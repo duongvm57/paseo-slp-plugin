@@ -23,7 +23,8 @@ This file is the repository's one effective protocol. The Human's current
 assignment controls authority; installed role policy holds the invariants no
 protocol relaxes. Complete unknown fields from repository evidence and the
 assignment before the decision that depends on them; a blank is an open
-decision, never a grant.
+decision, never a grant. The files listed under Repository references carry
+operational facts, not additional rules.
 
 The frontmatter is the single source for owner, version, review date, scope,
 routing intent and the Supervisor notebook — update it when decisions change.
@@ -104,8 +105,8 @@ installed review-gate rules. Reviewer seats are checkers, not implementation
 owners, so they never take a task out of Lean. This template lists no single-seat
 change classes; adding one is a Human protocol decision recorded under
 Overrides. Seat titles name the seat inside taskLabel —
-`Peer — Reviewer — <task> / Spec` and `Peer — Reviewer — <task> / Std` — never
-an "axis" suffix; seats already running keep their titles.
+`Peer — Reviewer — <task> / Spec` and `Peer — Reviewer — <task> / Standard`,
+unabbreviated — never an "axis" suffix; seats already running keep their titles.
 
 ## Correction, verdict and delivery
 
@@ -277,6 +278,24 @@ workflow or creates a Lead type. All four recipes remain available by default.
 | Work state | Lead checkpoint in the owner's timeline or an authorized notes path |
 | Delivery and completion point | As each assignment states; the task completes when its assignment's stated outcome is accepted |
 
+## Repository references
+
+This file holds rules and decisions. Operational facts they rely on — exact
+check commands and the behavior each proves, CI gates and switches, how project
+skills or tools are installed, environment and path hazards — live in
+`.paseo-slp/references/<topic>.md`, listed below and pointed to in one line
+from the section that applies them; a short fact may stay inline instead. A
+reference records facts verified from this repository with the date verified.
+It never adds, relaxes or overrides a rule here or in installed policy; a rule
+found in a reference moves into this file through a Human decision. Read a
+reference at the decision that needs it. Treat a missing, stale or contradicted
+reference as an open fact to verify and report, never as a grant. Updating a
+reference needs write scope for it, not a protocol decision or version bump.
+
+| Topic | Path | Read when |
+|---|---|---|
+| — | None recorded | — |
+
 ## Ownership and integration
 
 Inspect existing changes and active writers. Record owned/excluded scopes and return
@@ -295,10 +314,11 @@ Human can trace every lane.
 
 ## Candidate, verification and acceptance
 
-Established checks: record the exact commands found in this repository and the
-behavior each demonstrates, and name the relevant ones in each assignment; never
-take a command from this template. Run a check that must be isolated from the
-session's ambient environment under a whitelist (`env -i` plus the variables it
+Established checks: the exact commands found in this repository and the
+behavior each demonstrates live in its checks reference under Repository
+references, or inline when short. Name the relevant ones in each assignment;
+never take a command from this template. Run a check that must be isolated from
+the session's ambient environment under a whitelist (`env -i` plus the variables it
 needs) or with the complete injected variable set unset — a partial `env -u`
 leaks runtime variables and can fake failures.
 
@@ -333,6 +353,8 @@ pool precedence, profiles, readiness, Jev receipts and handoff. Missing eligible
 runtime blocks that delegation; use onboarding. Human controls pool changes and
 quotaFallback. Lead selects within grant; an eligible option grants no handoff.
 Name task-relevant micro skills in Peer assignments; Lead keeps macro skills.
+How this repository installs or exposes project skills is an operational fact
+for Repository references.
 
 ## Monitoring and heartbeat
 
@@ -354,8 +376,11 @@ mechanism, impact and outcome in authorized notes; report retrieval gaps.
 
 ## Overrides and evolution
 
-List every place this file departs from the rendered template, so a
-later package upgrade can tell Human decisions from template text:
+List every place this file changes a template rule or its wording, so a later
+package upgrade can tell Human decisions from template text. Filling the
+frontmatter, Repository configuration, Repository references and the
+referenced files is configuration, not an override — including moving
+operational detail out of this file into a reference:
 
 | Section | Change | Decided by / date |
 |---|---|---|

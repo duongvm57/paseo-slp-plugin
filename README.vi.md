@@ -827,7 +827,9 @@ node "$SLP_RT/bin/slp.mjs" materialize /absolute/target-repo --from /absolute/so
 Lệnh copy `.paseo-slp/workspace-protocol.md`, và `.paseo-slp/slp-routing.json`
 (đã validate) chỉ khi source thật sự pin catalog — source chưa từng tạo
 catalog thì materialize chỉ mang protocol, và target đọc pool user-scope y
-hệt source. `notebook.md` là state do Supervisor sở hữu và không bao giờ
+hệt source. `.paseo-slp/references/` — dữ kiện vận hành mà protocol trỏ
+tới — được copy đệ quy khi có (từ chối symlink và object không phải regular
+file). `notebook.md` là state do Supervisor sở hữu và không bao giờ
 được copy. `--include` lặp lại được để stage thêm file repository-relative
 nguyên byte — spec/evidence chưa track mà seat cần đọc; path được validate
 trước khi stage bất cứ thứ gì (từ chối absolute, drive-prefixed, backslash,

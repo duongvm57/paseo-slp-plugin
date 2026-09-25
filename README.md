@@ -875,7 +875,9 @@ node "$SLP_RT/bin/slp.mjs" materialize /absolute/target-repo --from /absolute/so
 It copies `.paseo-slp/workspace-protocol.md`, and `.paseo-slp/slp-routing.json`
 (validated) only when the source actually pins one — a source that never
 created a catalog materializes the protocol alone, and the target resolves
-the user-scope pool exactly like the source does. `notebook.md` is
+the user-scope pool exactly like the source does. `.paseo-slp/references/`
+— the operational facts the protocol points to — is copied recursively when
+present (symlinks and non-regular entries are refused). `notebook.md` is
 Supervisor-owned state and is never copied. Repeatable `--include` stages
 extra repository-relative files verbatim — untracked spec or evidence the
 seat must read; paths are validated before anything is staged (absolute,

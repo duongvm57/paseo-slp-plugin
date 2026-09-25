@@ -17,7 +17,8 @@ Read/re-read policy text under the common core's freshness rule.
    it, else copy .paseo-slp/ and rebase absolute paths that point under the
    source root onto the target root. Materialize carries the repo catalog only
    when the source pinned one; a target without it resolves the user-scope pool
-   like the source does. Explicit extra files outside .paseo-slp/ — untracked
+   like the source does. It also carries .paseo-slp/references/, the
+   operational facts the protocol points to, when present. Explicit extra files outside .paseo-slp/ — untracked
    spec or evidence the seat must read — stage via repeated
    `--include <repo-path>` flags: verbatim copies, deduped by target path,
    preserved when already present.
