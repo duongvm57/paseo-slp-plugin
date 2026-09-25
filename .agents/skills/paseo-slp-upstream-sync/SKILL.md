@@ -25,24 +25,29 @@ changes (preserve them), the target release and the permitted write scope.
 every scratch artifact is a write: directories, `npm pack` tarballs, extracted
 trees, redirected diff output, receipts and reports. Write them only under
 the exact path the assignment grants, such as
-`.local-checks/skill-upstream-sync/<release>/`. Without a scratch grant, continue with console-only
-evidence; when that cannot answer the question, report the gap and request the
-grant. Installing or reloading a live Paseo daemon, host configuration, commit
+`.local-checks/skill-upstream-sync/<release>/`. Without a scratch grant,
+continue with console-only evidence; when that cannot answer the question,
+report the gap and request the grant. Installing or reloading a live Paseo daemon, host configuration, commit
 and publication each need a separate grant.
 
-A prior sync's report, when present or designated, shows the investigation
-method and evidence shape. Its conclusions belong to its own release: verify
-every fact for the current target, and keep that prior run's artifacts
-untouched.
-
-Read the version pins and exports from `package.json`, `package-lock.json`,
-`plugin/package.json` and `plugin/paseo-plugin.json`. Record each of
+Read `.paseo-slp/references/upstream-baseline.md`, the tracked record of each
+package's **Pinned** version (what this checkout builds against) and
+**Assessed** version (the newest release already classified), with coverage
+and open items. Cross-check Pinned against `package.json`,
+`package-lock.json`, `plugin/package.json` and `plugin/paseo-plugin.json`; a
+mismatch is a finding to resolve before assessing. Record each of
 `@getpaseo/plugin`, `client`, `protocol`, `cli` and `server` separately: some
 are host packages rather than plugin dependencies, and each package carries its
-own release number.
+own release number. A package with no Assessed version, or partial coverage,
+starts from Pinned for its unreviewed surface.
 
-Done: current pins, supported Paseo range, worktree baseline, target release
-and write authority (including the scratch grant) are explicit.
+A prior sync's report, when present, shows the investigation method and
+evidence shape. Its conclusions belong to its own release: verify every fact
+for the current target, and keep that prior run's artifacts untouched.
+
+Done: Pinned and Assessed per package, supported Paseo range, worktree
+baseline, target release and write authority (including the scratch grant)
+are explicit.
 
 ## 2. Find the upstream release
 
@@ -56,8 +61,8 @@ npm view "@getpaseo/plugin@<target-version>" version time dist.tarball repositor
 ```
 
 Repeat the second query for each assessed package. Follow each package
-repository to its release notes, changelog or tag, and read every release from
-the current pin through the target. Record an unavailable source as a gap; a
+repository to its release notes, changelog or tag, and read every release
+after Assessed through the target. Record an unavailable source as a gap; a
 version number alone is not release evidence.
 
 Done: a per-package baseline/target table lists exact versions, dates,
@@ -71,21 +76,22 @@ Map what this checkout consumes:
 rg -n '@getpaseo/' plugin package.json plugin/package.json
 ```
 
-The archive work below needs the scratch grant from step 1. Pack the baseline
-and target of all five packages into the granted directory, leaving the
-checkout's installed dependencies as they are. Take the baseline of a directly
-pinned package from the lockfile; for `cli` or `server`, which the plugin does
-not pin, use the version of the supported or observed Paseo runtime and label
-that source as a host version.
+The archive work below needs the scratch grant from step 1. Pack the Assessed
+and target versions of all five packages into the granted directory, leaving
+the checkout's installed dependencies as they are; the new delta is what
+changed since the last classification, and compatibility is still judged
+against Pinned. Where step 1 found no Assessed version or partial coverage,
+diff from Pinned instead — the lockfile for pinned packages, and for `cli` or
+`server` the supported or observed Paseo runtime, labelled as a host version.
 
 ```sh
 scratch=".local-checks/skill-upstream-sync/<release-id>"
-mkdir -p "$scratch/plugin-pinned" "$scratch/plugin-target"
-npm pack "@getpaseo/plugin@<pinned-version>" --pack-destination "$scratch"
+mkdir -p "$scratch/plugin-base" "$scratch/plugin-target"
+npm pack "@getpaseo/plugin@<base-version>" --pack-destination "$scratch"
 npm pack "@getpaseo/plugin@<target-version>" --pack-destination "$scratch"
-tar -xzf "$scratch/getpaseo-plugin-<pinned-version>.tgz" -C "$scratch/plugin-pinned"
+tar -xzf "$scratch/getpaseo-plugin-<base-version>.tgz" -C "$scratch/plugin-base"
 tar -xzf "$scratch/getpaseo-plugin-<target-version>.tgz" -C "$scratch/plugin-target"
-diff -ruN "$scratch/plugin-pinned/package" "$scratch/plugin-target/package" > "$scratch/plugin.diff"
+diff -ruN "$scratch/plugin-base/package" "$scratch/plugin-target/package" > "$scratch/plugin.diff"
 ```
 
 `diff` exits 1 when trees differ; a larger code is a diff error. Save the file
@@ -226,5 +232,13 @@ Reviewers report only their own axis. Report in order:
 5. **Limits:** unreviewed package surface, missing release notes, absent
    live-runtime evidence, compatibility risks and unsettled resources.
 
+With the verdict, update `.paseo-slp/references/upstream-baseline.md` within
+the granted write scope: Assessed, coverage, date and outcome per package,
+Pinned when an update landed, open items, and where the report lives. A "no
+plugin change" outcome advances Assessed too; the record is how the next sync
+skips work already classified. Without write scope for it, hand the exact
+table rows back with the verdict.
+
 Done: the Human or assigned Supervisor can see what was assessed, why the
-chosen action follows and what evidence supports the handback.
+chosen action follows and what evidence supports the handback, and the
+baseline record matches the verdict.
