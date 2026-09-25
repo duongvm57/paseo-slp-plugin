@@ -129,6 +129,7 @@ Proof Auditor → independent-second-opinion. Use eligible alternatives if unbou
 Host Verifier requires explicit install/live-check authority. Lead uses macro
 skills, Peer micro skills; doctrine tasks use writing-for-agents, test-authoring
 uses a test-design skill when available.
+Skill homes, payload shipping and provider symlinks: `.paseo-slp/references/skill-layout.md`.
 
 ## Verification and monitoring
 
