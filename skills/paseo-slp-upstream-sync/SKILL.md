@@ -1,114 +1,166 @@
 ---
 name: paseo-slp-upstream-sync
-description: Lead-only macro workflow to assess new Paseo upstream releases against paseo-slp and carry out an authorized plugin sync. Use when an @getpaseo package or Paseo release may affect the plugin; not for unrelated dependency bumps or Peer micro-tasks.
+description: Lead-only macro workflow that turns a Paseo upstream release into a plugin impact report and, under an explicit grant, a verified paseo-slp update. Use when a new Paseo release or @getpaseo package version may affect the plugin; skip unrelated dependency bumps and Peer micro-tasks.
 ---
 
 # Sync paseo-slp with Paseo upstream
 
-Use this skill to turn each upstream release into an evidence-based plugin impact report and, when the active assignment grants the write scope, a verified update. A release alone does not authorize dependency, compatibility, runtime, or product changes.
+Each upstream release becomes an evidence-based **impact report**; a verified
+update follows only when the active assignment grants its exact writes. A
+release by itself authorizes nothing: dependency, compatibility, runtime and
+product changes each need their own grant.
 
-This is a **Lead macro skill**. Only the project Lead who owns framing, integration, review and technical acceptance runs the full workflow and reads the full `.paseo-slp/workspace-protocol.md`. A Supervisor may route or observe it under their assignment. A Peer must not run this workflow, decide versions or compatibility, orchestrate the review gate, or issue ACVERDICT. If the Lead delegates a bounded micro-slice, the Peer follows that assignment and only the task-relevant constraints supplied by the Lead; it does not read the full workspace protocol by default.
+The project Lead runs this workflow end to end: framing, integration, review
+gate and verdict. A Supervisor routes or observes it. A Peer receives only a
+bounded slice with the task-relevant constraints the Lead supplies.
 
 ## 1. Establish the baseline
 
-Read the repository's `AGENTS.md`, the full `.paseo-slp/workspace-protocol.md`, and current assignment. Record the repository, branch/commit, existing working changes, upstream release being assessed, and the permitted write scope. Preserve unrelated work. Follow the repository protocol's recipe, isolation, review gate, and verification rules.
+Read `AGENTS.md`, the full `.paseo-slp/workspace-protocol.md` and the
+assignment; follow the protocol's recipe, isolation, review gate and
+verification rules. Record the repository, branch/commit, existing working
+changes (preserve them), the target release and the permitted write scope.
 
-When `.local-checks/upstream-v092/report.md` is present or designated as prior evidence, read it as a reference for the investigation method and evidence shape. Treat its v0.9.2 conclusions as release-specific; independently verify facts for the current target. Keep that report and every sibling artifact under `.local-checks/upstream-v092/` read-only. Write current-run evidence only to a fresh, assignment-authorized scratch path.
+**Scratch grant.** The tracked checkout is read-only during assessment, and
+every scratch artifact is a write: directories, `npm pack` tarballs, extracted
+trees, redirected diff output, receipts and reports. Write them only under
+the exact path the assignment grants, such as
+`.local-checks/skill-upstream-sync/<release>/`. Without a scratch grant, continue with console-only
+evidence; when that cannot answer the question, report the gap and request the
+grant. Installing or reloading a live Paseo daemon, host configuration, commit
+and publication each need a separate grant.
 
-Read the current version pins and exports from `package.json`, `package-lock.json`, `plugin/package.json`, and `plugin/paseo-plugin.json`. Record versions separately for `@getpaseo/plugin`, `@getpaseo/client`, `@getpaseo/protocol`, `@getpaseo/cli`, and `@getpaseo/server`; some may be host packages rather than direct plugin dependencies. Do not infer a pin from another package or assume all packages share a release number.
+A prior sync's report, when present or designated, shows the investigation
+method and evidence shape. Its conclusions belong to its own release: verify
+every fact for the current target, and keep that prior run's artifacts
+untouched.
 
-The tracked checkout assessment is read-only. Every scratch mutation is a write: creating directories, `npm pack` tarballs, extracting packages, redirecting diff/log output, and writing reports all require the assignment to grant the exact scratch path. Keep investigation artifacts under `.local-checks/skill-upstream-sync/<release>/` only when that path is granted; otherwise use the exact path named by the assignment. If no scratch-write grant exists, do not create files, run `npm pack`, extract tarballs, or redirect output. Continue only with permitted console-only/read-only evidence; if that cannot answer the question, report the evidence gap and request the needed grant before proceeding. Do not install or upgrade a live Paseo daemon, change host configuration, commit, or publish unless separately authorized.
+Read the version pins and exports from `package.json`, `package-lock.json`,
+`plugin/package.json` and `plugin/paseo-plugin.json`. Record each of
+`@getpaseo/plugin`, `client`, `protocol`, `cli` and `server` separately: some
+are host packages rather than plugin dependencies, and each package carries its
+own release number.
 
-Done: current pins, supported Paseo range, worktree baseline, target release, and write authority are explicit.
+Done: current pins, supported Paseo range, worktree baseline, target release
+and write authority (including the scratch grant) are explicit.
 
 ## 2. Find the upstream release
 
-Query npm for each package so independent package versions and dist-tags are visible:
+Query npm per package so independent versions and dist-tags stay visible:
 
 ```sh
 for name in plugin client protocol cli server; do
   npm view "@getpaseo/$name" version dist-tags --json
 done
-```
-
-Compare published versions and publication times with the recorded pins. For the candidate version of each relevant package, capture its exact metadata and tarball reference:
-
-```sh
 npm view "@getpaseo/plugin@<target-version>" version time dist.tarball repository --json
 ```
 
-Repeat for each package being assessed. Follow the package repository to its release notes, changelog, or release tag when available. Read notes from the last version represented by the current pin through the target version; if a source is unavailable, record that gap and do not treat the version number as release evidence.
+Repeat the second query for each assessed package. Follow each package
+repository to its release notes, changelog or tag, and read every release from
+the current pin through the target. Record an unavailable source as a gap; a
+version number alone is not release evidence.
 
-Done: a per-package baseline/target table includes exact versions, dates, release-note sources, and any inaccessible evidence.
+Done: a per-package baseline/target table lists exact versions, dates,
+release-note sources and inaccessible evidence.
 
 ## 3. Compare package surfaces
 
-First map what this checkout actually consumes:
+Map what this checkout consumes:
 
 ```sh
 rg -n '@getpaseo/' plugin package.json plugin/package.json
 ```
 
-Before any archive operation, confirm that the assignment explicitly grants scratch-write authority for the exact release scratch directory. `npm pack` creates a tarball; extraction creates trees; `diff` redirection writes evidence. If the grant is absent, stop before these commands and follow the console-only path or report the blocker described in Step 1.
-
-Use `npm pack` at the recorded baseline and target version for each of the five packages. For directly pinned packages, read the baseline from the lockfile. If `cli` or `server` is not pinned by the plugin, use the version associated with the currently supported/observed Paseo runtime and label that source; never present a host version as a plugin pin. Keep the resulting `.tgz` files and extracted `package/` trees in the authorized release scratch directory; do not replace the checkout's installed dependencies during impact assessment. For example:
+The archive work below needs the scratch grant from step 1. Pack the baseline
+and target of all five packages into the granted directory, leaving the
+checkout's installed dependencies as they are. Take the baseline of a directly
+pinned package from the lockfile; for `cli` or `server`, which the plugin does
+not pin, use the version of the supported or observed Paseo runtime and label
+that source as a host version.
 
 ```sh
 scratch=".local-checks/skill-upstream-sync/<release-id>"
-mkdir -p "$scratch"
+mkdir -p "$scratch/plugin-pinned" "$scratch/plugin-target"
 npm pack "@getpaseo/plugin@<pinned-version>" --pack-destination "$scratch"
 npm pack "@getpaseo/plugin@<target-version>" --pack-destination "$scratch"
-```
-
-Extract the printed tarball filenames into separate versioned folders, then diff those extracted trees. For example:
-
-```sh
-mkdir -p "$scratch/plugin-pinned" "$scratch/plugin-target"
 tar -xzf "$scratch/getpaseo-plugin-<pinned-version>.tgz" -C "$scratch/plugin-pinned"
 tar -xzf "$scratch/getpaseo-plugin-<target-version>.tgz" -C "$scratch/plugin-target"
 diff -ruN "$scratch/plugin-pinned/package" "$scratch/plugin-target/package" > "$scratch/plugin.diff"
 ```
 
-Compare the package export map, public `.d.ts` entrypoints and barrels, payload/schema files, and relevant runtime `.js` files. Save the file list and `diff -ruN` output for each package; exit code 1 means differences were found, while a larger code indicates a diff error. Trace moved declarations through their barrels: a file move is not an API removal when the symbol remains re-exported. Check public exports as well as runtime semantics; a type-only diff misses behavior changes.
+`diff` exits 1 when trees differ; a larger code is a diff error. Save the file
+list and diff per package, then compare the export map, public `.d.ts`
+entrypoints and barrels, payload/schema files and relevant runtime `.js`. Trace
+moved declarations through their barrels: a symbol still re-exported was moved,
+not removed. Read runtime semantics as well as types, since a type-only diff
+misses behavior changes. For `server` and `cli`, focus on the exported
+contracts and host/CLI behavior the plugin relies on; distribution churn is not
+plugin impact. Record every file inspected and every surface left unreviewed.
 
-Use release notes and the tarball diff together. For `@getpaseo/server` and `@getpaseo/cli`, focus on exported contracts and host/CLI behavior that the plugin actually relies on; avoid treating unrelated distribution churn as plugin impact. Record the exact files inspected and any unreviewed surface.
-
-Done: every changed public or relied-on surface is classified as used, unused, preserved through re-export, or unresolved, with source evidence.
+Done: every changed public or relied-on surface is classified as used, unused,
+preserved through re-export, or unresolved, with source evidence.
 
 ## 4. Trace changes to plugin touchpoints
 
-For each material change, identify the concrete import, payload, lifecycle, or process behavior it could affect. Use this map, then verify it against current code:
+Connect each material change to the import, payload, lifecycle or process
+behavior it could affect. Start from this map and verify it against current
+code:
 
 | Upstream surface | paseo-slp touchpoints |
 |---|---|
 | Plugin server contracts, RPC, hooks, lifecycle | `plugin/index.server.ts`, `plugin/server/*` |
 | Plugin client hooks, navigation, UI contracts | `plugin/index.client.tsx`, `plugin/client/*` |
-| Protocol schemas and serialized payloads | `plugin/server/config-view.ts`, `config-transaction.ts`, relevant `plugin/server/*` consumers, and `plugin/server/generated/runtime-payload.ts` |
-| Host/CLI launch behavior, argv, environment, or provider resolution | `plugin/server/launchers.ts`, `executables.ts`, `provider-catalog.ts`, and the affected server-side caller |
+| Protocol schemas and serialized payloads | `plugin/server/config-view.ts`, `config-transaction.ts`, other `plugin/server/*` consumers, `plugin/server/generated/runtime-payload.ts` |
+| Host/CLI launch behavior, argv, environment, provider resolution | `plugin/server/launchers.ts`, `executables.ts`, `provider-catalog.ts` and the affected caller |
 | Compatibility range | `plugin/paseo-plugin.json` (`requirements.paseo`) |
-| Dependency resolution and bundled build inputs | root `package.json` / `package-lock.json`, `plugin/package.json`, and the plugin payload generator |
+| Dependency resolution and bundled build inputs | root `package.json` / `package-lock.json`, `plugin/package.json`, the payload generator |
 
-Confirm which SDK code is host-supplied and which protocol or other content is bundled by the current plugin build. Do not infer runtime behavior solely from the repository's TypeScript dependency version. A host-side fix can remove the need for a plugin edit; a bundled payload can still be stale when a dependency pin changes.
+Establish which SDK code the host supplies and which content the plugin build
+bundles; the repository's TypeScript dependency version does not show runtime
+behavior. A host-side fix can remove the need for a plugin edit, while a
+bundled payload can go stale when a pin changes.
 
-Done: the impact map connects each relevant upstream change to an actual plugin touchpoint or records why it has no effect.
+Done: each relevant upstream change maps to an actual touchpoint, or carries
+the reason it has no effect.
 
 ## 5. Assess impact before updating
 
-Classify each change using behavior and compatibility, not semver labels alone:
+Classify by behavior and compatibility, not semver labels:
 
-- **Additive:** new exports, optional fields or parameters, relaxed validation, preserved re-exports, or host fixes that retain the contracts this plugin uses. State whether any code or dependency update is actually needed; “no plugin change” is a valid result.
-- **Potentially breaking:** removed or renamed used exports, tightened required fields or schemas, changed payload/event meaning or defaults, altered CLI/launch behavior the plugin relies on, or a host version outside the currently supported range. Verify whether the change is truly incompatible with this plugin and with every Paseo version the manifest still claims to support.
-- **Unresolved:** missing release evidence, unexamined paths, unclear runtime/bundle boundaries, or behavior that cannot be inferred from types. Keep it unresolved; do not convert absence of evidence into compatibility.
+- **Additive:** new exports, optional fields or parameters, relaxed
+  validation, preserved re-exports, or host fixes that keep the contracts this
+  plugin uses. State whether any update is needed; "no plugin change" is a
+  valid result.
+- **Potentially breaking:** removed or renamed used exports, tightened
+  required fields or schemas, changed payload/event meaning or defaults,
+  altered CLI/launch behavior the plugin relies on, or a host version outside
+  the supported range. Confirm the incompatibility against this plugin and
+  every Paseo version the manifest still claims.
+- **Unresolved:** missing release evidence, unexamined paths, unclear
+  runtime/bundle boundaries, or behavior types cannot show. It stays
+  unresolved until evidence arrives.
 
-Before any write, deliver an impact report with the per-package version table, release evidence, additive/breaking/unresolved findings, affected touchpoints, compatibility consequences, recommended update/no-update options, and remaining evidence gaps.
+Deliver the impact report before any write: the per-package version table,
+release evidence, classified findings, affected touchpoints, compatibility
+consequences, update/no-update options and remaining gaps.
 
-Proceed with an update only when the active assignment covers the exact dependency, code, payload, and compatibility writes required. Ask the Human for a decision when a change would drop or narrow supported Paseo versions, requires a breaking adaptation or user-visible behavior choice, adopts an optional upstream capability, exposes a security/privacy trade-off, or exceeds the current grant. If authority covers assessment only, stop after the report. Never widen or narrow `requirements.paseo` just to match the newest release.
+An update proceeds only when the assignment covers its exact dependency, code,
+payload and compatibility writes; with assessment-only authority, the report is
+the handback. Ask the Human when a change would drop or narrow supported Paseo
+versions, needs a breaking adaptation or user-visible behavior choice, adopts
+an optional upstream capability, carries a security/privacy trade-off, or
+exceeds the grant. `requirements.paseo` moves only with an approved
+compatibility decision, never to match the newest release.
 
-Done: the recommendation and the Human/assignment decision that unlocks any write are recorded before mutation.
+Done: the recommendation and the Human or assignment decision that unlocks
+each write are recorded before any mutation.
 
 ## 6. Apply an authorized update
 
-Update only the direct dependencies and touchpoints required by the accepted decision. For the root pins, pass each package's separately selected version to npm so it updates `package.json` and `package-lock.json` together:
+Change only the direct dependencies and touchpoints the accepted decision
+requires. Pass each package's separately selected version to npm, which
+updates `package.json` and `package-lock.json` together; the lockfile changes
+only through npm:
 
 ```sh
 npm install --save-dev --save-exact \
@@ -117,41 +169,62 @@ npm install --save-dev --save-exact \
   "@getpaseo/protocol@<protocol-version>"
 ```
 
-Then align the corresponding `@getpaseo/protocol` pin in `plugin/package.json` with the approved version. Do not hand-edit the root lockfile or add `@getpaseo/cli` or `@getpaseo/server` as plugin dependencies just because they were inspected.
-
-Adapt code narrowly to the verified contract. Change `plugin/paseo-plugin.json` only when the approved compatibility decision requires it, and explain which host versions remain supported. Regenerate the plugin payload after changing its source inputs:
+Align the `@getpaseo/protocol` pin in `plugin/package.json` with the approved
+version. `cli` and `server` stay out of the plugin's dependencies; inspecting
+them grants no pin. Adapt code narrowly to the verified contract. Edit
+`plugin/paseo-plugin.json` only as the compatibility decision requires, and
+name the host versions that remain supported. After changing payload inputs:
 
 ```sh
 npm run generate:plugin-payload
 ```
 
-Review the generated diff and confirm it contains only the intended source-derived changes. Do not install, reload, or upgrade a live plugin/daemon unless the assignment separately grants that operation.
+Review the generated diff for source-derived changes only.
 
-Done: manifests, lockfile, source, compatibility range, and generated payload agree with the accepted decision; the exact diff is reviewable.
+Done: manifests, lockfile, source, compatibility range and generated payload
+agree with the accepted decision, and the exact diff is reviewable.
 
 ## 7. Verify the frozen candidate
 
-Read current scripts from `package.json`. Run the checks required by the workspace protocol on the candidate. For this repository, the expected checks are:
+Run the checks the workspace protocol requires, reading current scripts from
+`package.json`; this sync always includes `npm run check:plugin-payload`. Run
+`npm test` under a whitelisted environment — `env -i` with `PATH`, `HOME` and
+fresh temporary `PASEO_HOME` and `SLP_DAEMON_HOME` — because inherited `SLP_*`
+values or live daemon state fake failures; remove the temporary homes after
+recording results. Add focused checks for changed contracts or runtime
+behavior, and keep a failing full-suite run beside any focused pass.
 
-- `npm test` under a whitelisted environment (`env -i` with `PATH`, `HOME` and fresh temporary directories for both `PASEO_HOME` and `SLP_DAEMON_HOME`), so no inherited `SLP_*` value or live daemon state leaks in; clean up the temporary homes after recording results.
-- `npm run typecheck`
-- `npm run check`
-- `npm run check:plugin-payload` (the payload `--check` script)
+Each required check leaves a receipt under the scratch grant: exact command,
+environment setup, tool/runtime versions, full stdout and stderr, exit code,
+receipt path and SHA256. A live Paseo version that was not exercised stays a
+named limit; package inspection and local tests do not prove live
+compatibility.
 
-Capture the **full stdout and stderr** for each required check in an inspectable receipt under the authorized scratch path. Record the exact command and environment/isolation setup, tool/runtime versions, complete output, exit code, receipt path, and receipt SHA256. Do not reduce a failing full-suite run to a focused-test pass; retain both outputs separately. If no receipt write path is authorized, request it before running checks whose evidence must be retained. Add focused checks for changed contracts or runtime behavior. If a live Paseo version was not exercised, say so; local tests and package inspection do not prove live compatibility.
+Pin the candidate with the installed SLP snapshot helper before and after
+review, and pause the writer while independent review runs. A changed snapshot
+means correcting the candidate, rerunning affected checks and repeating the
+gate on the new snapshot.
 
-Pin the candidate with the installed SLP snapshot helper before and after review. Pause the writer while independent review runs. If the snapshot changes, correct the candidate, rerun affected checks, and repeat the gate on the new snapshot.
-
-Done: the reviewed snapshot is stable, all required checks have actual results, and limitations remain visible.
+Done: the reviewed snapshot is stable, every required check has an actual
+result and receipt, and limits remain visible.
 
 ## 8. Hand back
 
-The Lead owns the project verdict and sends it to the assigned Supervisor as a separate handback message. State `ACCEPT`, `CHANGES_REQUESTED`, or `BLOCKED`; reviewers report only their own axis disposition and never issue the project ACVERDICT. Report these items in order:
+The Lead sends the project verdict — `ACCEPT`, `CHANGES_REQUESTED` or
+`BLOCKED` — to the assigned Supervisor as a separate handback message.
+Reviewers report only their own axis. Report in order:
 
-1. **Impact:** upstream versions/dates/sources, baseline pins, classified deltas, touchpoints, and recommendation.
-2. **Decision:** no update, authorized update, or the exact Human decision still needed; name the approved write scope.
-3. **Change:** artifact paths, concise diff summary, generated payload status, and stable candidate identity.
-4. **Verification:** exact command and environment, full output/receipt path and SHA256, exit code, candidate identity before/after review, and separate Spec and Standards gate results required by the workspace protocol; then the Lead-owned ACVERDICT.
-5. **Limits:** unreviewed package surface, missing release notes, absent live-runtime evidence, compatibility risks, and any unsettled resources.
+1. **Impact:** upstream versions, dates and sources, baseline pins, classified
+   deltas, touchpoints and recommendation.
+2. **Decision:** no update, authorized update, or the exact Human decision
+   still needed; name the approved write scope.
+3. **Change:** artifact paths, concise diff summary, generated payload status
+   and stable candidate identity.
+4. **Verification:** commands and environment, receipt paths and SHA256, exit
+   codes, candidate identity before and after review, the separate Spec and
+   Standards results, then the Lead's verdict.
+5. **Limits:** unreviewed package surface, missing release notes, absent
+   live-runtime evidence, compatibility risks and unsettled resources.
 
-Done: the Human or assigned Supervisor can see what was assessed, why the chosen action follows, and what evidence supports the handback.
+Done: the Human or assigned Supervisor can see what was assessed, why the
+chosen action follows and what evidence supports the handback.
