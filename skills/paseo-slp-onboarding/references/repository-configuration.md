@@ -23,6 +23,23 @@ under the same Lead when within mandate. Opening a PR does not grant production
 execution. Independent Lean tasks can run concurrently with one Engineer each
 and required review seats, subject to ownership and capacity.
 
+## Protocol and references
+
+The protocol states rules; `.paseo-slp/references/` holds the facts they use.
+A repository with backend and frontend checks might carry:
+
+| File | Holds | Protocol keeps |
+|---|---|---|
+| `references/check-commands.md` | Per-component commands with working directory and the behavior each proves; CI gates and disabled switches; path hazards such as spaces or mixed Unicode normalization | Established checks are named per assignment; which checks gate acceptance; pointer line |
+| `references/skill-layout.md` | Where project skills live and how each provider sees them, e.g. `.claude/skills/<name>` symlinks into `.agents/skills/` | Single skill source; assignments name the `SKILL.md` path; pointer line |
+
+Each file names the protocol section it serves and the date its facts were
+verified. A statement that says what agents must or may do is a rule and stays
+in the protocol. Materialize carries `.paseo-slp/references/` into worktrees
+with the protocol.
+
+## Engineering examples
+
 The examples below illustrate engineering decisions, not mandatory setup steps.
 
 | Example | Owner, next step, evidence and stop |

@@ -5,7 +5,8 @@ description: Set up or revise a repository's Paseo SLP protocol and Peer runtime
 
 # Repository onboarding
 
-Produce one `.paseo-slp/workspace-protocol.md`, a Peer pool decision and verified
+Produce one `.paseo-slp/workspace-protocol.md` of rules and decisions, any
+`.paseo-slp/references/` files it points to, a Peer pool decision and verified
 Supervisor/Lead profiles. Recommend from repo evidence; ask only missing decisions.
 Preserve Human customizations. External MCP/connectors, credentials, polling and
 queue bookkeeping belong to the repo harness. Do not
@@ -13,8 +14,9 @@ add tracker setup questions or activation gates to ordinary onboarding.
 
 ## 1. Inspect
 
-Locate the installed CLI/package. Read AGENTS.md, existing `.paseo-slp/` files,
-`src/templates/workspace-protocol.md`, project checks/CI, delivery conventions
+Locate the installed CLI/package. Read AGENTS.md, existing `.paseo-slp/` files
+(including `references/`), `src/templates/workspace-protocol.md`, project
+checks/CI, delivery conventions
 and state-changing surfaces. The template must contain `## Repository configuration`
 and `template_sha256`; otherwise report the upgrade prerequisite. Setup grants
 no installation or host edits.
@@ -40,8 +42,18 @@ Lead chooses recipes per task; external input implies no separate Lead. Keep
 all recipes unless Human decides otherwise; a removed recipe needs an explicit
 route for that work. Preserve installed invariants and review requirements.
 Record current deviations in Overrides, with decider/date; keep history outside
-runtime protocol. Only a fully custom process needs
-[custom interview](references/custom-interview.md).
+runtime protocol.
+
+Keep rules and decisions in the protocol. Put operational facts — exact check
+commands and what each proves, CI gates/switches, skill or tool installation
+mechanics, path/environment hazards — in `.paseo-slp/references/<topic>.md`,
+list each under Repository references and point to it in one line from the
+section that applies it ([split example](references/repository-configuration.md#protocol-and-references)).
+Create a reference only when it has content; a short fact may stay inline. The
+split is configuration, not an Override. An existing protocol carrying inline
+detail gets the split as a proposed diff, never silently.
+
+Only a fully custom process needs [custom interview](references/custom-interview.md).
 
 For existing protocols, preserve every Human decision/custom section. Reapply
 known overrides; absent provenance means differences may be customizations.
@@ -65,10 +77,11 @@ Done: source chosen and populated, or its delegation gap recorded.
 
 ## 5. Write
 
-Present the exact complete diff and consequences; obtain direct Human
-confirmation. Verify the base is unchanged, write, re-read and compare target
-bytes. Drift blocks the write. For a new repo, confirm absent → final bytes,
-verify absence, then write before init. Revisions bump version/last_reviewed.
+Present the exact complete diff of every target file (protocol and references)
+and consequences; obtain direct Human confirmation. Verify each base is
+unchanged, write, re-read and compare target bytes. Drift blocks the write.
+For a new repo, confirm absent → final bytes, verify absence, then write before
+init. Revisions bump version/last_reviewed.
 Set supervisor_notebook to its owned path or timeline:<agentId> with retrieval
 instructions. Keep role bytes out of protocol.
 
@@ -86,6 +99,7 @@ Done: confirmed bytes match; init preview shows protocol preserved.
 
 Walk a clear task, uncertain feature and dependency through owner, next step,
 unlocking evidence and authority; include Transition for shared-state repos.
+Every protocol pointer resolves to an existing reference.
 Fix gaps, then validate the pool per its reference. Report exact changed files,
 profile/provider evidence, eligible choices, pool-maintenance/fallback authority
 and unresolved decisions. Distinguish an empty pool from provider unavailability.

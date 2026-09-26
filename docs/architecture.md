@@ -205,11 +205,14 @@ Six rules fall out of the role model and shape everything below:
 │     state/jev-*.key      per-daemon provider key (0600,           │
 │                          write-only; status reports hasKey only)  │
 │     state/supervision.json                                        │
-│                          opt-in per-Lead supervision routes       │
-│                          (0600, sha256 CAS; supervision card)     │
+│                          opt-in supervision defaults + per-Lead   │
+│                          routes (0600, sha256 CAS; one writer)    │
 │     state/supervision-cases.json                                  │
 │                          bounded metadata ring written by the     │
-│                          shadow observer (≤200/30d — no bodies)   │
+│                          observer (≤200/30d — no bodies)          │
+│     state/supervision-deliveries.json                             │
+│                          notify attempts, written before each     │
+│                          send (≤200/30d — no bodies)              │
 │     state/peer-pool.json the user-scope Peer pool — catalog-      │
 │                          shaped, written whole-file under a       │
 │                          sha256 CAS; sole writer is the Peer      │
@@ -451,16 +454,21 @@ still be executing from them.
   prepare-time calls), its key lives in per-daemon state, and routing
   stays deterministic — prepare verifies the receipt offline and fails
   closed on any config/transport/validation error. The plugin-side
-  supervision observer is the second consumer: it runs only for Lead
-  routes explicitly bound in `state/supervision.json` with
-  `capabilities.supervision` on, and it observes without acting — a
-  serialized queue evaluates Peer handbacks and persists a metadata-only
-  ring; missing evidence becomes `unknown`, never a violation, and the
-  `notify` mode carries no delivery path in this build.
+  supervision observer is the second consumer: it runs only with
+  `capabilities.supervision` on and for Leads the Human opted in through
+  `state/supervision.json` (explicit routes, or daemon defaults for
+  discovered SLP Leads). A serialized queue assesses Peer handbacks and
+  persists metadata-only rings; missing evidence becomes `unknown`, never a
+  violation. Its only action is `notify`: one code-generated review prompt
+  per finding to the verified Supervisor recipient — it never creates,
+  reassigns or cancels agents, accepts work or edits artifacts.
 - No background watchers — status is computed when asked. The single
-  exception is the opt-in shadow observer above: event-driven from
-  lifecycle hooks (never a poll), bound to explicit routes, and writing
-  only the bounded metadata ring.
+  exception is the opt-in observer above: event-driven from lifecycle hooks,
+  with timers only for its own cases (the delivery checkpoint, expiry, and a
+  bounded backoff re-check while a notify recipient is busy), writing only
+  its bounded metadata rings. On the client, the supervision bell re-reads
+  the stored notify recipients every 60 s while the app runs — a cheap
+  status RPC, not a daemon-side watcher.
 - The Supervisor/Lead/Peer intelligence is **policy text + Paseo
   primitives**, not code in the plugin. The plugin's correctness job ends
   at "the right bytes reach the right session through the right channel."

@@ -1,0 +1,124 @@
+{
+  "fixture": "paseo-slp/supervision.live-timeline",
+  "schemaVersion": 1,
+  "family": "devin",
+  "provider": "slp-devin-lead",
+  "role": "lead",
+  "sanitized": true,
+  "provenance": {
+    "source": "observed",
+    "host": "paseo daemon 0.9.1 (worker restarted after the smoke; timeline seeded from durable rows committed from the live stream)",
+    "capture": "client.fetchAgentTimeline(agentId, {direction:'tail', limit:0, projection:'projected'}) — the same projection rows agent.turn_ended receives via timelineStore.getItems(agentId) (agent-manager.js:3483, agent-timeline-store.js getItems/fetch)",
+    "actor": "live smoke 2026-09-26, slp-devin-lead",
+    "rawSha256": "50cb39d8ab5bfd6db48a05753f25e613f21cb1965e423aad6bbcffdccb0b457b",
+    "itemsKept": 10,
+    "itemsTotal": 161,
+    "sanitization": "agent/call/message ids remapped; every free-text body, prompt, command, path and output replaced; booleans, numbers, nulls, key sets, nesting, statuses, errors, tool names and ACP titles kept verbatim. Devin user_message: the SLP ACP role prefix keeps its first line, the verbatim terminal assignment line and the carrier block line formats; the policy core is elided."
+  },
+  "items": [
+    {
+      "type": "user_message",
+      "text": "SLP role=lead\n[policy core elided in fixture]\nUse the current authorized Human or delegated assignment and its Paseo workspace. Notifications and heartbeat prompts do not replace that assignment.\n<paseo-system>\nSanitized system notification.\n</paseo-system>"
+    },
+    {
+      "type": "tool_call",
+      "callId": "call_sanitized0032#sanitized0032",
+      "name": "Calling send_agent_prompt from paseo",
+      "detail": {
+        "type": "unknown",
+        "input": {
+          "prompt": "Sanitized prompt.",
+          "agentId": "22222222-2222-4222-8222-222222222222",
+          "background": true,
+          "notifyOnFinish": true
+        },
+        "output": null
+      },
+      "metadata": {
+        "title": "Calling send_agent_prompt from paseo"
+      },
+      "status": "completed",
+      "error": null
+    },
+    {
+      "type": "user_message",
+      "text": "SLP role=lead\n[policy core elided in fixture]\nUse the current authorized Human or delegated assignment and its Paseo workspace. Notifications and heartbeat prompts do not replace that assignment.\n<paseo-system>\nSanitized system notification.\n</paseo-system>"
+    },
+    {
+      "type": "user_message",
+      "text": "SLP role=lead\n[policy core elided in fixture]\nUse the current authorized Human or delegated assignment and its Paseo workspace. Notifications and heartbeat prompts do not replace that assignment.\nSanitized follow-up message (item 83)."
+    },
+    {
+      "type": "user_message",
+      "text": "SLP role=lead\n[policy core elided in fixture]\nUse the current authorized Human or delegated assignment and its Paseo workspace. Notifications and heartbeat prompts do not replace that assignment.\nSanitized follow-up message (item 93)."
+    },
+    {
+      "type": "user_message",
+      "text": "SLP role=lead\n[policy core elided in fixture]\nUse the current authorized Human or delegated assignment and its Paseo workspace. Notifications and heartbeat prompts do not replace that assignment.\n<paseo-system>\nSanitized system notification.\n</paseo-system>"
+    },
+    {
+      "type": "tool_call",
+      "callId": "mcp_call_tool:46#sanitized0033",
+      "name": "Calling send_agent_prompt from paseo",
+      "detail": {
+        "type": "unknown",
+        "input": {
+          "prompt": "Sanitized prompt.",
+          "background": true,
+          "notifyOnFinish": true,
+          "agentId": "55555555-5555-4555-8555-555555555555"
+        },
+        "output": null
+      },
+      "metadata": {
+        "title": "Calling send_agent_prompt from paseo"
+      },
+      "status": "completed",
+      "error": null
+    },
+    {
+      "type": "user_message",
+      "text": "SLP role=lead\n[policy core elided in fixture]\nUse the current authorized Human or delegated assignment and its Paseo workspace. Notifications and heartbeat prompts do not replace that assignment.\n<paseo-system>\nSanitized system notification.\n</paseo-system>"
+    },
+    {
+      "type": "tool_call",
+      "callId": "mcp_call_tool:0#sanitized0034",
+      "name": "Calling send_agent_prompt from paseo",
+      "detail": {
+        "type": "unknown",
+        "input": {
+          "notifyOnFinish": true,
+          "agentId": "66666666-6666-4666-8666-666666666666",
+          "prompt": "Sanitized prompt.",
+          "background": true
+        },
+        "output": null
+      },
+      "metadata": {
+        "title": "Calling send_agent_prompt from paseo"
+      },
+      "status": "completed",
+      "error": null
+    },
+    {
+      "type": "tool_call",
+      "callId": "mcp_call_tool:0#sanitized0035",
+      "name": "Calling send_agent_prompt from paseo",
+      "detail": {
+        "type": "unknown",
+        "input": {
+          "prompt": "Sanitized prompt.",
+          "agentId": "33333333-3333-4333-8333-333333333333",
+          "background": true,
+          "notifyOnFinish": true
+        },
+        "output": null
+      },
+      "metadata": {
+        "title": "Calling send_agent_prompt from paseo"
+      },
+      "status": "completed",
+      "error": null
+    }
+  ]
+}

@@ -555,47 +555,83 @@ the pool is Human-owned, so escalate rather than retry. Controlled
 degradation: while armed an outage blocks only the dependent delegation; the
 Human disables the capability in the Manager card and Lead judgment resumes.
 
-### Communication supervision (optional, shadow-only)
+### Communication supervision (optional)
 
-Supervision is a second opt-in capability, configured per Lead route in the
+Supervision is a second opt-in capability, configured in the
 **Supervision** section inside the SLP Manager's **Jev** tab
-(`<daemonHome>/slp-runtime/state/supervision.json`, 0600, sha256 CAS). It is
-off by default — configuring Jev alone never enables observation, and a
-route does nothing until its mode is explicitly `shadow` *and* Jev is
-enabled with `capabilities.supervision` on.
+(`<daemonHome>/slp-runtime/state/supervision.json`, schema 2, 0600, sha256
+CAS). It is off by default — configuring Jev alone never enables
+observation. The card has one **Supervision** switch (the Jev
+`supervision` capability; turning it on shows what is sent and what it
+costs first), then two plain choices:
 
-In shadow mode the plugin's lifecycle hooks
-(`agent.created`/`archived`/`turn_started`/`turn_ended`) capture normalized
-`send_agent_prompt` evidence for the bound Lead's direct Peers, and a
-serialized plugin-owned queue evaluates each Peer handback through Jev's
-three-question assessment (brief quality, handback quality, Lead handling).
-The detector observes only — it never infers authority, certifies
-artifacts, mutates assignments, or messages any agent, and every missing or
-unverifiable input resolves to `unknown`, never a violation. The Manager
-card lists bounded observation metadata (case state, ids, timestamps,
-counts, visibility flags, assessment summary) — message bodies and keys are
-never persisted.
+- **Which Leads** — *All SLP Leads* (daemon defaults: every SLP Lead the
+  plugin discovers, an exact `slp-<family>-lead` seen in a lifecycle event or
+  verified by refresh; unchecked Leads are left out) or *Selected Leads*
+  (one explicit route per checked Lead; an explicit route always wins over
+  defaults). Leads are picked by name from the app's agent list. Each
+  Lead's room stays separate.
+- **When an issue is found** — *Record only* (`shadow`: assess and record) or
+  *Record and alert a Supervisor* (`notify`: also prompt the Supervisor you
+  pick from the list).
+- **Advanced** — the daemon-wide confidence threshold (0.5–1, default 0.9)
+  and the wait before alerting.
 
-External data and cost: a shadow evaluation sends captured
-brief/handback/room-message content to the configured Jev endpoint, so
-that communication leaves the host and each evaluation is a billable
-provider call. Provider coverage: codex is the only family whose
-normalized send shape is verified against a real timeline; the pi, devin
-and claude fixtures are mapper-derived, so their sends are demoted to
-uncertain (`family-shape-unverified`) and every case in those families
-stays `unknown` until real-timeline fixtures exist. On devin the upstream
-record additionally drops the MCP result body, so delivery evidence would
-stay weaker even after fixture verification. On this host
-`report-route-unverifiable` is always set — there is no machine-readable
-report-recipient signal — so cases currently resolve `unknown` before any
-Jev call; see the open decision on structured report-recipient labels.
-Open cases and the event queue are process-local: a plugin restart does
-not replay missed turns, and only the metadata ring survives
-(`state/supervision-cases.json`, ≤200 entries or 30 days).
+If the plugin cannot look an agent up when you save (seen live on host
+0.9.1), the save still lands and the card says so; that Lead is watched
+only once its next turn is seen in the expected workspace.
 
-Mode `notify` is schema-valid but carries no delivery path in this build —
-notification is a separate Human gate. Live end-to-end validation has not
-run; the design, evidence and open decisions live in
+Each Peer handback is assessed as soon as it lands, through Jev's rubric-3
+questions (obligations are per turn: a closure-only message such as an
+accepted-and-closed notice needs only a fitting acknowledgment, while a bare
+"ACK"/"Done" never answers a message that still asks for work): does the Lead's brief carry the obligations this task needs,
+does the handback answer what was asked (complete/missing/failed/unverified,
+ownership, blocker needs), and did the Lead's later communication dispose of
+the obligation the handback raised — including through another Peer or an
+escalation to the Supervisor, or `no_action_required` for an informational
+result. The case is re-assessed when new confirmed messages arrive. A
+handling disposition or mishandling must be linked by Jev to one specific
+confirmed message the code offered; silence, acknowledgment or elapsed time
+never becomes a finding. Findings are independent per axis and immutable:
+a later message resolves a finding only when Jev links it as the specific
+correction. The pending delay is a checkpoint — brief/handback findings are
+delivered only after it, giving the Lead time to correct first.
+
+The detector judges communication only — it never infers authority,
+certifies artifacts, accepts work or mutates assignments, and a missing or
+unverifiable input keeps that axis `unknown`. In `notify` mode a code-generated
+alert ("Suspected communication issue — review required") with bounded,
+untrusted excerpts goes to the route's Supervisor (or the default
+recipient), at most once per finding and recipient. Before every send the
+Supervisor is refreshed (exact SLP Supervisor, not archived, active) and the
+route rechecked; a changed route cancels, never falls back. The attempt is
+recorded before the send (a corrupt or unreadable attempt history blocks
+delivery until repaired, never reset); a failure or timeout is reported
+`notification delivery uncertain` and never retried. A running Supervisor is
+not prompted — delivery waits until it is idle, but a prompt that lands as a
+turn starts interrupts that turn (the SDK exposes no queue option). A bell
+in the Supervisor's workspace offers **Open supervision settings** and
+**Turn off alerts** (notify → shadow) through the same server-side CAS
+writer.
+
+External data and cost: shadow and notify send the brief, handback, the
+Lead's confirmed post-handback messages to this Peer, to its other direct
+Peers and to the Supervisor, and the Peer's confirmed sends to the
+configured Jev endpoint; unconfirmed sends go as ids only. Each assessment
+is a billable call (at most six per case). Provider coverage (per axis,
+from real observed timelines): Codex, Claude Code and Pi — brief, handback
+and Lead messages (Lead-role live runs not done yet); Devin — brief and
+handback only, because the Devin provider emits no result for its sends, so
+a Devin Lead's handling is never judged. A mixed room is judged per axis, never
+blocked by one family. Upgrading to this coverage turns existing supervision
+settings off until you re-save them in the Manager (Restore). The report route is not machine-readable on this host
+(`report-route-unverifiable` is disclosed, not a gate). Open cases and the
+queue are process-local: a restart does not replay missed turns; only the
+bounded metadata rings survive (`state/supervision-cases.json` and
+`state/supervision-deliveries.json`, ≤200 entries or 30 days, no bodies).
+A schema-1 file from an earlier version reads with every route off until the
+Human re-enables it — an upgrade never widens transmission or turns on
+delivery. Live end-to-end validation and model evaluation have not run; see
 [docs/spec/supervision-integration.md](docs/spec/supervision-integration.md).
 
 ### Work tracker (optional)
@@ -875,7 +911,9 @@ node "$SLP_RT/bin/slp.mjs" materialize /absolute/target-repo --from /absolute/so
 It copies `.paseo-slp/workspace-protocol.md`, and `.paseo-slp/slp-routing.json`
 (validated) only when the source actually pins one — a source that never
 created a catalog materializes the protocol alone, and the target resolves
-the user-scope pool exactly like the source does. `notebook.md` is
+the user-scope pool exactly like the source does. `.paseo-slp/references/`
+— the operational facts the protocol points to — is copied recursively when
+present (symlinks and non-regular entries are refused). `notebook.md` is
 Supervisor-owned state and is never copied. Repeatable `--include` stages
 extra repository-relative files verbatim — untracked spec or evidence the
 seat must read; paths are validated before anything is staged (absolute,

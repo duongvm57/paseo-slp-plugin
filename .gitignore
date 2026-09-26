@@ -3,8 +3,11 @@
 .paseo-slp/notebook.md
 node_modules/
 
-# Local skill-install artifacts (skills CLI)
-.agents/
+# Local skill-install artifacts (skills CLI); repo-scoped skills are tracked
+.agents/*
+!.agents/skills/
+.agents/skills/*
+!.agents/skills/paseo-slp-upstream-sync/
 .pi/
 skills-lock.json
 

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, writeFileSync, readFileSync, rmSync, existsSync, realpathSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync, readFileSync, rmSync, existsSync, realpathSync, symlinkSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
@@ -60,6 +60,33 @@ test('materialize works when the source never created a catalog', t => {
   assert.equal(applied.files[0].path.endsWith('workspace-protocol.md'), true);
   assert.equal(existsSync(join(target, '.paseo-slp/slp-routing.json')), false);
   assert.equal(existsSync(join(target, '.paseo-slp/workspace-protocol.md')), true);
+});
+
+test('materialize carries protocol references so worktree pointers resolve', t => {
+  const dir = fixture(t), source = slpCheckout(join(dir, 'source')), target = join(dir, 'target');
+  mkdirSync(target);
+  // The protocol keeps rules and one-line pointers; the operational facts it
+  // points to live under .paseo-slp/references/ and must travel with it.
+  mkdirSync(join(source, '.paseo-slp/references/components'), { recursive: true });
+  writeFileSync(join(source, '.paseo-slp/references/check-commands.md'), '# Checks\n');
+  writeFileSync(join(source, '.paseo-slp/references/components/web.md'), '# Web\n');
+  const applied = materializeWorkspace(source, target, true);
+  assert.equal(applied.files.length, 4, 'protocol + catalog + 2 references');
+  assert.equal(readFileSync(join(target, '.paseo-slp/references/check-commands.md'), 'utf8'), '# Checks\n');
+  assert.equal(readFileSync(join(target, '.paseo-slp/references/components/web.md'), 'utf8'), '# Web\n');
+  // A target-owned reference is preserved, like every other target file.
+  writeFileSync(join(target, '.paseo-slp/references/check-commands.md'), '# Target checks\n');
+  const again = materializeWorkspace(source, target, true);
+  assert.equal(again.preserved, true);
+  assert.equal(readFileSync(join(target, '.paseo-slp/references/check-commands.md'), 'utf8'), '# Target checks\n');
+  // References stage through the protocol contract, not --include.
+  assert.throws(() => materializeWorkspace(source, target, false, { includePaths: ['.paseo-slp/references'] }), /managed by materialize/);
+  // A symlinked reference is refused before any target write.
+  const fresh = join(dir, 'fresh');
+  mkdirSync(fresh);
+  symlinkSync('check-commands.md', join(source, '.paseo-slp/references/alias.md'));
+  assert.throws(() => materializeWorkspace(source, fresh, true), /Protocol reference is a symlink/);
+  assert.equal(existsSync(join(fresh, '.paseo-slp')), false);
 });
 
 test('materialize copies catalog bytes verbatim so a pinned route hash stays valid', t => {

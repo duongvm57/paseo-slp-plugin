@@ -522,46 +522,82 @@ quyền Human nên escalate thay vì thử lại. Degradation có kiểm soát: 
 bật, một outage chỉ chặn delegation phụ thuộc; Human tắt capability trong
 Manager card và phán đoán của Lead được khôi phục.
 
-### Giám sát giao tiếp (tùy chọn, chỉ shadow)
+### Giám sát giao tiếp (tùy chọn)
 
-Supervision là capability opt-in thứ hai, cấu hình theo từng route Lead trong
-section **Supervision** nằm trong tab **Jev** của SLP Manager
-(`<daemonHome>/slp-runtime/state/supervision.json`, 0600, sha256 CAS). Mặc
-định tắt — chỉ cấu hình Jev không bao giờ bật quan sát, và một route không
-làm gì cho tới khi mode được đặt tường minh là `shadow` *và* Jev được bật
-với `capabilities.supervision`.
+Supervision là capability opt-in thứ hai, cấu hình trong section
+**Supervision** nằm trong tab **Jev** của SLP Manager
+(`<daemonHome>/slp-runtime/state/supervision.json`, schema 2, 0600, sha256
+CAS). Mặc định tắt — chỉ cấu hình Jev không bao giờ bật quan sát. Card có
+một công tắc **Supervision** (chính là capability `supervision` của Jev;
+bật lên sẽ hiện trước những gì được gửi đi và chi phí), rồi hai lựa chọn
+đơn giản (giao diện hiện bằng tiếng Anh):
 
-Ở mode shadow, các lifecycle hook của plugin
-(`agent.created`/`archived`/`turn_started`/`turn_ended`) capture evidence
-`send_agent_prompt` đã chuẩn hóa cho các Peer trực tiếp của Lead được bind,
-và một hàng đợi tuần tự do plugin sở hữu đánh giá từng handback của Peer qua
-bộ ba câu hỏi Jev (chất lượng brief, chất lượng handback, cách Lead xử lý).
-Detector chỉ quan sát — không suy ra authority, không chứng nhận artifact,
-không sửa assignment, không nhắn cho agent nào; mọi đầu vào thiếu hoặc không
-verify được đều thành `unknown`, không bao giờ là vi phạm. Card Manager liệt
-kê metadata quan sát có giới hạn (trạng thái case, id, timestamp, đếm, cờ
-visibility, tóm tắt assessment) — body message và key không bao giờ được
-persist.
+- **Which Leads** — *All SLP Leads* (defaults của daemon: mọi SLP Lead mà
+  plugin khám phá, một `slp-<family>-lead` chính xác thấy qua lifecycle event
+  hoặc được verify bằng refresh; Lead bị bỏ chọn thì bị loại ra) hoặc
+  *Selected Leads* (mỗi Lead được chọn là một route tường minh; route tường
+  minh luôn thắng defaults). Lead được chọn theo tên từ danh sách agent của
+  app. Room của từng Lead vẫn tách biệt.
+- **When an issue is found** — *Record only* (`shadow`: đánh giá và ghi lại)
+  hoặc *Record and alert a Supervisor* (`notify`: gửi thêm prompt cho
+  Supervisor chọn từ danh sách).
+- **Advanced** — confidence threshold toàn daemon (0.5–1, mặc định 0.9) và
+  thời gian chờ trước khi cảnh báo.
 
-Dữ liệu ra ngoài và chi phí: một lượt đánh giá shadow gửi nội dung
-brief/handback/room-message đã capture tới Jev endpoint đã cấu hình, nghĩa là
-giao tiếp đó rời khỏi host và mỗi lượt đánh giá là một provider call trả
-phí. Coverage provider: chỉ codex có send shape đã verify trên timeline
-thật; fixture pi, devin và claude là mapper-derived nên send của chúng bị
-demote thành uncertain (`family-shape-unverified`) và mọi case của các
-family đó giữ `unknown` tới khi có fixture timeline thật. Trên devin, bản
-ghi upstream còn drop body của MCP result nên evidence giao hàng vẫn yếu
-hơn cả sau khi fixture được verify. Trên host này
-`report-route-unverifiable` luôn được set — không có report-recipient
-signal đọc được bằng máy — nên hiện mọi case resolve `unknown` trước cả
-Jev call; xem open decision về structured report-recipient label. Các case
-đang mở và hàng đợi event là process-local: restart plugin không replay
-các turn đã lỡ, chỉ ring metadata tồn tại (`state/supervision-cases.json`,
-≤200 mục hoặc 30 ngày).
+Nếu lúc lưu plugin không tra được agent (đã gặp khi chạy thật trên host
+0.9.1), cấu hình vẫn được lưu và card báo rõ; Lead đó chỉ được quan sát khi
+thấy turn kế tiếp của nó trong đúng workspace.
 
-Mode `notify` hợp lệ về schema nhưng không có đường delivery trong build
-này — notification là một gate Human riêng. Validation E2E live chưa chạy;
-thiết kế, evidence và các quyết định còn mở nằm trong
+Mỗi handback của Peer được đánh giá ngay khi tới, qua bộ câu hỏi rubric 3
+của Jev (nghĩa vụ tính theo từng turn: thông điệp chỉ chấp nhận/đóng việc chỉ
+cần một lời xác nhận phù hợp, còn một câu "ACK"/"Đã nhận" trần không bao giờ
+trả lời được thông điệp vẫn đang yêu cầu việc): brief của Lead có mang các nghĩa vụ nhiệm vụ này cần không; handback
+có trả lời đúng điều được hỏi (hoàn tất/thiếu/thất bại/chưa verify, ownership,
+nhu cầu khi bị chặn) không; và giao tiếp sau đó của Lead có xử lý nghĩa vụ mà
+handback nêu ra không — kể cả qua một Peer khác hay escalate lên Supervisor,
+hoặc `no_action_required` với kết quả chỉ mang tính thông tin. Case được đánh
+giá lại khi có message đã xác nhận mới. Một disposition hay mishandling phải
+được Jev gắn với đúng một message đã xác nhận do code đưa ra; im lặng,
+acknowledgment hay thời gian trôi qua không bao giờ thành finding. Finding
+độc lập theo từng trục và bất biến: message sau chỉ resolve một finding khi
+Jev gắn nó là correction cụ thể. Pending delay là checkpoint — finding
+brief/handback chỉ được gửi sau mốc này để Lead có cơ hội sửa trước.
+
+Detector chỉ phán giao tiếp — không suy ra authority, không chứng nhận
+artifact, không nghiệm thu, không sửa assignment; đầu vào thiếu hoặc không
+verify được giữ trục đó ở `unknown`. Ở mode `notify`, một alert do code tạo
+("Suspected communication issue — review required") kèm trích đoạn có giới hạn,
+đánh dấu không tin cậy, được gửi tới Supervisor của route (hoặc recipient mặc
+định), tối đa một lần cho mỗi finding và recipient. Trước mỗi lần gửi,
+Supervisor được refresh (SLP Supervisor chính xác, chưa archive, đang active)
+và route được kiểm lại; route đổi thì hủy, không bao giờ chuyển sang người
+khác. Attempt được ghi trước khi gửi (lịch sử attempt bị hỏng hoặc không đọc
+được sẽ chặn việc gửi tới khi được sửa, không bao giờ bị reset); lỗi hoặc
+timeout được báo là
+`notification delivery uncertain` và không bao giờ gửi lại. Supervisor đang
+chạy thì không bị prompt — việc gửi đợi tới khi idle, nhưng prompt rơi đúng
+lúc một turn bắt đầu sẽ ngắt turn đó (SDK không có tùy chọn xếp hàng). Chuông
+ở workspace của Supervisor có **Open supervision settings** và **Turn off
+alerts** (notify → shadow), dùng chung writer CAS phía server.
+
+Dữ liệu ra ngoài và chi phí: shadow và notify gửi brief, handback, các message
+đã xác nhận sau handback của Lead tới Peer này, tới các Peer trực tiếp khác và
+tới Supervisor, cùng các send đã xác nhận của Peer tới Jev endpoint đã cấu
+hình; send chưa xác nhận chỉ gửi id. Mỗi lượt đánh giá là một call trả phí
+(tối đa sáu lượt mỗi case). Coverage provider (theo từng trục, dựa trên
+timeline thật đã quan sát): Codex, Claude Code và Pi — brief, handback và
+message của Lead (chưa chạy live ở vai Lead); Devin — chỉ brief và handback, vì
+provider Devin không phát kết quả của lệnh gửi, nên phần xử lý của Lead Devin
+không bao giờ được chấm. Phòng trộn family được chấm theo từng trục, một family
+không chặn các family khác. Nâng lên coverage này sẽ tắt cấu hình supervision
+hiện có cho tới khi bạn lưu lại trong Manager (Restore). Report route không đọc được bằng máy trên host
+này (`report-route-unverifiable` được công bố, không phải gate). Case đang mở
+và hàng đợi là process-local: restart không replay turn đã lỡ; chỉ các ring
+metadata có giới hạn tồn tại (`state/supervision-cases.json` và
+`state/supervision-deliveries.json`, ≤200 mục hoặc 30 ngày, không có body).
+File schema 1 từ bản trước được đọc với mọi route ở trạng thái off cho tới khi
+Human bật lại — nâng cấp không bao giờ mở rộng dữ liệu gửi đi hay tự bật
+delivery. Validation E2E live và model evaluation chưa chạy; xem
 [docs/spec/supervision-integration.md](docs/spec/supervision-integration.md).
 
 ### Work tracker (tùy chọn)
@@ -827,7 +863,9 @@ node "$SLP_RT/bin/slp.mjs" materialize /absolute/target-repo --from /absolute/so
 Lệnh copy `.paseo-slp/workspace-protocol.md`, và `.paseo-slp/slp-routing.json`
 (đã validate) chỉ khi source thật sự pin catalog — source chưa từng tạo
 catalog thì materialize chỉ mang protocol, và target đọc pool user-scope y
-hệt source. `notebook.md` là state do Supervisor sở hữu và không bao giờ
+hệt source. `.paseo-slp/references/` — dữ kiện vận hành mà protocol trỏ
+tới — được copy đệ quy khi có (từ chối symlink và object không phải regular
+file). `notebook.md` là state do Supervisor sở hữu và không bao giờ
 được copy. `--include` lặp lại được để stage thêm file repository-relative
 nguyên byte — spec/evidence chưa track mà seat cần đọc; path được validate
 trước khi stage bất cứ thứ gì (từ chối absolute, drive-prefixed, backslash,

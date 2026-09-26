@@ -6,7 +6,7 @@ import type { PluginServerContribution } from "@getpaseo/plugin/server";
 import { realpathSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { activate, reconcile, deactivate, status, localTarget, catalog, setLanguage, getRoleRouting, setRoleRouting, getPeerPool, setPeerPool, getJev, setJev, setJevKey, testJev, getWorkTracker, setWorkTracker } from "./shared/contracts.ts";
-import { getSupervision, setSupervision } from "./shared/supervision.ts";
+import { disableSupervisionNotifications, getSupervision, getSupervisionStatus, setSupervision } from "./shared/supervision.ts";
 import type { Manager } from "./shared/contracts.ts";
 import { loadCatalog } from "./server/provider-catalog.ts";
 import { createManager } from "./server/manager.ts";
@@ -59,16 +59,18 @@ export default function contribute(server: Parameters<PluginServerContribution>[
   const tracker = createWorkTracker();
   server.handle(getWorkTracker, input => tracker.getWorkTracker(input));
   server.handle(setWorkTracker, input => tracker.setWorkTracker(input));
-  // Supervision route config (spec supervision-integration.md §Configuration):
+  // Supervision config (spec supervision-integration.md §Configuration):
   // private supervision.json under the SERVED daemon home — the store binds
   // the state path to the home this process actually serves (PASEO_HOME env),
   // refusing reads/writes it cannot verify. Agent validation on save goes
-  // through the connected SDK.
-  // Phase B shadow observer: lifecycle hooks capture the minimal normalized
-  // communication synchronously; a serialized plugin-lifetime queue owns SDK
-  // refreshes, Jev HTTP (via the gated supervision resolver) and the bounded
-  // metadata ring. `notify` routes are never observed; no send() exists here.
-  // An unverifiable served home leaves the observer inert (shadow = null).
+  // through the connected SDK; the Command Center/bell actions use the same
+  // CAS writer.
+  // Observer: lifecycle hooks capture the minimal normalized communication
+  // synchronously; a serialized plugin-lifetime queue owns SDK refreshes,
+  // Jev HTTP (via the gated supervision resolver), the bounded metadata ring
+  // and — for `notify` routes only — Supervisor delivery through the hook
+  // context's connected SDK. An unverifiable served home leaves the observer
+  // inert (shadow = null).
   let observer: SupervisionObserver | null = null;
   try {
     const served = detectDaemonHome();
@@ -91,6 +93,8 @@ export default function contribute(server: Parameters<PluginServerContribution>[
   });
   server.handle(getSupervision, input => supervision.getSupervision(input));
   server.handle(setSupervision, (input, { paseo }) => supervision.setSupervision(input, paseo));
+  server.handle(getSupervisionStatus, input => supervision.getStatus(input));
+  server.handle(disableSupervisionNotifications, (input, { paseo }) => supervision.disableNotifications(input, paseo));
   // Phase 2 (settings-driven-providers.md §6): the hook-family thin aliases
   // need the two halves the sentinel gate cannot supply — role-bundle
   // injection at agent.create and the session-open grant overlay. Both hooks
@@ -114,8 +118,9 @@ export default function contribute(server: Parameters<PluginServerContribution>[
   });
   const offAgentCreate = server.before("agent.create", injection.agentCreate);
   const offSessionOpen = server.before("agent.session_open", injection.sessionOpen);
-  // Shadow-observer lifecycle hooks — synchronous capture only; every async
-  // step (refresh, Jev HTTP, ring write) runs on the observer's own queue.
+  // Observer lifecycle hooks — synchronous capture only; every async step
+  // (refresh, Jev HTTP, ring write, notify delivery) runs on the observer's
+  // own queue.
   const ob = observer;
   const offCreated = ob === null ? null : server.on("agent.created", (event, { paseo }) => ob.onCreated(event.agent, paseo));
   const offArchived = ob === null ? null : server.on("agent.archived", (event, { paseo }) => ob.onArchived(event.agent, paseo));

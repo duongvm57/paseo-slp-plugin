@@ -124,7 +124,7 @@ const STATUS_DETAIL_LABELS = new Set([
   "Live acceptance",
 ]);
 
-export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
+export function ManagerSurface({ host, layout, theme, navigation }: PluginSurfaceProps) {
   const colors = theme.colors;
   const compact = layout.compact;
   const callStatus = useRpc(status);
@@ -338,8 +338,9 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
     update,
   });
 
-  // The supervision card owns the route snapshot, per-route draft, CAS
-  // save/reload and the Jev-capability gate readout — cards/supervision.tsx.
+  // The supervision card owns the config snapshot, draft (which Leads, what
+  // happens on a finding, thresholds), agent pickers, CAS save/reload and
+  // the findings readout — cards/supervision.tsx.
   // It loads with the target (independent of binding, like the Jev card).
   const supervision = useSupervisionCard({
     target,
@@ -884,12 +885,14 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
         // value.
         <View style={sectionShown("jev")}>
         <JevCard colors={colors} target={target} jev={jev} />
-        {/* Supervision routes are per-daemon-home plugin state (same class as
-            the Jev card) — one explicit Lead→Supervisor route per Lead ID,
-            CAS-guarded whole-file saves, served-home verified server-side.
+        {/* Supervision config is per-daemon-home plugin state (same class as
+            the Jev card) — daemon defaults for discovered Leads plus explicit
+            per-Lead routes, CAS-guarded whole-file saves, served-home
+            verified server-side.
             The card mounts inside the Jev section: supervision assessments
-            run through the same Jev config this section edits. */}
-        <SupervisionCard colors={colors} target={target} jev={jev} supervision={supervision} />
+            run through the same Jev config this section edits, and its
+            on/off switch is the Jev supervision capability. */}
+        <SupervisionCard colors={colors} target={target} jev={jev} supervision={supervision} navigation={navigation} />
         </View>
       ) : null}
 

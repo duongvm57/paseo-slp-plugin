@@ -1,24 +1,27 @@
-// tests/plugin-supervision.test.mjs — the Phase A configuration seam behind
+// tests/plugin-supervision.test.mjs — the configuration seam behind
 // plugin/server/supervision/state.ts + plugin/shared/supervision.ts:
-// private supervision.json under the SERVED daemon home only, raw-file
-// SHA-256 CAS (rechecked after awaited agent validation), exact
-// Lead→Supervisor route validation through a doubled Paseo SDK surface,
-// archive/closed/provider/workspace rejection, duplicate-Lead rejection,
-// "off" routes skipping liveness, schema-valid-but-inert "notify", and
-// broken-file evidence semantics. No daemon, no network: PaseoLike is a
-// structural double; the served home is injected like the real
-// detectDaemonHome seam.
+// private supervision.json (schema 2: daemon defaults for discovered Leads,
+// explicit per-Lead routes, the shared confidence threshold) under the
+// SERVED daemon home only, raw-file SHA-256 CAS (rechecked after awaited
+// agent validation), exact Lead→Supervisor validation through a doubled
+// Paseo SDK surface, schema-1 migration that never widens an earlier
+// choice, pending verification when the host returns no snapshot, the
+// served-home bell actions, and broken-file
+// evidence semantics. No daemon, no network: PaseoLike is a structural
+// double; the served home is injected like the real detectDaemonHome seam.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { createSupervisionState, supervisionPath } from '../plugin/server/supervision/state.ts';
+import { effectiveRoute, normalizeSupervisionFile, notifyRecipients, withoutNotify } from '../plugin/shared/supervision.ts';
 import { createJev } from '../plugin/server/jev.ts';
 import { makeHome, targetOf } from './helpers/plugin-doubles.mjs';
 
 const LEAD = '11111111-1111-4111-8111-111111111111';
 const LEAD2 = '22222222-2222-4222-8222-222222222222';
 const SUP = '33333333-3333-4333-8333-333333333333';
+const SUP2 = '44444444-4444-4444-8444-444444444444';
 const WKS = 'wks_testworkspace';
 
 // A state instance bound to `home` as the daemon home the process serves —
@@ -27,9 +30,18 @@ const WKS = 'wks_testworkspace';
 const stateFor = home => createSupervisionState({ servedHome: () => ({ daemonHome: home, source: 'env' }) });
 const fileOf = home => supervisionPath(join(home, 'slp-runtime'));
 
-const get = (state, home) => state.getSupervision({ schemaVersion: 1, target: targetOf(home) });
-const set = (state, home, routes, expectedSha256, paseo) =>
-  state.setSupervision({ schemaVersion: 1, target: targetOf(home), routes, expectedSha256 }, paseo);
+const DEFAULTS = { mode: 'off', supervisorAgentId: null, supervisorWorkspaceId: null, pendingDelayMs: 60000 };
+const cfg = ({ routes = [], defaults = {}, confidenceThreshold = 0.9 } = {}) => ({
+  schemaVersion: 3, confidenceThreshold, defaults: { ...DEFAULTS, ...defaults }, routes,
+});
+const get = (state, home) => state.getSupervision({ schemaVersion: 2, target: targetOf(home) });
+// `routesOrConfig`: an array is shorthand for cfg({ routes }).
+const set = (state, home, routesOrConfig, expectedSha256, paseo) =>
+  state.setSupervision({
+    schemaVersion: 2, target: targetOf(home),
+    config: Array.isArray(routesOrConfig) ? cfg({ routes: routesOrConfig }) : routesOrConfig,
+    expectedSha256,
+  }, paseo);
 
 const route = (over = {}) => ({
   leadAgentId: LEAD,
@@ -64,72 +76,149 @@ const leadAgent = (over = {}) => ({
 const supAgent = (over = {}) => ({
   id: SUP, provider: 'slp-codex-supervisor', workspaceId: WKS, status: 'idle', archivedAt: null, ...over,
 });
-const livePaseo = makePaseo({ [LEAD]: leadAgent(), [SUP]: supAgent() });
+const livePaseo = makePaseo({ [LEAD]: leadAgent(), [SUP]: supAgent(), [SUP2]: supAgent({ id: SUP2, workspaceId: 'wks_sup2' }) });
 
 // ---------------------------------------------------------------------------
 // Defaults and file semantics
 // ---------------------------------------------------------------------------
 
-test('absent file reads as unconfigured: empty routes, null sha, no error', async t => {
+test('absent file reads as unconfigured: defaults off, no routes, null sha, no error', async t => {
   const home = makeHome(t);
   const state = stateFor(home);
   const view = await get(state, home);
   assert.deepEqual(view, {
-    schemaVersion: 1, routes: [], sha256: null,
-    observations: null, gates: null, diagnostics: null, error: null,
+    schemaVersion: 2, config: cfg(), sha256: null, migration: null,
+    observations: null, gates: null, diagnostics: null, unverified: [], error: null,
   });
   assert.equal(existsSync(fileOf(home)), false);
 });
 
-test('routes round-trip through set/get with 0600 atomic writes and restart load', async t => {
+test('config round-trips through set/get with 0600 atomic writes and restart load', async t => {
   const home = makeHome(t);
   const state = stateFor(home);
-  const stored = await set(state, home, [route()], null, livePaseo);
+  const stored = await set(state, home, cfg({ routes: [route()], confidenceThreshold: 0.8 }), null, livePaseo);
   assert.equal(lstatSync(fileOf(home)).mode & 0o777, 0o600);
   assert.equal(stored.error, null);
-  assert.equal(stored.routes.length, 1);
+  assert.equal(stored.config.routes.length, 1);
+  assert.equal(stored.config.confidenceThreshold, 0.8);
   assert.equal(typeof stored.sha256, 'string');
-  // No tmp siblings survive the atomic write.
   assert.deepEqual(
     readdirSync(join(home, 'slp-runtime', 'state')).filter(name => name.endsWith('.tmp')),
     [],
   );
-  // Restart load: a fresh state object over the same served home reads the
-  // persisted routes back (spec: "A persisted route loads when the plugin
-  // starts").
+  assert.equal(JSON.parse(readFileSync(fileOf(home), 'utf8')).schemaVersion, 3, 'writes are always schema 3');
   const restarted = stateFor(home);
   const view = await get(restarted, home);
   assert.equal(view.error, null);
-  assert.deepEqual(view.routes, stored.routes);
+  assert.deepEqual(view.config, stored.config);
   assert.equal(view.sha256, stored.sha256);
 });
 
-test('invalid file is off with a visible error — routes null, sha preserved for CAS', async t => {
+test('invalid file is off with a visible error — config null, sha preserved for CAS', async t => {
   const home = makeHome(t);
   mkdirSync(dirname(fileOf(home)), { recursive: true });
   writeFileSync(fileOf(home), '{not json');
   const state = stateFor(home);
   const view = await get(state, home);
-  assert.equal(view.routes, null);
+  assert.equal(view.config, null);
   assert.equal(typeof view.sha256, 'string');
   assert.match(view.error, /not valid JSON/);
-  // Schema-mismatched content fails the same way — never an empty route list.
-  writeFileSync(fileOf(home), JSON.stringify({ schemaVersion: 2, routes: [] }));
+  writeFileSync(fileOf(home), JSON.stringify({ schemaVersion: 3, routes: [] }));
   const mismatched = await get(state, home);
-  assert.equal(mismatched.routes, null);
+  assert.equal(mismatched.config, null);
   assert.match(mismatched.error, /schema validation/);
-  // A duplicate leadAgentId makes the file invalid too.
-  writeFileSync(fileOf(home), JSON.stringify({
-    schemaVersion: 1,
-    routes: [route(), route({ supervisorAgentId: null })],
-  }));
+  writeFileSync(fileOf(home), JSON.stringify(cfg({ routes: [route(), route({ supervisorAgentId: null })] })));
   const dup = await get(state, home);
-  assert.equal(dup.routes, null);
+  assert.equal(dup.config, null);
   assert.match(dup.error, /duplicate leadAgentId/);
   // CAS still lets a stale-aware client overwrite the broken file.
   const repaired = await set(state, home, [route()], dup.sha256, livePaseo);
   assert.equal(repaired.error, null);
-  assert.equal(repaired.routes.length, 1);
+  assert.equal(repaired.config.routes.length, 1);
+});
+
+// ---------------------------------------------------------------------------
+// Migration (schema 1 → 2)
+// ---------------------------------------------------------------------------
+
+test('migration: a schema-1 file reads with every route off and its previous modes listed', async t => {
+  const home = makeHome(t);
+  mkdirSync(dirname(fileOf(home)), { recursive: true });
+  const legacy = { schemaVersion: 1, routes: [route({ mode: 'shadow' }), route({ leadAgentId: LEAD2, mode: 'notify' }), route({ leadAgentId: SUP2, mode: 'off', supervisorAgentId: null })] };
+  writeFileSync(fileOf(home), JSON.stringify(legacy));
+  const before = readFileSync(fileOf(home));
+  const view = await get(stateFor(home), home);
+  assert.equal(view.error, null);
+  assert.deepEqual(view.config.routes.map(r => r.mode), ['off', 'off', 'off'], 'an upgrade never activates or widens a route');
+  assert.equal(view.config.routes[1].supervisorAgentId, SUP, 'the recipient is kept for an explicit re-enable');
+  assert.deepEqual(view.config.defaults, DEFAULTS);
+  assert.deepEqual(view.migration, {
+    fromSchemaVersion: 1,
+    disabledRoutes: [{ leadAgentId: LEAD, previousMode: 'shadow' }, { leadAgentId: LEAD2, previousMode: 'notify' }],
+    disabledDefaults: null,
+  });
+  assert.deepEqual(readFileSync(fileOf(home)), before, 'reading never rewrites the file');
+  assert.equal(effectiveRoute(view.config, LEAD, null), null);
+  // A save (with the file's CAS token) writes schema 3 and clears the migration.
+  const saved = await set(stateFor(home), home, cfg({ routes: [route()] }), view.sha256, livePaseo);
+  assert.equal(saved.migration, null);
+  assert.equal(JSON.parse(readFileSync(fileOf(home), 'utf8')).schemaVersion, 3);
+});
+
+test('migration: a schema-2 file reads with every route AND the defaults off — new family coverage needs a re-save', async t => {
+  // Schema 3 made Claude Code and Devin content transmissible; a schema-2
+  // choice must never silently start sending it.
+  const home = makeHome(t);
+  mkdirSync(dirname(fileOf(home)), { recursive: true });
+  const v2 = {
+    schemaVersion: 2, confidenceThreshold: 0.8,
+    defaults: { mode: 'notify', supervisorAgentId: SUP2, supervisorWorkspaceId: 'wks_sup2', pendingDelayMs: 5000 },
+    routes: [route({ mode: 'shadow' }), route({ leadAgentId: LEAD2, mode: 'off', supervisorAgentId: null })],
+  };
+  writeFileSync(fileOf(home), JSON.stringify(v2));
+  const before = readFileSync(fileOf(home));
+  const view = await get(stateFor(home), home);
+  assert.equal(view.error, null);
+  assert.equal(view.config.schemaVersion, 3);
+  assert.deepEqual([view.config.defaults.mode, ...view.config.routes.map(r => r.mode)], ['off', 'off', 'off']);
+  assert.deepEqual([view.config.confidenceThreshold, view.config.defaults.supervisorAgentId, view.config.defaults.pendingDelayMs], [0.8, SUP2, 5000],
+    'everything but the modes is kept for an explicit re-enable');
+  assert.deepEqual(view.migration, {
+    fromSchemaVersion: 2,
+    disabledRoutes: [{ leadAgentId: LEAD, previousMode: 'shadow' }],
+    disabledDefaults: { previousMode: 'notify' },
+  });
+  assert.deepEqual(readFileSync(fileOf(home), 'utf8'), before.toString(), 'reading never rewrites the file');
+  assert.equal(effectiveRoute(view.config, LEAD, { workspaceId: WKS }), null);
+  assert.equal(effectiveRoute(view.config, SUP, { workspaceId: WKS }), null, 'defaults observe nothing either');
+  assert.deepEqual(notifyRecipients(view.config), [], 'no bell until the Human re-saves');
+  // Disabling notifications on a migration view has nothing to reduce — no write.
+  await stateFor(home).disableNotifications({ schemaVersion: 2 }, makePaseo({}));
+  assert.deepEqual(readFileSync(fileOf(home), 'utf8'), before.toString());
+});
+
+test('effective route: explicit wins (off included); discovered Leads follow active defaults only', () => {
+  const config = cfg({
+    routes: [route({ mode: 'off' }), route({ leadAgentId: LEAD2, mode: 'notify' })],
+    defaults: { mode: 'shadow', supervisorAgentId: SUP, supervisorWorkspaceId: WKS },
+  });
+  assert.equal(effectiveRoute(config, LEAD, { workspaceId: WKS }), null, 'explicit off wins over defaults');
+  assert.equal(effectiveRoute(config, LEAD2, null), null, 'an explicit route waits for host evidence of its Lead');
+  assert.equal(effectiveRoute(config, LEAD2, { workspaceId: 'wks_other' }), null, 'a Lead seen in another workspace does not match its route');
+  assert.equal(effectiveRoute(config, LEAD2, { workspaceId: WKS }).source, 'route');
+  const discovered = effectiveRoute(config, SUP2, { workspaceId: 'wks_x' });
+  assert.deepEqual([discovered.source, discovered.mode, discovered.supervisorAgentId, discovered.leadWorkspaceId], ['default', 'shadow', SUP, 'wks_x']);
+  assert.equal(effectiveRoute(config, SUP2, null), null, 'an undiscovered id never follows defaults');
+  assert.equal(effectiveRoute(config, SUP, { workspaceId: WKS }), null, 'the default Supervisor is never its own Lead');
+  assert.equal(effectiveRoute(cfg(), SUP2, { workspaceId: WKS }), null, 'defaults off observe nothing');
+  assert.deepEqual(notifyRecipients(config), [{ agentId: SUP, workspaceId: WKS, source: 'route' }],
+    'a route without a recorded Supervisor workspace falls back to its Lead workspace');
+  assert.deepEqual(notifyRecipients(cfg({ routes: [route({ mode: 'notify', supervisorWorkspaceId: 'wks_sup' })] })),
+    [{ agentId: SUP, workspaceId: 'wks_sup', source: 'route' }], 'the bell follows the Supervisor workspace');
+  const off = withoutNotify(cfg({ routes: [route({ mode: 'notify' })], defaults: { mode: 'notify', supervisorAgentId: SUP, supervisorWorkspaceId: WKS } }));
+  assert.deepEqual([off.defaults.mode, off.routes[0].mode], ['shadow', 'shadow'], 'disable keeps observing, delivers nothing');
+  assert.equal(off.defaults.supervisorAgentId, SUP, 'the recipient is kept');
+  assert.equal(normalizeSupervisionFile({ schemaVersion: 2 }).ok, false);
 });
 
 // ---------------------------------------------------------------------------
@@ -140,21 +229,18 @@ test('set-supervision rejects a stale expectedSha256', async t => {
   const home = makeHome(t);
   const state = stateFor(home);
   await set(state, home, [route()], null, livePaseo);
-  // Expected-absent while a file exists → conflict.
   await assert.rejects(
     () => set(state, home, [], null, livePaseo),
     error => error.code === 'IDEMPOTENCY_CONFLICT' && /changed since/.test(error.message),
   );
-  // A wrong hash → conflict.
   await assert.rejects(
     () => set(state, home, [], 'f'.repeat(64), livePaseo),
     error => error.code === 'IDEMPOTENCY_CONFLICT',
   );
-  // The correct token saves.
   const current = await get(state, home);
   const cleared = await set(state, home, [], current.sha256, livePaseo);
   assert.equal(cleared.error, null);
-  assert.deepEqual(cleared.routes, []);
+  assert.deepEqual(cleared.config.routes, []);
 });
 
 // ---------------------------------------------------------------------------
@@ -165,33 +251,34 @@ test('supervision state binds to the served daemon home — mismatches refuse, n
   const served = makeHome(t);
   const other = makeHome(t);
   const state = stateFor(served);
-  // A target naming a DIFFERENT existing daemon home is rejected.
   const view = await get(state, other);
-  assert.equal(view.routes, null);
+  assert.equal(view.config, null);
   assert.match(view.error, /not the daemon home this plugin serves/);
   await assert.rejects(
     () => set(state, other, [], null, livePaseo),
     error => error.code === 'HOME_UNVERIFIED',
   );
   assert.equal(existsSync(fileOf(other)), false);
-  // Without a PASEO_HOME export the process home is a default guess — a
-  // recorded host capability gap, never a silent write.
   const guessing = createSupervisionState({ servedHome: () => ({ daemonHome: served, source: 'default' }) });
   const gap = await get(guessing, served);
-  assert.equal(gap.routes, null);
+  assert.equal(gap.config, null);
   assert.match(gap.error, /host capability gap/);
   await assert.rejects(
     () => set(guessing, served, [], null, livePaseo),
     error => error.code === 'HOME_UNVERIFIED',
   );
+  // The served-home actions refuse the same way.
+  const status = await guessing.getStatus({ schemaVersion: 2 });
+  assert.match(status.error, /host capability gap/);
+  await assert.rejects(() => guessing.disableNotifications({ schemaVersion: 2 }, livePaseo), error => error.code === 'HOME_UNVERIFIED');
   assert.equal(existsSync(fileOf(served)), false);
 });
 
 // ---------------------------------------------------------------------------
-// Route validation through the doubled SDK
+// Validation through the doubled SDK
 // ---------------------------------------------------------------------------
 
-test('shadow route validation requires exact provider roles, non-archived, non-closed, matching workspace', async t => {
+test('route validation requires exact provider roles, non-archived, active, matching workspace', async t => {
   const home = makeHome(t);
   const state = stateFor(home);
   const cases = [
@@ -200,12 +287,10 @@ test('shadow route validation requires exact provider roles, non-archived, non-c
     ['Lead archived', { [LEAD]: leadAgent({ archivedAt: '2026-09-20T00:00:00Z' }), [SUP]: supAgent() }, /archived/],
     ['Lead closed', { [LEAD]: leadAgent({ status: 'closed' }), [SUP]: supAgent() }, /closed/],
     ['Lead workspace mismatch', { [LEAD]: leadAgent({ workspaceId: 'wks_other' }), [SUP]: supAgent() }, /workspace/],
-    ['Lead missing on daemon', { [SUP]: supAgent() }, /not found/],
     ['Supervisor provider is a lead', { [LEAD]: leadAgent(), [SUP]: supAgent({ provider: 'slp-pi-lead' }) }, /exact slp-<family>-supervisor/],
     ['Supervisor archived', { [LEAD]: leadAgent(), [SUP]: supAgent({ archivedAt: 'x' }) }, /archived/],
-    ['Supervisor closed', { [LEAD]: leadAgent(), [SUP]: supAgent({ status: 'closed' }) }, /closed/],
-    ['Supervisor workspace mismatch', { [LEAD]: leadAgent(), [SUP]: supAgent({ workspaceId: 'wks_other' }) }, /must share the Lead's workspace/],
-    ['Supervisor missing', { [LEAD]: leadAgent() }, /Supervisor.*not found/],
+    ['Supervisor closed', { [LEAD]: leadAgent(), [SUP]: supAgent({ status: 'closed' }) }, /active agent/],
+    ['Supervisor errored', { [LEAD]: leadAgent(), [SUP]: supAgent({ status: 'error' }) }, /active agent/],
   ];
   for (const [name, agents, pattern] of cases) {
     await assert.rejects(
@@ -217,6 +302,37 @@ test('shadow route validation requires exact provider roles, non-archived, non-c
   }
 });
 
+test('defaults: an active exact Supervisor is required and its workspace is server-derived', async t => {
+  const home = makeHome(t);
+  const state = stateFor(home);
+  // A client-supplied workspace is ignored — the refreshed agent decides.
+  const stored = await set(state, home, cfg({ defaults: { mode: 'notify', supervisorAgentId: SUP2, supervisorWorkspaceId: null } }), null, livePaseo);
+  assert.equal(stored.config.defaults.supervisorWorkspaceId, 'wks_sup2');
+  await assert.rejects(
+    () => set(state, home, cfg({ defaults: { mode: 'shadow', supervisorAgentId: LEAD } }), stored.sha256, livePaseo),
+    error => error.code === 'INVALID_REQUEST' && /exact slp-<family>-supervisor/.test(error.message),
+  );
+  // Default notify without a recipient fails the schema.
+  await assert.rejects(
+    () => set(state, home, cfg({ defaults: { mode: 'notify' } }), stored.sha256, livePaseo),
+    /invalid set-supervision input/,
+  );
+  // Defaults off with the SAME recipient keep its recorded workspace without
+  // a liveness check (a departed Supervisor does not block unrelated edits).
+  const parked = await set(state, home, cfg({ defaults: { mode: 'off', supervisorAgentId: SUP2 } }), stored.sha256, makePaseo({}));
+  assert.equal(parked.config.defaults.supervisorWorkspaceId, 'wks_sup2');
+});
+
+test('threshold is bounded 0.5–1 by the schema', async t => {
+  const home = makeHome(t);
+  const state = stateFor(home);
+  for (const bad of [0.49, 1.01]) {
+    await assert.rejects(() => set(state, home, cfg({ confidenceThreshold: bad }), null, livePaseo), /invalid set-supervision input/);
+  }
+  const ok = await set(state, home, cfg({ confidenceThreshold: 0.5 }), null, livePaseo);
+  assert.equal(ok.config.confidenceThreshold, 0.5);
+});
+
 test('duplicate leadAgentId is rejected at write', async t => {
   const home = makeHome(t);
   const state = stateFor(home);
@@ -224,29 +340,19 @@ test('duplicate leadAgentId is rejected at write', async t => {
     () => set(state, home, [route(), route({ supervisorAgentId: null, leadAgentId: LEAD })], null, livePaseo),
     error => error.code === 'INVALID_REQUEST' && /duplicate leadAgentId/.test(error.message),
   );
-  // Distinct Leads in one save are fine.
-  const paseo = makePaseo({
-    [LEAD]: leadAgent(),
-    [LEAD2]: leadAgent({ id: LEAD2 }),
-    [SUP]: supAgent(),
-  });
+  const paseo = makePaseo({ [LEAD]: leadAgent(), [LEAD2]: leadAgent({ id: LEAD2 }), [SUP]: supAgent() });
   const stored = await set(state, home, [route(), route({ leadAgentId: LEAD2, supervisorAgentId: null })], null, paseo);
-  assert.equal(stored.routes.length, 2);
+  assert.equal(stored.config.routes.length, 2);
 });
 
-test('off routes skip liveness validation; notify is schema-valid and stored but inert', async t => {
+test('off routes skip liveness validation; notify requires and validates a Supervisor', async t => {
   const home = makeHome(t);
   const state = stateFor(home);
-  // mode: "off" — no SDK calls at all (a route to an archived/departed Lead
-  // must still be parkable; spec validates only at enable time).
   const parked = await set(state, home, [route({ mode: 'off' })], null, makePaseo({}));
   assert.equal(parked.error, null);
-  assert.equal(parked.routes[0].mode, 'off');
-  // "notify" stores without error — schema-valid but unimplemented; the
-  // schema requires a Supervisor ID for it.
+  assert.equal(parked.config.routes[0].mode, 'off');
   const notify = await set(state, home, [route({ mode: 'notify' })], parked.sha256, livePaseo);
-  assert.equal(notify.routes[0].mode, 'notify');
-  // notify without a Supervisor fails schema validation.
+  assert.equal(notify.config.routes[0].mode, 'notify');
   await assert.rejects(
     () => set(state, home, [route({ mode: 'notify', supervisorAgentId: null })], notify.sha256, livePaseo),
     /invalid set-supervision input/,
@@ -266,11 +372,7 @@ test('schema rejects malformed routes before any validation or write', async t =
     ['unbounded delay', route({ pendingDelayMs: 86400001 })],
   ];
   for (const [name, bad] of cases) {
-    await assert.rejects(
-      () => set(state, home, [bad], null, livePaseo),
-      /invalid set-supervision input/,
-      name,
-    );
+    await assert.rejects(() => set(state, home, [bad], null, livePaseo), /invalid set-supervision input/, name);
   }
   assert.equal(existsSync(fileOf(home)), false);
 });
@@ -278,7 +380,6 @@ test('schema rejects malformed routes before any validation or write', async t =
 test('a second writer landing during agent validation is caught by the recheck', async t => {
   const home = makeHome(t);
   const state = stateFor(home);
-  // Slow refresh double: a concurrent writer saves while validation awaits.
   let release;
   const gate = new Promise(resolve => { release = resolve; });
   const slowPaseo = {
@@ -295,6 +396,68 @@ test('a second writer landing during agent validation is caught by the recheck',
   await assert.rejects(() => pending, error => error.code === 'IDEMPOTENCY_CONFLICT');
   const view = await get(state, home);
   assert.equal(view.sha256, winner.sha256);
+});
+
+// ---------------------------------------------------------------------------
+// Served-home actions (header bell)
+// ---------------------------------------------------------------------------
+
+test('no host snapshot is pending verification, not a rejection; a returned snapshot is still checked', async t => {
+  const home = makeHome(t);
+  const state = stateFor(home);
+  // The refresh returns nothing for the Lead and throws for the Supervisor
+  // (live: "Agent not found" for a live slp Lead) — the save lands, both are
+  // listed unverified, and the picker's Supervisor workspace is kept.
+  const throwing = {
+    agents: {
+      ref: id => ({
+        refresh: async () => {
+          if (id === SUP) throw new Error('Agent not found: ' + id);
+          return { agent: null };
+        },
+      }),
+    },
+  };
+  const saved = await set(state, home, [route({ mode: 'notify', supervisorWorkspaceId: 'wks_picker' })], null, throwing);
+  assert.equal(saved.error, null);
+  assert.deepEqual(saved.unverified.map(item => [item.agentId, item.role]), [[LEAD, 'lead'], [SUP, 'supervisor']]);
+  assert.match(saved.unverified[1].reason, /Agent not found/);
+  assert.equal(saved.config.routes[0].supervisorWorkspaceId, 'wks_picker');
+  assert.deepEqual((await get(state, home)).unverified, [], 'get never reports a previous save');
+  // A route Supervisor in another workspace is fine; its own workspace is
+  // server-derived and places the bell.
+  const moved = await set(state, home, [route({ mode: 'notify', supervisorAgentId: SUP2, supervisorWorkspaceId: 'wks_client_guess' })], saved.sha256, livePaseo);
+  assert.deepEqual(moved.unverified, []);
+  assert.equal(moved.config.routes[0].supervisorWorkspaceId, 'wks_sup2');
+  assert.deepEqual((await state.getStatus({ schemaVersion: 2 })).recipients, [{ agentId: SUP2, workspaceId: 'wks_sup2', source: 'route' }]);
+  // Unverified default Supervisor keeps the client workspace.
+  const defaults = await set(state, home, cfg({ defaults: { mode: 'notify', supervisorAgentId: SUP, supervisorWorkspaceId: 'wks_picker' } }), moved.sha256, throwing);
+  assert.equal(defaults.config.defaults.supervisorWorkspaceId, 'wks_picker');
+  assert.deepEqual(defaults.unverified.map(item => item.role), ['supervisor']);
+});
+
+test('status lists notify recipients with their bell workspace; disable turns notify into shadow', async t => {
+  const home = makeHome(t);
+  const state = stateFor(home);
+  await set(state, home, cfg({
+    routes: [route({ mode: 'notify' })],
+    defaults: { mode: 'notify', supervisorAgentId: SUP2 },
+  }), null, livePaseo);
+  const status = await state.getStatus({ schemaVersion: 2 });
+  assert.deepEqual(status.recipients.map(r => [r.agentId, r.workspaceId, r.source]).sort(), [
+    [SUP, WKS, 'route'], [SUP2, 'wks_sup2', 'default'],
+  ].sort());
+  // Disabling succeeds even when a routed Lead is gone (no re-validation of
+  // a pure reduction) and keeps every recipient.
+  const disabled = await state.disableNotifications({ schemaVersion: 2 }, makePaseo({}));
+  assert.deepEqual(disabled.recipients, []);
+  const view = await get(state, home);
+  assert.deepEqual([view.config.defaults.mode, view.config.routes[0].mode], ['shadow', 'shadow']);
+  assert.equal(view.config.defaults.supervisorAgentId, SUP2);
+  // Nothing to disable → no write.
+  const sha = view.sha256;
+  await state.disableNotifications({ schemaVersion: 2 }, makePaseo({}));
+  assert.equal((await get(state, home)).sha256, sha);
 });
 
 // ---------------------------------------------------------------------------

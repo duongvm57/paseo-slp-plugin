@@ -101,6 +101,17 @@ test('installed common protocol supports combined configuration without losing g
   assert.ok(!base.includes('| Connector and cadence |'));
   assert.match(examples, /new pricing feature with a database backfill/);
   assert.match(examples, /Opening a PR does not grant production\nexecution/);
+  // Operational facts live in .paseo-slp/references/; moving them there is
+  // configuration, never a deviation the Overrides table must register.
+  assert.equal(base.match(/^## Repository references$/gm).length, 1);
+  assert.match(base, /`\.paseo-slp\/references\/<topic>\.md`/);
+  assert.match(base, /never adds, relaxes or overrides a rule/);
+  assert.match(base, /never as a grant/);
+  assert.match(base, /live in its checks reference under Repository\nreferences/);
+  assert.match(base, /referenced files is configuration, not an override/);
+  assert.match(skill, /`\.paseo-slp\/references\/<topic>\.md`/);
+  assert.match(skill, /split is configuration, not an Override/);
+  assert.match(examples, /^## Protocol and references$/m);
 });
 
 test('launcher loads installed role bytes, excludes private review material, preserves configured custom provider/full-access', t => {
@@ -516,7 +527,7 @@ test('decision-doctrine lines reach the standalone bundles that need them and ne
   assert.match(template, /owner map and\s+creation receipts/, 'formation receipts tactic');
   // B25: split-seat naming convention — slash suffix, never an "axis" suffix.
   assert.match(template, /Reviewer — <task> \/ Spec/, 'Spec seat naming convention');
-  assert.match(template, /Reviewer — <task> \/ Std/, 'Std seat naming convention');
+  assert.match(template, /Reviewer — <task> \/ Standard`/, 'Standard seat naming convention, unabbreviated');
   assert.match(template, /never\s+an "axis" suffix/);
   // B24: monitoring doctrine enumerates seats by identity, not cwd, and never
   // infers nonexistence from an empty listing (references ship as locators —
