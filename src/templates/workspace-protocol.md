@@ -275,7 +275,7 @@ workflow or creates a Lead type. All four recipes remain available by default.
 | Capacity | Record parallel task and review-seat limits before admitting concurrent work |
 | Lead topology | One Lead handling the assigned work mix; split only for explicit authority or capacity needs under a Human-granted formation mandate |
 | Shared-state controls | Before a Transition phase: name executor, environment, rehearsal, backup/restore, window and reconciliation evidence |
-| Work state | Lead checkpoint in the owner's timeline or an authorized notes path |
+| Work state | Task source and durable checkpoint pointer: `<source and location, or none>` |
 | Delivery and completion point | As each assignment states; the task completes when its assignment's stated outcome is accepted |
 
 ## Repository references
