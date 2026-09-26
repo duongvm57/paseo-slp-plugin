@@ -5,66 +5,80 @@ description: Set up or revise a repository's Paseo SLP protocol and Peer runtime
 
 # Repository onboarding
 
-Produce one `.paseo-slp/workspace-protocol.md` of rules and decisions, any
-`.paseo-slp/references/` files it points to, a Peer pool decision and verified
-Supervisor/Lead profiles. Recommend from repo evidence; ask only missing decisions.
-Preserve Human customizations. External MCP/connectors, credentials, polling and
-queue bookkeeping belong to the repo harness. Do not
+`.paseo-slp/workspace-protocol.md` is where a workspace sets its orchestration
+tactics: how Lead chooses recipes, forms teams, gates and delivers in this
+repository. Every other line has a home elsewhere:
+
+| Line | Home |
+|---|---|
+| Cross-project invariant: authority, parentage, recovery, monitoring and routing procedures | Installed role policy |
+| Operational fact: check commands and what each proves, CI gates, skill/tool install mechanics, path/environment hazards | `.paseo-slp/references/<topic>.md` |
+| External MCP/connectors, credentials, polling, queue bookkeeping | Repo harness |
+| Rationale and history | Git |
+
+Produce the protocol, the references it points to, a Peer pool decision and
+verified Supervisor/Lead profiles. Recommend from repo evidence; ask only
+missing decisions. Preserve Human customizations. Do not
 add tracker setup questions or activation gates to ordinary onboarding.
 
 ## 1. Inspect
 
 Locate the installed CLI/package. Read AGENTS.md, existing `.paseo-slp/` files
 (including `references/`), `src/templates/workspace-protocol.md`, project
-checks/CI, delivery conventions
-and state-changing surfaces. The template must contain `## Repository configuration`
-and `template_sha256`; otherwise report the upgrade prerequisite. Setup grants
-no installation or host edits.
+checks/CI, delivery conventions and state-changing surfaces. The template must
+contain `## Repository configuration` and `template_sha256`; otherwise report
+the upgrade prerequisite. Setup grants no installation or host edits.
 
-Done: cite evidence or absence for work mix, checks, delivery and shared state;
-record the package version.
+Done: evidence or absence cited for work mix, checks, delivery and shared
+state; package version recorded.
 
 ## 2. Verify profiles
 
 Use list_profiles/list_providers and live model/settings discovery to verify
 slp-supervisor/slp-lead against their installed role providers. Report exact
 mismatches. Human fixes them in Settings → host → Agents → Agent profiles:
-matching `slp-{family}-{role}`, model, thinking and mode. Never hand-edit daemon
-config or require slp-peer; Peers use a pool.
+matching `slp-{family}-{role}`, model, thinking and mode. Daemon config stays
+Human-edited; Peers use a pool, never an slp-peer profile.
 
 Done: both profiles verified, or each gap has Human fix steps.
 
 ## 3. Propose
 
-Fill the template from evidence using
+Start from the template and
 [configuration examples](references/repository-configuration.md); combine every applicable setting.
-Lead chooses recipes per task; external input implies no separate Lead. Keep
-all recipes unless Human decides otherwise; a removed recipe needs an explicit
-route for that work. Preserve installed invariants and review requirements.
-Record current deviations in Overrides, with decider/date; keep history outside
-runtime protocol.
+The template is the full default wording; the protocol condenses it. Keep,
+condensed: recipe choice and risk triggers, the Lean tiny procedure (role
+policy defers to it), the other recipes, Gate with seat names and idle
+retention, team formation, Repository configuration, Repository references and
+Overrides. Template text that restates role policy — read timing, context
+recovery, authority invariants, reopen handling, monitoring and routing
+procedures — stays in role policy.
 
-Keep rules and decisions in the protocol. Put operational facts — exact check
-commands and what each proves, CI gates/switches, skill or tool installation
-mechanics, path/environment hazards — in `.paseo-slp/references/<topic>.md`,
-list each under Repository references and point to it in one line from the
-section that applies it ([split example](references/repository-configuration.md#protocol-and-references)).
+Keep all recipes unless Human decides otherwise; a removed recipe needs an
+explicit route for that work. Overrides list changed meaning with
+decider/date; condensed wording with the same meaning is no Override.
+
+Operational facts go to `.paseo-slp/references/<topic>.md`, listed under
+Repository references with a one-line pointer from the section that applies
+them ([split example](references/repository-configuration.md#protocol-and-references)).
 Create a reference only when it has content; a short fact may stay inline. The
 split is configuration, not an Override. An existing protocol carrying inline
-detail gets the split as a proposed diff, never silently.
+detail gets the split as a proposed diff.
 
-Only a fully custom process needs [custom interview](references/custom-interview.md).
+Read [protocol writing rules](references/protocol-writing.md) before drafting
+and apply every rule to every line. Only a fully custom process needs
+[custom interview](references/custom-interview.md).
 
-For existing protocols, preserve every Human decision/custom section. Reapply
-known overrides; absent provenance means differences may be customizations.
-Surface conflicts for Human decision. Legacy profile provenance belongs in
-migration evidence, not an accumulating runtime history.
+For existing protocols, preserve every Human decision and custom section.
+Reapply known overrides; absent provenance means differences may be
+customizations. Surface conflicts for Human decision.
 
 Present the full effective file and diff, evidence, inferred proposals and open
-authority/budget/delivery/work-state decisions. Resolve questions one at a time.
-Record package_version and template_sha256 from the installed template.
+authority/budget/delivery/work-state decisions. Resolve questions one at a
+time. Record package_version and template_sha256 from the installed template.
 
-Done: each field is confirmed or explicitly open; Human has seen the full target.
+Done: each field confirmed or explicitly open; every line passes the writing
+rules; Human has seen the full target.
 
 ## 4. Decide pool
 
@@ -79,11 +93,11 @@ Done: source chosen and populated, or its delegation gap recorded.
 
 Present the exact complete diff of every target file (protocol and references)
 and consequences; obtain direct Human confirmation. Verify each base is
-unchanged, write, re-read and compare target bytes. Drift blocks the write.
+unchanged, write, re-read and compare target bytes; drift blocks the write.
 For a new repo, confirm absent → final bytes, verify absence, then write before
-init. Revisions bump version/last_reviewed.
-Set supervisor_notebook to its owned path or timeline:<agentId> with retrieval
-instructions. Keep role bytes out of protocol.
+init. Revisions bump version/last_reviewed. Set supervisor_notebook to its
+owned path or timeline:<agentId> with retrieval instructions. Role bytes stay
+in role policy.
 
 Preview `node <slp-cli> init <absolute-repo>`; apply within setup authority.
 Init preserves existing files. Import a chosen catalog with --routing-from only
@@ -99,8 +113,8 @@ Done: confirmed bytes match; init preview shows protocol preserved.
 
 Walk a clear task, uncertain feature and dependency through owner, next step,
 unlocking evidence and authority; include Transition for shared-state repos.
-Every protocol pointer resolves to an existing reference.
-Fix gaps, then validate the pool per its reference. Report exact changed files,
+Every protocol pointer resolves to an existing reference. Fix gaps, then
+validate the pool per its reference. Report exact changed files,
 profile/provider evidence, eligible choices, pool-maintenance/fallback authority
 and unresolved decisions. Distinguish an empty pool from provider unavailability.
 Live launches need task authority; local preparation is not E2E acceptance.

@@ -1,6 +1,6 @@
 # Repository skill layout
 
-Operational facts for the skills line of "Runtime and pool" in
+Operational facts for "Routing and skills" in
 `.paseo-slp/workspace-protocol.md`; the rules stay there. Verified 2026-09-25.
 
 Two skill homes, by audience:
