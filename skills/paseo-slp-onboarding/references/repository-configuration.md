@@ -25,7 +25,8 @@ and required review seats, subject to ownership and capacity.
 
 ## Protocol and references
 
-The protocol states rules; `.paseo-slp/references/` holds the facts they use.
+The protocol states orchestration tactics; `.paseo-slp/references/` holds the
+facts they use.
 A repository with backend and frontend checks might carry:
 
 | File | Holds | Protocol keeps |

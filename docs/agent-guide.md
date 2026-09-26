@@ -4,7 +4,8 @@ Use the installed [onboarding skill](../skills/paseo-slp-onboarding/SKILL.md)
 when asked to onboard/reconfigure a repo, even if not registered as a native
 skill. It owns discovery, proposal, confirmed write and validation.
 
-Produce one effective `.paseo-slp/workspace-protocol.md`. Lead selects or combines
+Produce one effective `.paseo-slp/workspace-protocol.md`: the workspace's
+orchestration tactics, condensed from the template. Lead selects or combines
 Lean, Feature, Transition and Investigation per task; these are not Lead types.
 Recommend from evidence, ask missing decisions, preserve customizations. Deep
 interview is only for a fully custom process.
