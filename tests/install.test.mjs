@@ -174,7 +174,7 @@ test('installed adapter injects every role over stdio while preserving host prom
     // orchestrating roles and the re-read trigger to Lead alone; both reach
     // the seat on thread/start and thread/resume (same instruction string).
     assert.equal(/does not license merging\s+the axes into one seat/.test(instruction), role !== 'peer');
-    assert.equal(/re-read\s+the review-gate rules/.test(instruction), role === 'lead');
+    assert.equal(/When the assignment or protocol\s+requires independent review/.test(instruction), role === 'lead');
     // The C8 formation pins ride the same delegation block: the decision
     // table, formation record, placement pin and post-create verification
     // reach Supervisor and Lead, never Peer.

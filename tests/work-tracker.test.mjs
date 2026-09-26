@@ -376,12 +376,11 @@ test('session entry: disabled tracker renders byte-identically — absent file a
   assert.ok(!unmanaged.includes('Work tracker:'), 'unmanaged render ignores the setting');
 });
 
-// T1 byte-level pin (Spec F2): the disabled render must equal the render the
-// pre-feature code produced, outside the one accepted §11b locator delta —
-// the integrity list gains src/references/work-tracking.md even when disabled.
-// The fixture captures the historical render with runtime/home paths normalized.
-// Tests need neither Git history nor git/tar executables to load this baseline.
-test('session entry: disabled render equals the pre-feature render byte-for-byte outside the locator delta (T1)', t => {
+// T1 byte-level pin: disabled session entry keeps the historical instruction
+// body, while the role-scoped locator contract exposes only common.md and the
+// Peer role file. The fixture captures the historical render with normalized
+// paths; its old all-reference locator list is intentionally not reused.
+test('session entry: disabled Peer render keeps its body and uses the role locator allowlist (T1)', t => {
   const before = JSON.parse(readFileSync(join(root, 'tests/fixtures/pre-tracker-session.json'), 'utf8'));
   const home = tmpHome(t);
   const installed = join(tmp(t, 'wt-inst-'), 'release');
@@ -390,10 +389,8 @@ test('session entry: disabled render equals the pre-feature render byte-for-byte
   const after = roleBundle(installed, 'peer', env).instructions
     .replaceAll(installed, '<RUNTIME_ROOT>')
     .replaceAll(home, '<DAEMON_HOME>');
-  // Integrity locators carry per-file size+sha256, so another lane's doctrine
-  // edit legitimately rewrites that file's locator line. Pin the invariant,
-  // not the bytes: the render body must be identical, and the locator path
-  // set may gain exactly the work-tracking.md entry — nothing else.
+  // Locator hashes change with policy edits. Pin the role allowlist and body,
+  // not historical locator bytes.
   const locatorRe = /^- (.*\S) — \d+ bytes, sha256 [0-9a-f]{64}$/;
   const splitRender = text => {
     const locators = new Set(), body = [];
@@ -403,17 +400,11 @@ test('session entry: disabled render equals the pre-feature render byte-for-byte
     }
     return { locators, body: body.join('\n') };
   };
-  const a = splitRender(after), b = { locators: new Set(before.locators), body: before.body };
-  assert.deepEqual(
-    [...a.locators].filter(path => !b.locators.has(path)),
-    ['<RUNTIME_ROOT>/src/references/work-tracking.md'],
-    'work tracker adds exactly its own locator entry',
-  );
-  assert.deepEqual(
-    [...b.locators].filter(path => !a.locators.has(path)),
-    [],
-    'work tracker preserves every pre-feature locator entry',
-  );
+  const a = splitRender(after), b = { body: before.body };
+  assert.deepEqual([...a.locators].sort(), [
+    '<RUNTIME_ROOT>/src/common.md',
+    '<RUNTIME_ROOT>/src/roles/peer.md',
+  ].sort(), 'tracker-off Peer carrier contains only its role allowlist');
   assert.equal(a.body, b.body, 'disabled render body must equal the pre-feature render byte-for-byte');
 });
 

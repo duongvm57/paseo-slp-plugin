@@ -219,10 +219,10 @@ forms the team. Split into lanes only for explicit authority or capacity needs
 under a Human-granted formation mandate. A lane is a long-lived Lead session holding a standing mandate, such as a tracker task
 stream: the mandate authorizes the Lead, and each admitted task is its own
 bounded assignment with its own Peer team. Correction and re-review continuity
-stay inside that task; the task closes at the Delivery completion point with no
-correction open, which is its team's settlement boundary under installed
-monitoring rules. Lanes are a repository tactic, not role types: a lane Lead is
-an ordinary Lead reading this whole file.
+stay inside that task; it settles after Delivery completes and no correction or
+re-review remains open, as defined in installed monitoring rules. Lanes are a
+repository tactic, not role types: a lane Lead is an ordinary Lead reading this
+whole file.
 
 - Supervisor receives or pulls work under the Human assignment using tools
   supplied by the repository harness, then delegates to its verified child Lead
@@ -252,10 +252,9 @@ already enabled, following installed work-tracking policy. Task ownership,
 review and delivery acceptance still follow the rules in this protocol.
 
 A lane is continuous responsibility, not an immortal session: when its context
-degrades or ownership must change, the Lead proposes a handoff to its Supervisor
-or the Human with outcome, state, accepted and rejected decisions, evidence,
-dependencies, candidate/review state, remaining work and resource receipts, and
-the installed governance and provider-routing procedures run the transfer.
+degrades or ownership must change, the Lead proposes an authorized handoff to its
+Supervisor or the Human using the state fields in installed governance rules.
+The installed governance and provider-routing procedures guide the transfer.
 Children keep their parent; each resource settles or is handed off before the
 successor assigns writes. No compaction count is a threshold.
 
@@ -329,11 +328,12 @@ snapshot helper or an exact commit with all relevant working changes accounted
 for; record external proof separately. Review and verdict bind to the same
 candidate.
 
-Acceptance is not assignment close: keep accepted Peers idle after the accept
-sweep so rework keeps its context, and consider a batch archive when the
-assignment that formed the team closes and rework has settled. A Human stop
-still takes effect immediately; idle retention never runs hidden work or
-delays required cleanup.
+Acceptance is not Delivery or task settlement. Keep the same Engineer and
+independent review seats available for correction or re-review. A bounded task
+settles after Delivery completes and no correction or re-review remains open;
+reconcile task resources under installed monitoring rules. Settlement does not
+itself archive, kill or reparent sessions. A Human stop still takes effect
+immediately; idle retention never runs hidden work or delays required cleanup.
 
 ## Reopen, dependency and blocked handling
 
@@ -349,9 +349,12 @@ record actual proof, unresolved findings and settlement of task-owned resources.
 Record routing_intent (`inherit`, `pinned`, `empty`), decider/date and pool
 maintenance/budget authority; IDs belong in the catalog. Before delegation or
 fallback, read the verified runtime's `src/references/provider-routing.md` for
-pool precedence, profiles, readiness, Jev receipts and handoff. Missing eligible
-runtime blocks that delegation; use onboarding. Human controls pool changes and
-quotaFallback. Lead selects within grant; an eligible option grants no handoff.
+pool precedence, profiles, readiness, routing evidence and handoff. Jev-specific
+routing guidance is conditional on `jevRouting.routing` in the routes output:
+read `src/references/jev-routing.md` for `shadow`, `armed` or `error`; `error`
+blocks the dependent branch. Missing eligible runtime blocks that delegation;
+use onboarding. Human controls pool changes and quotaFallback. Lead selects within
+grant; an eligible option grants no handoff.
 Name task-relevant micro skills in Peer assignments; Lead keeps macro skills.
 How this repository installs or exposes project skills is an operational fact
 for Repository references.

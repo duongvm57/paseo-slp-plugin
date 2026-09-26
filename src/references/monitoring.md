@@ -139,11 +139,14 @@ to the protocol; numerical examples in the guide are heuristics.
 At task completion, cancellation, handoff or expiry review, reconcile the owner map
 with the resource receipts: task descendants, pending permissions, terminals,
 workspace scripts, schedules/heartbeats and processes. Artifact acceptance alone
-is not that boundary: an accepted Peer stays idle against rework until the
-assignment that formed the team closes, then settles in one pass — idle retention neither runs
-hidden work nor delays a required cleanup. Human stop halts further
-work and follow-ups; cancel owned task agents as authorized by common policy, and
-stop the observer's own task-local wakes. Do not start a new cleanup agent after stop.
+is not settlement: settle each bounded task after Delivery completes and no
+correction or re-review remains open. Keep the same Engineer and independent review
+seats available while that task has rework. Reconcile its resources at settlement;
+preserve sessions and artifacts, and perform lifecycle actions only under explicit
+authority. A continuing lane or Lead mandate does not keep a completed task open.
+Human stop halts further work and follow-ups; cancel owned task agents as authorized
+by common policy, and stop the observer's own task-local wakes. Do not start a new
+cleanup agent after stop.
 
 Each heartbeat owner deletes its recorded task heartbeat and records the receipt.
 For another owner's heartbeat, arrange cleanup by that owner during normal handback;

@@ -22,6 +22,17 @@ and constraints to the correct Lead. Lead retains technical acceptance; Human ma
 also speak directly with Lead. Choose observation/reasoning effort by task risk and
 available budget, not by role title; preserve explicit Human profile selections.
 
+For a cross-project dependency, relay only when the current assignment explicitly
+grants the relay and the recipient Lead and route are verified. Share only the
+minimum authorized payload; omit raw assignments and private context. If the grant,
+route or data authority is missing or unclear, keep the dependent branch BLOCKED
+and ask the assigned authority or Human for a decision. Record from/to project,
+task and Lead IDs; dependency/interface; minimal evidence pointer; request; answer,
+status and evidence; blocked branch and owner; any Human decision or additional
+authority needed; next action; and timestamp or receipt. The Supervisor forwards
+the decision without judging the interface, accepting work, granting write,
+priority, merge or integration authority, or creating an assignment.
+
 ## Causal notebook
 
 At setup, resolve a durable notebook location and its write owner within assignment
@@ -54,10 +65,14 @@ may allow intervention, but ordinary observation never grants implementation sco
 or permission to direct the Peer independently of its Lead.
 
 If Lead cannot recover, propose a replacement with evidence and the concrete handoff.
-When Human has already granted that recovery authority, act within it; otherwise
-request the missing owner decision. Transfer objective, boundaries, owner map,
-decisions/alternatives, candidate/proof/findings, dependencies, remaining work,
-notebook and task resource receipts. Use a fresh Lead session through Paseo with
+Lead may also propose a handoff when context loss or degradation makes task state
+unreliable to recover. When Human has already granted recovery authority, act within
+it; otherwise request the missing owner decision. Transfer the objective and scope
+with the handoff reason; accepted and rejected decisions with reasons; evidence and
+candidate/review state; rejected alternatives; dependencies, owner IDs and
+readiness; next action; notebook/checkpoint; resource and wake owner IDs with
+receipts; and unknowns/limits. These fields guide the handoff and do not define a
+schema for `handoff.state`. Use a fresh Lead session through Paseo with
 evidence-focused context, not a fork of the failed reasoning trajectory.
 
 Before assigning replacement ownership, confirm the old writer/Lead is paused or

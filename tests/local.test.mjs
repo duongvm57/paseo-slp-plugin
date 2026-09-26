@@ -465,8 +465,8 @@ test('decision-doctrine lines reach the standalone bundles that need them and ne
   const installed = join(fixture(t), 'release');
   install(root, installed);
   // The review-gate invariant and the create_agent parentage rule ride
-  // delegation.md (Supervisor + Lead); the re-read trigger and the
-  // protocol-read timing live in the role files. Peer must receive none.
+  // delegation.md (Supervisor + Lead); gate applicability, freshness and
+  // fail-closed behavior live in Lead. Peer must receive none.
   const [supervisor, lead] = ['supervisor', 'lead'].map(role => roleBundle(installed, role, {}).instructions);
   for (const instructions of [supervisor, lead]) {
     assert.match(instructions, /does not license merging\s+the axes into one seat/, 'review-gate invariant');
@@ -487,9 +487,9 @@ test('decision-doctrine lines reach the standalone bundles that need them and ne
     assert.match(instructions, /send_agent_prompt to a\s+parentless or differently parented/, 'B21 formation-defect trigger');
     assert.match(instructions, /second workspace\s+for the same team with no isolation reason/, 'B22 placement-defect trigger');
   }
-  assert.match(lead, /re-read\s+the review-gate rules/);
-  assert.match(lead, /after resume or compaction/);
-  assert.ok(!/re-read\s+the review-gate rules/.test(supervisor), 'the re-read trigger is Lead-scoped');
+  assert.match(lead, /When the assignment or protocol\s+requires independent review, follow its gate rules and references\/review-gates\.md\.\s+While that gate applies/);
+  assert.match(lead, /immediately before each\s+decision.*including after resume or compaction; a surviving summary like\s+"Engineer → Reviewer" is not the rule/s);
+  assert.ok(!/When the assignment or protocol\s+requires independent review/.test(supervisor), 'the re-read trigger is Lead-scoped');
   assert.match(supervisor, /before replying to the Human/, 'B12 protocol-read timing');
   assert.match(lead, /before your first reply/, 'B12 protocol-read timing');
   // Role-scoped C8 cues: the observe-vs-establish distinction is Supervisor's;
@@ -501,7 +501,7 @@ test('decision-doctrine lines reach the standalone bundles that need them and ne
   assert.ok(!/does not adopt it/.test(supervisor), 'Lead cue stays role-scoped');
   const peer = roleBundle(installed, 'peer', {}).instructions;
   assert.ok(!/does not license merging/.test(peer));
-  assert.ok(!/re-read\s+the review-gate rules/.test(peer));
+  assert.ok(!/When the assignment or protocol\s+requires independent review/.test(peer));
   assert.ok(!/cannot carry a new\s+delegation/.test(peer));
   assert.ok(!/New-team delegation|Observe-existing-work|formation record/.test(peer), 'Peer gets no formation doctrine');
   assert.ok(!/not evidence of parentage|not filesystem\s+isolation/.test(peer));
@@ -515,13 +515,14 @@ test('decision-doctrine lines reach the standalone bundles that need them and ne
     assert.ok(!peer.includes(readFileSync(join(installed, 'src/references', ref), 'utf8')), `Peer must not load ${ref} bytes`);
   }
   // The shipped protocol template carries the same doctrine: read-on-landing,
-  // split-axis gate wording, idle retention, create_agent-only seats and the
+  // split-axis gate wording, task-scoped rework continuity, create_agent-only seats and the
   // shared-workspace placement default with the owner-map/receipt record.
   const template = readFileSync(join(installed, 'src/templates/workspace-protocol.md'), 'utf8');
   assert.match(template, /when the assignment lands/);
   assert.match(template, /split-axis seats, never one merged seat/);
-  assert.match(template, /keep accepted Peers idle/);
-  assert.match(template, /assignment that formed the team/, 'idle-retention referent is the team assignment');
+  assert.match(template, /same Engineer and\s+independent review seats available for correction or re-review/);
+  assert.match(template, /bounded task\s+settles after Delivery completes and no correction or re-review remains open/);
+  assert.doesNotMatch(template, /batch archive/);
   assert.match(template, /agent-scoped create_agent/);
   assert.match(template, /share the\s+assignment'?s workspace by default/, 'team-workspace default');
   assert.match(template, /owner map and\s+creation receipts/, 'formation receipts tactic');

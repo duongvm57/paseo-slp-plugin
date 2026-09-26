@@ -126,6 +126,8 @@ needed. A large new domain can go to a separate Lead through Paseo when authorit
 allows. Define its objective, exclusions, contract, stable result, proof and return
 recipient. Keep the original Lead on its trajectory as integration/acceptance owner.
 Escalate cross-project authority before assigning writes in another repository.
+For cross-project relay, follow references/governance.md; without an explicit grant
+and a verified recipient route, keep the dependent branch BLOCKED.
 
 For BLOCKED, preserve evidence and state the missing decision, capability or external
 prerequisite. Repeated corrections call for a root-mechanism check, not another local
@@ -152,9 +154,9 @@ Evidence must address real failure mechanisms and the Human outcome. Use integra
 migration, cancellation, performance or Human product/visual/playtest evidence as
 appropriate; unit-test success cannot substitute for an untested outcome. The Human
 decides subjective or owner-only trade-offs. Complete with candidate, actual checks,
-review evidence, ACCEPT/CHANGES_REQUESTED/BLOCKED, residual risks and resource settlement
-from references/monitoring.md. Artifact acceptance and resource settlement are
-distinct, and acceptance is not assignment close: accepted seats keep their
-context for rework and re-review until the assignment that formed the team
-closes, when
-settlement runs per references/monitoring.md and the repository protocol.
+review evidence, ACCEPT/CHANGES_REQUESTED/BLOCKED and residual risks. Artifact
+acceptance is distinct from Delivery and resource settlement: a bounded task settles
+after Delivery completes and no correction or re-review remains open. Keep the same
+Engineer and independent review seats for open rework, then follow
+references/monitoring.md and the repository protocol to reconcile task resources.
+Settlement does not itself archive, kill or reparent sessions.
