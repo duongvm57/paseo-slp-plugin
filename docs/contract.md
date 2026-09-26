@@ -245,36 +245,83 @@ and receipts prove consistency, not cryptographic authenticity. Accepted
 risk (recorded): the key file is 0600 inside the daemon home, yet any
 same-user process can read it — daemon-home integrity is the boundary.
 
-Communication supervision is a second opt-in capability, bound per Lead
-route in <daemonHome>/slp-runtime/state/supervision.json (0600, whole-file
-sha256 CAS through the supervision card — its sole writer). Off by default;
-configuring Jev never enables a route, and a route enables nothing until
-mode is explicitly shadow. When enabled, the plugin's lifecycle hooks
-(agent.created/archived/turn_started/turn_ended) synchronously capture
-normalized send_agent_prompt evidence for the bound Lead's direct Peers,
-and a serialized plugin-owned queue evaluates each Peer handback through
-Jev's three-question assessment — a second Jev consumer that requires
-capabilities.supervision in addition to enabled. The detector observes
-communication only: it never infers authority, certifies artifacts,
-mutates assignments, or prompts any agent, and every missing or
-unverifiable input resolves to unknown rather than drift. Persisted output
-is a bounded metadata ring (state/supervision-cases.json, ≤200 entries,
-≤30 days — fingerprints, ids, counts, flags, assessment summaries; never
-message bodies or keys); open cases and the queue are process-local and
-are not replayed after a restart. External data/cost: shadow evaluation
-sends captured brief/handback/room-message content to the configured Jev
-endpoint, so communication leaves the host and each evaluation is a paid
-provider call. Mode notify is schema-valid but has no delivery
-implementation — notification is a separate Human gate. Provider coverage:
-only the codex normalized send shape is verified against a real timeline;
-pi/devin/claude fixtures are mapper-derived, so their sends stay uncertain
-(family-shape-unverified) and their cases resolve unknown until real
-fixtures exist — devin additionally drops the MCP result body upstream.
-Because no machine-readable report-recipient signal exists on this host,
-report-route-unverifiable is set on every case, so all cases currently
-resolve unknown before any Jev call — accepted, pending the structured
-report-recipient decision. Live E2E validation has not run; see
-docs/spec/supervision-integration.md.
+Communication supervision is a second opt-in capability configured in
+<daemonHome>/slp-runtime/state/supervision.json (schema 2, 0600, whole-file
+sha256 CAS through one server-side writer shared by the supervision card and
+the recipient-workspace bell).
+Off by default; configuring Jev never enables it. The store holds a
+daemon-wide confidenceThreshold (0.5–1, default 0.9), defaults for
+discovered SLP Leads (an exact slp-<family>-lead seen in a lifecycle record
+or verified by refresh; mode off unless the Human selects one) and explicit
+per-Lead routes that always win, including an explicit off. An explicit
+route observes only once host evidence (a lifecycle record or refresh) shows
+an exact SLP Lead in the route's workspace; a save whose agents the plugin
+cannot refresh still lands, reporting them unverified, while a returned
+snapshot must match exactly. A schema-1 file
+reads with every route off and its previous modes listed until the Human
+re-saves — an upgrade never widens transmission or enables delivery. When a
+Lead is observed (shadow or notify) and Jev holds capabilities.supervision,
+the plugin's lifecycle hooks (agent.created/archived/turn_started/turn_ended)
+synchronously capture normalized send_agent_prompt evidence for that Lead's
+direct Peers, and a serialized plugin-owned queue assesses each Peer handback
+as soon as it lands, and again when its packet changes (at most six paid
+calls per case), through Jev's rubric-3 questions: turn-scoped brief
+obligations (a disposition/closure-only notice owes no work-request elements
+and is answered by a fitting acknowledgment; a bare acknowledgment never
+discharges a brief that still asks for work, evidence or a decision — decided
+by content, never by keywords), whether the handback answers its brief, and whether the Lead's
+later communication disposes of the obligation the handback raised (handled,
+no_action_required, pending, drift). A disposition or mishandling counts only
+when Jev links it to one specific confirmed message the code offered — a
+send's presence, acknowledgment, silence and elapsed time never decide.
+Findings are independent per axis and immutable; a later message resolves a
+finding only when linked as its specific correction. The detector judges
+communication only: it never infers authority, certifies artifacts, accepts
+work or mutates assignments, and every missing or unverifiable input keeps
+its axis unknown. Local gates: whole-window provenance gaps (paused capture,
+credential guard, oversize, unverified Peer family, failed Peer turn, no
+communication) close the case before any Jev call; a pointer or missing
+brief makes brief and handback unobservable; Lead send-lane and chronology
+gaps (unmatched start, uncertain sends, failed or unobservable sends,
+unverified Lead family, dropped events, withheld cross-Peer bodies) gate only
+the handling axis. report-route-unverifiable is set on every case on this
+host and is disclosed to Jev and the Supervisor, not a gate. External
+data/cost: an assessment sends the brief, handback, the Lead's confirmed
+post-handback messages to this Peer, to its other direct Peers and to the
+Supervisor, and the Peer's confirmed sends to the configured Jev endpoint;
+uncertain sends go as ids only. Mode notify additionally delivers a
+code-generated alert with bounded untrusted excerpts to the route's
+Supervisor (or the default recipient): brief/handback findings only after the
+pending-delay checkpoint, linked mishandling immediately, at most once per
+finding and recipient. Before every send the recipient is refreshed (exact
+slp-<family>-supervisor, not archived, active status) and the route rechecked
+after every await; a changed route cancels and never falls back. The attempt
+is persisted before the SDK send; an unreadable, corrupt or schema-invalid
+attempt history (or a failed write) refuses every reservation with a visible
+reason and is never reset or overwritten; failure or timeout is recorded
+uncertain and never retried; a running Supervisor is
+not prompted, but a prompt landing as its turn starts interrupts it (the
+SDK send options expose no active-turn behavior). Persisted output is two
+bounded metadata rings (state/supervision-cases.json and
+state/supervision-deliveries.json, ≤200 entries in memory and on disk, ≤30
+days — fingerprints, ids, counts, flags, findings, assessment summaries,
+delivery states; never message bodies or keys; attempt records of live cases
+are pinned and each case holds at most three); open cases and the queue are process-local and are not
+replayed after a restart. Provider coverage is per axis, never per family:
+one capture module returns separate evidence for the brief, the handback and
+each send's input and outcome, and opens only shapes backed by a real
+normalized fixture — codex, claude and pi brief/handback/sends, devin
+brief/handback (an SLP-wrapped Devin message must be exactly one wrapper for
+the captured actor's role; a message with no transport trace is read
+verbatim) with send outcomes unknown because the provider emits no result. Lead-role live runs for
+claude, codex and pi are not done (no such Lead provider on the test
+daemon). An accepted
+send needs the semantic success of that exact call; a related rejected or
+unknown Lead send keeps handling unknown and never carries a body out;
+handling also needs a usable brief. Opening a family's content is a
+widening of transmission: config schema 3 reads schema-1/2 files with every
+route and the defaults off until the Human re-saves. Live E2E validation and
+model evaluation have not run; see docs/spec/supervision-integration.md.
 
 prepare accepts repository, workspaceId, assignment and role. Supervisor/Lead use
 fresh profiles/providers; Peer uses providers and route.optionId/catalogSha256.

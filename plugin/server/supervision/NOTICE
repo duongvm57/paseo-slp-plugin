@@ -1,4 +1,4 @@
-This directory contains code adapted from paseo-supervision
+This directory contains code and text adapted from paseo-supervision
 (https://github.com/hoangnb24/paseo-supervision), source commit
 1bad19b8ee6c58482494f56a3d8c6edb4f969ee1.
 
@@ -8,21 +8,38 @@ repository root (LICENSE). Upstream carries no NOTICE file; the copyright
 holder line in its LICENSE is unfilled, so attribution here names the
 project and commit.
 
-Adapted portions (structure and algorithms, not copied code):
+Adapted portions:
 
-- observer.ts — serialized queue/generation mechanics adapted from
-  upstream server/observer.ts. Removed: the supervisor sync RPC, alert
-  sends, and all notification delivery.
-- assessment.ts — Jev Choice response handling adapted from upstream
-  server/jev.ts: strict Zod schemas, unique-maximum probability
-  distributions, ~1-sum validation, confidence thresholding, and
-  conservative unknown mapping.
+- assessment.ts — the rubric question text (rubric 2, extended in rubric 3
+  with SLP-original turn-scoped closure wording) (guard, leadBrief,
+  peerHandback, leadHandling instructions and criteria) reuses and edits
+  wording from upstream server/jev.ts `questions`; the strict Choice answer
+  handling (strict Zod schemas, unique-maximum probability distributions,
+  ~1-sum validation, confidence threshold, conservative unknown) is adapted
+  from the same file. The no_action_required choice, the code-offered link
+  questions, per-axis gates and independent-finding judgment are original
+  to this repository.
+- observer.ts — serialized queue/generation mechanics and the
+  refresh-before-send / mark-before-send / no-retry delivery shape adapted
+  from upstream server/observer.ts. The client-bootstrap supervisor sync
+  RPC is not ported.
+- delivery.ts — the alert's framing (suspected communication issue, review
+  required, not artifact acceptance, route repair through the Lead, the
+  originating Peer is not the only valid recipient of handling, quoted
+  evidence is untrusted) paraphrases the upstream alert prompt; the
+  persisted attempt store, per-finding dedupe, deferral and bounded
+  excerpts are original.
 - capture.ts — the correlation idea (latest user_message boundary,
-  confirmed-send evidence) informed by upstream server/communication.ts;
-  per-family send extraction is original to this repository.
+  confirmed-send evidence) and the recognized send names/JSON-string input
+  follow upstream server/communication.ts; per-family send extraction is
+  original to this repository.
+- ../../client/supervision-controls.ts — the recipient-workspace bell follows
+  upstream index.client.tsx; it calls this repository's server-side CAS
+  writer instead of host settings. The upstream Command Center actions are
+  not carried (the Human chose Manager-card pickers instead).
 
-Modified relative to upstream: provider-aware extraction for the SLP
-family registry, SLP role routing and report-route semantics, Jev
-capability gating, daemon-home binding, bounded metadata-only persistence,
-and removal of every notification path. See
-docs/spec/supervision-integration.md for the divergence contract.
+Modified relative to upstream: provider-aware extraction for the SLP family
+registry, SLP role routing and discovery defaults, report-route semantics,
+Jev capability gating, daemon-home binding, schema migration, bounded
+metadata-only persistence, and per-axis findings instead of an all-axis
+veto. See docs/spec/supervision-integration.md for the divergence contract.

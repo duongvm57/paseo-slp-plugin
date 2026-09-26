@@ -1,191 +1,54 @@
-// Supervision-card ownership: the card owns the stored route snapshot, the
-// editable per-route form, load/save/reload with the raw-file CAS token, and
-// the Jev-capability gate readout — the same discipline as the peer-pool
+// Supervision-card ownership: the card owns the stored config snapshot, the
+// editable draft (which Leads, what happens on a finding, advanced
+// thresholds), load/save/reload with the raw-file CAS token, the agent
+// pickers and the findings readout — the same discipline as the peer-pool
 // card (spec docs/spec/supervision-integration.md §Configuration and
-// authority). The shell supplies the target, its stale-guard predicates, the
-// RPC callers and the shared Jev view.
-//
-// Mode vocabulary: the UI offers only "off" and "shadow". "notify" is
-// schema-valid — a stored route with it loads and displays as notify — but
-// notification delivery is unimplemented in this build, so there is no UI
-// affordance to select it (spec: "any UI affordance for notification remains
-// unimplemented").
-import { useEffect, useRef, useState } from "react";
+// authority, §Manager). The on/off switch is the Jev supervision capability,
+// written through the Jev card hook from the SAVED Jev view. The shell
+// supplies the target, its stale-guard predicate, the RPC callers, the Jev
+// card state and client navigation. The header bell
+// (supervision-controls.ts) writes through the same server-side CAS writer
+// and opens the Manager.
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import { Text, View } from "react-native";
+import { usePaseo } from "@getpaseo/plugin/client";
 import type { TargetValue } from "../../shared/contracts.ts";
-import {
-  SUPERVISION_PENDING_DELAY_DEFAULT_MS,
-  SUPERVISION_PENDING_DELAY_MAX_MS,
-} from "../../shared/supervision.ts";
+import { SUPERVISION_CONFIDENCE_MAX, SUPERVISION_CONFIDENCE_MIN, SUPERVISION_PENDING_DELAY_MAX_MS } from "../../shared/supervision.ts";
 import type {
   GetSupervisionRequest,
   GetSupervisionResult,
   SetSupervisionRequest,
   SetSupervisionResult,
-  SupervisionMode,
+  SupervisionMigration,
   SupervisionObservation,
-  SupervisionRoute,
+  SupervisionUnverified,
 } from "../../shared/supervision.ts";
 import { errorMessage } from "../manager-state.ts";
+import { notifySupervisionChanged } from "../supervision-controls.ts";
+import {
+  agentChoices,
+  configFromForm,
+  describeReason,
+  emptySupervisionForm,
+  formFromConfig,
+  jevReadiness,
+  leadChecked,
+  leadRows,
+  restoreMigration,
+  shortId,
+  statusLine,
+  summarizeObservations,
+  supervisorRows,
+  toggleLead,
+  translateError,
+} from "../supervision-form.ts";
+import type { AgentChoice, AgentDirectoryEntry, SupervisionForm } from "../supervision-form.ts";
 import type { Colors } from "../ui-kit.tsx";
-import { Badge, Button, Card, ChipSelect, Field, styles } from "../ui-kit.tsx";
+import { Badge, Button, Card, CheckRow, ChipSelect, Collapse, Field, styles, SwitchRow } from "../ui-kit.tsx";
 import type { JevCardState } from "./jev.tsx";
 
-// Editable copy of one route — every field is a string so the draft can hold
-// a partially typed row; the build step validates and converts.
-type RouteForm = {
-  leadAgentId: string;
-  leadWorkspaceId: string;
-  supervisorAgentId: string; // "" → null
-  mode: "off" | "shadow";
-  pendingDelayMs: string;
-};
-
-const emptyRouteForm = (): RouteForm => ({
-  leadAgentId: "",
-  leadWorkspaceId: "",
-  supervisorAgentId: "",
-  mode: "off",
-  pendingDelayMs: String(SUPERVISION_PENDING_DELAY_DEFAULT_MS),
-});
-
-const formFromRoutes = (routes: SupervisionRoute[]): RouteForm[] =>
-  routes.map(route => ({
-    leadAgentId: route.leadAgentId,
-    leadWorkspaceId: route.leadWorkspaceId,
-    supervisorAgentId: route.supervisorAgentId ?? "",
-    // A stored "notify" route stays visible and editable, but a draft save
-    // can only produce off/shadow — see the header comment.
-    mode: route.mode === "notify" ? "shadow" : route.mode,
-    pendingDelayMs: String(route.pendingDelayMs),
-  }));
-
-const routesFromForm = (form: RouteForm[]): { routes: SupervisionRoute[] } | { error: string } => {
-  const seen = new Set<string>();
-  const routes: SupervisionRoute[] = [];
-  for (const [index, row] of form.entries()) {
-    const label = `Route ${index + 1}`;
-    const leadAgentId = row.leadAgentId.trim();
-    const leadWorkspaceId = row.leadWorkspaceId.trim();
-    const supervisorAgentId = row.supervisorAgentId.trim();
-    if (leadAgentId === "") return { error: `${label}: Lead agent ID is required` };
-    if (leadWorkspaceId === "") return { error: `${label}: Lead workspace ID is required` };
-    if (seen.has(leadAgentId)) return { error: `${label}: duplicate Lead agent ID — one route per Lead` };
-    seen.add(leadAgentId);
-    const pendingDelayMs = Number(row.pendingDelayMs.trim());
-    if (!Number.isInteger(pendingDelayMs) || pendingDelayMs < 0 || pendingDelayMs > SUPERVISION_PENDING_DELAY_MAX_MS) {
-      return { error: `${label}: pending delay must be an integer 0–${SUPERVISION_PENDING_DELAY_MAX_MS} ms` };
-    }
-    routes.push({
-      leadAgentId,
-      leadWorkspaceId,
-      supervisorAgentId: supervisorAgentId === "" ? null : supervisorAgentId,
-      mode: row.mode,
-      pendingDelayMs,
-    });
-  }
-  return { routes };
-};
-
-// The gate line the Manager must show (spec: a failed Jev gate "shows a
-// reason in the Manager"). Derived from the saved Jev view only — a dirty
-// Jev draft does not arm the capability.
-const gateStatus = (jevView: JevCardState["view"]): { label: string; tone: "neutral" | "good" | "draft" | "bad" } => {
-  if (jevView === null) return { label: "Jev status unread — gate state unknown", tone: "draft" };
-  if (jevView.error !== null) return { label: `Jev config broken — supervision stays off (${jevView.error})`, tone: "bad" };
-  if (!jevView.configured) return { label: "Jev not configured — supervision stays off", tone: "neutral" };
-  if (jevView.enabled !== true) return { label: "Jev disabled — supervision stays off", tone: "neutral" };
-  if (jevView.provider === null) return { label: "Jev provider unset — supervision stays off", tone: "draft" };
-  if (!jevView.hasKey) return { label: "Jev key missing — supervision stays off", tone: "draft" };
-  if (jevView.keyPermissionsOk === false) {
-    return { label: "Jev key file is group/other-accessible — supervision stays off (chmod 600)", tone: "bad" };
-  }
-  if (jevView.capabilities?.supervision !== true) {
-    return { label: "Jev supervision capability not armed — routes capture nothing", tone: "draft" };
-  }
-  return { label: "Jev supervision capability armed — explicit routes still required", tone: "good" };
-};
-
-// The five spec states on the observation list — Badge tones are limited to
-// the existing vocabulary, so the label carries the distinction.
-const observationTone = (state: SupervisionObservation["state"]): { label: string; tone: "neutral" | "good" | "draft" | "bad" } => {
-  switch (state) {
-    case "observed": return { label: "observed", tone: "draft" };
-    case "evaluated": return { label: "evaluated", tone: "good" };
-    case "unknown": return { label: "unknown", tone: "neutral" };
-    case "suspected_drift": return { label: "suspected drift", tone: "bad" };
-    // In the vocabulary for forward compat — never emitted by this build.
-    case "notification_uncertain": return { label: "notification delivery uncertain", tone: "neutral" };
-  }
-};
-
-const shortId = (id: string): string => id.length > 13 ? `${id.slice(0, 8)}…` : id;
-
-function ObservationList({ colors, data }: { colors: Colors; data: GetSupervisionResult }) {
-  const observations = data.observations;
-  const gates = data.gates;
-  const diagnostics = data.diagnostics;
-  if (observations === null && gates === null) {
-    return (
-      <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
-        No live observer readout — the shadow observer is not running for this home.
-      </Text>
-    );
-  }
-  return (
-    <View style={{ gap: 6 }}>
-      <Text style={[styles.legend, { color: colors.foregroundMuted }]}>Shadow observations (metadata only)</Text>
-      {gates !== null && Object.keys(gates).length > 0 ? (
-        <View style={{ gap: 2 }}>
-          {Object.entries(gates).map(([leadId, reason]) => (
-            <Text key={leadId} style={[styles.mutedSmall, { color: reason === null ? colors.statusSuccess : colors.statusWarning }]}>
-              Route {shortId(leadId)}: {reason === null ? "gate green" : `paused — ${reason}`}
-            </Text>
-          ))}
-        </View>
-      ) : null}
-      {diagnostics !== null && (diagnostics.droppedEvents > 0 || diagnostics.reasons.length > 0) ? (
-        <Text style={[styles.mutedSmall, { color: colors.statusWarning }]}>
-          Observer diagnostics: {diagnostics.droppedEvents} dropped event(s)
-          {diagnostics.reasons.length > 0 ? ` — ${diagnostics.reasons.join(", ")}` : ""}
-        </Text>
-      ) : null}
-      {(observations ?? []).length === 0 ? (
-        <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>No cases recorded yet.</Text>
-      ) : (
-        (observations ?? []).map(entry => {
-          const tone = observationTone(entry.state);
-          return (
-            <View key={entry.fingerprint} style={[styles.noticeBox, { borderColor: colors.border, backgroundColor: colors.surface2 }]}>
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                <Badge colors={colors} label={tone.label} tone={tone.tone} />
-                <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
-                  peer {shortId(entry.peerId)} · lead {shortId(entry.leadAgentId)} · {entry.updatedAt}
-                </Text>
-              </View>
-              <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
-                case {shortId(entry.fingerprint)} · room {entry.counts.roomMessages} / uncertain {entry.counts.uncertainRoomMessages} / other-room {entry.counts.otherRoomMessages} / reports {entry.counts.reportMessages} / peer-sends {entry.counts.peerSends} · assessments {entry.assessmentsUsed}
-              </Text>
-              {entry.reason !== null ? (
-                <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>reason: {entry.reason}</Text>
-              ) : null}
-              {entry.visibility.length > 0 ? (
-                <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
-                  visibility: {entry.visibility.join(", ")}
-                </Text>
-              ) : null}
-              {entry.lastAssessment !== null ? (
-                <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
-                  last assessment {entry.lastAssessment.model}: brief={entry.lastAssessment.choices.leadBrief.choice}@{entry.lastAssessment.choices.leadBrief.confidence} handback={entry.lastAssessment.choices.peerHandback.choice}@{entry.lastAssessment.choices.peerHandback.confidence} handling={entry.lastAssessment.choices.leadHandling.choice}@{entry.lastAssessment.choices.leadHandling.confidence}
-                </Text>
-              ) : null}
-            </View>
-          );
-        })
-      )}
-    </View>
-  );
-}
+type Navigation = { openAgent(input: { agentId: string }): void } | undefined;
 
 export function useSupervisionCard({ target, targetKey, isCurrentKey, callGetSupervision, callSetSupervision, update }: {
   target: TargetValue | null;
@@ -195,32 +58,53 @@ export function useSupervisionCard({ target, targetKey, isCurrentKey, callGetSup
   callSetSupervision: (input: SetSupervisionRequest) => Promise<SetSupervisionResult>;
   update: (patch: { lastError: string | null }, target: TargetValue) => void;
 }) {
+  const paseo = usePaseo();
   const [data, setData] = useState<GetSupervisionResult | null>(null);
-  const [form, setForm] = useState<RouteForm[]>([]);
+  const [form, setForm] = useState<SupervisionForm>(emptySupervisionForm);
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const [reloading, setReloading] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [unverified, setUnverified] = useState<SupervisionUnverified[]>([]);
   const [readError, setReadError] = useState<string | null>(null);
   const [cardError, setCardError] = useState<{ message: string; cas: boolean } | null>(null);
+  const [agents, setAgents] = useState<AgentChoice[] | null>(null);
+  const [agentsError, setAgentsError] = useState<string | null>(null);
 
   // Target switch drops the previous home's snapshot, draft and every
   // transient flag — a draft authored against home A must never save into B.
   useEffect(() => {
     setData(null);
-    setForm([]);
+    setForm(emptySupervisionForm());
     setDirty(false);
     setSaving(false);
     setReloading(false);
     setSaved(false);
+    setUnverified([]);
     setReadError(null);
     setCardError(null);
+    setAgents(null);
+    setAgentsError(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- targetKey captures target
   }, [targetKey]);
 
+  // The pickers list the app's own active agents — the same list the
+  // sidebar shows — so a thread is chosen by name, never by typed id.
+  const loadAgents = async (issueKey: string) => {
+    try {
+      const result = await paseo.agents.list({ scope: "active", page: { limit: 200 } });
+      if (!isCurrentKey(issueKey)) return;
+      setAgents(agentChoices(result.entries as unknown as AgentDirectoryEntry[]));
+      setAgentsError(null);
+    } catch (error) {
+      if (!isCurrentKey(issueKey)) return;
+      setAgentsError(errorMessage(error));
+    }
+  };
+
   // Fetch once per target. data === null is ambiguous between "loading" and
   // "the read failed" — readError separates the two so a failed read never
-  // paints as an empty route list, and Save requires a successful snapshot
+  // paints as an empty config, and Save requires a successful snapshot
   // rather than silently sending expectedSha256:null.
   const loadedFor = useRef<string | null>(null);
   useEffect(() => {
@@ -228,66 +112,67 @@ export function useSupervisionCard({ target, targetKey, isCurrentKey, callGetSup
     loadedFor.current = targetKey;
     const issueKey = targetKey;
     let cancelled = false;
+    void loadAgents(issueKey);
     void (async () => {
       try {
-        const result = await callGetSupervision({ schemaVersion: 1, target });
+        const result = await callGetSupervision({ schemaVersion: 2, target });
         if (cancelled || !isCurrentKey(issueKey)) return;
         setData(result);
         setReadError(null);
-        setForm(formFromRoutes(result.routes ?? []));
+        setForm(formFromConfig(result.config));
       } catch (error) {
         if (cancelled || !isCurrentKey(issueKey)) return;
         setReadError(errorMessage(error));
       }
     })();
-    return () => { cancelled = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- targetKey captures target
-  }, [target, targetKey]);
+    return () => {
+      cancelled = true;
+      // A cancelled read never landed — release the guard so a re-run for
+      // the same key (StrictMode replay, key round-trip) retries instead
+      // of painting "loading" forever with data === null.
+      if (loadedFor.current === issueKey) loadedFor.current = null;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- targetKey captures target; the shell mints a fresh target object every render, so keying on it would cancel every pending read
+  }, [targetKey]);
 
-  const markEdited = () => { setDirty(true); setSaved(false); };
-
-  const setRouteField = (index: number, field: "leadAgentId" | "leadWorkspaceId" | "supervisorAgentId" | "pendingDelayMs", value: string) => {
-    markEdited();
-    setForm(current => current.map((row, at) => (at === index ? { ...row, [field]: value } : row)));
+  const edit = (change: (current: SupervisionForm) => SupervisionForm) => {
+    setDirty(true);
+    setSaved(false);
+    setUnverified([]);
+    setForm(change);
   };
-  const setRouteMode = (index: number, mode: "off" | "shadow") => {
-    markEdited();
-    setForm(current => current.map((row, at) => (at === index ? { ...row, mode } : row)));
-  };
-  const addRoute = () => { markEdited(); setForm(current => [...current, emptyRouteForm()]); };
-  const removeRoute = (index: number) => { markEdited(); setForm(current => current.filter((_, at) => at !== index)); };
 
   const save = async () => {
     if (!target || !targetKey) return;
-    const built = routesFromForm(form);
+    const built = configFromForm(form);
     if ("error" in built) {
-      update({ lastError: built.error }, target);
+      setCardError({ message: built.error, cas: false });
       return;
     }
     const issueKey = targetKey;
     setSaving(true);
     try {
       const result = await callSetSupervision({
-        schemaVersion: 1,
+        schemaVersion: 2,
         target,
-        routes: built.routes,
+        config: built.config,
         expectedSha256: data?.sha256 ?? null,
       });
       if (!isCurrentKey(issueKey)) return;
       setData(result);
-      setForm(formFromRoutes(result.routes ?? []));
+      setForm(formFromConfig(result.config));
       setDirty(false);
       setSaved(true);
+      setUnverified(result.unverified);
       setCardError(null);
+      notifySupervisionChanged();
     } catch (error) {
+      // The draft is kept on failure — the Human fixes one thing and saves
+      // again instead of re-entering everything.
       const message = errorMessage(error);
       update({ lastError: message }, target);
       if (isCurrentKey(issueKey)) {
-        const cas = message.includes("changed since") || message.includes("changed during");
-        setCardError({
-          message: cas ? "supervision.json changed since the last read — Reload to fetch the new version." : message,
-          cas,
-        });
+        setCardError({ message: translateError(message), cas: /changed since|changed during/i.test(message) });
       }
     } finally {
       if (isCurrentKey(issueKey)) setSaving(false);
@@ -298,22 +183,31 @@ export function useSupervisionCard({ target, targetKey, isCurrentKey, callGetSup
     if (!target || !targetKey) return;
     const issueKey = targetKey;
     setReloading(true);
+    void loadAgents(issueKey);
     try {
-      const result = await callGetSupervision({ schemaVersion: 1, target });
+      const result = await callGetSupervision({ schemaVersion: 2, target });
       if (!isCurrentKey(issueKey)) return;
       setData(result);
       setReadError(null);
       setCardError(null);
-      setForm(formFromRoutes(result.routes ?? []));
+      setForm(formFromConfig(result.config));
       setDirty(false);
       setSaved(false);
+      setUnverified([]);
+      notifySupervisionChanged();
     } catch (error) {
       const message = errorMessage(error);
       update({ lastError: message }, target);
-      if (isCurrentKey(issueKey)) setCardError({ message, cas: false });
+      if (isCurrentKey(issueKey)) setCardError({ message: translateError(message), cas: false });
     } finally {
       if (isCurrentKey(issueKey)) setReloading(false);
     }
+  };
+
+  const restore = () => {
+    const migration = data?.migration ?? null;
+    if (migration === null) return;
+    edit(() => restoreMigration(data?.config ?? null, migration));
   };
 
   return {
@@ -322,188 +216,446 @@ export function useSupervisionCard({ target, targetKey, isCurrentKey, callGetSup
     dirty,
     busy: saving || reloading,
     saved,
+    unverified,
     readError,
     cardError,
-    setRouteField,
-    setRouteMode,
-    addRoute,
-    removeRoute,
+    agents,
+    agentsError,
+    edit,
     save,
     reload,
+    restore,
+    refreshAgents: () => { if (targetKey) void loadAgents(targetKey); },
   };
 }
 export type SupervisionCardState = ReturnType<typeof useSupervisionCard>;
 
-const MODE_OPTIONS: readonly { label: string; value: "off" | "shadow" }[] = [
-  { label: "Off", value: "off" },
-  { label: "Shadow", value: "shadow" },
-];
+// ---------------------------------------------------------------------------
+// View
+// ---------------------------------------------------------------------------
 
-export function SupervisionCard({ colors, target, jev, supervision }: {
+const TONE_COLOR = (colors: Colors, tone: "good" | "neutral" | "warn" | "bad"): string =>
+  tone === "good" ? colors.statusSuccess
+    : tone === "warn" ? colors.statusWarning
+      : tone === "bad" ? colors.statusDanger
+        : colors.foregroundMuted;
+
+function Notice({ colors, tone, children }: { colors: Colors; tone: "warn" | "bad" | "neutral"; children: ReactNode }) {
+  const color = TONE_COLOR(colors, tone);
+  return (
+    <View style={[styles.noticeBox, { borderColor: tone === "neutral" ? colors.border : color, backgroundColor: colors.surface2 }]}>
+      {children}
+    </View>
+  );
+}
+
+function Section({ colors, title, children }: { colors: Colors; title: string; children: ReactNode }) {
+  return (
+    <View style={{ gap: 6 }}>
+      <Text style={[styles.fieldLabel, { color: colors.foreground }]}>{title}</Text>
+      {children}
+    </View>
+  );
+}
+
+// The old per-case readout, kept behind "Technical details" for review and
+// debugging — ids, counts, reason codes and model choices, never bodies.
+function TechnicalDetails({ colors, data }: { colors: Colors; data: GetSupervisionResult }) {
+  const tone = (state: SupervisionObservation["state"]): "neutral" | "good" | "draft" | "bad" =>
+    state === "evaluated" ? "good" : state === "observed" ? "draft" : state === "unknown" ? "neutral" : "bad";
+  const muted = [styles.mutedSmall, { color: colors.foregroundMuted }];
+  return (
+    <View style={{ gap: 6 }}>
+      {data.gates !== null && Object.keys(data.gates).length > 0 ? (
+        <View style={{ gap: 2 }}>
+          {Object.entries(data.gates).map(([leadId, reason]) => (
+            <Text key={leadId} style={muted}>lead {leadId}: {reason ?? "ok"}</Text>
+          ))}
+        </View>
+      ) : null}
+      {data.diagnostics !== null && (data.diagnostics.droppedEvents > 0 || data.diagnostics.reasons.length > 0) ? (
+        <Text style={muted}>
+          observer: {data.diagnostics.droppedEvents} dropped event(s)
+          {data.diagnostics.reasons.length > 0 ? ` — ${data.diagnostics.reasons.join(", ")}` : ""}
+        </Text>
+      ) : null}
+      {(data.observations ?? []).map(entry => (
+        <View key={entry.fingerprint} style={[styles.noticeBox, { borderColor: colors.border, backgroundColor: colors.surface2 }]}>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <Badge colors={colors} label={entry.state} tone={tone(entry.state)} />
+            <Text style={muted}>case {shortId(entry.fingerprint)} · peer {entry.peerId} · lead {entry.leadAgentId} · {entry.updatedAt}</Text>
+          </View>
+          <Text style={muted}>
+            {entry.route !== null ? `${entry.route.source}/${entry.route.mode} · ` : ""}room {entry.counts.roomMessages} · cross-peer {entry.counts.otherRoomMessages} · reports {entry.counts.reportMessages} · uncertain {entry.counts.uncertainRoomMessages} · peer-sends {entry.counts.peerSends} · assessments {entry.assessmentsUsed}
+          </Text>
+          {entry.findings.map(finding => (
+            <Text key={finding.axis} style={muted}>
+              finding {finding.axis}: {finding.choice}@{finding.confidence} · {finding.status}
+              {finding.evidenceCallId !== null ? ` · linked ${finding.evidenceCallId}` : ""}
+              {finding.resolvedBy !== null ? ` · resolved by ${finding.resolvedBy}` : ""}
+            </Text>
+          ))}
+          {entry.delivery !== null ? (
+            <Text style={muted}>
+              delivery: {entry.delivery.state} → {entry.delivery.recipient} ({entry.delivery.findings.join(", ")}){entry.delivery.reason !== null ? ` — ${entry.delivery.reason}` : ""}
+            </Text>
+          ) : null}
+          {entry.reason !== null ? <Text style={muted}>reason: {entry.reason}</Text> : null}
+          {entry.visibility.length > 0 ? <Text style={muted}>visibility: {entry.visibility.join(", ")}</Text> : null}
+          {entry.lastAssessment !== null ? (
+            <Text style={muted}>
+              {entry.lastAssessment.model} ({entry.lastAssessment.rubricVersion}): brief={entry.lastAssessment.choices.leadBrief.choice}@{entry.lastAssessment.choices.leadBrief.confidence} handback={entry.lastAssessment.choices.peerHandback.choice}@{entry.lastAssessment.choices.peerHandback.confidence} handling={entry.lastAssessment.choices.leadHandling.choice}@{entry.lastAssessment.choices.leadHandling.confidence}
+            </Text>
+          ) : null}
+        </View>
+      ))}
+    </View>
+  );
+}
+
+// Required disclosure (spec: "an explicit UI disclosure that full captured
+// communication can leave the host") — shown in the consent step and kept
+// one tap away afterwards.
+function Disclosure({ colors }: { colors: Colors }) {
+  const text = [styles.mutedSmall, { color: colors.foregroundMuted }];
+  return (
+    <View style={{ gap: 6 }}>
+      <Text style={text}>
+        • Sent to Jev: the Lead's brief to each Peer, the Peer's hand-back, the Lead's later messages to that Peer,
+        to its other Peers and to the Supervisor, and the Peer's own messages. This content leaves this computer.
+        Messages that could not be confirmed are sent as ids only.
+      </Text>
+      <Text style={text}>
+        • Cost: each check is a paid Jev call. A conversation can be checked again when new messages arrive, up to a
+        fixed limit.
+      </Text>
+      <Text style={text}>
+        • Alerts: the Supervisor receives a short generated message quoting limited excerpts. Alerts wait while the
+        Supervisor is busy, but one that lands just as its turn starts interrupts that turn. A failed alert is marked
+        uncertain and never retried.
+      </Text>
+      <Text style={text}>
+        • Coverage by agent family: Codex, Claude Code and Pi — the brief, the hand-back and the Lead's later messages.
+        Devin — the brief and the hand-back only; whether a Devin message was delivered is not visible, so a Devin Lead's
+        handling is never judged. A family never blocks the others in a mixed room.
+      </Text>
+      <Text style={text}>
+        • Limits: findings are suspected communication issues to review — not proof, not an acceptance decision.
+        Silence never triggers an alert. A restart forgets conversations in progress; only the recent summary is kept.
+      </Text>
+    </View>
+  );
+}
+
+const migrationText = (migration: SupervisionMigration): string => {
+  const leads = migration.disabledRoutes.length;
+  const parts = [
+    leads > 0 ? `${leads} Lead${leads === 1 ? "" : "s"}` : null,
+    migration.disabledDefaults !== null ? "all SLP Leads" : null,
+  ].filter(Boolean);
+  return `Settings from an earlier version were found for ${parts.join(" and ")}.`;
+};
+
+export function SupervisionCard({ colors, target, jev, supervision, navigation }: {
   colors: Colors;
   target: TargetValue | null;
   jev: JevCardState;
   supervision: SupervisionCardState;
+  navigation?: Navigation;
 }) {
-  const gate = gateStatus(jev.view);
-  const storedModes = new Set<SupervisionMode>((supervision.data?.routes ?? []).map(route => route.mode));
+  const [consentOpen, setConsentOpen] = useState(false);
+  const [switchError, setSwitchError] = useState<string | null>(null);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [disclosureOpen, setDisclosureOpen] = useState(false);
+  const [technicalOpen, setTechnicalOpen] = useState(false);
+
+  const { form, data } = supervision;
+  const readiness = jevReadiness(jev.view);
+  const capabilityOn = jev.view?.capabilities?.supervision === true;
+  const choices = supervision.agents ?? [];
+  const nameById = useMemo(() => new Map(choices.map(choice => [choice.agentId, choice.title])), [choices]);
+  const names = (agentId: string): string => nameById.get(agentId) ?? shortId(agentId);
+  const status = statusLine({ jev: readiness, capabilityOn, data, names });
+  const summary = useMemo(() => summarizeObservations(data?.observations ?? null), [data]);
+  const leads = leadRows(choices, form);
+  const supervisors = supervisorRows(choices, form);
+  const disabled = !target || supervision.busy || data === null;
+  const migration = data?.migration ?? null;
+  const gates = data?.gates ?? {};
+
+  const setCapability = async (next: boolean) => {
+    setSwitchError(null);
+    if (next && !consentOpen) { setConsentOpen(true); return; }
+    setConsentOpen(false);
+    if (next === capabilityOn) return; // cancelling the consent step writes nothing
+    const error = await jev.setSupervisionCapability(next);
+    if (error !== null) {
+      setSwitchError(/changed since|IDEMPOTENCY/i.test(error)
+        ? "Jev settings changed elsewhere. Reload them in the Jev card, then try again."
+        : error);
+      jev.retryLoad();
+    }
+  };
+
   return (
     <Card
       colors={colors}
       title="Supervision"
-      subtitle="Opt-in shadow observation of explicitly bound Leads — off by default; configuring Jev never opts in"
+      subtitle="Checks how each Lead briefs its Peers and handles their hand-backs, and can alert a Supervisor."
     >
-      {/* Required disclosure (spec: "an explicit UI disclosure that full
-          captured communication can leave the host"). */}
-      <View style={[styles.noticeBox, { borderColor: colors.statusWarning, backgroundColor: colors.surface2 }]}>
-        <Text style={[styles.mutedSmall, { color: colors.statusWarning }]}>
-          A route in shadow mode can send captured Peer/Lead communication to the configured Jev endpoint —
-          content leaves this host. Notification delivery is not implemented in this build.
-        </Text>
-        <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
-          Only the codex send shape is verified against a real timeline; pi/devin/claude sends stay
-          uncertain, so their cases resolve unknown. On this host every case is unknown before any
-          Jev call (report-route-unverifiable). Each evaluation is a billable Jev call. Open cases
-          and the event queue are process-local: a plugin restart does not replay missed turns —
-          only the bounded metadata ring persists.
-        </Text>
-      </View>
-      <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-        <Badge colors={colors} label={gate.label} tone={gate.tone} />
-      </View>
-      {storedModes.has("notify") ? (
-        <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
-          A stored route uses mode "notify" — schema-valid but inert in this build; saving from this card
-          writes it back as shadow.
-        </Text>
+      <SwitchRow
+        colors={colors}
+        checked={capabilityOn || consentOpen}
+        disabled={!target || !readiness.ready || jev.capabilityBusy || jev.view === null}
+        onToggle={next => { void setCapability(next); }}
+        title="Supervision"
+        hint={readiness.ready ? "Off by default. Turning it on sends conversation content to Jev." : readiness.why}
+      />
+      {consentOpen ? (
+        <Notice colors={colors} tone="warn">
+          <Text style={[styles.checkTitle, { color: colors.foreground }]}>Before you turn this on</Text>
+          <Disclosure colors={colors} />
+          <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
+            <Button colors={colors} kind="primary" label={jev.capabilityBusy ? "Turning on…" : "Turn on"}
+              disabled={jev.capabilityBusy} onPress={() => { void setCapability(true); }} />
+            <Button colors={colors} kind="ghost" label="Cancel" disabled={jev.capabilityBusy}
+              onPress={() => setConsentOpen(false)} />
+          </View>
+        </Notice>
+      ) : null}
+      {switchError !== null ? (
+        <Text style={[styles.mutedSmall, { color: colors.statusDanger }]} accessibilityLiveRegion="polite">{switchError}</Text>
       ) : null}
 
-      {supervision.data !== null ? <ObservationList colors={colors} data={supervision.data} /> : null}
+      <Text style={[styles.checkTitle, { color: TONE_COLOR(colors, status.tone) }]} accessibilityLiveRegion="polite">
+        {status.text}
+      </Text>
 
       {supervision.readError !== null ? (
-        <View style={[styles.noticeBox, { borderColor: colors.statusDanger, backgroundColor: colors.surface2 }]}>
+        <Notice colors={colors} tone="bad">
           <Text style={[styles.mutedSmall, { color: colors.statusDanger }]}>
-            Could not read supervision.json: {supervision.readError}
+            Could not load supervision settings: {translateError(supervision.readError)}
           </Text>
-        </View>
+          <Button colors={colors} kind="ghost" label="Try again" disabled={supervision.busy} onPress={() => void supervision.reload()} />
+        </Notice>
       ) : null}
-      {supervision.data?.error ? (
-        <View style={[styles.noticeBox, { borderColor: colors.statusDanger, backgroundColor: colors.surface2 }]}>
-          <Text style={[styles.mutedSmall, { color: colors.statusDanger }]}>
-            {supervision.data.error}
+      {data?.error ? (
+        <Notice colors={colors} tone="bad">
+          <Text style={[styles.mutedSmall, { color: colors.statusDanger }]}>{translateError(data.error)}</Text>
+          <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>Details: {data.error}</Text>
+        </Notice>
+      ) : null}
+      {migration !== null && (migration.disabledRoutes.length > 0 || migration.disabledDefaults !== null) ? (
+        <Notice colors={colors} tone="warn">
+          <Text style={[styles.mutedSmall, { color: colors.statusWarning }]}>
+            {migrationText(migration)} They are paused because this version can send more to Jev (Claude Code, Devin and Pi
+            conversations are now included). Read "What is sent and what it costs", restore, review, then save.
           </Text>
-        </View>
+          <Button colors={colors} kind="ghost" label="Restore" disabled={disabled} onPress={supervision.restore} />
+        </Notice>
       ) : null}
 
-      {supervision.form.map((row, index) => (
-        <View key={index} style={[styles.noticeBox, { borderColor: colors.border, backgroundColor: colors.surface2 }]}>
-          <Text style={[styles.fieldLabel, { color: colors.foreground }]}>Route {index + 1}</Text>
-          <Field
-            colors={colors}
-            label="Lead agent ID"
-            hint="Exact agent UUID with provider slp-<family>-lead — verified against the connected daemon on save"
-            value={row.leadAgentId}
-            onChangeText={text => supervision.setRouteField(index, "leadAgentId", text)}
-            placeholder="00000000-0000-0000-0000-000000000000"
-            disabled={!target || supervision.busy}
-          />
-          <Field
-            colors={colors}
-            label="Lead workspace ID"
-            hint="The Lead's exact workspace binding — a mismatch rejects the save"
-            value={row.leadWorkspaceId}
-            onChangeText={text => supervision.setRouteField(index, "leadWorkspaceId", text)}
-            placeholder="wks_…"
-            disabled={!target || supervision.busy}
-          />
-          <Field
-            colors={colors}
-            label="Supervisor agent ID (optional in shadow)"
-            hint="Exact agent UUID with provider slp-<family>-supervisor — required for notify, may be kept empty while shadowing"
-            value={row.supervisorAgentId}
-            onChangeText={text => supervision.setRouteField(index, "supervisorAgentId", text)}
-            placeholder="00000000-0000-0000-0000-000000000000"
-            disabled={!target || supervision.busy}
-          />
-          <View style={styles.field}>
-            <Text style={[styles.legend, { color: colors.foregroundMuted }]}>Mode</Text>
-            <ChipSelect
-              colors={colors}
-              variant="choice"
-              value={row.mode}
-              options={MODE_OPTIONS}
-              onChange={next => supervision.setRouteMode(index, next)}
-              disabled={!target || supervision.busy}
-            />
-          </View>
-          <Field
-            colors={colors}
-            label="Pending-brief delay (ms)"
-            hint={`How long a pending brief may wait for the handback before the case is assessed incomplete — 0–${SUPERVISION_PENDING_DELAY_MAX_MS}`}
-            value={row.pendingDelayMs}
-            onChangeText={text => supervision.setRouteField(index, "pendingDelayMs", text)}
-            placeholder={String(SUPERVISION_PENDING_DELAY_DEFAULT_MS)}
-            disabled={!target || supervision.busy}
-          />
-          <Button
-            colors={colors}
-            kind="ghost"
-            label="Remove route"
-            disabled={!target || supervision.busy}
-            onPress={() => supervision.removeRoute(index)}
-          />
+      <Section colors={colors} title="Which Leads">
+        <ChipSelect<"all" | "selected">
+          colors={colors}
+          variant="choice"
+          value={form.scope}
+          options={[{ label: "All SLP Leads", value: "all" }, { label: "Selected Leads", value: "selected" }]}
+          onChange={next => supervision.edit(current => ({ ...current, scope: next }))}
+          disabled={disabled}
+        />
+        <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
+          {form.scope === "all"
+            ? "Every SLP Lead on this computer, including ones started later. Uncheck a Lead to leave it out."
+            : "Only the Leads you check."}
+        </Text>
+        {supervision.agentsError !== null ? (
+          <Text style={[styles.mutedSmall, { color: colors.statusWarning }]}>
+            Could not list agents: {supervision.agentsError}
+          </Text>
+        ) : supervision.agents === null ? (
+          <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>Loading agents…</Text>
+        ) : leads.length === 0 ? (
+          <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
+            No SLP Leads are running right now.{form.scope === "all" ? " New Leads are picked up automatically." : ""}
+          </Text>
+        ) : (
+          leads.map(row => {
+            const gate = gates[row.agentId];
+            const hint = [
+              row.detail,
+              row.custom ? "has custom settings (kept unless you change this row)" : null,
+              gate !== undefined && gate !== null ? describeReason(gate) : null,
+            ].filter(Boolean).join(" — ");
+            return (
+              <CheckRow
+                key={row.agentId}
+                colors={colors}
+                checked={leadChecked(form, row.agentId) || row.custom}
+                title={row.title}
+                hint={hint}
+                disabled={disabled || row.workspaceId === null}
+                onToggle={next => {
+                  if (row.workspaceId === null) return;
+                  const pick = { agentId: row.agentId, workspaceId: row.workspaceId };
+                  supervision.edit(current => toggleLead(current, pick, next));
+                }}
+              />
+            );
+          })
+        )}
+        <View style={{ flexDirection: "row" }}>
+          <Button colors={colors} kind="ghost" label="Refresh list" disabled={!target} onPress={supervision.refreshAgents} />
         </View>
-      ))}
+      </Section>
 
-      <Button
-        colors={colors}
-        kind="ghost"
-        label="+ Add Lead route"
-        disabled={!target || supervision.busy}
-        onPress={supervision.addRoute}
-      />
+      <Section colors={colors} title="When an issue is found">
+        <ChipSelect<"shadow" | "notify">
+          colors={colors}
+          variant="choice"
+          value={form.mode}
+          options={[{ label: "Record only", value: "shadow" }, { label: "Record and alert a Supervisor", value: "notify" }]}
+          onChange={next => supervision.edit(current => ({ ...current, mode: next }))}
+          disabled={disabled}
+        />
+        {form.mode === "notify" ? (
+          supervisors.length === 0 ? (
+            <Text style={[styles.mutedSmall, { color: colors.statusWarning }]}>
+              No SLP Supervisor is running. Start one, then press Refresh list.
+            </Text>
+          ) : (
+            supervisors.map(row => (
+              <CheckRow
+                key={row.agentId}
+                colors={colors}
+                checked={form.supervisor?.agentId === row.agentId}
+                title={row.title}
+                hint={row.detail}
+                disabled={disabled}
+                onToggle={next => supervision.edit(current => ({
+                  ...current,
+                  supervisor: next ? { agentId: row.agentId, workspaceId: row.workspaceId } : null,
+                }))}
+              />
+            ))
+          )
+        ) : (
+          <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
+            Findings appear below; nobody is messaged.
+          </Text>
+        )}
+      </Section>
+
+      <Collapse colors={colors} title="Advanced" open={advancedOpen} onToggle={setAdvancedOpen}>
+        <Field
+          colors={colors}
+          label="Confidence needed"
+          hint={`How sure Jev must be before something counts as an issue (${SUPERVISION_CONFIDENCE_MIN}–${SUPERVISION_CONFIDENCE_MAX}). This is the model's own confidence, not measured accuracy.`}
+          value={form.confidenceThreshold}
+          onChangeText={text => supervision.edit(current => ({ ...current, confidenceThreshold: text }))}
+          disabled={disabled}
+        />
+        <Field
+          colors={colors}
+          label="Wait before alerting (seconds)"
+          hint={`Brief and hand-back issues are alerted only after this wait, so the Lead can fix them first (0–${SUPERVISION_PENDING_DELAY_MAX_MS / 1000}).`}
+          value={form.delaySeconds}
+          onChangeText={text => supervision.edit(current => ({ ...current, delaySeconds: text }))}
+          disabled={disabled}
+        />
+      </Collapse>
+      <Collapse colors={colors} title="What is sent and what it costs" open={disclosureOpen} onToggle={setDisclosureOpen}>
+        <Disclosure colors={colors} />
+      </Collapse>
 
       {supervision.cardError ? (
-        <View style={[styles.noticeBox, {
-          borderColor: supervision.cardError.cas ? colors.statusWarning : colors.statusDanger,
-          backgroundColor: colors.surface2,
-        }]}>
-          <Text style={[styles.mutedSmall, {
-            color: supervision.cardError.cas ? colors.statusWarning : colors.statusDanger,
-          }]}>
+        <Notice colors={colors} tone={supervision.cardError.cas ? "warn" : "bad"}>
+          <Text style={[styles.mutedSmall, { color: supervision.cardError.cas ? colors.statusWarning : colors.statusDanger }]}>
             {supervision.cardError.message}
           </Text>
           {supervision.cardError.cas ? (
-            <Button
-              colors={colors}
-              kind="ghost"
-              label="Reload"
-              disabled={supervision.busy}
-              onPress={() => void supervision.reload()}
-            />
+            <Button colors={colors} kind="ghost" label="Reload" disabled={supervision.busy} onPress={() => void supervision.reload()} />
           ) : null}
-        </View>
+        </Notice>
       ) : null}
-
       {supervision.saved && !supervision.dirty ? (
         <Text style={[styles.mutedSmall, { color: colors.statusSuccess }]} accessibilityLiveRegion="polite">Saved.</Text>
       ) : null}
-      <View style={{ flexDirection: "row", gap: 8 }}>
+      {supervision.unverified.length > 0 ? (
+        <Notice colors={colors} tone="warn">
+          {supervision.unverified.map(item => (
+            <Text key={`${item.role}:${item.agentId}`} style={[styles.mutedSmall, { color: colors.statusWarning }]}>
+              {names(item.agentId)} could not be checked right now.{" "}
+              {item.role === "lead"
+                ? "Watching starts once this Lead's next turn is seen."
+                : "Alerts are checked again before each one is sent."}
+            </Text>
+          ))}
+        </Notice>
+      ) : null}
+      <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
         <Button
           colors={colors}
           kind="primary"
-          label={supervision.busy ? "Working…" : "Apply supervision routes"}
-          disabled={!target || supervision.busy || !supervision.dirty || supervision.readError !== null}
+          label={supervision.busy ? "Working…" : "Save changes"}
+          disabled={disabled || !supervision.dirty || supervision.readError !== null}
           onPress={() => void supervision.save()}
         />
-        <Button
-          colors={colors}
-          kind="ghost"
-          label="Reload"
-          disabled={!target || supervision.busy}
-          onPress={() => void supervision.reload()}
-        />
+        <Button colors={colors} kind="ghost" label={supervision.dirty ? "Discard changes" : "Reload"}
+          disabled={!target || supervision.busy} onPress={() => void supervision.reload()} />
       </View>
+
+      <View style={[styles.divider, { borderTopColor: colors.border }]} />
+      <Section colors={colors} title="Recent findings">
+        {data === null || (data.observations === null && data.gates === null) ? (
+          <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
+            {data === null ? "Loading…" : "Nothing to show — the observer is not running for this Paseo home."}
+          </Text>
+        ) : (
+          <>
+            {summary.issues.length === 0 ? (
+              <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>No open issues.</Text>
+            ) : summary.issues.map(issue => (
+              <Notice key={issue.fingerprint} colors={colors} tone="warn">
+                <Text style={[styles.checkTitle, { color: colors.foreground }]}>
+                  {names(issue.leadAgentId)} → {names(issue.peerId)}
+                </Text>
+                {issue.problems.map(problem => (
+                  <Text key={problem} style={[styles.mutedSmall, { color: colors.statusWarning }]}>{problem}</Text>
+                ))}
+                <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
+                  {new Date(issue.at).toLocaleString()}{issue.delivery !== null ? ` · ${issue.delivery}` : ""}
+                </Text>
+                {navigation !== undefined ? (
+                  <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
+                    <Button colors={colors} kind="ghost" label="Open Lead" onPress={() => navigation.openAgent({ agentId: issue.leadAgentId })} />
+                    <Button colors={colors} kind="ghost" label="Open Peer" onPress={() => navigation.openAgent({ agentId: issue.peerId })} />
+                  </View>
+                ) : null}
+              </Notice>
+            ))}
+            <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
+              {summary.okCount} checked with no issue · {summary.inProgress} in progress
+            </Text>
+            {summary.unassessed.length > 0 ? (
+              <View style={{ gap: 2 }}>
+                <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>Not checked:</Text>
+                {summary.unassessed.map(group => (
+                  <Text key={group.label} style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
+                    • {group.label} ({group.count})
+                  </Text>
+                ))}
+              </View>
+            ) : null}
+            <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
+              No findings does not mean communication was fine — many conversations cannot be checked.
+            </Text>
+            <Collapse colors={colors} title="Technical details" open={technicalOpen} onToggle={setTechnicalOpen}>
+              <TechnicalDetails colors={colors} data={data} />
+            </Collapse>
+          </>
+        )}
+      </Section>
     </Card>
   );
 }

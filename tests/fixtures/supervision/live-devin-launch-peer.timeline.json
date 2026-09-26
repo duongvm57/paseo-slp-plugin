@@ -1,0 +1,30 @@
+{
+  "fixture": "paseo-slp/supervision.live-timeline",
+  "schemaVersion": 1,
+  "family": "devin",
+  "provider": "slp-devin-peer",
+  "role": "peer",
+  "sanitized": true,
+  "provenance": {
+    "source": "observed",
+    "host": "paseo daemon 0.9.1; live run i4",
+    "capture": "client.fetchAgentTimeline(agentId, {direction:'tail', limit:0, projection:'projected'}) — projected rows passed to agent.turn_ended",
+    "actor": "live smoke 2026-09-26 i4, slp-devin-peer",
+    "rawSha256": "c0beea98c06838b70e8a3655fc84334bfe1305b860acee6d59c900ce589aa8e1",
+    "itemsKept": 2,
+    "itemsTotal": 31,
+    "sanitization": "Only the first user_message and one assistant_message are retained. Free-text assignment and handback bodies are replaced; message ids are remapped. The compact SLP role marker and launch binding structure are kept verbatim."
+  },
+  "items": [
+    {
+      "type": "user_message",
+      "text": "SLP role=peer\n\nLaunch binding: {\"provider\":\"slp-devin-peer\",\"model\":\"swe-2-high\",\"modeId\":\"bypass\",\"thinkingOptionId\":\"high\",\"features\":{}}\nAssignment:\nSanitized brief body.\n",
+      "messageId": "sanitized-message-i4-01"
+    },
+    {
+      "type": "assistant_message",
+      "text": "Sanitized handback.\n",
+      "messageId": "sanitized-message-i4-02"
+    }
+  ]
+}

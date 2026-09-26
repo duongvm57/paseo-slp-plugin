@@ -1,0 +1,168 @@
+{
+  "fixture": "paseo-slp/supervision.live-timeline",
+  "schemaVersion": 1,
+  "family": "claude",
+  "provider": "slp-claude-peer",
+  "role": "peer",
+  "sanitized": true,
+  "provenance": {
+    "source": "observed",
+    "host": "paseo daemon 0.9.1 (worker restarted after the smoke; timeline seeded from durable rows committed from the live stream)",
+    "capture": "client.fetchAgentTimeline(agentId, {direction:'tail', limit:0, projection:'projected'}) — the same projection rows agent.turn_ended receives via timelineStore.getItems(agentId) (agent-manager.js:3483, agent-timeline-store.js getItems/fetch)",
+    "actor": "live smoke 2026-09-26, slp-claude-peer",
+    "rawSha256": "d0645a46eea5cd372e3beb68012bc2628ae0ba4c663dfc3555cbd800c3d46382",
+    "itemsKept": 15,
+    "itemsTotal": 15,
+    "sanitization": "agent/call/message ids remapped; every free-text body, prompt, command, path and output replaced; booleans, numbers, nulls, key sets, nesting, statuses, errors, tool names and ACP titles kept verbatim. Devin user_message: the SLP ACP role prefix keeps its first line, the verbatim terminal assignment line and the carrier block line formats; the policy core is elided."
+  },
+  "items": [
+    {
+      "type": "user_message",
+      "text": "SLP role=peer\n\nLaunch binding: {\"provider\":\"slp-claude-peer\"}\nAssignment:\nSanitized brief body (item 0).\n",
+      "messageId": "sanitized-message-0001"
+    },
+    {
+      "type": "assistant_message",
+      "text": "Sanitized assistant commentary (item 1).",
+      "messageId": "sanitized-message-0002"
+    },
+    {
+      "type": "tool_call",
+      "callId": "toolu_SANITIZED0001",
+      "name": "Bash",
+      "detail": {
+        "type": "shell",
+        "command": "Sanitized command.",
+        "output": "Sanitized output."
+      },
+      "status": "completed",
+      "error": null
+    },
+    {
+      "type": "assistant_message",
+      "text": "Sanitized assistant commentary (item 3).",
+      "messageId": "sanitized-message-0003"
+    },
+    {
+      "type": "tool_call",
+      "callId": "toolu_SANITIZED0002",
+      "name": "Read",
+      "detail": {
+        "type": "read",
+        "filePath": "Sanitized filePath.",
+        "content": "Sanitized content.",
+        "offset": 1
+      },
+      "status": "completed",
+      "error": null
+    },
+    {
+      "type": "tool_call",
+      "callId": "toolu_SANITIZED0003",
+      "name": "Read",
+      "detail": {
+        "type": "read",
+        "filePath": "Sanitized filePath.",
+        "content": "Sanitized content.",
+        "offset": 1
+      },
+      "status": "completed",
+      "error": null
+    },
+    {
+      "type": "tool_call",
+      "callId": "toolu_SANITIZED0004",
+      "name": "Read",
+      "detail": {
+        "type": "read",
+        "filePath": "Sanitized filePath.",
+        "content": "Sanitized content.",
+        "offset": 1
+      },
+      "status": "completed",
+      "error": null
+    },
+    {
+      "type": "assistant_message",
+      "text": "Sanitized assistant commentary (item 7).",
+      "messageId": "sanitized-message-0004"
+    },
+    {
+      "type": "tool_call",
+      "callId": "toolu_SANITIZED0005",
+      "name": "Bash",
+      "detail": {
+        "type": "shell",
+        "command": "Sanitized command.",
+        "output": "Sanitized output."
+      },
+      "status": "completed",
+      "error": null
+    },
+    {
+      "type": "assistant_message",
+      "text": "Sanitized assistant commentary (item 9).",
+      "messageId": "sanitized-message-0005"
+    },
+    {
+      "type": "tool_call",
+      "callId": "toolu_SANITIZED0006",
+      "name": "ToolSearch",
+      "detail": {
+        "type": "unknown",
+        "input": {
+          "query": "Sanitized query.",
+          "max_results": 3
+        },
+        "output": {
+          "output": [
+            {
+              "tool_name": "Sanitized tool_name.",
+              "type": "tool_reference"
+            }
+          ]
+        }
+      },
+      "status": "completed",
+      "error": null
+    },
+    {
+      "type": "tool_call",
+      "callId": "toolu_SANITIZED0007",
+      "name": "mcp__paseo__send_agent_prompt",
+      "detail": {
+        "type": "unknown",
+        "input": {
+          "agentId": "11111111-1111-4111-8111-111111111111",
+          "prompt": "Sanitized prompt.",
+          "notifyOnFinish": false
+        },
+        "output": {
+          "output": {
+            "success": true,
+            "status": "running",
+            "lastMessage": null,
+            "permission": null
+          }
+        }
+      },
+      "status": "completed",
+      "error": null
+    },
+    {
+      "type": "assistant_message",
+      "text": "Sanitized final handback (item 12).",
+      "messageId": "sanitized-message-0006"
+    },
+    {
+      "type": "user_message",
+      "text": "Sanitized follow-up message (item 13).",
+      "messageId": "sanitized-message-0007"
+    },
+    {
+      "type": "assistant_message",
+      "text": "Sanitized final handback (item 14).",
+      "messageId": "sanitized-message-0008"
+    }
+  ]
+}

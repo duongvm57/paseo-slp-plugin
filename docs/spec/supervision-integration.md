@@ -1,359 +1,568 @@
 # SLP communication supervision — integration design
 
-Status: shadow observer implemented (2026-09-23, `feat/supervision-integration`).
-Steps 1–3 and 5 of the implementation order are landed: host evidence,
-the configuration seam, the shadow observer, and the documentation. `notify`
-remains schema-valid but inert — it is a second Human gate — and live E2E
-validation has not run, so the open decisions below are still open.
-Original status: design proposal investigated 2026-09-23 against
-`paseo-supervision` commit
-[`1bad19b8`](https://github.com/hoangnb24/paseo-supervision/tree/1bad19b8ee6c58482494f56a3d8c6edb4f969ee1),
-this SLP checkout at `d253711a`, the installed Paseo 0.8.0 SDK declarations,
-and the current [Paseo plugin reference](https://paseo.sh/docs/plugins/reference.md).
-This proposal changes no runtime behavior, role instructions, daemon state, or
-live agents.
+Status: shadow and notify implemented (revised 2026-09-26, feature parity
+with `paseo-supervision` commit
+[`1bad19b8`](https://github.com/hoangnb24/paseo-supervision/tree/1bad19b8ee6c58482494f56a3d8c6edb4f969ee1)).
+Local checks cover the behavior below; live end-to-end validation, a
+labelled model evaluation and any activation on a real daemon have **not**
+run. Nothing in this document is enabled by installing or upgrading the
+plugin.
+
+History: first designed 2026-09-23 (shadow-only, presence-checking rubric,
+`notify` inert). Revised 2026-09-25 (axis-scoped local gates). This revision
+restores the upstream task-relative semantic rubric, adds cross-Peer
+disposition, independent findings, daemon defaults for discovered Leads, and
+real `notify` delivery with a header bell. A same-day UX revision (after a
+live test found the card hard to use) replaced typed ids with agent pickers,
+made one switch control supervision, accepted saves the plugin cannot
+refresh as pending verification, and removed the Command Center items.
 
 ## Decision
 
-Build supervision as an **opt-in capability of the existing `paseo-slp` plugin**.
+Supervision is an **opt-in capability of the existing `paseo-slp` plugin**.
 The reference plugin and SLP target the same workflow: a Lead briefs a Peer,
-the Peer hands work back through its assigned reporting path, and the Lead
-handles the resulting obligation. The integration changes how that workflow
-is scoped and observed in this package.
+the Peer hands work back, and the Lead disposes of the obligation the
+handback raises. Supervision judges whether that communication was adequate
+and tells a Supervisor when it looks wrong.
 
-Supervision stays optional. Configuring Jev only makes supervision available;
-it never enables observation by itself. The feature defaults off. When it is
-off, SLP keeps its current provider setup, role injection, routing, and
-on-demand `monitor` behavior. Enabling supervision requires a ready Jev
-configuration and an explicit per-Lead selection; disabling it stops new
-capture, assessment, and notifications without changing other Jev uses.
-Use the reference plugin's conservative event correlation and safety gates as
-the starting algorithm, but use SLP's provider registry, Jev configuration,
-explicit Lead-to-Supervisor assignments, and plugin-owned state. Do not install
-the reference plugin alongside SLP or copy its fixed provider names, global
-recipient, environment key, or message extraction unchanged.
+It stays optional and off by default. Configuring Jev only makes it
+available. Observation starts only when Jev is enabled with
+`capabilities.supervision` **and** the Human selects `shadow` or `notify`
+for a Lead — through daemon defaults for discovered SLP Leads or an explicit
+per-Lead route. Turning it off stops new capture, assessment and delivery
+without changing other Jev uses, provider setup, role injection, routing or
+on-demand `monitor`.
 
-The first deliverable should be **shadow observation** for one explicitly bound
-Lead. Notification delivery is a second gate after representative shadow cases
-have been reviewed by a Human. Even in notification mode, the output is a
-suspected communication issue for Supervisor review. It is never artifact
-acceptance, a Lead verdict, permission to alter an assignment, or an automatic
-Peer follow-up.
+The output is always a **suspected communication issue for review**. It is
+never artifact acceptance, a Lead verdict, authority, permission to alter an
+assignment, or an automatic Peer follow-up. `notify` only prompts the chosen
+Supervisor, who decides within its own assignment.
 
-## Why the reference plugin cannot be used as-is
+## Upstream feature mapping
 
-| Reference behavior | SLP consequence |
+| Upstream behavior | SLP behavior and reason |
 | --- | --- |
-| Matches exactly `codex-lead`, `codex-peer`, `codex-supervisor` in [`server/communication.ts`](https://github.com/hoangnb24/paseo-supervision/blob/1bad19b8ee6c58482494f56a3d8c6edb4f969ee1/server/communication.ts). | SLP owns twelve `slp-<family>-<role>` provider IDs; derive role from [`plugin/shared/families.ts`](../../plugin/shared/families.ts), not a new provider list. |
-| Routes every discovered Lead to one UI-selected Supervisor. | An SLP Supervisor observes only assigned Leads/projects. A shared workspace or provider does not grant that scope. Store an explicit route per Lead ID. |
-| Takes the latest Peer `user_message` as the brief and last `assistant_message` as handback. | Keep that session handback path. Also capture confirmed Peer `send_agent_prompt` reports when present. SLP briefs can point to `assignmentFile`, and an assignment can name a recipient distinct from the parent; record those visibility limits before judging delivery or Lead handling. |
-| Reads `JEV_API_KEY` from daemon environment and calls TypeSafe directly. | SLP already stores `jev.json` and a private per-provider key, supporting TypeSafe and OpenRouter. A second key/config would produce conflicting controls. |
-| Client bootstraps persisted recipient settings into server memory after reload. | The pinned `@getpaseo/plugin@0.8.0` declaration gives `registerSettings()` a `void` result, so the server has no read/subscription handle. Use SLP's existing private state-file pattern and record this host gap. Newer online docs describe a server handle; do not assume it exists in the pinned package. |
-| Begins observing and may call Jev after plugin installation. | SLP currently says it has no background semantic detector. New observation and external transmission must be separately enabled and documented in the package contract. |
+| Fixed providers `codex-lead`/`codex-peer`/`codex-supervisor` ([`server/config.ts`](https://github.com/hoangnb24/paseo-supervision/blob/1bad19b8ee6c58482494f56a3d8c6edb4f969ee1/server/config.ts)). | Roles derive from [`plugin/shared/families.ts`](../../plugin/shared/families.ts) — the twelve exact `slp-<family>-<role>` ids. Providers outside the registry are never auto-classified. |
+| Every discovered Lead routes to one UI-selected Supervisor. | Same outcome, opt-in: **daemon defaults** apply to every discovered SLP Lead without an explicit route; explicit per-Lead routes override (an explicit `off` wins). Defaults are off until the Human selects a mode. Rooms never mix: each case is judged against its own Lead's communication. |
+| Semantic three-question rubric ([`server/jev.ts`](https://github.com/hoangnb24/paseo-supervision/blob/1bad19b8ee6c58482494f56a3d8c6edb4f969ee1/server/jev.ts)). | Restored as rubric 2 with SLP terms, plus `no_action_required` and code-offered link questions (below). |
+| All-axis veto: any unknown axis makes the whole decision unknown. | Not copied. Findings are independent per axis; an unknown axis never erases another axis's supported finding. |
+| `JEV_API_KEY` env, TypeSafe only, 15 s timeout. | Existing SLP Jev config and private key (TypeSafe or OpenRouter, pinned model, response-pin validation), 5 s single-shot timeout, credential guard. No second key path. |
+| Env `PASEO_SUPERVISION_ALERT_CONFIDENCE`, default 0.9. | `confidenceThreshold` in the store (0.5–1, default 0.9), one value for evaluator and Manager. |
+| Invalid env configuration throws in `contribute()`, so the **whole upstream plugin** fails to load. | Only the supervision capability stops: an invalid store is off with a visible Manager error; the rest of SLP keeps working. |
+| Supervisor chosen in host settings; the client persists the setting between an RPC `prepare` and `commit`, and a loaded client must bootstrap the server after restart. | One server-side CAS writer on the private store; every client and the observer read the same file. The server needs no client to start observing after a restart. |
+| Command Center "Set this thread as Supervisor", "Open supervision settings", "Disable Supervisor notifications"; bell in the recipient workspace. | Bell only ([`plugin/client/supervision-controls.ts`](../../plugin/client/supervision-controls.ts)), with "Open supervision settings" and "Turn off alerts" (notify → shadow). The Human rejected Command Center items as too hidden (2026-09-26); the Supervisor is picked by name in the Manager card instead. |
+| Mark-before-send, no retry, refresh-before-send. | Kept, with a persisted attempt store, per-finding dedupe, and deferral while the Supervisor is running. |
+| Open cases, dedupe and alerts in memory; nothing survives restart. | Cases stay process-local (no replay); bounded metadata rings keep the review trail and delivery attempts. |
 
-The reference plugin's [`observer.ts`](https://github.com/hoangnb24/paseo-supervision/blob/1bad19b8ee6c58482494f56a3d8c6edb4f969ee1/server/observer.ts)
-does offer reusable ideas: synchronous hook capture, a serialized background
-queue, parent-based room membership, archive generations, matching turn-start
-ordering, unknown chronology buckets, stale-assessment invalidation, recipient
-refresh before send, and no automatic retry after uncertain delivery. Its
-[offline verification](https://github.com/hoangnb24/paseo-supervision/blob/1bad19b8ee6c58482494f56a3d8c6edb4f969ee1/docs/VERIFICATION.md)
-reports mocked tests and typecheck, not live Jev or daemon acceptance.
-
-## Proposed ownership and data flow
+## Ownership and data flow
 
 ```mermaid
 flowchart LR
-    UI[SLP Manager: Supervision] -->|CAS settings RPC| Store[Private supervision.json]
-    Hooks[Paseo lifecycle hooks] --> Capture[SLP communication capture]
-    Store --> Gate[Exact Lead route + Jev capability gate]
+    UI[Manager card / bell] -->|CAS RPC| Store[Private supervision.json]
+    Hooks[Paseo lifecycle hooks] --> Capture[Provider-aware capture]
+    Store --> Gate[Effective route + Jev capability gate]
     Capture --> Gate
-    Gate -->|bounded, complete evidence| Jev[Jev decision transport]
-    Jev --> Judge[Local validation + uncertainty gate]
-    Judge -->|shadow| Review[Bounded metadata for Human review]
-    Judge -->|notify: suspected drift| Sup[Assigned active Supervisor]
+    Gate -->|bounded packet| Jev[Jev decision transport]
+    Jev --> Judge[Strict parse + per-axis gates + findings]
+    Judge --> Ring[Metadata ring for review]
+    Judge -->|notify| Deliver[Revalidate, reserve, send]
+    Deliver --> Sup[Verified Supervisor]
 ```
 
-`plugin/index.server.ts` registers lifecycle hooks beside its existing
-`agent.create` and `agent.session_open` hooks. Keep the observer in
-`plugin/server/supervision/`; shared RPC schemas and role matching belong in
-`plugin/shared/`. The client adds a Supervision section to
-[`ManagerSurface.tsx`](../../plugin/client/ManagerSurface.tsx), with an optional
-agent-context command to prefill the selected Lead or Supervisor. The command
-still saves through the same server RPC; it does not create agents.
-
-No observer code belongs in the immutable `bin/`/`src/` runtime payload. The
-plugin owns event observation while it is enabled; provider wrappers continue
-to own role delivery. The existing on-demand [`src/monitor.mjs`](../../src/monitor.mjs)
-remains a distinct source of cheap signal candidates.
-
-| Planned file | Responsibility |
+| File | Responsibility |
 | --- | --- |
-| `plugin/shared/supervision.ts` | Exact SLP role predicates, route and RPC schemas. |
-| `plugin/server/supervision/capture.ts` | Provider-aware timeline extraction with explicit visibility states. |
-| `plugin/server/supervision/observer.ts` | Lifecycle registration, chronology, cases, queue, archive generations and delivery gate. |
-| `plugin/server/supervision/assessment.ts` | Jev question set, strict response validation and local verdict rules. |
-| `plugin/server/supervision/state.ts` | Private route CAS and bounded metadata retention. |
-| `plugin/client/cards/supervision.tsx` | Route selection, mode, gate status and shadow review list in the Manager. |
-| `plugin/index.server.ts`, `plugin/index.client.tsx` | Wire and clean up the new server and client contributions. |
+| `plugin/shared/supervision.ts` | Role predicates, schema-3 store, schema-1/2 migration view, effective-route resolution, observation/finding/delivery metadata, RPC contracts. |
+| `plugin/server/supervision/state.ts` | Served-home binding, the single CAS writer, SDK validation with pending verification, served-home actions (status, disable notifications). |
+| `plugin/server/supervision/capture.ts` | The capture module: one entry point, per-family adapters inside; returns brief/handback evidence, per-call send input and outcome, send coverage and issues. |
+| `plugin/server/supervision/assessment.ts` | Rubric-2 questions, link questions, strict parsing, local gates, per-axis judgment. |
+| `plugin/server/supervision/observer.ts` | Hooks, discovery, chronology, cases, queue, archive generations, packets, findings, closure, dispatch pass. |
+| `plugin/server/supervision/delivery.ts` | Attempt store (mark-before-send), recipient predicate, alert template. |
+| `plugin/client/cards/supervision.tsx`, `plugin/client/supervision-form.ts` | Manager card and its view model (scope, pickers, plain-English text, findings summary). |
+| `plugin/client/supervision-controls.ts` | The recipient-workspace bell. |
 
-### Pinned host capability gaps
+No observer code lives in the immutable `bin/`/`src/` runtime payload.
+[`src/monitor.mjs`](../../src/monitor.mjs) stays a separate on-demand tool.
 
-| Missing/limited capability | Evidence | Design response |
+### Host capability gaps and host facts
+
+| Capability | Evidence | Response |
 | --- | --- | --- |
-| Server-side plugin settings read/watch in the installed 0.8.0 package | `node_modules/@getpaseo/plugin/dist/server/contracts.d.ts` returns `void` from `registerSettings`, although the current online reference describes a handle. | Use the already established private SLP state-file pattern; load it at plugin start and revalidate on the first hooked event. No client bootstrap is needed. |
-| Per-item turn ID or authenticated sender on timeline messages | Paseo lifecycle and protocol 0.8.0 types; upstream [`INPUT_SHAPES.md`](https://github.com/hoangnb24/paseo-supervision/blob/1bad19b8ee6c58482494f56a3d8c6edb4f969ee1/docs/INPUT_SHAPES.md). | Use matched start/end observation order; ambiguity is unknown. |
-| Proven normalized `send_agent_prompt` shape for every SLP family | Upstream investigation sampled one Codex/Meetless path. | Capture sanitized family fixtures before enabling that family. Unsupported shapes are unknown. |
-| Visibility into `assignmentFile` content and whether a session-final response was read by Lead | SLP's prepare helper can put only a path in `initialPrompt`; lifecycle events do not report read receipts. | Do not read arbitrary files or infer delivery. Mark the affected axes unknown. |
-| Structured report-recipient ID for a Peer assignment | SLP permits an explicit report recipient distinct from the parent for observe-existing work; the lifecycle agent record carries parentage but not the assignment route. | Capture the final session handback and any confirmed Peer sends, but leave route-compliance and Lead-receipt judgments unknown. Investigate a structured label on `create_agent` only after verifying its live MCP schema and readback. |
-| Cancellation of an already issued `agents.ref(id).send()` | Paseo 0.8.0 SDK exposes a promise with no abort parameter. | Revalidate before send, bound the wait, mark before dispatch, and report uncertain outcome without retry. |
+| Server-side plugin settings read/watch | Installed `@getpaseo/plugin@0.8.0` `registerSettings()` returns `void`. | Private state file read by the server; no client bootstrap. |
+| Per-item turn id or authenticated sender on timeline messages | Protocol 0.8.0 `AgentTimelineItem`; hook items are bare. | Matched start/end ordering; the finish-envelope fallback is text correlation, not authentication; ambiguity is unknown. |
+| Normalized timeline shapes per family | Observed 2026-09-26 for codex, claude and devin (live smoke; [fixtures README](../../tests/fixtures/supervision/README.md) rows 16–18) and pi (one authorized pi Peer, row 19). | Only fixture-backed shapes are verified (see Provider coverage). |
+| Devin send outcome | The Devin provider's ACP update for MCP tools carries only `status` — no `rawOutput`, no `content` (its own session record, row 18); the host mapper would keep either. | Devin sends are recognized with verified recipients but their outcome is unknown; a Devin Lead's handling is never judged. A host-side send receipt (sender, recipient, callId, success, turn linkage) would be the fix — not implemented. |
+| `assignmentFile` content, Lead read receipts, structured report recipient | Lifecycle events and snapshots carry none. | Pointer brief → brief and handback unobservable; `report-route-unverifiable` disclosed on every case. |
+| Cancelling an issued `send()` | `PaseoAgentHandle.send(text, {messageId})` has no abort. | Revalidate, reserve, bound the wait, report uncertain, never retry. |
+| Non-interrupting delivery to a running agent | `PaseoAgentSendOptions` exposes no `activeTurnBehavior`; host 0.9.1 `session.js` defaults it to `interrupt` (protocol enum `interrupt`/`steer`). The handle forwards options untyped, but relying on an undeclared option is a workaround — not used. | Defer while the refreshed Supervisor is `running`; an idle→running race can still interrupt (disclosed). |
+| Plugin-session refresh of a live SLP agent | Live 2026-09-26 (host 0.9.1, app over relay): saving a route for a live `slp-devin-lead` failed "Agent not found" from `paseo.agents.ref(id).refresh()` in the plugin handler, while the app listed the agent. Host `getAgentPayloadById` returns null only through `isProviderVisibleToClient`; root cause not confirmed ([fixtures README](../../tests/fixtures/supervision/README.md) row 15). | A save no longer requires a snapshot: no snapshot (null or thrown) records the agent **unverified** and the save lands; a returned snapshot is still checked exactly. Routes activate only on host evidence (below). |
+| Host-side dedupe of repeated sends | Host 0.9.1 `message-receipts` persists (agentId, messageId) with a request fingerprint: a completed replay is a no-op, a pending one fails "outcome unknown", a different body fails "key conflict". | Deterministic `messageId` and deterministic alert body as defence in depth; the plugin's own attempt store remains the dedupe (0.8 hosts are not assumed to have receipts). |
 
-### Configuration and authority
+## Configuration and authority
 
-- Add `jev.capabilities.supervision`, default `false`, to the Jev card. Show
-  the enable control only after Jev has a valid enabled configuration, pinned
-  provider/model, and private key. Jev setup alone never opts in. Turning the
-  feature off gates new capture and assessment; turning it back on requires
-  explicit per-Lead routes. The Jev card must preserve other capability keys
-  on save so editing routing cannot silently turn supervision on or off.
-- Store `slp-runtime/state/supervision.json` with schema version 1 and one
-  route per Lead ID: `{ leadAgentId, leadWorkspaceId, supervisorAgentId,
-  mode: "off" | "shadow" | "notify" }`, plus a bounded
-  `pendingDelayMs` (proposed default 60 seconds). `notify` requires a Supervisor ID;
-  `shadow` may keep one for later but sends no prompt. IDs are exact, never
-  inferred from title, cwd, workspace, or nearest active Supervisor.
-- Add typed `get-supervision` and `set-supervision` RPCs with a raw-file SHA-256
-  compare-and-swap token. Write through the existing atomic private-file
-  helper. Recheck the token after any awaited agent validation. An invalid or
-  unreadable file means **off with a visible error**, never an empty route that
-  the UI presents as a successful save.
-- Extend `get-jev`/`set-jev` with a configuration revision or raw-file hash
-  before adding the new capability toggle. The current Jev card writes a
-  reconstructed `{routing}` capability object, so it must preserve all saved
-  capability keys and reject a stale save instead of overwriting another
-  client's supervision choice.
-- At save time, refresh the named Lead and Supervisor through the connected
-  Paseo SDK. Require an active exact SLP role provider, non-archived agent,
-  matching Lead workspace, and an explicit operator selection. At every
-  evaluation and before every prompt, re-read the gates and refresh the
-  recipient. Archive or changed provider/status disables delivery for that
-  route; there is no fallback recipient. A restored ID requires fresh active
-  verification.
-- The server process must bind the state path to the daemon home it actually
-  serves. The existing `local-target` value is a prefill, not proof of host-home
-  mapping. If the selected target cannot be verified against that process,
-  reject the save and record a host capability gap instead of writing another
-  daemon home's files.
-- `off` captures and sends nothing. `shadow` captures and may send selected
-  communication to Jev, with no Supervisor prompt. `notify` adds the alert
-  path. Both active modes require a specific Human-approved Lead route and an
-  explicit UI disclosure that full captured communication can leave the host.
-  A missing or broken Jev configuration disables these modes while leaving
-  every existing SLP feature available.
-  No installation, reload, activation, or Jev routing toggle enables them.
-  A persisted route loads when the plugin starts; before the first assessment
-  after restart, the hook's connected SDK context verifies its agents. Cases
-  from before restart are not replayed.
-- A failed Jev capability/key/target gate, or an unavailable recipient in
-  `notify`, pauses capture for that route and shows a reason in the Manager.
-  It does not retain new message bodies or spend on assessments while delivery
-  is impossible. A newly added provider family remains unsupported until its
-  normalized timeline fixture and parser tests pass.
+The store is `<daemonHome>/slp-runtime/state/supervision.json`, schema 3:
 
-### Observation and correlation
+```json
+{
+  "schemaVersion": 3,
+  "confidenceThreshold": 0.9,
+  "defaults": { "mode": "off", "supervisorAgentId": null, "supervisorWorkspaceId": null, "pendingDelayMs": 60000 },
+  "routes": [{ "leadAgentId": "…", "leadWorkspaceId": "…", "supervisorAgentId": "…", "supervisorWorkspaceId": "…", "mode": "shadow", "pendingDelayMs": 60000 }]
+}
+```
 
-1. Filter exact owned provider IDs using the shared family/role registry.
-   Observe only Leads named in active routes and their direct Peer children,
+- **Modes.** `off` captures and sends nothing. `shadow` captures, sends the
+  packet to Jev and records findings. `notify` is shadow plus Supervisor
+  delivery. `notify` requires a Supervisor id (route or default).
+- **Resolution.** An explicit route decides alone — an explicit `off` keeps
+  that Lead unobserved. Otherwise a **discovered** SLP Lead follows active
+  defaults. A Lead is discovered only from a lifecycle record whose provider
+  is an exact `slp-<family>-lead`, or from a refresh that proves it (a Peer
+  event of an undiscovered parent triggers that refresh). An explicit active
+  route also needs discovery, with the discovered workspace equal to the
+  route's `leadWorkspaceId`; until then its gate reads `lead-not-seen-yet`
+  (or `lead-workspace-mismatch`) and nothing is observed. The default
+  Supervisor is never observed as its own Lead.
+- **Threshold.** `confidenceThreshold` applies to every axis behind a finding
+  and to delivery. It is model concentration, not measured accuracy.
+- **Pending delay.** 0–24 h, default 60 s. A checkpoint for delivering
+  brief/handback findings, never a deadline that turns silence into drift.
+- **Validation (save time).** Every named agent is refreshed. When the host
+  returns a snapshot it must match exactly: an explicit active route's Lead
+  is an active exact SLP Lead in the declared workspace; a named Supervisor
+  (route or default) is an active exact SLP Supervisor (status
+  `initializing`/`idle`/`running`) in any workspace, and its workspace is
+  recorded server-side (`supervisorWorkspaceId`; it places the bell). When
+  the refresh returns nothing or throws, the save still lands and the
+  response lists the agent in `unverified` with the reason; a Supervisor
+  then keeps the workspace the Manager's picker supplied. This is safe
+  because an unverified Lead's route observes nothing until host evidence
+  arrives, and delivery re-checks the recipient before every send. With
+  defaults off, an unchanged default recipient keeps its recorded workspace
+  without a liveness check. Off routes need no liveness. No inference from
+  title, cwd or workspace; no fallback recipient. A route written before
+  `supervisorWorkspaceId` existed reads it as null and places its bell in the
+  Lead's workspace.
+- **CAS.** The token is the sha256 of the raw file bytes (no separate
+  revision or route-generation field exists). `set-supervision` must present
+  the token it read; every writer rechecks it after its awaited SDK
+  validation and writes atomically (0600). The served-home action
+  `disable-supervision-notifications` reads and writes in one call through
+  the same writer; disabling is a pure reduction
+  (notify → shadow) and re-validates nothing, so it succeeds even when an
+  unrelated route's Lead is gone. An invalid or unreadable file is **off with
+  a visible error**, never an empty config; open cases close
+  `config-invalid` (distinct from `route-removed`).
+- **Served home.** State binds to the daemon home this plugin process serves
+  (exported `PASEO_HOME`); a UI target or a default-guessed home that cannot
+  be verified is refused and recorded as a host capability gap.
+- **Migration.** A schema-1 file (routes only) or schema-2 file is read as
+  schema 3 with **every route and the defaults off**, recipients and other
+  fields kept, and the previously enabled routes and defaults listed
+  (`migration.disabledRoutes`, `migration.disabledDefaults`) for the Manager's
+  Restore. Each upgrade widened what can leave the host (schema 2: cross-Peer
+  bodies and delivery; schema 3: Claude Code and Devin message content), so
+  an upgrade must not widen an earlier choice. The file is untouched until
+  the Human saves; writes are always schema 3; the delivery attempt history
+  is not reset.
+- **Gate failure.** A failed Jev capability/key/target gate pauses capture
+  daemon-wide, drops retained bodies and spends nothing. An unavailable
+  notify recipient blocks delivery for that Lead with a visible reason while
+  observation continues.
+
+## Observation and correlation
+
+1. **Membership.** Observe only Leads resolved above and their direct Peers,
    using `parentAgentId` from hooks and the daemon parent label on refreshed
-   snapshots. Never treat common cwd/workspace as parentage. A route to a
-   parentless or differently parented Lead is allowed when explicitly assigned;
-   Peer membership still requires that Lead's actual parent link.
-2. On `agent.created`, `agent.archived`, `agent.turn_started`, and
-   `agent.turn_ended`, capture only the minimal normalized communication
-   boundary synchronously and return from the hook. HTTP and SDK refresh/send
-   run in a plugin-lifetime background queue, outside the hook deadline.
-   Archive generations invalidate pending work and block old turns from
-   restoring an archived agent. After plugin reload, a newly observed turn may
-   restore discovery only after a read-only refresh verifies active parentage.
-3. Peer brief: the latest `user_message` is a **candidate**, not an
-   authenticated complete assignment. If it points to `assignmentFile`, or a
-   source boundary is ambiguous, mark brief visibility incomplete; do not
-   read arbitrary files or ask Jev to judge brief completeness. Peer handback:
-   take the last `assistant_message` of a completed turn as the same
-   session-visible handback the reference plugin uses. Separately capture
-   confirmed `paseo.send_agent_prompt` reports from Peer to their actual
-   recipient, with recipient and body as delivered-communication evidence.
-   When the two bodies differ, keep their distinct provenance; never silently
-   replace one with the other. If the assigned report recipient is not
-   machine-verifiable, leave route compliance and whether Lead received the
-   report unknown. Failed/canceled Peer turns cannot establish a completed
-   session handback, although an individually confirmed send still records
-   delivery.
-4. Lead handling: accept only confirmed `paseo.send_agent_prompt` tool calls
-   with parsed `{agentId, prompt}` and a successful structured MCP result.
-   Successful individual sends on failed/canceled turns still count.
-   Refresh recipients; keep messages to any direct Peer in the same Lead room,
-   and include confirmed Lead reports to that route's Supervisor as a separate
-   communication class. Unrelated recipients, final Lead prose, failed calls,
-   and executable-wrapper text cannot prove handling. A Lead may also act
-   directly; absent observable communication is **unknown**, never silence
+   snapshots. A Peer is admitted only after a refresh verifies its parent;
+   `agent.created` payloads are persisted claims, not creation proof. Common
+   cwd or workspace is never parentage.
+2. **Hooks.** `agent.created`, `agent.archived`, `agent.turn_started`,
+   `agent.turn_ended` capture the minimal normalized boundary synchronously
+   and return. SDK refresh, Jev HTTP and delivery run on one plugin-lifetime
+   queue. Archive generations are monotonic; a tombstoned id cannot re-enter
+   until a refresh verifies restoration.
+3. **Capture evidence.** `capture.ts` is the one module that reads provider
+   shapes; the observer and assessment never name a family. For each ended
+   turn it returns, separately:
+   - **brief / handback** — `verified` (the family's message mapping has a
+     real normalized fixture and the item matches it), `missing` (the turn
+     region is known and the message is not there), or `unverified` with a
+     cause (`unsupported-family` for a non-registry provider, `turn-boundary-unverified` when no
+     `user_message` opens the slice, `role-prefix-unrecognized`). The latest
+     `user_message` of a completed Peer turn is the brief and the last
+     `assistant_message` the handback. When that message starts with the
+     compact SLP launch envelope (`SLP role`, `Launch binding`, `Assignment`),
+     capture validates the role against the actor and the bound provider
+     family, then keeps only the assignment body; runtime binding metadata is not sent as communication
+     evidence. This envelope is observed in the Codex, Claude and Devin
+     fixtures; the Pi path is covered with the real launch builder synthetically
+     because the live Pi message had no wrapper. A Devin message is read
+     strictly whenever it carries ANY fixed structural line of the SLP
+     transport anywhere in the text — the role line, either half of the
+     role-prefix terminal line, the recovery and snapshot lines, the
+     onboarding locator, the managed-runtime helper block, the
+     communication-language line, the work-tracker line, the carrier block
+     or a launch binding (pinned to the renderer sources by a test) — exactly one recognized
+     wrapper for the captured actor's role, or `role-prefix-unrecognized`; a
+     Devin message with no trace at all is captured verbatim as a plain
+     follow-up (`devin-plain-message-v1`, seen live in r4) — its role comes
+     from the host-verified provider, never from the text. Free policy prose
+     from the role files is not a fixed line, so a fragment made only of such
+     prose would read as plain — a disclosed residual. A pointer to
+     `assignmentFile` is a content fact (`brief-references-assignment-file`),
+     never read.
+   - **each send** — input (`verified` recipient + prompt, or unverified with
+     a reason) and outcome: `accepted` needs the semantic success of exactly
+     that call in a verified shape; `rejected` needs an explicit failure
+     result tied to the call (`success:false`, `isError`, a failed status
+     with an error and no success payload); everything else is `unknown`
+     (running, canceled — a canceled call may still have delivered — missing
+     output, prose, an unverified shape, or contradictory envelopes
+     `send-result-contradictory`). A body leaves capture only for a verified
+     input with an accepted outcome.
+   - **send coverage** — whether the family's send shapes are recognized and
+     their outcomes decodable; a call naming `send_agent_prompt` that no
+     adapter recognizes makes the turn's coverage unverified
+     (`send-shape-unverified`). An MCP proxy surface (`mcp__paseo`, bare
+     `mcp`) whose target tool cannot be read — input not an object, a detail
+     type other than `unknown`, or no `tool` — does the same (fail-closed;
+     never a send, never a body); only the bare proxy's observed discovery
+     inputs (search/list/connect/describe) are exempt. A shell command is
+     never read as a send.
+   Accepted Peer sends are kept as delivered reports; a Peer send receipt
+   never removes the brief/handback axes.
+4. **Lead sends.** Accepted sends count, including on failed/canceled turns.
+   Recipients are refreshed: a verified direct Peer of the same Lead is room
+   communication (this Peer, or cross-Peer); the route's Supervisor is the
+   report class. **Scope of an unproven send.** Every case of a Lead has the
+   same disposition-carrying set — the Lead's verified direct Peers and the
+   route Supervisor — because a cross-Peer message or an escalation may
+   dispose of any case's obligation. A send into that set whose outcome is
+   rejected or unknown therefore leaves every case of that Lead with an
+   incomplete candidate set: it is kept ids-only in each case's uncertain
+   lane with its reason, and handling stays unknown for all of them (never a
+   candidate, never a body). A send to anyone outside the set — another
+   Lead's Peer, an unrelated agent — touches no case. An unverified input
+   (recipient unknown) might be inside the set, so it gates every case of
+   that Lead too. Narrowing to the recipient's own case would let case A be
+   judged — and alert on drift — while a possibly-correcting message to Peer
+   B is unobservable. The Lead's family send
+   coverage is looked up from the Lead snapshot every evaluation refreshes
+   (a verified host record — never inferred from the Peer); an unverified
+   family (`send-coverage-unverified` for devin, `unsupported-family` for a
+   non-registry provider, `lead-provider-unknown` without a record) leaves handling unusable
+   from the first assessment. Final prose and wrapper text prove nothing.
+   Direct Lead action with no observable communication stays pending, never
    drift.
-5. Use a monotonic callback-order counter. A Lead send is subsequent handling
-   only when its matching non-null turn-start event was observed strictly after
-   the Peer handback. When no usable start reached the observer instance —
-   plugin reload erases the in-memory start maps, lifecycle hook calls can
-   time out, and gate pauses drop starts at the hook — an end-only fallback
-   may still prove ordering from the `turn_ended` event itself: the
-   `user_message` opening that turn's slice — the same slice send
-   extraction uses — is this case's handback delivery, meaning the
-   `<paseo-system>` finish notification embedding the handback body with
-   the peer's id at the status-line position, so it precedes every
-   extracted send and the in-event ordering is sufficient evidence. A bare
-   `send_agent_prompt` report body is never an anchor: timeline
-   `user_message` items carry no authenticated sender (the host passes the
-   prompt through verbatim — no wrapper, no sender field), so a text-only
-   match cannot distinguish the peer's delivery from a manual message or
-   another agent's identical input. A matching `user_message` in an older
-   turn, or an envelope naming the peer only inside its title or reason,
-   proves nothing either. The
-   fallback never fabricates a start timestamp; whatever it cannot establish
-   stays uncertain, flagged `lead-start-end-derived` when it did prove the
-   ordering and `lead-start-unmatched` when it could not. Overlap,
-   missing/mismatched starts without such in-event proof, unsupported
-   provider tool shapes, delivery ambiguity, or a failed recipient refresh
-   remain uncertainty and locally block both closure and alert. New evidence
-   arriving during an assessment invalidates that assessment before delivery.
+5. **Chronology.** A Lead send follows the handback when its matching
+   non-null turn-start was observed strictly after the handback, or — when no
+   usable start reached this observer — when the turn slice opens with this
+   case's finish-notification envelope (peer id at the status-line position,
+   handback in the response section). The envelope is text correlation, not
+   an authenticated sender; a bare report body, an older slice, or a foreign
+   status line never anchors. Chronology is judged per case and only for a
+   turn that laned a send into that case. Non-qualifying sends land in the
+   uncertain lane; overlap and missing starts gate handling only.
 
-Paseo 0.8/0.9 lifecycle payloads provide the needed event names and full
-timeline, but timeline items have no per-item turn ID or timestamp, and the
-observer's start bookkeeping is plugin-process state that does not survive
-reloads or a dropped hook call — the end event's own ordering is the only
-honest fallback. The reference plugin's
-[input-shape investigation](https://github.com/hoangnb24/paseo-supervision/blob/1bad19b8ee6c58482494f56a3d8c6edb4f969ee1/docs/INPUT_SHAPES.md)
-establishes one normalized Codex/Meetless `send_agent_prompt` shape; it does
-not establish the same shape for Pi, Devin, and Claude. Before supporting a
-family in active modes, collect sanitized, read-only fixtures from that
-family's actual Paseo timeline. Unsupported shapes stay unknown.
+### Provider coverage
 
-### Jev assessment and local gates
+What each family can contribute today (packet 3, capture `slp-capture-6`).
+"Verified" means a sanitized normalized fixture observed on a real timeline
+backs the shape; it certifies extraction, not content or authorship.
 
-Ask three narrow typed Choice questions about applicable Lead brief quality,
-Peer handback quality, and observable Lead handling. Adapt the reference
-[`server/jev.ts`](https://github.com/hoangnb24/paseo-supervision/blob/1bad19b8ee6c58482494f56a3d8c6edb4f969ee1/server/jev.ts)
-rubric to SLP's actual assignment, report-route, evidence, ownership, and
-review-gate language. Mark every message body as untrusted data. Jev cannot
-grant authority, certify an artifact, infer that a required reviewer ran, or
-turn missing visibility into a violation.
+| Family | Brief / handback (as Peer) | Send input | Send outcome | Handling of its Peers (as Lead) |
+| --- | --- | --- | --- | --- |
+| codex | verified (live compact launch envelope; only the assignment body is captured) | verified (`paseo.send_agent_prompt`, object input; alias and string input unverified) | verified (`structuredContent.success`, `isError`) | judgeable |
+| claude | verified (live compact launch envelope; only the assignment body is captured) | verified (`mcp__paseo__send_agent_prompt`) | verified (`output.output.success`; failed/denied = rejected) | judgeable (send shape observed on a Peer; Lead-role live run not done) |
+| devin | verified for the two observed prompt wrappers — the full ACP role bundle (sometimes wrapping the compact launch envelope) or the direct compact envelope, checked against the actor's role; capture keeps only the assignment body — and for a plain follow-up with no transport trace (captured verbatim). Any trace in another form (wrong role, merged, truncated, embedded) is unverified | verified (ACP title `Calling send_agent_prompt from paseo`) | unknown — the provider emits no result | never judged (`send-coverage-unverified`) |
+| pi | verified (live message had no role prefix — the policy rides `--append-system-prompt`; compact launch envelope uses the shared parser, covered synthetically) | verified (proxy tool `mcp__paseo`, `input.tool = "paseo_send_agent_prompt"`, object `args`; the bare `mcp` proxy, `paseo.send_agent_prompt` and string args stay unverified; `mcp` search/list/connect/describe calls are not sends; a proxy call with an unreadable target makes coverage unverified) | verified (`details.{mode:"call", tool:"send_agent_prompt"}.mcpResult.structuredContent.success`, `isError`; the `content[].text` copy is never parsed) | judgeable (send shape observed on a Peer; no `slp-pi-lead` provider exists, Lead-role live run not done) |
 
-Use SLP's existing Jev provider configuration and credential guard. Extend
-[`plugin/server/jev.ts`](../../plugin/server/jev.ts) with a guarded resolver
-and a request helper for this server-side consumer; keep endpoint, model and
-redaction behavior in parity tests with [`src/jev.mjs`](../../src/jev.mjs).
-The plugin compiler cannot import `src/` across its root boundary. Do not add
-a second `JEV_API_KEY` path. Support the configured TypeSafe `/v1/systemone`
-or OpenRouter Decisions endpoint and the configured pinned model. Before
-network transmission, apply the existing
-credential-shaped-string guard to the entire outgoing state; a match makes
-the case unknown and emits only a bounded local reason code. Do not transmit
-tool outputs, reasoning, unrelated history, raw errors, or credentials.
-The outbound state contains only the bound Lead/Peer IDs, case and turn/message
-IDs, the complete captured brief and session handback bodies, confirmed
-room/report prompts, and visibility flags. A field that is too large or
-incomplete is unknown; it is never silently shortened into apparently
-complete evidence.
+Mixed rooms are judged per axis: a devin Peer under a codex, claude or pi Lead
+gets all three axes; a codex/claude/pi Peer under a devin Lead gets brief and
+handback only (partial support, not an unusable case). Assessment summaries record `captureVersion`;
+rows from before it read `legacy-1` and keep their old verdicts — history is
+never re-evaluated.
 
-Only a complete, schema-valid response may influence the local decision.
-Require all three answer objects; reject choices outside their declared
-vocabulary, malformed distributions, ties, out-of-range or nonfinite
-probabilities, a response model outside the configured provider's pin rule,
-errors, and timeout. A declared `unknown` choice remains an unknown assessment
-for that axis. The proposed notification threshold is `0.9` on every axis
-used to justify an alert, initially fixed for the pilot; concentration is not
-measured accuracy. Require observable supporting communication for a
-handling-drift alert. A standalone brief/handback gap can be flagged after
-the configured review delay when its body is complete and that axis is
-confident, even if delivery or Lead handling is unknown; the notification
-must state those limits and ask for review. A correlated observable repair
-suppresses it. Delay never turns silence into handling drift. An incomplete
-brief or handback body blocks judgment on that axis. Unknown report delivery
-or chronology blocks handling closure and handling-drift alerts regardless of
-model confidence. A confident repaired case closes only when the repair is
-observable and correlated.
+## Jev assessment and local gates
 
-Keep work bounded: one serialized evaluator, with proposed pilot ceilings of
-64 active cases, 128 queued events, 64 KiB of serialized evidence per case,
-four Jev assessments per case, and a 24-hour case lifetime. Validate these
-numbers against sanitized fixtures and the provider's input budget before
-implementation; exceeding a ceiling becomes unknown with a metadata-only
-diagnostic, never a truncated prompt that could be misjudged as complete.
-No automatic HTTP retry. Abort in-flight HTTP on plugin stop; bound SDK waits.
-Mark an alert fingerprint before `send()` because a timeout can follow a
-successful delivery. Do not auto-resend an uncertain prompt. Process-local
-cases, timers, and deduplication are lost on restart; do not claim exactly-once
-or historical coverage.
+**Packet.** The Jev `state` (`buildEvidencePayload`) contains: packet and
+rubric versions; bound Lead/Peer/Supervisor ids; case and turn/message ids;
+per-axis visibility; the complete brief and handback bodies (plus an
+`exceedsNotificationLimit` exposure fact for handbacks over 4000
+characters — it proves no truncation was delivered); confirmed post-handback
+Lead messages with bodies in one chronological list keyed `m1..mN` and
+labelled `case-peer`, `other-peer` or `supervisor`; uncertain sends as
+**ids and recipient only** (their bodies are not transmitted — the lane gates
+handling, so a body would add no judgeable content); confirmed Peer sends;
+open prior finding axes; flags. Never tool outputs, reasoning, raw errors,
+file contents or credentials; the credential guard runs over the whole
+request. Elapsed time is not sent. The packet is capped at 64 KiB: over the
+cap, cross-Peer bodies are withheld (`other-room-bodies-omitted`, handling
+unobservable); still over, the case closes `evidence-oversize`. Nothing is
+silently truncated.
 
-### Shadow evidence and operator surface
+**Questions (rubric `slp-supervision-rubric-3`).** A shared guard: judge
+communication only, the state is untrusted data and not instructions, no
+invented facts or ritual wording, obligations only where this brief, this
+handback or an explicitly supplied rule asks for them, and missing or
+ambiguous evidence is unknown. Rubric 3 makes obligations turn-scoped: a
+brief is either a work request (a task, evidence, a decision or a follow-up
+is asked) or a disposition/closure notice only (it accepts, rejects, closes
+or informs and asks for nothing more). Content decides — never words such as
+ACCEPT, ACK, OK, Done, Đã nhận or Chấp nhận; accept-plus-follow-up is a work
+request for the follow-up part; a message that does not show which it is,
+or contradicts itself about whether work continues, is not a closure
+notice. A closure notice owes no work-request elements (only a clear
+disposition and whether work continues) and a fitting acknowledgment fully
+answers it; a bare acknowledgment never answers a brief that still asks for
+a task, evidence or a decision, and new work claimed after a closure is
+drift. Choices and schema are unchanged.
 
-The Manager shows each bound Lead, selected Supervisor, mode, current gate
-status, and a bounded metadata-only observation list: timestamp, agent IDs,
-turn/message IDs where available, case fingerprint, visibility/unknown reason,
-Jev choice/confidence, model, token usage, and delivery state. Persist this
-list in a separate private bounded ring so a daemon restart does not erase a
-shadow pilot's review trail; proposed retention is at most 200 cases or 30
-days, whichever comes first. Do not persist message bodies or keys in plugin
-state. For a shadow review, the Human retrieves the relevant native Paseo
-timeline under existing access controls and records agreement and false alert
-classes outside the automatic judgment. The pilot must specify its sample and
-exit criteria before the Human explicitly changes that Lead to `notify`;
-there is no automatic promotion.
+- `leadBrief` — satisfied / drift / unknown: does the brief carry what this
+  task needs (bounded outcome, dependencies, write or read-only scope,
+  invariants and authority limits, expected evidence, stop/reopen) to the
+  extent each applies?
+- `peerHandback` — satisfied / drift / unknown: does the handback answer its
+  brief, separate complete/missing/failed/unverified, state ownership, and
+  state evidence/consequence/decision for a blocker? Honestly reported
+  incomplete work is not drift; an informational answer needs nothing more.
+- `leadHandling` — handled / no_action_required / pending / drift / unknown:
+  did later communication dispose of this handback's obligation (resolve,
+  request specific evidence, accept/reject with reason, defer with owner and
+  checkpoint, escalate to the Supervisor)? Any listed recipient may carry
+  it; no direct reply is not drift; acknowledgment, DONE, tests or silence
+  are not closure; elapsed time is a checkpoint.
+- **Link questions**, only when confirmed candidates exist (the newest
+  eight with bodies): `dispositionMessage` (which message carries the
+  disposition or mishandling), `briefCorrection` and `handbackCorrection`
+  (asked only for an open finding on that axis). Their choice vocabulary is
+  exactly the candidate keys plus `none`/`unknown`, so a schema-valid answer
+  can only name a message the code supplied. Membership is checked; it does
+  not prove the judgment right.
 
-The UI must distinguish **observed**, **evaluated**, **unknown**, **suspected
-drift**, and **notification delivery uncertain**. An empty alert list proves
-none of these are healthy. Notification text cites the case fingerprint,
-route, three assessments, observed message evidence and visibility limits;
-it asks the Supervisor to review and contact the Lead through the assigned
-route. It must never tell the Supervisor to accept work or message a Peer.
+Brief and handback bodies are immutable per case, so those axes are asked
+once. Handling and link questions are asked on the initial assessment and
+again whenever the packet changes. Only a complete schema-valid response for
+exactly the asked questions counts: strict choices, finite ~1-sum
+distributions with a unique maximum, and a response model within the
+configured pin rule. A failed or malformed call proves nothing and is never
+retried automatically.
 
-## Implementation order and acceptance gates
+**Local gates.**
 
-1. **Host evidence first:** confirm the pinned hook, settings, agent-refresh,
-   parent-label and normalized tool-call shapes in this checkout and sanitized
-   fixtures for each intended provider family. Record missing shapes before a
-   parser workaround. Keep unsupported families off.
-2. **Configuration seam:** add shared schemas, the `supervision.json` CAS RPC,
-   Jev capability/UI controls and exact Lead-to-Supervisor binding. Test
-   target isolation, concurrent saves, restart load, archive, bad provider,
-   and disabled defaults. No lifecycle hook should call Jev yet.
-3. **Shadow observer:** add capture, chronology, queue, privacy preflight,
-   Jev questions/response validation, local unknown gates, bounded metadata,
-   stop cleanup, and no notification path. Test synthetic cases that would
-   otherwise produce false drift: different room, unobserved direct action,
-   assignment-file pointer, final-only handback, overlapping turn, failed
-   tool send, canceled Lead turn with a confirmed send, stale assessment, and
-   archive/restore races.
-4. **Notification gate:** after the Human's shadow criteria are met, implement
-   `notify` with exact route refresh, generation checks, one attempt per
-   fingerprint, and explicit delivery uncertainty. Test concurrent route
-   changes and archive immediately before send.
-5. **Documentation and live validation:** amend
-   [`docs/contract.md`](../contract.md), [`docs/architecture.md`](../architecture.md),
-   both READMEs, and the Manager help text to state the new detector boundary,
-   external-data/cost implications, provider coverage and restart limits.
-   Run local typecheck/tests and plugin compile on one stable candidate.
-   Separately, with task authority, run a disposable end-to-end room through
-   the requested E2E procedure. Local checks alone are not live acceptance.
+| Scope | Flags | Effect |
+| --- | --- | --- |
+| Case | `capture-paused`, `credential-shaped-content`, `evidence-oversize`, `peer-turn-not-completed`, `no-observable-communication` (brief and handback both missing — an unverified message is communication, not silence) | Close unknown before any Jev call. |
+| Brief | brief `missing`/`unverified`, empty, or `brief-references-assignment-file` | Brief unusable; handback unusable too (request-relative judgment needs the request) and **handling unusable** with the brief's reason (packet 3: the obligation's request must be readable). |
+| Handback | handback `missing`/`unverified` or empty | Handback and handling unusable. |
+| Handling | `lead-start-unmatched`, uncertain sends, Lead send reasons (`send-not-completed`, `send-input-unparsed`, `send-result-unobservable`, `send-result-unsuccessful`, `send-result-contradictory`, `send-shape-unverified`, `recipient-refresh-failed`, `recipient-inactive`), Lead coverage (`send-coverage-unverified` for devin, `unsupported-family`, `lead-provider-unknown`; `family-shape-unverified` only on older rows), `queue-overflow`, `other-room-bodies-omitted` | Handling unusable; brief/handback still judged. |
+| None | `report-route-unverifiable`, `lead-start-end-derived`, `lead-turn-not-completed` | Disclosed only. |
 
-Do not copy code directly without preserving the upstream Apache-2.0 notice
-and recording which source commit supplied it. A clean SLP implementation of
-the algorithms is preferable because its role, routing, Jev, and privacy
-contracts materially differ.
+**Judgment and findings.** Per axis, below the threshold, `unknown`, or an
+unobservable axis yields no finding. A confident brief or handback `drift`
+records a finding. `handled` counts only with a linked disposition message;
+`drift` counts as a handling finding only when linked to the message that
+mishandles the obligation — silence can never be mishandling.
+`no_action_required` settles handling without any message; `pending` keeps
+the case open at any elapsed time. Findings are immutable records (axis,
+choice, confidence, linked call id). A later message resolves a brief or
+handback finding only when Jev links it as that finding's specific
+correction; a handling finding is resolved only by a linked disposition
+whose message was appended to the case strictly after the mishandling
+message (both must be in the case's confirmed lanes — a missing order proves
+nothing). A clean handling disposition never repairs an unrelated gap.
 
-## Open decisions for the implementation assignment
+**Closure.** Without open findings a case closes `evaluated` when handling is
+settled and both body axes were judged or are unobservable, `unknown` with
+the gate reason when handling is permanently gated (every gate input only
+accumulates), or `unknown` at the assessment ceiling. With open findings it
+closes as suspected drift once handling is settled (or the ceiling is
+reached), the checkpoint has passed and any notify delivery has settled; a
+permanently gated handling axis keeps it open until expiry so a linked
+correction can still arrive. `no_action_required` closes the observer case
+only — never the task, never acceptance.
 
-1. Which Lead(s) and provider families form the first shadow pilot? The
-   reference repo's genuine tool-shape evidence covers only a Codex path.
-2. What sample size, false-alert class, and cost ceiling must the Human see
-   before `notify` is allowed? Confidence alone cannot answer this.
-3. Can the live `create_agent` path carry and later expose a structured
-   report-recipient label for every SLP provider? If not, route compliance
-   remains outside this detector; session-visible handbacks still support
-   communication-quality assessment.
+**Cache and invalidation.** The sha256 of state plus questions is stored
+with the answers; an identical rebuilt packet re-derives the verdict without
+a call. New bodies or flags change the packet and need a fresh bounded call.
+Every in-flight assessment carries an evaluation basis (per-Lead queued
+jobs, per-case evidence version, archive generations, gate-down purges,
+config and gate file stamps); any change discards the paid answer before it
+is used.
+
+**Retention of process state.** Capture and send dedupe windows are pruned
+after 24 h (a duplicate hook delivery arrives within moments); an archived
+Lead's send dedupe is dropped at archive, since its dead-era captures fail
+the generation compare. A Lead turn-start whose end never arrives is pruned
+after 24 h (that turn then reads unmatched — the conservative outcome).
+Drained per-Lead queue counters are deleted; per-Lead gate reasons are kept
+only for explicit routes, discovered Leads and Leads with open cases; Peer
+membership and discovered Leads are removed at archive. Archive generations
+and tombstones are deliberately never pruned: they are the archive/ABA
+authority for queued work and late events, one small entry per archived id
+for the process lifetime. The in-memory metadata ring holds exactly the ≤200
+rows written to disk.
+
+**Bounds.** One serialized evaluator; 64 open cases; 128 queued events;
+64 KiB packet; **six** Jev assessments per case (the initial assessment plus
+re-assessments on changed packets — the former four assumed a single delayed
+assessment); 24 h case lifetime; 5 s single-shot HTTP; 15 s SDK waits.
+Exceeding a bound becomes unknown with a metadata diagnostic.
+
+## Notification delivery
+
+`notify` runs the same observer and evaluator as `shadow`, then a dispatch
+pass after each drain:
+
+- **Eligibility.** Open findings whose confidence meets the *current*
+  threshold and that were not yet attempted for this recipient. Handling
+  mishandling is eligible immediately; brief/handback findings only after
+  the pending-delay checkpoint, so a Lead correction linked before it
+  prevents the alert. `pending` is never eligible.
+- **Revalidation.** Before any attempt the recipient is refreshed and must
+  be the exact id, an exact `slp-<family>-supervisor`, not archived, and in
+  a deliverable status. After the await the case, gate, effective route
+  (mode, recipient, source) and archive state must be unchanged; otherwise
+  the dispatch is canceled and never redirected. An unavailable recipient
+  blocks delivery with a visible reason (`notify-recipient-…`).
+- **Deferral.** A `running` Supervisor is not prompted (the host would
+  interrupt its turn); the dispatch re-checks with backoff (30 s doubling to
+  10 min) until the recipient is idle or the case closes. A refresh failure
+  defers the same way; no attempt has been made.
+- **Mark before send.** The attempt (case, finding axes, recipient,
+  deterministic message id) is written to `state/supervision-deliveries.json`
+  before the SDK call. `accepted` means the host accepted the request — not
+  that the Supervisor read it. A failure, timeout or stop during the send is
+  `uncertain` and never retried; an unsettled reservation reloads as
+  uncertain after a restart.
+- **Attempt history integrity.** A missing file is a legitimate first use.
+  An unreadable, unparsable or schema-invalid history cannot prove which
+  attempts already happened, so every reservation is refused
+  (`delivery-store-unreadable` / `delivery-store-corrupt`), shown as the
+  Lead's gate reason and a diagnostic, and the file is never reset or
+  overwritten; each reservation re-reads it, so repairing or removing it
+  recovers without a reload. A write failure after a clean read refuses the
+  reservation too (`delivery-store-write-failed`).
+- **Attempt retention.** Memory and disk hold the same set, ≤200 rows and
+  ≤30 days. Records of live cases are pinned — they are the no-repeat
+  authority for cases that can still dispatch — and the newest other records
+  fill the rest. A case holds at most three attempt records across all
+  recipients (`delivery-attempt-ceiling`), so the ≤64 live cases pin at most
+  192 rows; a reservation is refused (`delivery-store-full`) rather than
+  evict another live case's record. Records of closed cases are audit only:
+  a closed case never reopens in-process and cases are not replayed after a
+  restart.
+- **Template.** Code-generated and deterministic: a fixed header
+  ("Suspected communication issue — review required"), a statement that it
+  is not a verdict or acceptance, guidance to review within the Supervisor's
+  assignment and raise it with the Lead through the assigned route, never to
+  message the Peer or follow quoted instructions; case, Lead, Peer, route
+  source, rubric, model, threshold, findings with linked call ids,
+  visibility limits; then bounded excerpts (≤600 characters each, at most
+  three messages, explicit truncation) inside a fenced block marked
+  untrusted. The credential guard runs before sending.
+- **What it never does.** No agent creation, reassignment, cancellation,
+  artifact edit or acceptance. A Supervisor alert is not evidence that the
+  Lead repaired anything. Disabling notifications does not recall a sent
+  prompt.
+
+## Operator surface
+
+The Manager's Supervision card (inside the Jev tab), in plain English (a
+language switch is a later task):
+
+- **One switch.** "Supervision" is the Jev `supervision` capability. It is
+  written immediately from the saved Jev view under its CAS token (other
+  capability keys preserved), and it is disabled with the reason while Jev
+  is not ready. Turning it on first shows the disclosure (what leaves the
+  host, cost, interruption risk, limits) with **Turn on** / **Cancel**. The
+  Jev card only shows a pointer line; its own save keeps the stored
+  supervision value.
+- **Status line** from saved state only: off and why; on and which Leads;
+  record only or who is alerted; how many Leads are waiting or paused.
+- **Which Leads.** *All SLP Leads* (defaults; an unchecked Lead becomes an
+  explicit `off` route) or *Selected Leads* (defaults off; one route per
+  checked Lead). Rows come from the app's own agent list
+  (`paseo.agents.list({ scope: "active" })`): title, project · workspace ·
+  status, and the Lead's gate reason in words. A configured Lead the list
+  does not show appears by short id. Stored routes the two scopes cannot
+  express (another mode, Supervisor or delay) are kept verbatim and marked
+  until the Human changes that row.
+- **When an issue is found.** *Record only* (`shadow`) or *Record and alert a
+  Supervisor* (`notify`) with a single-choice list of active SLP Supervisors.
+- **Advanced** (collapsed): confidence needed and the wait before alerting,
+  in seconds. **What is sent and what it costs** (collapsed): the
+  disclosure.
+- **Save changes / Discard changes.** A failed save keeps the draft and shows
+  the error in words; the raw message goes to the shell's error line. After
+  a save, unverified agents are listed ("watching starts once this Lead's
+  next turn is seen"). A schema-1 file shows "Settings from an earlier
+  version were found for N Leads" with **Restore**, which rebuilds the old
+  choices as an unsaved draft.
+- **Recent findings.** Open issues with Lead → Peer names, the problem in
+  words, alert state, and **Open Lead** / **Open Peer** (client navigation,
+  hidden on hosts without it); counts of checked-with-no-issue and in
+  progress; unchecked cases grouped by reason; a reminder that no findings
+  does not mean healthy. **Technical details** (collapsed) keeps the raw
+  readout: gate codes, diagnostics, per-case states, counts, findings with
+  linked/resolving call ids, delivery state (presentation states
+  `reserved`/`accepted`/`uncertain`/`deferred`/`canceled`/`blocked`; the
+  attempt store persists only `reserved`/`accepted`/`uncertain`),
+  visibility and the last assessment with rubric version.
+
+A bell appears in each notify recipient's workspace with **Open supervision
+settings** and **Turn off alerts**; it is re-derived from the stored config
+on load, after local changes and on a 60 s client-side poll of
+`get-supervision-status` (a cheap file read on the daemon; no daemon-side
+watcher). There are no supervision Command Center items.
+
+Persisted state is metadata only: `state/supervision-cases.json` and
+`state/supervision-deliveries.json`, each ≤200 entries or 30 days. Rows from
+before rubric 2 read as `rubricVersion: legacy-1`; their choices never
+inherit rubric-2 meaning. Cases and the queue are process-local: a restart
+does not replay missed turns. For review, the Human reads the native Paseo
+timeline under existing access controls.
+
+## Verification and remaining acceptance
+
+Local: unit and scenario tests for capture, rubric/parse, gates, judgment,
+packet allowlist, discovery, migration, findings and linked resolution,
+cache/invalidation (including the suspension-site matrix), delivery
+(eligibility, deferral, revalidation, cancel, mark-before-send, uncertain,
+stop), store CAS, pending verification and served-home actions, the client
+view model (scopes, kept routes, restore, pickers, text) and the bell;
+typecheck and host compile. These prove mechanics, not judgment quality.
+
+Not yet done, each needing its own authority: a labelled model evaluation
+with predetermined positive, negative and ambiguous cases; a disposable live
+end-to-end room on a real daemon (shadow first, then notify to a test
+Supervisor) including an observed interruption check; Lead-role live runs
+for claude, codex and pi (no `slp-<family>-lead` provider of those families
+exists on the test daemon); a pi rejected/failed send observed live (its
+rejected classification rests on the observed envelope and synthetic
+mutations); a host send receipt for devin.
+
+## Open decisions
+
+1. Which Leads and families form the first shadow pilot, and which sample,
+   false-alert classes and cost ceiling the Human needs before enabling
+   `notify` anywhere. Confidence alone cannot answer this.
+2. Whether a structured, authoritative report-recipient signal can exist
+   (writer, binding time, amendments). Without it route compliance stays
+   outside this detector.
+3. Whether the SDK will expose a non-interrupting delivery option; until
+   then deferral-while-running is the mitigation.
+4. Evaluation semantics of non-work turns — addressed by rubric 3 (above).
+   Live r4 showed three acknowledgement/follow-up Peer turns whose
+   `peerHandback` came back `drift` because an ACK was judged as a work
+   handback. Rubric 3 clarifies turn-scoped obligations instead of filtering:
+   every turn is still a case judged by Jev, and no keyword heuristic
+   suppresses or exempts a turn. A bounded synthetic eval (12 en/vi cases, 7
+   negative controls, one live run on typesafe/jev-1.13.0;
+   `.local-checks/supervision-provider-design-20260926/implementation/ack-semantics/`)
+   agreed with every `peerHandback` label and 9/12 `leadBrief` labels, with
+   no false finding at the 0.9 threshold; the three `leadBrief` misses are
+   low-confidence drift on short work briefs, also present under rubric 2.
+   The synthetic set did not reproduce the live r4 drift and says nothing
+   about calibration; a live follow-up on real turns remains the acceptance
+   check.

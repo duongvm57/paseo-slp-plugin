@@ -7,7 +7,7 @@ import type { EmbeddedPayload } from "../../shared/contracts.ts";
 export const embeddedPayload: EmbeddedPayload = {
   "schemaVersion": 1,
   "candidate": {
-    "sha256": "f1e0844eb982a825590c207d75b3eae8321cf78d443878d6dbf51c1c089110ea",
+    "sha256": "118d62d6bbf0c9a9a08334e8b5a24402c7dec118e5f3084b0cb325fa880a6927",
     "files": [
       {
         "path": "bin/claude-role.mjs",
@@ -43,7 +43,7 @@ export const embeddedPayload: EmbeddedPayload = {
       },
       {
         "path": "package.json",
-        "sha256": "364216689c2a23544ca5d40873a41a7ebf18abf725a182a62f8124b1f31f7bd5"
+        "sha256": "155cd60fde9c45709237430269a015ba2f0e35ae2373f12cc010066a3783be98"
       },
       {
         "path": "skills/paseo-slp-e2e/SKILL.md",
@@ -219,7 +219,7 @@ export const embeddedPayload: EmbeddedPayload = {
       }
     ]
   },
-  "payloadSha256": "bdb6d92d00c15b90bf96d9a7e38d42dd0e1222d1a16397c535c4c56d3fc6c692",
+  "payloadSha256": "4745fe290ccb1caee39d19b07148eee42410d7e906ab94259b0e9a472461b7f9",
   "files": [
     {
       "path": "bin/claude-role.mjs",
@@ -271,9 +271,9 @@ export const embeddedPayload: EmbeddedPayload = {
     },
     {
       "path": "package.json",
-      "sha256": "364216689c2a23544ca5d40873a41a7ebf18abf725a182a62f8124b1f31f7bd5",
+      "sha256": "155cd60fde9c45709237430269a015ba2f0e35ae2373f12cc010066a3783be98",
       "mode": 420,
-      "base64": "ewogICJuYW1lIjogInBhc2VvLXNscCIsCiAgInZlcnNpb24iOiAiMC40LjAiLAogICJwcml2YXRlIjogdHJ1ZSwKICAidHlwZSI6ICJtb2R1bGUiLAogICJlbmdpbmVzIjogewogICAgIm5vZGUiOiAiPj0yMiIKICB9LAogICJiaW4iOiB7CiAgICAicGFzZW8tc2xwIjogImJpbi9zbHAubWpzIgogIH0sCiAgInNjcmlwdHMiOiB7CiAgICAiaW5zdGFsbDpzbHAiOiAibm9kZSBiaW4vc2xwLm1qcyBpbnN0YWxsIC0tcGFzZW8taG9tZSAtLWFwcGx5IC0tcmVsb2FkIiwKICAgICJ0ZXN0IjogIm5vZGUgLS10ZXN0IHRlc3RzLyoudGVzdC5tanMiLAogICAgImUyZSI6ICJub2RlIGUyZS9jbGkubWpzIiwKICAgICJjaGVjayI6ICJub2RlIGJpbi9zbHAubWpzIGlkZW50aXR5IiwKICAgICJnZW5lcmF0ZTpwbHVnaW4tcGF5bG9hZCI6ICJub2RlIHNjcmlwdHMvZ2VuZXJhdGUtcGx1Z2luLXBheWxvYWQubWpzIiwKICAgICJjaGVjazpwbHVnaW4tcGF5bG9hZCI6ICJub2RlIHNjcmlwdHMvZ2VuZXJhdGUtcGx1Z2luLXBheWxvYWQubWpzIC0tY2hlY2siLAogICAgInR5cGVjaGVjayI6ICJ0c2MgLS1ub0VtaXQgLXAgdHNjb25maWcuanNvbiIKICB9LAogICJkZXZEZXBlbmRlbmNpZXMiOiB7CiAgICAiQGdldHBhc2VvL2NsaWVudCI6ICIwLjguMCIsCiAgICAiQGdldHBhc2VvL3BsdWdpbiI6ICIwLjguMCIsCiAgICAiQGdldHBhc2VvL3Byb3RvY29sIjogIjAuOC4wIiwKICAgICJAdHlwZXMvbm9kZSI6ICIyNC4xMC4xIiwKICAgICJAdHlwZXMvcmVhY3QiOiAiMTkuMS4xNyIsCiAgICAiZXNidWlsZCI6ICIwLjI1LjEyIiwKICAgICJyZWFjdCI6ICIxOS4xLjkiLAogICAgInJlYWN0LW5hdGl2ZSI6ICIwLjgxLjUiLAogICAgInR5cGVzY3JpcHQiOiAiNS45LjMiLAogICAgInpvZCI6ICI0LjYuNSIKICB9Cn0K"
+      "base64": "ewogICJuYW1lIjogInBhc2VvLXNscCIsCiAgInZlcnNpb24iOiAiMC40LjAiLAogICJwcml2YXRlIjogdHJ1ZSwKICAidHlwZSI6ICJtb2R1bGUiLAogICJlbmdpbmVzIjogewogICAgIm5vZGUiOiAiPj0yMiIKICB9LAogICJiaW4iOiB7CiAgICAicGFzZW8tc2xwIjogImJpbi9zbHAubWpzIgogIH0sCiAgInNjcmlwdHMiOiB7CiAgICAiaW5zdGFsbDpzbHAiOiAibm9kZSBiaW4vc2xwLm1qcyBpbnN0YWxsIC0tcGFzZW8taG9tZSAtLWFwcGx5IC0tcmVsb2FkIiwKICAgICJ0ZXN0IjogIm5vZGUgLS10ZXN0IHRlc3RzLyoudGVzdC5tanMiLAogICAgImUyZSI6ICJub2RlIGUyZS9jbGkubWpzIiwKICAgICJjaGVjayI6ICJub2RlIGJpbi9zbHAubWpzIGlkZW50aXR5IiwKICAgICJnZW5lcmF0ZTpwbHVnaW4tcGF5bG9hZCI6ICJub2RlIHNjcmlwdHMvZ2VuZXJhdGUtcGx1Z2luLXBheWxvYWQubWpzIiwKICAgICJjaGVjazpwbHVnaW4tcGF5bG9hZCI6ICJub2RlIHNjcmlwdHMvZ2VuZXJhdGUtcGx1Z2luLXBheWxvYWQubWpzIC0tY2hlY2siLAogICAgInR5cGVjaGVjayI6ICJ0c2MgLS1ub0VtaXQgLXAgdHNjb25maWcuanNvbiIKICB9LAogICJkZXZEZXBlbmRlbmNpZXMiOiB7CiAgICAiQGdldHBhc2VvL2NsaWVudCI6ICIwLjguMCIsCiAgICAiQGdldHBhc2VvL3BsdWdpbiI6ICIwLjguMCIsCiAgICAiQGdldHBhc2VvL3Byb3RvY29sIjogIjAuOC4wIiwKICAgICJAdHlwZXMvbm9kZSI6ICIyNC4xMC4xIiwKICAgICJAdHlwZXMvcmVhY3QiOiAiMTkuMS4xNyIsCiAgICAiZXNidWlsZCI6ICIwLjI1LjEyIiwKICAgICJyZWFjdCI6ICIxOS4xLjkiLAogICAgInJlYWN0LW5hdGl2ZSI6ICIwLjgxLjUiLAogICAgInJlYWN0LXRlc3QtcmVuZGVyZXIiOiAiMTkuMS45IiwKICAgICJ0eXBlc2NyaXB0IjogIjUuOS4zIiwKICAgICJ6b2QiOiAiNC42LjUiCiAgfQp9Cg=="
     },
     {
       "path": "skills/paseo-slp-e2e/SKILL.md",

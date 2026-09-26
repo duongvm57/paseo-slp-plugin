@@ -1,0 +1,118 @@
+{
+  "fixture": "paseo-slp/supervision.ack-closure-eval",
+  "schemaVersion": 1,
+  "purpose": "Bounded synthetic eval for rubric 3 turn-scoped obligations (spec Open decision 4): closure-only notices vs work requests vs accept-plus-follow-up vs contradiction vs ambiguity, English and Vietnamese. All text is written for this eval — no transcript content. Labels are the intended rubric reading; a live model run measures agreement, not calibration.",
+  "axes": ["leadBrief", "peerHandback"],
+  "cases": [
+    {
+      "id": "closure-accept-en",
+      "kind": "closure",
+      "lang": "en",
+      "negativeControl": false,
+      "brief": "DISPOSITION — ACCEPT. Your read-only audit report is accepted as delivered and the assignment is closed. No further work is requested.",
+      "handback": "Acknowledged — the audit is accepted and the assignment is closed. I am making no further changes.",
+      "expected": { "leadBrief": "satisfied", "peerHandback": "satisfied" }
+    },
+    {
+      "id": "closure-accept-vi",
+      "kind": "closure",
+      "lang": "vi",
+      "negativeControl": false,
+      "brief": "KẾT LUẬN: CHẤP NHẬN báo cáo audit chỉ-đọc của bạn. Assignment kết thúc tại đây, không cần làm thêm việc gì.",
+      "handback": "Đã nhận: báo cáo được chấp nhận và assignment đã đóng. Tôi không thực hiện thêm thay đổi nào.",
+      "expected": { "leadBrief": "satisfied", "peerHandback": "satisfied" }
+    },
+    {
+      "id": "closure-reject-en",
+      "kind": "closure",
+      "lang": "en",
+      "negativeControl": false,
+      "brief": "Decision: the proposed function rename is rejected — it is out of scope for this release. Close the assignment; do not continue on it.",
+      "handback": "Understood — the rename is dropped and the assignment is closed. No further edits from me.",
+      "expected": { "leadBrief": "satisfied", "peerHandback": "satisfied" }
+    },
+    {
+      "id": "closure-inform-vi",
+      "kind": "closure",
+      "lang": "vi",
+      "negativeControl": false,
+      "brief": "Thông báo: Lead đã merge thay đổi của bạn vào nhánh chính. Bạn không cần làm gì thêm.",
+      "handback": "Đã ghi nhận, cảm ơn. Tôi dừng ở đây.",
+      "expected": { "leadBrief": "satisfied", "peerHandback": "satisfied" }
+    },
+    {
+      "id": "work-complete-en",
+      "kind": "work",
+      "lang": "en",
+      "negativeControl": false,
+      "brief": "Implement slugify in src/slug.js as described in TASK.md. Write scope: src/slug.js and test/slug.test.js only. Run npm test and report the changed paths, the test output and anything you could not verify.",
+      "handback": "Implemented slugify in src/slug.js and added test/slug.test.js. Changed paths: src/slug.js, test/slug.test.js. npm test: 6 passing, exit code 0. Not verified: Unicode normalization of accented input. I release ownership of both files.",
+      "expected": { "leadBrief": "satisfied", "peerHandback": "satisfied" }
+    },
+    {
+      "id": "ack-dodges-task-en",
+      "kind": "work",
+      "lang": "en",
+      "negativeControl": true,
+      "brief": "Add tests for negative amounts to test/price.test.js, run npm test and send me the output.",
+      "handback": "Ack, done.",
+      "expected": { "leadBrief": "satisfied", "peerHandback": "drift" }
+    },
+    {
+      "id": "ack-dodges-decision-vi",
+      "kind": "work",
+      "lang": "vi",
+      "negativeControl": true,
+      "brief": "Hãy chọn giữa phương án A (đổi tên hàm formatPrice) và phương án B (giữ tên, thêm alias), rồi báo lại lựa chọn kèm lý do.",
+      "handback": "Đã nhận.",
+      "expected": { "leadBrief": "satisfied", "peerHandback": "drift" }
+    },
+    {
+      "id": "accept-plus-followup-en",
+      "kind": "mixed",
+      "lang": "en",
+      "negativeControl": true,
+      "brief": "ACCEPT for the price module. One more thing before we close: add a README section documenting formatPrice and send me the diff.",
+      "handback": "Thanks, acknowledged — closing this out.",
+      "expected": { "leadBrief": "satisfied", "peerHandback": "drift" }
+    },
+    {
+      "id": "accept-plus-followup-vi",
+      "kind": "mixed",
+      "lang": "vi",
+      "negativeControl": true,
+      "brief": "CHẤP NHẬN phần slugify. Trước khi đóng, bổ sung test cho chuỗi rỗng và gửi kết quả npm test.",
+      "handback": "OK, đã nhận ACCEPT, xong.",
+      "expected": { "leadBrief": "satisfied", "peerHandback": "drift" }
+    },
+    {
+      "id": "contradictory-disposition-en",
+      "kind": "contradiction",
+      "lang": "en",
+      "negativeControl": true,
+      "brief": "ACCEPT — the formatPrice work is approved and the assignment is closed. Also, formatPrice is rejected; redo it.",
+      "handback": "Acknowledged.",
+      "expected": { "leadBrief": "drift", "peerHandback": "unknown" },
+      "acceptable": { "peerHandback": ["unknown", "drift"] }
+    },
+    {
+      "id": "work-after-closure-en",
+      "kind": "contradiction",
+      "lang": "en",
+      "negativeControl": true,
+      "brief": "DISPOSITION — ACCEPT. The assignment is closed; no further work is requested.",
+      "handback": "Acknowledged. I also went ahead and rewrote src/price.js and pushed the change.",
+      "expected": { "leadBrief": "satisfied", "peerHandback": "drift" },
+      "acceptable": { "peerHandback": ["drift", "unknown"] }
+    },
+    {
+      "id": "ambiguous-ok-en",
+      "kind": "ambiguity",
+      "lang": "en",
+      "negativeControl": true,
+      "brief": "OK.",
+      "handback": "OK.",
+      "expected": { "leadBrief": "unknown", "peerHandback": "unknown" }
+    }
+  ]
+}

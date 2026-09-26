@@ -54,7 +54,7 @@ export function useJevCard({ target, targetKey, sameTarget, callGetJev, callSetJ
   const [jevBaseUrl, setJevBaseUrl] = useState("");
   const [jevEnabledOn, setJevEnabledOn] = useState(false);
   const [jevRoutingOn, setJevRoutingOn] = useState(false);
-  const [jevSupervisionOn, setJevSupervisionOn] = useState(false);
+  const [capabilityBusy, setCapabilityBusy] = useState(false);
   const [jevDirty, setJevDirty] = useState(false);
   const [jevBusy, setJevBusy] = useState(false);
   const [jevSaved, setJevSaved] = useState(false);
@@ -131,6 +131,7 @@ export function useJevCard({ target, targetKey, sameTarget, callGetJev, callSetJ
     setJevBusy(false);
     setJevKeyBusy(false);
     setJevTestBusy(false);
+    setCapabilityBusy(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- targetKey captures target
   }, [targetKey]);
 
@@ -140,7 +141,6 @@ export function useJevCard({ target, targetKey, sameTarget, callGetJev, callSetJ
     if (jevDirty) return;
     setJevEnabledOn(jevView?.enabled === true);
     setJevRoutingOn(jevView?.capabilities?.routing === true);
-    setJevSupervisionOn(jevView?.capabilities?.supervision === true);
     const kind = jevView?.provider?.kind === "typesafe" ? "typesafe" : "openrouter";
     setJevKind(kind);
     setJevModel(jevView?.provider?.model ?? JEV_KIND_DEFAULT[kind].model);
@@ -177,7 +177,9 @@ export function useJevCard({ target, targetKey, sameTarget, callGetJev, callSetJ
         // Preserve every capability key the daemon already stores — a
         // reconstructed {routing} object would silently flip a capability
         // this card does not own (spec: set-jev must preserve saved keys and
-        // reject a stale save via the raw-file CAS token).
+        // reject a stale save via the raw-file CAS token). The supervision
+        // capability is owned by the Supervision card's switch, so it always
+        // comes from the saved view here.
         expectedSha256: jevView?.sha256 ?? null,
         jev: {
           schemaVersion: 1,
@@ -185,7 +187,6 @@ export function useJevCard({ target, targetKey, sameTarget, callGetJev, callSetJ
           capabilities: {
             ...(jevView?.capabilities ?? {}),
             routing: jevRoutingOn,
-            supervision: jevSupervisionOn,
           },
           provider: {
             kind: jevKind,
@@ -259,7 +260,37 @@ export function useJevCard({ target, targetKey, sameTarget, callGetJev, callSetJ
   const setBaseUrl = (text: string) => { markEdited(); setJevBaseUrl(text); };
   const setEnabledOn = (next: boolean) => { markEdited(); setJevEnabledOn(next); };
   const setRoutingOn = (next: boolean) => { markEdited(); setJevRoutingOn(next); };
-  const setSupervisionOn = (next: boolean) => { markEdited(); setJevSupervisionOn(next); };
+  // The Supervision card's on/off switch: one immediate set-jev built from
+  // the SAVED view (never this card's draft), flipping only the supervision
+  // capability under the view's CAS token. A dirty Jev draft stays a draft —
+  // the prefill effect is gated on jevDirty, and saveJev takes supervision
+  // from the refreshed view.
+  const setSupervisionCapability = async (next: boolean): Promise<string | null> => {
+    if (!target || jevView === null || jevView.provider === null) return "Jev settings are not loaded";
+    setCapabilityBusy(true);
+    try {
+      const result = await callSetJev({
+        schemaVersion: 1,
+        target,
+        expectedSha256: jevView.sha256,
+        jev: {
+          schemaVersion: 1,
+          enabled: jevView.enabled === true,
+          capabilities: { routing: false, ...(jevView.capabilities ?? {}), supervision: next },
+          provider: jevView.provider,
+        },
+      });
+      if (!sameTarget(target)) return null;
+      setJevView(result.jev);
+      return null;
+    } catch (error) {
+      const message = errorMessage(error);
+      update({ lastError: message }, target);
+      return message;
+    } finally {
+      if (sameTarget(target)) setCapabilityBusy(false);
+    }
+  };
   const setKeyInput = (text: string) => { setJevKeyInput(text); setJevTest(null); };
 
   return {
@@ -269,7 +300,7 @@ export function useJevCard({ target, targetKey, sameTarget, callGetJev, callSetJ
     baseUrl: jevBaseUrl,
     enabledOn: jevEnabledOn,
     routingOn: jevRoutingOn,
-    supervisionOn: jevSupervisionOn,
+    capabilityBusy,
     dirty: jevDirty,
     busy: jevBusy,
     saved: jevSaved,
@@ -285,7 +316,7 @@ export function useJevCard({ target, targetKey, sameTarget, callGetJev, callSetJ
     setBaseUrl,
     setEnabledOn,
     setRoutingOn,
-    setSupervisionOn,
+    setSupervisionCapability,
     setKeyInput,
     save,
     saveKey,
@@ -434,32 +465,13 @@ export function JevCard({ colors, target, jev }: {
             title="Routing decisions"
             hint="When armed, prepare requires a Jev decision receipt for catalog routing (run `slp route-decide`); Lead judgment alone no longer suffices."
           />
-          {/* The supervision capability control renders only once the saved
-              Jev config is enabled, schema-valid (the provider model pin is
-              enforced by JevConfig — aliases never reach the view), and the
-              private key is in place; earlier it would arm a dead flag.
-              Default off, and it never enables supervision by itself — that
-              needs an explicit Lead→Supervisor route. A key that exists but
-              fails the server's permission check surfaces the gate reason
-              instead of looking saveable — resolveSupervision rejects it
-              with jev-key-permissions. */}
-          {jev.view?.configured === true && jev.view.enabled === true &&
-            jev.view.provider !== null && jev.view.error === null ? (
-            jev.view.hasKey === true && jev.view.keyPermissionsOk === false ? (
-              <Text style={[styles.mutedSmall, { color: colors.statusDanger }]} accessibilityLiveRegion="polite">
-                Jev key file is group/other-accessible — supervision stays off (chmod 600 the jev key file).
-              </Text>
-            ) : jev.view.hasKey === true ? (
-              <SwitchRow
-                colors={colors}
-                checked={jev.supervisionOn}
-                disabled={!target || jev.busy || !jev.enabledOn}
-                onToggle={next => { jev.setSupervisionOn(next); }}
-                title="Supervision assessments"
-                hint="Grants the shadow observer access to this Jev key for explicitly bound Leads. Capability alone observes nothing — a saved route is still required."
-              />
-            ) : null
-          ) : null}
+          {/* The supervision capability is switched in the Supervision card
+              below (one switch, with its disclosure); this line only points
+              there so the Jev card does not carry a second control. */}
+          <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
+            Supervision: {jev.view.capabilities?.supervision === true ? "on" : "off"} — turn it on or off in the
+            Supervision card below.
+          </Text>
           {jev.saved && !jev.dirty ? (
             <Text style={[styles.mutedSmall, { color: colors.statusSuccess }]} accessibilityLiveRegion="polite">Saved.</Text>
           ) : null}
