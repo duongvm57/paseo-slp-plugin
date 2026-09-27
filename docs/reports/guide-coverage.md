@@ -92,7 +92,7 @@ Targets refer to the linked materials above and their named sections.
 | G19 · §5.2, §6.5 | C/T/H | Event-first; low-frequency heartbeat safety net when needed, no universal 15-minute cadence. | Explicitly prohibited | Conditional: Monitoring → Heartbeat safety net and low-frequency sweep (protocol-chosen cadence); Protocol → Monitoring and heartbeat; H01/H03. |
 | G20 · §5.2 model tier | T | Monitoring can use economical models; difficult recovery/judgment needs adequate reasoning. | Missing | Policy covered: Governance setup; Protocol → Routing and skills; preserve Human selections. |
 | G21 · §5.3 ownership | I | Lead owns framing/topology/dependencies/integration/verdict; plans provisional; requests reconciled. | Partial | Policy covered: Lead; Orchestration → Frame and select, Reopen/dependencies, Proof. |
-| G22 · §5.3 direct work | C/T | Lead may handle tiny coupled task if protocol allows; avoid difficult self-acceptance. | Restricted: Peer always writes | Policy covered: Lead; Protocol tiny-task row; difficult work uses independent judgment. |
+| G22 · §5.3 direct work | C/T | Lead may handle tiny coupled task if protocol allows; avoid difficult self-acceptance. | Restricted: Peer always writes | Policy covered: Lead assigns all implementation writes to a Peer Engineer; tiny work uses one Peer Engineer; Protocol → Tiny procedure; difficult work uses independent judgment. |
 | G23 · §5.3 trajectory | C | Split large dependency/domain branches with contract/handback, retain main Lead trajectory. | Prohibited additional lanes | Policy covered: Lead; Orchestration → Reopen, dependencies and recovery boundaries. |
 | G24 · §5.3 inputs/outputs | I | Root/protocol/assignment/inventory, owner map, routing, requests, candidate, proof, verdict and risks. | Partial | Policy covered: Lead, Delegation steps 1–3, Orchestration acceptance, Monitoring handback. |
 | G25 · §5.4 disposition | I/C | One Peer profile with task-specific Engineer/Architect/Reviewer/Scout outputs and authority. | Engineer only | Policy covered: Peer; Delegation step 2; Orchestration Frame and select. |
@@ -241,10 +241,11 @@ split axes) is now inlined in the delegation procedure, and Lead re-reads
 orchestration.md/review-gates.md at reviewer selection, re-review and
 acceptance — a compaction-era "Engineer → Reviewer" summary does not license
 one merged seat, and seats that cannot be supplied make the gate BLOCKED.
-Artifact acceptance is not assignment close: accepted Peers stay idle against
-rework and settle in a batch when the assignment that formed the team
-closes; Human stop still takes effect immediately. New seats join the team
-only through agent-scoped
+Artifact acceptance is not assignment close: each bounded task settles when
+Delivery completes and no correction or re-review remains open, even while its
+lane or team mandate continues. Accepted Peers stay idle for task-local rework;
+settlement does not auto-archive, kill or reparent them. Human stop still takes
+effect immediately. New seats join the team only through agent-scoped
 create_agent (parent link, report route, sidebar tree); prompting a standalone
 session observes existing work, never a new delegation.
 Formation follow-up (2026-09-19): delegation now classifies new-team,

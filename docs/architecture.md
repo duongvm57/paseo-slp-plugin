@@ -104,9 +104,9 @@ project-level result: framing, topology, decomposition, ownership,
 dependencies, checkpoints, review, integration, verdict. It reconstructs
 the task without pre-solving it, assigns exactly one owner per moving
 scope, writes neutral bounded briefs, and grants Peers the right to
-reopen, request dependencies or stop blocked. Tiny, tightly-coupled work
-may be Lead self-work; bounded implementation goes to a Peer Engineer;
-difficult acceptance goes to a Reviewer that did not implement;
+reopen, request dependencies or stop blocked. All implementation writes,
+including tiny work, belong to a Peer Engineer; tiny work uses one Peer
+Engineer. Difficult acceptance goes to an independent Reviewer;
 subjective or product decisions go to the Human with evidence, not a
 simulated proof.
 

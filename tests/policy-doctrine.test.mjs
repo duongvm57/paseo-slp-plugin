@@ -16,6 +16,7 @@ test('Lead implementation ownership stays with Peer Engineers across doctrine an
     ['src/templates/workspace-protocol.md', template],
     ['.paseo-slp/workspace-protocol.md', read('.paseo-slp/workspace-protocol.md')],
     ['docs/review-checklist.md', read('docs/review-checklist.md')],
+    ['docs/architecture.md', read('docs/architecture.md')],
     ['e2e/workspace-protocol.md', read('e2e/workspace-protocol.md')],
   ];
   const staleAllowances = [
@@ -24,6 +25,7 @@ test('Lead implementation ownership stays with Peer Engineers across doctrine an
     /Lead directly if protocol permits/i,
     /or Lead for permitted tiny work/i,
     /not a global prohibition on Lead direct work/i,
+    /Lead self-work/i,
   ];
 
   assert.match(lead, /Lead frames, inspects\s+and verifies, but does not implement\./i);
@@ -95,6 +97,7 @@ test('Jev routing procedure is conditional and unreadable mode fails closed', ()
   const jev = read('src/references/jev-routing.md');
   const provider = read('src/references/provider-routing.md');
   const execution = read('src/references/delegation-execution.md');
+  const onboarding = read('skills/paseo-slp-onboarding/references/peer-pool.md');
   const template = read('src/templates/workspace-protocol.md');
 
   assert.match(jev, /jevRouting\.routing` set to\s+`shadow`, `armed` or `error`/);
@@ -102,7 +105,9 @@ test('Jev routing procedure is conditional and unreadable mode fails closed', ()
   assert.match(jev, /`error` means the configured state is unreadable: block the dependent routing branch/);
   assert.match(jev, /Shadow evaluation is the gate before arming/);
   assert.match(provider, /references\/jev-routing\.md/);
-  assert.match(execution, /references\/jev-routing\.md/);
+  const conditionalJevPointer = /When `routes` reports\s+`jevRouting\.routing` as\s+`shadow`, `armed` or\s+`error`, read `references\/jev-routing\.md`; skip it for `unconfigured` or\s+`off`\. `error` blocks the dependent routing branch\./;
+  assert.match(execution, conditionalJevPointer);
+  assert.match(onboarding, conditionalJevPointer);
   assert.doesNotMatch(provider, /Shadow evaluation is the gate before arming/);
   assert.doesNotMatch(execution, /enabled-but-unarmed daemon/);
   assert.match(template, /Jev-specific\s+routing guidance is conditional on `jevRouting\.routing`/);

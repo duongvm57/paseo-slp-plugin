@@ -42,8 +42,9 @@ Read/re-read policy text under the common core's freshness rule.
    Use prepare with role=peer, route.optionId, route.catalogSha256, repository,
    workspaceId, assignment and fresh providers to validate the selection and obtain
    create arguments. Profile inventory never overrides a Peer pool selection.
-   For Jev mode-specific receipt requirements and failure behavior, see
-   references/jev-routing.md.
+   When `routes` reports `jevRouting.routing` as `shadow`, `armed` or
+   `error`, read `references/jev-routing.md`; skip it for `unconfigured` or
+   `off`. `error` blocks the dependent routing branch.
    For any role, discovery can arrive by file: the installed `slp.mjs inventory`
    helper emits {providers, profiles} for the exact daemon home (managed seats
    carry the verified invocation in their runtime helper block) — pass its
