@@ -35,7 +35,7 @@ Local installation/transport checks do not constitute workflow acceptance.
 | src/templates/workspace-protocol.md | Common repository tactics and outcome/risk-based workflow recipes, including a protocol-owned Tiny procedure with independent review. Onboarding fills assignment, execution and delivery settings in one effective repo protocol, whose Repository references section points to operational facts (check commands, skill layout) kept in `.paseo-slp/references/`; filling configuration and references is not an Override; init still uses this default and preserves existing files. The `agent_mode` field records intended spawn mode for direct launches (empty falls back to the bundle's `modeId`, then asks). |
 | src/binding.mjs | Every rule a Binding must satisfy: setting patterns, the route override deny-lists and the single provider-health check. Imports nothing from the package. |
 | src/role-bundle.mjs | Which policy bytes each role receives at session entry, and their order; the load-path contract traced in reports/guide-coverage.md. Session-entry instructions also carry the carrier block (spawn kit plus role-scoped policy-byte locators) so profile/provider launches receive the same payload prepare places in initialPrompt. Peer locators include `common.md` and `roles/peer.md`, plus `work-tracking.md` only when managed session entry enables beads; Supervisor/Lead locator sets remain complete. Managed session entry injects the plugin-set communication language (slp-runtime/state/communication-language) when present. ACP delivery freezes the verified candidate core and carrier at adapter startup, reads language per prompt, and explicitly clears earlier runtime language instructions when unset; other transports retain entry-time language semantics. |
-| src/launch.mjs, src/profiles.mjs | Select one Binding source (saved profiles, catalog routing or an explicit binding), then compose the create_agent argument record. launchPlan and handoffPlan share one builder; preparation state and validation operations also serve launchCheck, preserving each path's diagnostic order and fresh final revalidation; nothing edits the create record afterwards. Handoff adds explicit authority, old-owner evidence, resources and current work snapshot; no lifecycle mutations. request.inventoryFile fills providers/profiles the request did not inline; request.assignmentFile appends a read-first pointer to the emitted prompt without inlining file bytes. The plan also surfaces the intended `modeId` (with a warning when the binding lacks one), a `spawnKit` of role-appropriate MCP tool signatures, and an `orientation` manifest of policy-byte locators (path/bytes/sha256, `missing` for receipt-declared files absent on disk; the set derives from the install receipt, so source-only documents are never declared) — locators only, never interpretation; the same payload is carried inside `create.initialPrompt`, the only field create_agent transmits, so the spawned seat actually receives it. The prompt-side carrier is omitted only when the binding targets the canonical `slp-<family>-<role>` wrapper and the request's live provider inventory observed it — the wrapper injects the carrier at session entry; unverified targets keep the prompt fallback. |
+| src/launch.mjs, src/profiles.mjs | Select one Binding source (saved profiles, catalog routing or an explicit binding), then compose the create_agent argument record. launchPlan and handoffPlan share one builder; preparation state and validation operations also serve launchCheck, preserving each path's diagnostic order and fresh final revalidation; nothing edits the create record afterwards. Handoff adds explicit authority, old-owner evidence, resources and current work snapshot; no lifecycle mutations. request.inventoryFile fills providers/profiles the request did not inline; request.assignmentFileMode defaults to pointer, preserving the read-first prompt; snapshot mode reads and inlines a bounded, validated repository-contained copy during prepare. The same choice applies to prepare-handoff; the daemon never reads the file. The plan also surfaces the intended `modeId` (with a warning when the binding lacks one), a `spawnKit` of role-appropriate MCP tool signatures, and an `orientation` manifest of policy-byte locators (path/bytes/sha256, `missing` for receipt-declared files absent on disk; the set derives from the install receipt, so source-only documents are never declared) — locators only, never interpretation; the same payload is carried inside `create.initialPrompt`, the only field create_agent transmits, so the spawned seat actually receives it. The prompt-side carrier is omitted only when the binding targets the canonical `slp-<family>-<role>` wrapper and the request's live provider inventory observed it — the wrapper injects the carrier at session entry; unverified targets keep the prompt fallback. |
 | src/inventory.mjs | Provider/profile inventory in the exact shapes prepare consumes: `paseo provider ls --json` only when the requested home's paseo.pid names a live process, else that home's own config.json `agents.providers` — never another daemon's providers, no directory materialization; provider `enabled` may be null for unrecognized states; profiles always from `daemon.agentProfiles`. Read-only; on multi-daemon hosts the live listing reflects whichever daemon the paseo CLI reaches. |
 | src/agent-state.mjs | Shared read-only discovery of daemon persistence (`<paseoHome>/agents/*/<id>.json`) for agent listing and monitoring. A missing root yields no records; other root errors propagate; broken groups and records are skipped. Preserves filesystem read order and duplicate IDs, leaving projection and duplicate resolution to callers. |
 | src/agents.mjs | Agent listing projected from `src/agent-state.mjs`, sorted by id with duplicate records retained, with shell-quoted devin-family `devin -r` attach hints; works around `paseo inspect`/`ls` not surfacing `persistence.nativeHandle`. Read-only, best-effort host detail. |
@@ -286,14 +286,18 @@ credential guard, oversize, unverified Peer family, failed Peer turn, no
 communication) close the case before any Jev call; a brief line with optional
 leading spaces/tabs, `Assignment file:`, optional spaces/tabs, and a non-whitespace
 value is a pointer that makes brief and handback unobservable (the path is never
-read); a missing brief has the same effect. Lead send-lane and chronology
+read); this gate applies to pointer mode. In `snapshot` mode, prepare has already
+read and validated the file, so its `Assignment snapshot:` carrier and inline
+content are ordinary brief text; the daemon still never reads a file. A missing
+brief has the same effect. Lead send-lane and chronology
 gaps (unmatched start, uncertain sends, failed or unobservable sends,
 unverified Lead family, dropped events, withheld cross-Peer bodies) gate only
 the handling axis. On this host, report-route-unverifiable is added to
 completed Peer cases; incomplete Peer turns return before that flag (and
 produce no case without an accepted send). When present it is disclosed to
 Jev and the Supervisor, not a gate. External
-data/cost: an assessment sends the brief, handback, the Lead's confirmed
+data/cost: an assessment sends the brief (including an inline assignment
+snapshot when selected), handback, the Lead's confirmed
 post-handback messages to this Peer, to its other direct Peers and to the
 Supervisor, and the Peer's confirmed sends to the configured Jev endpoint;
 uncertain sends go as ids only. Mode notify additionally delivers a
@@ -334,9 +338,13 @@ prepare accepts repository, workspaceId, assignment and role. Supervisor/Lead us
 fresh profiles/providers; Peer uses providers and route.optionId/catalogSha256.
 A profiles inventory can accompany Peer discovery but does not select its runtime;
 an inventoryFile path fills providers/profiles the request did not inline (explicit
-inline arrays win, including `[]`), and an assignmentFile path appends a
-read-first pointer to the emitted prompt while keeping file bytes out of it. Both
-fields apply to prepare-handoff through the shared plan builder.
+inline arrays win, including `[]`). `assignmentFileMode` defaults to `pointer`,
+which appends the existing read-first pointer without inlining file bytes;
+`snapshot` reads and validates a repository-contained file during prepare, then
+inlines its bounded, normalized text with relative-path and SHA-256 provenance.
+Snapshot errors fail prepare with no pointer fallback. Both assignment fields
+apply to prepare-handoff through the shared plan builder; supervision never
+reads the file.
 Catalog settings cannot be overlaid via route runtime/profile overrides. Explicit
 binding without profiles remains a separate Human-authorized offline/handoff path,
 not an ordinary missing-pool fallback. Helpers emit create arguments only; Paseo

@@ -121,7 +121,10 @@ Read/re-read policy text under the common core's freshness rule.
    non-deliverable scratch path (for example .local-checks/), pass a short
    assignment plus assignmentFile=<absolute path> to prepare and keep briefs one
    per seat; the emitted prompt references the seat's brief file instead of
-   inlining it.
+   inlining it. When supervision needs an observable brief, the Lead may opt
+   into `assignmentFileMode: "snapshot"`: prepare validates and inlines the
+   bounded file, while the default pointer mode retains the existing prompt and
+   makes the brief axis unobservable.
 3. Record the returned agent/workspace IDs, assignment and ownership in your timeline.
    Verify the returned child against host evidence — actual parent and
    workspace/cwd are host-queryable; check them using the full agent ID from

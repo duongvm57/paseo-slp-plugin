@@ -601,6 +601,19 @@ test('assignment-file detector flags a pointer line without relying on renderer 
   }
 });
 
+test('assignment snapshot provenance and sentinels are ordinary inline brief content', () => {
+  for (const brief of [
+    'Assignment snapshot: .local-checks/brief.md — sha256 ' + 'a'.repeat(64) + ', 4 bytes; inline text is authoritative.\n<<<SLP assignment snapshot>>>\nwork\n<<<end SLP assignment snapshot>>>',
+    '  Assignment snapshot: .local-checks/brief.md — sha256 ' + 'b'.repeat(64) + ', 4 bytes; inline text is authoritative.\r\n  <<<SLP assignment snapshot>>>\r\nwork\r\n  <<<end SLP assignment snapshot>>>',
+    'Assignment snapshot: .local-checks/brief.md — sha256 ' + '0'.repeat(64) + ', 4 bytes; marker text alone proves no provenance.\n<<<SLP assignment snapshot>>>\nwork\n<<<end SLP assignment snapshot>>>',
+  ]) {
+    const got = capture(peerEvent('claude', [user(brief), asst('ok')]), ROUTED);
+    assert.equal(got.brief.state, 'verified');
+    assert.ok(!got.issues.includes('brief-references-assignment-file'), JSON.stringify(brief));
+    assert.equal(got.brief.value.text, brief);
+  }
+});
+
 test('a failed Peer turn keeps only accepted sends and reads no brief/handback', () => {
   const turn = firstTurn(LIVE.claude.items);
   const failed = capture(peerEvent('claude', turn, { outcome: { kind: 'failed', error: { message: 'x' } } }), ROUTED);

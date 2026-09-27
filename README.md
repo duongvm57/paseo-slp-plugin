@@ -713,7 +713,7 @@ The optional offline path: `prepare` accepts role, repository, workspaceId
 and assignment. Supervisor/Lead additionally take the `profiles`/`providers`
 inventory; a Peer takes `providers` and `route: {optionId, catalogSha256}`
 from `routes`. Profiles may accompany a Peer request for discovery, but they
-never replace the pool. Two more optional fields, both also honored by
+never replace the pool. Three more optional fields, all also honored by
 `prepare-handoff`:
 
 - `inventoryFile`: absolute path to a JSON object carrying
@@ -724,9 +724,27 @@ never replace the pool. Two more optional fields, both also honored by
   evidence — pass live `list_providers` output from the same daemon inline as
   `providers` instead.
 - `assignmentFile`: absolute path to the full assignment brief (must exist,
-  be a regular file and be readable). The prompt keeps `assignment` as a
-  short brief and appends `Assignment file: <path> — read it first; it is
-  authoritative for scope details.`; the file content is not inlined.
+  be a regular file and be readable). By default, the prompt keeps
+  `assignment` as a short brief and appends `Assignment file: <path> — read
+  it first; it is authoritative for scope details.`; the file content is not
+  inlined.
+- `assignmentFileMode`: optional `pointer` (default, byte-for-byte current
+  prompt behavior) or `snapshot`. Snapshot mode is opt-in per prepare request:
+  supplying this field without `assignmentFile`, or using another value, fails
+  with `assignment-snapshot-invalid-mode`.
+  Prepare resolves the repository and file paths, requires the file target to
+  remain inside the repository, opens a regular file without following a final
+  symlink, reads at most 16 KiB, strictly decodes UTF-8, removes a leading BOM,
+  normalizes CRLF/CR to LF, and rejects control characters, nested markers and
+  credential-shaped text. It replaces the generated pointer with an
+  `Assignment snapshot:` provenance line (repository-relative path, SHA-256
+  and normalized byte count), sentinels and the normalized inline text. Any
+  validation or read error fails prepare; it never falls back to pointer mode.
+  `prepare-handoff` uses the same behavior. The daemon never reads this file;
+  the snapshot is the brief text it already receives and may assess under the
+  existing supervision route. Snapshotting puts that bounded text in the
+  launch prompt and host timeline, so the Lead must choose an appropriate file;
+  the pattern-based credential guard does not identify ordinary passwords.
 
 An option decides the whole bundle and maps to
 `slp-pi-peer`/`slp-codex-peer`/`slp-devin-peer`/`slp-claude-peer`; a model containing `/` is
@@ -778,8 +796,10 @@ A complete request carries: `taskLabel` (or the repo name is used), the role
 (and `disposition` for Peer), the real `repository` path and `workspaceId`,
 an `assignment` naming scope, authority, the report-recipient agent ID and
 the verification/handback expectations, plus one binding source. For longer
-briefs use `assignmentFile` — a separate file per seat, referenced read-first
-rather than inlined. Before any create_agent call, Lead records why the chosen
+briefs use `assignmentFile` — a separate file per seat. Pointer mode keeps the
+read-first reference; when supervision needs an observable brief, the Lead may
+explicitly select `assignmentFileMode: "snapshot"` to inline its validated,
+bounded content. Before any create_agent call, Lead records why the chosen
 topology (which seats, which pool options) fits the assignment — under armed
 Jev routing that reason trail is the decision receipt's distribution, not
 prose.
