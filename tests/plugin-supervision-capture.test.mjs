@@ -577,9 +577,17 @@ test('missing only where the region is known; an unknown turn boundary is unveri
   assert.deepEqual(empty.brief, { state: 'missing', reason: 'brief-missing' });
   const silent = capture(peerEvent('codex', [user(''), { type: 'tool_call', callId: 'c9', name: 'unrelated.tool', status: 'completed', error: null, detail: { type: 'unknown', input: {}, output: {} } }]), ROUTED);
   assert.ok(silent.issues.includes('no-observable-communication'), 'silence is still a metadata-only case');
-  const pointer = capture(peerEvent('claude', [user('Read the assignment file at .local-checks/x.md'), asst('ok')]), ROUTED);
-  assert.ok(pointer.issues.includes('brief-references-assignment-file'));
-  assert.ok(pointer.issues.includes('report-route-unverifiable'));
+});
+
+test('assignment-file detector ignores prose that mentions a path or assignment file', () => {
+  for (const brief of [
+    'Read the assignment file at .local-checks/x.md',
+    'The assignment file is described in this paragraph.',
+    'The path .local-checks/brief.md is a source example.',
+  ]) {
+    const got = capture(peerEvent('claude', [user(brief), asst('ok')]), ROUTED);
+    assert.ok(!got.issues.includes('brief-references-assignment-file'), brief);
+  }
 });
 
 test('a failed Peer turn keeps only accepted sends and reads no brief/handback', () => {
@@ -588,6 +596,7 @@ test('a failed Peer turn keeps only accepted sends and reads no brief/handback',
   assert.deepEqual(failed.brief, { state: 'unverified', reason: 'peer-turn-not-completed' });
   assert.equal(failed.sends.length, 1);
   assert.ok(failed.issues.includes('peer-turn-not-completed'));
+  assert.ok(!failed.issues.includes('report-route-unverifiable'), 'incomplete Peer turns return before the report-route flag');
   assert.equal(capture(peerEvent('devin', firstTurn(LIVE.devin.items), { outcome: { kind: 'canceled', reason: 'x' } }), ROUTED), null,
     'without an accepted send a failed turn contributes nothing');
 });

@@ -287,8 +287,10 @@ communication) close the case before any Jev call; a pointer or missing
 brief makes brief and handback unobservable; Lead send-lane and chronology
 gaps (unmatched start, uncertain sends, failed or unobservable sends,
 unverified Lead family, dropped events, withheld cross-Peer bodies) gate only
-the handling axis. report-route-unverifiable is set on every case on this
-host and is disclosed to Jev and the Supervisor, not a gate. External
+the handling axis. On this host, report-route-unverifiable is added to
+completed Peer cases; incomplete Peer turns return before that flag (and
+produce no case without an accepted send). When present it is disclosed to
+Jev and the Supervisor, not a gate. External
 data/cost: an assessment sends the brief, handback, the Lead's confirmed
 post-handback messages to this Peer, to its other direct Peers and to the
 Supervisor, and the Peer's confirmed sends to the configured Jev endpoint;
