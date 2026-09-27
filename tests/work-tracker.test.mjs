@@ -376,12 +376,12 @@ test('session entry: disabled tracker renders byte-identically — absent file a
   assert.ok(!unmanaged.includes('Work tracker:'), 'unmanaged render ignores the setting');
 });
 
-// T1 byte-level pin (Spec F2): the disabled render must equal the render the
-// pre-feature code produced, outside the one accepted §11b locator delta —
-// the integrity list gains src/references/work-tracking.md even when disabled.
-// The fixture captures the historical render with runtime/home paths normalized.
-// Tests need neither Git history nor git/tar executables to load this baseline.
-test('session entry: disabled render equals the pre-feature render byte-for-byte outside the locator delta (T1)', t => {
+// T1 byte-level pin: disabled session entry keeps the historical instruction
+// body after removing the declared common communication-policy and Peer
+// slp-record emit-rule deltas. Keep the fixture historical; any other body
+// drift remains visible. The locator contract exposes only common.md and the
+// Peer role file.
+test('session entry: disabled Peer render keeps historical body after declared policy deltas (T1)', t => {
   const before = JSON.parse(readFileSync(join(root, 'tests/fixtures/pre-tracker-session.json'), 'utf8'));
   const home = tmpHome(t);
   const installed = join(tmp(t, 'wt-inst-'), 'release');
@@ -390,10 +390,8 @@ test('session entry: disabled render equals the pre-feature render byte-for-byte
   const after = roleBundle(installed, 'peer', env).instructions
     .replaceAll(installed, '<RUNTIME_ROOT>')
     .replaceAll(home, '<DAEMON_HOME>');
-  // Integrity locators carry per-file size+sha256, so another lane's doctrine
-  // edit legitimately rewrites that file's locator line. Pin the invariant,
-  // not the bytes: the render body must be identical, and the locator path
-  // set may gain exactly the work-tracking.md entry — nothing else.
+  // Locator hashes change with policy edits. Pin the role allowlist and body,
+  // not historical locator bytes.
   const locatorRe = /^- (.*\S) — \d+ bytes, sha256 [0-9a-f]{64}$/;
   const splitRender = text => {
     const locators = new Set(), body = [];
@@ -403,18 +401,24 @@ test('session entry: disabled render equals the pre-feature render byte-for-byte
     }
     return { locators, body: body.join('\n') };
   };
-  const a = splitRender(after), b = { locators: new Set(before.locators), body: before.body };
-  assert.deepEqual(
-    [...a.locators].filter(path => !b.locators.has(path)),
-    ['<RUNTIME_ROOT>/src/references/work-tracking.md'],
-    'work tracker adds exactly its own locator entry',
-  );
-  assert.deepEqual(
-    [...b.locators].filter(path => !a.locators.has(path)),
-    [],
-    'work tracker preserves every pre-feature locator entry',
-  );
-  assert.equal(a.body, b.body, 'disabled render body must equal the pre-feature render byte-for-byte');
+  const a = splitRender(after), b = { body: before.body };
+  const communicationPolicy = readFileSync(join(root, 'src/common.md'), 'utf8')
+    .split(/\r?\n[ \t]*\r?\n/u)
+    .find(paragraph => paragraph.includes('Seat-facing text'));
+  assert.ok(communicationPolicy, 'common.md contains the seat-facing text paragraph');
+  const peerEmitRule = readFileSync(join(root, 'src/roles/peer.md'), 'utf8')
+    .split(/\r?\n[ \t]*\r?\n/u)
+    .find(paragraph => paragraph.includes('slp-record'));
+  assert.ok(peerEmitRule, 'peer.md contains the slp-record emit-rule paragraph');
+  const withoutPeerEmitRule = a.body.replace(`\n\n${peerEmitRule}\n`, '\n\n');
+  assert.notEqual(withoutPeerEmitRule, a.body, 'the declared Peer emit-rule delta is present');
+  const historicalBody = withoutPeerEmitRule.replace(`\n\n${communicationPolicy}\n\n`, '\n\n');
+  assert.notEqual(historicalBody, withoutPeerEmitRule, 'the declared common-policy delta is present');
+  assert.deepEqual([...a.locators].sort(), [
+    '<RUNTIME_ROOT>/src/common.md',
+    '<RUNTIME_ROOT>/src/roles/peer.md',
+  ].sort(), 'tracker-off Peer carrier contains only its role allowlist');
+  assert.equal(historicalBody, b.body, 'the remaining disabled render body equals the historical baseline byte-for-byte');
 });
 
 test('session entry: enabled setting adds one pointer line between language and assignment (T3)', t => {

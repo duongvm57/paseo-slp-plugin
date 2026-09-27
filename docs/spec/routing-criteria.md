@@ -328,6 +328,16 @@ The UI has not been run/rendered in this pass. Adaptive layout per device, conte
 | `new` | Lookup on Custom seats and Token conflict. | A Custom seat's standard tokens still resolve to the shared meaning; a free string or legacy token without a definition shows "Nội dung riêng — package chưa định nghĩa" (Custom content — not defined by the package), not a guessed synonym. In a conflict, each token of both versions is lookupable; a token no longer in or not in the current set must show exactly that state — do not borrow a near-match string's meaning. |
 | `new` | Closing the lookup. | The "Đóng định nghĩa" (Close definitions) button returns the user to the suitability group just viewed, keeping the open seat, values, dirty state and any conflict-resolution choices. Opening/closing/looking up are read actions — **no confirmation needed** — and do not light up Save. Actual focus behavior needs host verification; it was not confirmed during this doc pass. |
 
+### 7.5. Repository catalog and user-scope pool: precedence and drift
+
+When a repository pins `.paseo-slp/slp-routing.json`, that catalog controls
+binding, including when it contains no options. The Manager's user-scope Peer
+pool is the fallback only when the repository has no catalog. A displayed
+`poolDrift` is an advisory difference between two Human-owned sources: the
+system does not merge them or block a launch. Bring the difference to the
+Human/Manager to reconcile the source they intend to own; read `routes` again
+for the authoritative scope and current diff.
+
 ## 8. Which seats are redundant or still missing
 
 | Assessment | Decision for the current set of 12 | Why |

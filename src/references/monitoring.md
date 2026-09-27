@@ -51,6 +51,9 @@ wake/report path meets the job's observation need, report the dependent work BLO
 
 ## Heartbeat safety net
 
+A heartbeat is the bounded fallback for gaps in event coverage, never the default
+observation plan — and it ends at settlement, not on a cadence.
+
 Whether to use a heartbeat at all is the workspace protocol/assignment's choice
 from the task's duration, risk and event coverage; cadence, timezone, expiry/run
 bounds and observer ownership are likewise repository/assignment choices — there
@@ -139,11 +142,14 @@ to the protocol; numerical examples in the guide are heuristics.
 At task completion, cancellation, handoff or expiry review, reconcile the owner map
 with the resource receipts: task descendants, pending permissions, terminals,
 workspace scripts, schedules/heartbeats and processes. Artifact acceptance alone
-is not that boundary: an accepted Peer stays idle against rework until the
-assignment that formed the team closes, then settles in one pass — idle retention neither runs
-hidden work nor delays a required cleanup. Human stop halts further
-work and follow-ups; cancel owned task agents as authorized by common policy, and
-stop the observer's own task-local wakes. Do not start a new cleanup agent after stop.
+is not settlement: settle each bounded task after Delivery completes and no
+correction or re-review remains open. Keep the same Engineer and independent review
+seats available while that task has rework. Reconcile its resources at settlement;
+preserve sessions and artifacts, and perform lifecycle actions only under explicit
+authority. A continuing lane or Lead mandate does not keep a completed task open.
+Human stop halts further work and follow-ups; cancel owned task agents as authorized
+by common policy, and stop the observer's own task-local wakes. Do not start a new
+cleanup agent after stop.
 
 Each heartbeat owner deletes its recorded task heartbeat and records the receipt.
 For another owner's heartbeat, arrange cleanup by that owner during normal handback;
@@ -154,5 +160,14 @@ resources and portfolio monitoring whose assignment continues. Stop other owned
 resources only within authority; report any that remain active or unknown.
 
 Handback lists candidate/verdict separately from resource IDs, cleanup receipts,
-continuing assignments and unknown settlement. Lifecycle idle and a deadline do not
-prove cancellation, successful cleanup or technical acceptance.
+continuing assignments and unknown settlement, and names how to reproduce or
+re-check the result and which inputs a downstream seat can consume. Lifecycle idle
+and a deadline do not prove cancellation, successful cleanup or technical
+acceptance.
+
+At settlement, the owner receiving the report writes a `slp-record` with
+`kind: "settlement"` after Delivery and closed correction or re-review. Follow
+`references/report-records.md` for the writer, durable sink and fallback,
+including the handback fallback when neither durable sink is available. That
+reference also defines timeline export fields and provider-native handle notes.
+A pointer cannot restore a host timeline that has already been removed.

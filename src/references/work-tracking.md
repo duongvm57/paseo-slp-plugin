@@ -97,3 +97,7 @@ reassigning anything.
 Every report or handback names all open issue IDs it touched. Settlement
 means no claimed-but-abandoned issue and every gate resolved or explicitly
 handed off.
+
+When the root issue is the settlement sink, keep the `kind: "settlement"`
+`slp-record` in its comment so recovery can rebuild task-to-seat evidence; see
+`references/report-records.md` for its fields and fallback sinks.

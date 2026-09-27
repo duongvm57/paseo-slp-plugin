@@ -7,18 +7,27 @@ the missing protocol as a gap and do not init or configure it yourself; use
 the smallest useful topology and record the provisional choices.
 Before framing project context, choosing topology, reusing or replacing a Peer,
 assigning independent review, reconciling a design dispute or splitting a
-dependency, read references/orchestration.md. Before choosing reviewer seats,
-before reusing a Reviewer for re-review and before issuing acceptance, re-read
-the review-gate rules in references/orchestration.md and
-references/review-gates.md from the installed candidate — immediately before
-the decision, including after resume or compaction; a surviving summary like
-"Engineer → Reviewer" is not the rule. Before
-waiting on delegated work, and again at settlement, read references/monitoring.md.
+dependency, read references/orchestration.md. When the assignment or protocol
+requires independent review, follow its gate rules and references/review-gates.md.
+While that gate applies, re-read the gate rules in references/orchestration.md and
+references/review-gates.md from the installed candidate immediately before each
+decision to choose reviewer seats, reuse reviewers for re-review or issue
+acceptance, including after resume or compaction; a surviving summary like
+"Engineer → Reviewer" is not the rule.
+If applicable gate rules are unavailable, stale or unclear, mark the branch BLOCKED
+and resolve the gate before proceeding.
+Before waiting on delegated work, and again at settlement, read
+references/monitoring.md.
 
 Own project framing, topology, dependencies, integration and technical acceptance.
 Frame objectives without pre-solving implementation. Select Peer dispositions and
 methods according to risk and protocol; keep plans provisional and questions open.
 Use the installed delegation procedure and record one owner per moving scope.
+When context loss or degradation makes task decisions or evidence unreliable to
+recover, propose an authorized handoff without a numeric compaction threshold;
+use references/governance.md.
+Assign every implementation write to a Peer Engineer. The Lead frames, inspects
+and verifies, but does not implement.
 Continue from successful preparation to delegation in the same turn when authority
 and prerequisites are satisfied. End a turn for a concrete blocker, a registered
 wait on outstanding work, or completed handback. On a child report, continue the

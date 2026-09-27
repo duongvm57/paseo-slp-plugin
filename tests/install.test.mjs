@@ -63,6 +63,30 @@ test('integrated install previews, preserves preferences and unrelated config, a
   assert.equal(existsSync(destination), false);
 });
 
+test('standalone install requires an exclusive destination for directories, files and symlinks', t => {
+  const { dir } = fixture(t);
+  const existingDirectory = join(dir, 'existing-directory');
+  mkdirSync(existingDirectory);
+  writeFileSync(join(existingDirectory, 'sentinel.txt'), 'preserve directory\n');
+  const existingFile = join(dir, 'existing-file');
+  writeFileSync(existingFile, 'preserve file\n');
+  const symlinkTarget = join(dir, 'symlink-target');
+  mkdirSync(symlinkTarget);
+  writeFileSync(join(symlinkTarget, 'sentinel.txt'), 'preserve symlink target\n');
+  const existingSymlink = join(dir, 'existing-symlink');
+  symlinkSync(symlinkTarget, existingSymlink, 'dir');
+
+  for (const destination of [existingDirectory, existingFile, existingSymlink]) {
+    assert.throws(() => install(root, destination), error => error.code === 'EEXIST', destination);
+  }
+  assert.equal(readFileSync(join(existingDirectory, 'sentinel.txt'), 'utf8'), 'preserve directory\n');
+  assert.equal(readFileSync(existingFile, 'utf8'), 'preserve file\n');
+  assert.equal(lstatSync(existingSymlink).isSymbolicLink(), true);
+  assert.equal(readFileSync(join(symlinkTarget, 'sentinel.txt'), 'utf8'), 'preserve symlink target\n');
+  assert.equal(existsSync(join(existingDirectory, 'installed.json')), false);
+  assert.equal(existsSync(join(symlinkTarget, 'installed.json')), false);
+});
+
 test('collisions and modified profiles preserve both installation and host configuration', t => {
   const { home, destination, dir } = fixture(t);
   installPaseo(root, destination, home, true);
@@ -174,7 +198,7 @@ test('installed adapter injects every role over stdio while preserving host prom
     // orchestrating roles and the re-read trigger to Lead alone; both reach
     // the seat on thread/start and thread/resume (same instruction string).
     assert.equal(/does not license merging\s+the axes into one seat/.test(instruction), role !== 'peer');
-    assert.equal(/re-read\s+the review-gate rules/.test(instruction), role === 'lead');
+    assert.equal(/When the assignment or protocol\s+requires independent review/.test(instruction), role === 'lead');
     // The C8 formation pins ride the same delegation block: the decision
     // table, formation record, placement pin and post-create verification
     // reach Supervisor and Lead, never Peer.

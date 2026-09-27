@@ -1,6 +1,7 @@
 {
   "name": "paseo-slp",
   "private": true,
+  "license": "MIT",
   "version": "0.0.0",
   "description": "SLP runtime manager plugin for Paseo (Option A v1)",
   "dependencies": {

@@ -3,7 +3,7 @@ import { isAbsolute, join } from 'node:path';
 import { roles, orchestrates } from './profiles.mjs';
 import { files, hash, readJson } from './package.mjs';
 import { spawnKit } from './spawn-kit.mjs';
-import { workTrackerBlock } from './work-tracker.mjs';
+import { readWorkTrackerSetting, workTrackerBlock } from './work-tracker.mjs';
 
 // A Role bundle is the exact policy bytes a role receives at session entry.
 // This module owns the load-path contract that docs/reports/guide-coverage.md documents:
@@ -77,18 +77,17 @@ function managedHelpers(cli, home) {
     `  init/materialize/snapshot/prepare/prepare-handoff/verify are repo-scoped: they take explicit paths and never touch a daemon home.\n`;
 }
 
-// The declared locator set a role's carrier ships: the role's required bundle
-// parts plus every src/references file. On an installed root the set derives
-// from the install receipt's candidate.files — a receipt-declared reference
-// deleted from disk still reports missing instead of vanishing from the list.
-// A source checkout has no receipt and falls back to a live scan. Nothing
-// outside the install unit (for example docs/contract.md, a source-checkout
-// document) is ever declared here. Entries sort by absolute path so the list
-// carries no bundle/load-order hint. launch.mjs orientation() renders the same
-// list into the plan's manifest; tolerance is limited to ENOENT/ENOTDIR on the
-// optional paths — permission errors, corrupt receipts and symlinked policy
-// paths are integrity failures, never absence.
-export function policyLocators(root, role) {
+// The declared locator set a role's carrier ships: required bundle parts plus
+// that role's references. Supervisor/Lead keep the full reference set; Peer
+// receives only work-tracking.md when managed session entry enables beads.
+// On an installed root, references derive from candidate.files, so a selected
+// receipt-declared file deleted from disk still reports missing. A source
+// checkout falls back to a live scan. Nothing outside the install unit is
+// declared. Entries sort by absolute path and carry no load-order hint.
+// launch.mjs orientation() renders the same set. Only ENOENT/ENOTDIR on
+// optional paths means absence; corrupt receipts, other read errors and
+// symlinked policy paths remain integrity failures.
+export function policyLocators(root, role, env = process.env) {
   const required = bundleParts(role).map(part => `src/${part}`);
   let receipt = null;
   try { receipt = readJson(join(root, 'installed.json')); }
@@ -101,6 +100,13 @@ export function policyLocators(root, role) {
     references = [];
     try { references = files(root, 'src/references'); }
     catch (error) { if (error.code !== 'ENOENT' && error.code !== 'ENOTDIR') throw error; }
+  }
+  if (role === 'peer') {
+    const daemonHome = env?.SLP_MANAGED_RUNTIME === '1' ? env.SLP_DAEMON_HOME : null;
+    const trackerEnabled = typeof daemonHome === 'string' && isAbsolute(daemonHome)
+      ? readWorkTrackerSetting(daemonHome).enabled
+      : false;
+    references = trackerEnabled ? references.filter(path => path === 'src/references/work-tracking.md') : [];
   }
   return [...required, ...references].map(path => {
     const absolute = join(root, path);
@@ -164,7 +170,7 @@ export function roleDelivery(root, role, env = process.env, options = {}) {
     (managed ? managedHelpers(cli, managed.daemonHome) : '');
   // Compute the measured carrier once, alongside the immutable core. launch.mjs
   // opts out when it owns the carrier so the initial prompt never duplicates it.
-  const carrier = options.carrier === false ? '' : carrierBlock(spawnKit(role), policyLocators(policyRoot, role), sessionLocatorCaption);
+  const carrier = options.carrier === false ? '' : carrierBlock(spawnKit(role), policyLocators(policyRoot, role, env), sessionLocatorCaption);
   return {
     role, parts, orchestrates: orchestrates(role),
     // The work-tracker pointer is an entry-time helper like managedHelpers:

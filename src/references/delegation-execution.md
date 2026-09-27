@@ -42,19 +42,11 @@ Read/re-read policy text under the common core's freshness rule.
    Use prepare with role=peer, route.optionId, route.catalogSha256, repository,
    workspaceId, assignment and fresh providers to validate the selection and obtain
    create arguments. Profile inventory never overrides a Peer pool selection.
-   When the daemon arms Jev routing (jev.capabilities.routing — see
-   references/provider-routing.md), the receipt is a required third route field:
-   author a routing brief, run `slp route-decide` and pass its decision as
-   route.decision alongside optionId/catalogSha256; a decline or transport
-   failure blocks the delegation until resolved or the Human disables the
-   capability. Under an enabled-but-unarmed daemon (shadow evaluation),
-   route-decide still emits a receipt — Lead chooses independently, supplies
-   the receipt alongside, and the plan records both picks (routing.jev.
-   jevChoice/declined) for agreement measurement; the Human arms the
-   capability only after the recorded pairs satisfy pre-registered exit
-   criteria. In armed mode the suitability reason trail is the receipt's
-   recorded distribution, not the Lead prose above. Jev output is a bounded
-   proposal — never delegation authority.
+   State in the brief that candidate/check handbacks require the `slp-record`
+   block; the record does not replace prose.
+   When `routes` reports `jevRouting.routing` as `shadow`, `armed` or
+   `error`, read `references/jev-routing.md`; skip it for `unconfigured` or
+   `off`. `error` blocks the dependent routing branch.
    For any role, discovery can arrive by file: the installed `slp.mjs inventory`
    helper emits {providers, profiles} for the exact daemon home (managed seats
    carry the verified invocation in their runtime helper block) — pass its
@@ -131,7 +123,10 @@ Read/re-read policy text under the common core's freshness rule.
    non-deliverable scratch path (for example .local-checks/), pass a short
    assignment plus assignmentFile=<absolute path> to prepare and keep briefs one
    per seat; the emitted prompt references the seat's brief file instead of
-   inlining it.
+   inlining it. When supervision needs an observable brief, the Lead may opt
+   into `assignmentFileMode: "snapshot"`: prepare validates and inlines the
+   bounded file, while the default pointer mode retains the existing prompt and
+   makes the brief axis unobservable.
 3. Record the returned agent/workspace IDs, assignment and ownership in your timeline.
    Verify the returned child against host evidence — actual parent and
    workspace/cwd are host-queryable; check them using the full agent ID from

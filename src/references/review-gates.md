@@ -8,6 +8,15 @@ docs-only edits that touch no semantics, generated-payload regeneration,
 typo or metadata fixes); a required gate over doctrine, delegation,
 packaging, behaviour or code is never single-seat.
 
+## Policy provenance
+
+For a required review gate, this package intentionally sets a two-seat floor
+with separate Spec and Standards axes. That is stricter than corpus §§9–11,
+which leaves each repository to choose its review rigor. The Human chose this
+floor in `cc80974` (2026-09-24) so one review axis cannot mask the other. Change
+it only after a later explicit Human decision revisits the assurance and cost
+trade-off; a workspace protocol cannot lower a required gate to one seat.
+
 ## Axes
 
 Two default axes, each on its own fresh seat:

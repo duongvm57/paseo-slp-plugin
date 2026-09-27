@@ -20,12 +20,15 @@ Local installation/transport checks do not constitute workflow acceptance.
 | src/references/delegation-formation.md | Conditional delegation classification and formation record: new team, continuation or observe-existing. |
 | src/references/delegation-execution.md | Conditional delegation preparation, runtime selection, creation verification, ambiguous-create recovery, notification and report retrieval. |
 | src/references/orchestration.md | Lead's conditional topology, independent review/council, dependency and integration procedure. |
-| src/references/monitoring.md | Supervisor/Lead event observation, heartbeat ownership and resource settlement. |
-| src/references/governance.md | Supervisor scope, causal notebook, authorized recovery and policy evolution. |
+| src/references/monitoring.md | Supervisor/Lead event observation, heartbeat ownership and bounded-task resource settlement. |
+| src/references/report-records.md | Handback and settlement record fields, extraction semantics, failure codes, durable sinks and provider-native timeline handles. |
+| src/references/governance.md | Supervisor scope, causal notebook, authorized recovery, cross-project relay and policy evolution. |
 | src/references/anti-patterns.md | All 20 guide §9 hypotheses with evidence, questions and bounded responses; reached on audit/drift triggers. |
-| src/references/provider-routing.md | Supervisor/Lead profile selection, Peer pool selection, validation and handoff procedure. |
+| src/references/provider-routing.md | Supervisor/Lead profile selection, Peer pool selection, validation and handoff; conditional pointer to Jev routing procedure. |
+| src/references/jev-routing.md | Conditional Jev routing procedure: load only for `shadow`, `armed` or `error`; `error` blocks the dependent branch. |
 | src/references/review-gates.md | Review gate structure: parallel axis-split seats (Spec vs Standards; cross-family seat optional, never required), Lead-owned verification distinct from review seats, smell baseline, neutral briefs, non-merged aggregation and the repeated-class correction-loop escalation. |
 | src/references/work-tracking.md | Conditional beads (`bd`) work-graph doctrine — self-gates on the session-entry `Work tracker: beads (enabled in SLP settings)` pointer: probe first, unavailable/uninitialized is a recorded gap never a block, evidence-not-control-plane boundaries, the one-writer-per-scope table (Supervisor roots / Lead children / a seat's own issue), `BEADS_ACTOR`/`--actor` attribution, and recovery/handback rules. SLP never installs, initializes or configures beads. |
+| src/report-records.mjs | Pure report-block extraction and v1 validation, candidate/evidence consistency diagnostics, and referenced output reads rooted at the verifier's `--repo` when supplied, otherwise record-declared candidate roots. |
 | src/routing.mjs | Resolve the repository catalog, falling back to the plugin-owned user-scope pool at `<paseoHome>/slp-runtime/state/peer-pool.json` when absent; bind a Lead-selected option with fresh hash and availability checks. `optionExclusions` is the single eligibility predicate — closed-vocabulary tokens (`disabled`, `availability:<state>`, `role-not-listed`) shared by enforcement and Jev candidate generation. `validateCatalog` stays shape-only apart from normalizing the legacy `optionIds` quota-fallback list in place on read (≤1 → `optionId`, >1 fails closed — wave 6) and refusing the Jev decline sentinel as an option id — a shape-level collision; the semantic layer reports a reserved standard-seat id whose tokens diverge from the package set as a Token conflict on every read, and `catalogBinding` refuses to bind one. `catalogBinding` verifies a supplied Jev receipt offline — including the vocabulary version it was issued under — and requires one when the daemon arms `jev.capabilities.routing`. |
 | src/routing-vocabulary.mjs | Canonical routing-criteria vocabulary (docs/spec/routing-criteria.md): the four axes, the 16 standard `axis:value` tokens with definitions, the 12 reserved standard-seat ids with package token sets, the §4 reading helpers and the English Jev guidance — all versioned under `ROUTING_VOCABULARY_VERSION`. `plugin/shared/routing-vocabulary.ts` is its Manager-side mirror; neither side can import the other, so tests pin identical data. |
 | src/jev.mjs | Jev (TypeSafe System One) bounded-decision transport — never an ACP provider. Per-daemon config/key resolution (fail closed, all toggles default off) over two provider kinds: `openrouter` (Decisions API, pinned `typesafe/jev-1.13`, `provider.allow_fallbacks: false` on the wire) and `typesafe` (first-party `POST {baseUrl}/v1/systemone`, pinned `jev-1.13.0`, no provider field; baseUrl may be a custom https origin+path prefix) — each with its own model pin and baseUrl rule, calls with ~5s timeout and at most one bounded retry, typed-answer validation, credential-shaped-string redaction before send, and decision-receipt build/verify with the pin chosen by the receipt's provider kind. Receipts prove consistency, not authenticity; confidence is recorded, never a threshold. |
@@ -33,8 +36,8 @@ Local installation/transport checks do not constitute workflow acceptance.
 | skills/paseo-slp-onboarding/SKILL.md | Repo discovery and protocol recommendation before asking for missing decisions. The protocol holds only the workspace's orchestration tactics, condensed from the template under the skill's protocol writing rules; invariants stay in role policy and operational facts in `.paseo-slp/references/`; custom-process interview, confirmed protocol diff and Peer pool setup with Supervisor/Lead profile verification. Supporting resources disclose setup details. Skill installation remains independent from repo initialization. |
 | src/templates/workspace-protocol.md | Common repository tactics and outcome/risk-based workflow recipes, including a protocol-owned Tiny procedure with independent review. Onboarding fills assignment, execution and delivery settings in one effective repo protocol, whose Repository references section points to operational facts (check commands, skill layout) kept in `.paseo-slp/references/`; filling configuration and references is not an Override; init still uses this default and preserves existing files. The `agent_mode` field records intended spawn mode for direct launches (empty falls back to the bundle's `modeId`, then asks). |
 | src/binding.mjs | Every rule a Binding must satisfy: setting patterns, the route override deny-lists and the single provider-health check. Imports nothing from the package. |
-| src/role-bundle.mjs | Which policy bytes each role receives at session entry, and their order; the load-path contract traced in reports/guide-coverage.md. Session-entry instructions also carry the carrier block (spawn kit plus policy-byte locators) so profile/provider launches receive the same payload prepare places in initialPrompt. Managed session entry injects the plugin-set communication language (slp-runtime/state/communication-language) when present. ACP delivery freezes the verified candidate core and carrier at adapter startup, reads language per prompt, and explicitly clears earlier runtime language instructions when unset; other transports retain entry-time language semantics. |
-| src/launch.mjs, src/profiles.mjs | Select one Binding source (saved profiles, catalog routing or an explicit binding), then compose the create_agent argument record. launchPlan and handoffPlan share one builder; preparation state and validation operations also serve launchCheck, preserving each path's diagnostic order and fresh final revalidation; nothing edits the create record afterwards. Handoff adds explicit authority, old-owner evidence, resources and current work snapshot; no lifecycle mutations. request.inventoryFile fills providers/profiles the request did not inline; request.assignmentFile appends a read-first pointer to the emitted prompt without inlining file bytes. The plan also surfaces the intended `modeId` (with a warning when the binding lacks one), a `spawnKit` of role-appropriate MCP tool signatures, and an `orientation` manifest of policy-byte locators (path/bytes/sha256, `missing` for receipt-declared files absent on disk; the set derives from the install receipt, so source-only documents are never declared) — locators only, never interpretation; the same payload is carried inside `create.initialPrompt`, the only field create_agent transmits, so the spawned seat actually receives it. The prompt-side carrier is omitted only when the binding targets the canonical `slp-<family>-<role>` wrapper and the request's live provider inventory observed it — the wrapper injects the carrier at session entry; unverified targets keep the prompt fallback. |
+| src/role-bundle.mjs | Which policy bytes each role receives at session entry, and their order; the load-path contract traced in reports/guide-coverage.md. Session-entry instructions also carry the carrier block (spawn kit plus role-scoped policy-byte locators) so profile/provider launches receive the same payload prepare places in initialPrompt. Peer locators include `common.md` and `roles/peer.md`, plus `work-tracking.md` only when managed session entry enables beads; Supervisor/Lead locator sets remain complete. Managed session entry injects the plugin-set communication language (slp-runtime/state/communication-language) when present. ACP delivery freezes the verified candidate core and carrier at adapter startup, reads language per prompt, and explicitly clears earlier runtime language instructions when unset; other transports retain entry-time language semantics. |
+| src/launch.mjs, src/profiles.mjs | Select one Binding source (saved profiles, catalog routing or an explicit binding), then compose the create_agent argument record. launchPlan and handoffPlan share one builder; preparation state and validation operations also serve launchCheck, preserving each path's diagnostic order and fresh final revalidation; nothing edits the create record afterwards. Handoff adds explicit authority, old-owner evidence, resources and current work snapshot; no lifecycle mutations. request.inventoryFile fills providers/profiles the request did not inline; request.assignmentFileMode defaults to pointer, preserving the read-first prompt; snapshot mode reads and inlines a bounded, validated repository-contained copy during prepare. The same choice applies to prepare-handoff; the daemon never reads the file. The plan also surfaces the intended `modeId` (with a warning when the binding lacks one), a `spawnKit` of role-appropriate MCP tool signatures, and an `orientation` manifest of policy-byte locators (path/bytes/sha256, `missing` for receipt-declared files absent on disk; the set derives from the install receipt, so source-only documents are never declared) — locators only, never interpretation; the same payload is carried inside `create.initialPrompt`, the only field create_agent transmits, so the spawned seat actually receives it. The prompt-side carrier is omitted only when the binding targets the canonical `slp-<family>-<role>` wrapper and the request's live provider inventory observed it — the wrapper injects the carrier at session entry; unverified targets keep the prompt fallback. |
 | src/inventory.mjs | Provider/profile inventory in the exact shapes prepare consumes: `paseo provider ls --json` only when the requested home's paseo.pid names a live process, else that home's own config.json `agents.providers` — never another daemon's providers, no directory materialization; provider `enabled` may be null for unrecognized states; profiles always from `daemon.agentProfiles`. Read-only; on multi-daemon hosts the live listing reflects whichever daemon the paseo CLI reaches. |
 | src/agent-state.mjs | Shared read-only discovery of daemon persistence (`<paseoHome>/agents/*/<id>.json`) for agent listing and monitoring. A missing root yields no records; other root errors propagate; broken groups and records are skipped. Preserves filesystem read order and duplicate IDs, leaving projection and duplicate resolution to callers. |
 | src/agents.mjs | Agent listing projected from `src/agent-state.mjs`, sorted by id with duplicate records retained, with shell-quoted devin-family `devin -r` attach hints; works around `paseo inspect`/`ls` not surfacing `persistence.nativeHandle`. Read-only, best-effort host detail. |
@@ -44,7 +47,7 @@ Local installation/transport checks do not constitute workflow acceptance.
 | src/package.mjs | Package identity, exclusive staging, integrity checks and stable Git work snapshot; untracked nested Git work-tree roots are snapshotted recursively under `nested`, sub-repos can carry their own `nested`, and index gitlinks record `{path, kind:"gitlink", indexOid, headOid, state}` with non-clean states listed in top-level `incomplete`. |
 | src/runtime-state.mjs | Read-only plugin-state probes (H13 workaround): `localTarget` mirrors the plugin's daemon-home detection; `runtimeStatus` recomputes the file-derivable parts of the daemon `status` view — receipt, owned providers/profiles, runtime and launcher integrity, config-drift presence — and reports daemon-only views (live conflicts, family availability) as gaps, never guesses. The Jev probe reports `hasKey`/`keyPermissionsOk` only — key material never enters output. Fails closed on corrupt plugin state. Mutation RPCs are Human-authority and are not exposed. Retire when the host ships `paseo plugin invoke` or MCP `invoke_plugin_rpc`. |
 | src/work-tracker.mjs | Beads (`bd`) detection and enablement — read-only probes only (`bd version`, `bd where --json` with forced `BD_DISABLE_METRICS=1`, 5 s timeout, 64 KiB cap): never installs, initializes, upgrades or configures beads, and a missing or broken tracker is a gap in the result, never a throw or a spawn blocker. `readWorkTrackerSetting` reads `<daemonHome>/slp-runtime/state/work-tracker.json` (mirrored by `plugin/server/work-tracker.ts` — absent = disabled, corrupt/foreign = disabled plus a surfaced error, non-ENOENT errors propagate). `workTrackerBlock` renders the managed session-entry pointer (silent when disabled, one gap line when unreadable); `beadsSeatEnv` supplies the hook-family `BEADS_ACTOR`/BD_* overlay. |
-| bin/slp.mjs | Install/upgrade/preview, verify/uninstall, init, materialize, routes, prepare/handoff, inventory, agents, monitor, notebook, identity, snapshot, instructions (raw session-entry bundle bytes on stdout, provenance on stderr), route-decide (the only path that calls Jev — explicit invocation, network, emits a receipt; prepare and prepare --check stay offline), status and local-target (read-only plugin-state probes), and tracker (the read-only beads probe — prints the probe JSON and exits 0 even when not `ready`) entrypoints. |
+| bin/slp.mjs | Install/upgrade/preview, verify/uninstall, init, materialize, routes, prepare/handoff, inventory, agents, monitor, notebook, records (extract and validate `slp-record` blocks with optional evidence reads), identity, snapshot, instructions (raw session-entry bundle bytes on stdout, provenance on stderr), route-decide (the only path that calls Jev — explicit invocation, network, emits a receipt; prepare and prepare --check stay offline), status and local-target (read-only plugin-state probes), and tracker (the read-only beads probe — prints the probe JSON and exits 0 even when not `ready`) entrypoints. |
 | skills/paseo-slp-e2e/SKILL.md | Single-session full-suite execution procedure; requires the source checkout and authorized Paseo actors. |
 | e2e/evidence.mjs | One contract per evidence kind: what may enter the ledger and what discharges the kind's requirement at seal. |
 | e2e/criteria.mjs | U1–U7 as code, each naming the evidence kinds that can support it; the mapping a reviewer previously held in their head. |
@@ -159,14 +162,16 @@ Load-bearing decision rules — the required review gate and agent-scoped seat
 creation — sit in that always-loaded layer, and Lead re-reads the conditional
 references at the decisions that apply them, including after resume or
 compaction.
-The carrier block (spawn-kit signatures plus policy-byte locators) reaches a
-seat through two channels: session-entry bundle injection for profile/provider
-launches, and `create.initialPrompt` for the prepare path — the only field
-create_agent transmits, so plan-level `spawnKit`/`orientation` fields alone
-would never arrive. The captions differ on purpose: session-entry locators are
-measured when the bundle loads, plan locators where prepare ran. The kit is an
-approximation to verify against live `mcp_list_tools`; locators are integrity
-evidence, not policy content. The source contract reviewers use is this file —
+The carrier block (spawn-kit signatures plus role-scoped policy-byte locators)
+reaches a seat through two channels: session-entry bundle injection for
+profile/provider launches, and `create.initialPrompt` for the prepare path — the
+only field create_agent transmits, so plan-level `spawnKit`/`orientation` fields
+alone would never arrive. Peer locators contain `common.md` and `roles/peer.md`,
+plus `work-tracking.md` only when managed session entry enables beads. The
+Supervisor/Lead sets retain their references. The captions differ on purpose:
+session-entry locators are measured when the bundle loads, plan locators where
+prepare ran. The kit is an approximation to verify against live `mcp_list_tools`;
+locators are integrity evidence, not policy content. The source contract reviewers use is this file —
 `docs/contract.md` lives in the repository and is deliberately outside the
 install unit, so locator sets never declare it.
 Protocol defaults select tactics; global roles no longer impose a single Engineer
@@ -184,8 +189,10 @@ the context needed for their bounded assignments.
 The policy describes monitoring, council, recovery and parallel ownership, but these
 paths are not E2E-qualified by this revision. Heartbeat uses discovered host wake
 primitives; `slp.mjs monitor` adds a caller-invoked, delta-only signal scan that
-emits candidates without verdicts — it is not a semantic detector, and no
-lifecycle runner, tool filter or schedule adapter is added. Missing capabilities remain explicit before any fallback. See
+emits candidates without verdicts — it is not a semantic detector. Peer provider
+entries set `paseoTools.disabledTools` for selected orchestration MCP tools; this
+is a tool-delivery gate, not shell or direct-CLI isolation. No lifecycle runner
+or schedule adapter is added. Missing capabilities remain explicit before any fallback. See
 [guide coverage](reports/guide-coverage.md) for requirement mapping, load paths and host gaps.
 
 Codex, Pi, Devin and Claude share role bytes through their respective adapters. Human configures
@@ -280,13 +287,21 @@ communication only: it never infers authority, certifies artifacts, accepts
 work or mutates assignments, and every missing or unverifiable input keeps
 its axis unknown. Local gates: whole-window provenance gaps (paused capture,
 credential guard, oversize, unverified Peer family, failed Peer turn, no
-communication) close the case before any Jev call; a pointer or missing
-brief makes brief and handback unobservable; Lead send-lane and chronology
+communication) close the case before any Jev call; a brief line with optional
+leading spaces/tabs, `Assignment file:`, optional spaces/tabs, and a non-whitespace
+value is a pointer that makes brief and handback unobservable (the path is never
+read); this gate applies to pointer mode. In `snapshot` mode, prepare has already
+read and validated the file, so its `Assignment snapshot:` carrier and inline
+content are ordinary brief text; the daemon still never reads a file. A missing
+brief has the same effect. Lead send-lane and chronology
 gaps (unmatched start, uncertain sends, failed or unobservable sends,
 unverified Lead family, dropped events, withheld cross-Peer bodies) gate only
-the handling axis. report-route-unverifiable is set on every case on this
-host and is disclosed to Jev and the Supervisor, not a gate. External
-data/cost: an assessment sends the brief, handback, the Lead's confirmed
+the handling axis. On this host, report-route-unverifiable is added to
+completed Peer cases; incomplete Peer turns return before that flag (and
+produce no case without an accepted send). When present it is disclosed to
+Jev and the Supervisor, not a gate. External
+data/cost: an assessment sends the brief (including an inline assignment
+snapshot when selected), handback, the Lead's confirmed
 post-handback messages to this Peer, to its other direct Peers and to the
 Supervisor, and the Peer's confirmed sends to the configured Jev endpoint;
 uncertain sends go as ids only. Mode notify additionally delivers a
@@ -327,9 +342,15 @@ prepare accepts repository, workspaceId, assignment and role. Supervisor/Lead us
 fresh profiles/providers; Peer uses providers and route.optionId/catalogSha256.
 A profiles inventory can accompany Peer discovery but does not select its runtime;
 an inventoryFile path fills providers/profiles the request did not inline (explicit
-inline arrays win, including `[]`), and an assignmentFile path appends a
-read-first pointer to the emitted prompt while keeping file bytes out of it. Both
-fields apply to prepare-handoff through the shared plan builder.
+inline arrays win, including `[]`). `assignmentFileMode` defaults to `pointer`,
+which appends the existing read-first pointer without inlining file bytes;
+`snapshot` reads and validates a repository-contained file during prepare, then
+inlines its bounded, normalized text with relative-path and SHA-256 provenance.
+The credential guard checks both snapshot text and its repository-relative
+provenance path, reporting only the matched pattern name on rejection.
+Snapshot errors fail prepare with no pointer fallback. Both assignment fields
+apply to prepare-handoff through the shared plan builder; supervision never
+reads the file.
 Catalog settings cannot be overlaid via route runtime/profile overrides. Explicit
 binding without profiles remains a separate Human-authorized offline/handoff path,
 not an ordinary missing-pool fallback. Helpers emit create arguments only; Paseo

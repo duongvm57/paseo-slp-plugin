@@ -166,9 +166,9 @@ template and current assignment. Set the actual root/owner, writable and exclude
 scope, task class, topology/proof gates, concrete time/agent budget, allowed
 operations, quota fallback boundary, observation and cleanup policy. For
 `basic-*` scenarios, require Supervisor → Lead → an Engineer Peer for this
-test, followed by proof, Lead inspection/verdict and Supervisor handback. This is
-a fixture tactic, not a global prohibition on Lead direct work. Preserve the
-public task contract and Human note; use bounded event-driven observation and
+test, followed by proof, Lead inspection/verdict and Supervisor handback. This
+fixture tactic follows the policy that implementation writes belong to
+Peers. Preserve the public task contract and Human note; use bounded event-driven observation and
 create heartbeat only when the selected scenario and mandate require it.
 Include this task acceptance tactic in the fixture protocol: for each changed
 behavior, Lead derives an expected result from the public task contract and

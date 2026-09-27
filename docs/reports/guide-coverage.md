@@ -29,23 +29,26 @@ agent compliance or E2E success.
 | [Delegation](../../src/delegation.md) | roleBundle for orchestrating roles only (bundleParts) | Always for orchestrating roles; Peer excluded. Always-loaded core: carries the required review-gate invariant, the agent-scoped create_agent rule and the ambiguous-create/workspace invariants inline, with pointers to the two conditional procedure references below. |
 | [Delegation formation](../../src/references/delegation-formation.md) | Delegation core pointer | Before choosing the operation — new team, continuation or observe-existing — and recording the formation record. |
 | [Delegation execution](../../src/references/delegation-execution.md) | Delegation core pointer | Before preparing or issuing a delegation, verifying creation, recovering an ambiguous create or retrieving a child report. |
-| [Orchestration](../../src/references/orchestration.md) | Lead pointer; delegation points to isolation branch | Before topology selection, independent review, design dispute or dependency splitting; Lead re-reads it with review-gates.md before reviewer selection, re-review reuse and acceptance, including after resume/compaction. |
-| [Review gates](../../src/references/review-gates.md) | Orchestration pointer; Lead re-read trigger | Before choosing reviewer seats, before re-review reuse and before acceptance — re-read from the installed candidate, including after resume/compaction. |
-| [Monitoring](../../src/references/monitoring.md) | Supervisor/Lead and delegation pointers | Before observation/wait and at settlement. |
-| [Governance](../../src/references/governance.md) | Supervisor pointer; recovery branch from orchestration | Supervision setup, recovery or policy evolution; recovery owner is Supervisor under mandate. |
+| [Orchestration](../../src/references/orchestration.md) | Lead pointer; delegation points to isolation branch | Before topology selection, independent review, design dispute or dependency splitting; when assignment/protocol requires review, Lead reads it with review-gates.md before reviewer selection, re-review reuse and acceptance, including after resume/compaction. |
+| [Review gates](../../src/references/review-gates.md) | Orchestration pointer; Lead conditional re-read trigger | When assignment or protocol requires independent review: before choosing reviewer seats, re-review reuse and acceptance. An applicable gate with unavailable, stale or unclear rules is BLOCKED. |
+| [Monitoring](../../src/references/monitoring.md) | Supervisor/Lead and delegation pointers | Before observation/wait and at each bounded task's settlement, after Delivery and closure of correction/re-review. A continuing lane does not keep a completed task open. |
+| [Governance](../../src/references/governance.md) | Supervisor pointer; recovery and cross-project relay branches from orchestration | Supervision setup, Lead handoff or policy evolution; cross-project relay only under an explicit grant, verified route and authorized minimal payload. Missing authority keeps the branch BLOCKED. |
 | [Anti-patterns](../../src/references/anti-patterns.md) | Supervisor/Lead pointers, monitoring/governance | Workflow audit, drift, repeated failure, unclear architecture or lost momentum. |
-| [Routing](../../src/references/provider-routing.md) | Delegation and saved-profile pointer for Supervisor/Lead | Before every spawn: refresh the Human-configured role profile, validate capabilities and record the complete launch bundle. |
-| [Work tracking](../../src/references/work-tracking.md) | Managed session-entry `Work tracker:` line rendered by `workTrackerBlock` (between the communication-language output and the assignment), carried to hook-family seats at session open | Only when the plugin-set beads tracker setting is enabled — the reference self-gates on that pointer and must be ignored otherwise. The file is integrity-listed in every carrier regardless of the setting. |
+| [Routing](../../src/references/provider-routing.md) | Delegation and saved-profile pointer for Supervisor/Lead | Before every spawn: refresh the Human-configured role profile, validate capabilities and record the complete launch bundle; Jev details move to the conditional reference below. |
+| [Jev routing](../../src/references/jev-routing.md) | Pointer from routing and delegation execution | Read only when `routes` reports `jevRouting.routing` as `shadow`, `armed` or `error`. `unconfigured`/`off` skip it; `error` blocks the dependent branch and never falls back silently. |
+| [Work tracking](../../src/references/work-tracking.md) | Managed session-entry `Work tracker:` line rendered by `workTrackerBlock` (between the communication-language output and the assignment) | The reference self-gates on that line. Peer carrier includes its locator only when managed session entry enables beads; Supervisor/Lead keep their established locator set. |
+| [Handback and settlement records](../../src/references/report-records.md) | Peer handback rule; orchestration, monitoring and work-tracking pointers | When a handback claims a candidate/check, records are parsed, or a settlement pointer is written. |
 | [Onboarding skill](../../skills/paseo-slp-onboarding/SKILL.md) | Installable skill at native project/global scope | Human requests repo setup/update: the host triggers the installed skill, which fills protocol and repo-local routing with preserved preferences and discovery evidence. Skill installation is separate from `init`. |
 | [Protocol template](../../src/templates/workspace-protocol.md) | Explicit init creates repository .paseo-slp/workspace-protocol.md | Supervisor and Lead read the repository file when the assignment lands — before tactic-dependent replies or decisions, not only before delegation; Supervisor also reads it for an assigned protocol audit. Peer receives only relevant constraints. |
 
 [Package identity/install](../../src/package.mjs) recursively includes `src/`, so all
-nine references are in the install unit without adding them to every prompt.
-Common resolves `references/` relative to the installed policy directory supplied by
+eleven references are in the install unit. Role-scoped locators keep Peer metadata
+limited to common.md, peer.md and conditional work-tracking.md without reducing
+install integrity coverage. Common resolves `references/` relative to the installed policy directory supplied by
 the loader. The full guide and this matrix remain source documentation under docs/.
 No deployed instance is updated merely by editing this checkout.
 
-The carrier block (spawn-kit signatures plus policy-byte locators) reaches a
+The carrier block (spawn-kit signatures plus role-scoped policy-byte locators) reaches a
 seat through two channels: the session-entry bundle (the roleBundle column
 above) for profile/provider launches, and `create.initialPrompt` for the
 prepare path — the only field create_agent transmits, so plan-level
@@ -53,11 +56,13 @@ prepare path — the only field create_agent transmits, so plan-level
 prepare omits the prompt-side copy only for the canonical `slp-<family>-<role>`
 wrapper observed in live provider inventory; unverified targets keep it, and a
 seat may then receive the carrier twice — once at session entry, once in the
-prompt. Captions mark the measurement point: load-time for session entry,
-plan-time for prepare. Kit signatures are approximate and verified against live
+prompt. Peer carries locators for `common.md` and `roles/peer.md`, plus
+`references/work-tracking.md` only when its managed session-entry line is enabled;
+Supervisor/Lead sets stay unchanged. Captions mark the measurement point:
+load-time for session entry, plan-time for prepare. Kit signatures are approximate and verified against live
 `mcp_list_tools`; locators carry path/bytes/sha256 as integrity evidence, not
 policy content. The locator set derives from the install receipt plus the
-role's required policy files, so a receipt-declared file that vanished still
+role's allowed policy files, so a receipt-declared file that vanished still
 appears as `missing`; source-only documents like `docs/contract.md` are never
 declared.
 
@@ -73,7 +78,7 @@ Targets refer to the linked materials above and their named sections.
 | G04 · §2.2 | C | Foundation work needs enough domain framing to locate unknowns and owner decisions. | Missing | Policy covered: Orchestration → Frame and select; Protocol → Choosing a workflow. Human learning itself is contextual. |
 | G05 · §3.0 | I/C | Preflight control plane, provider availability, workspace/agent inventory and user-owned changes. | Partial | Policy covered: Delegation step 1 plus the formation record (situation row, calling actor, expected parent, pinned workspace, recipient, operation, isolation reason) before the first delegation call; actual reachability remains per-launch evidence. |
 | G06 · §3.0 | I/C | Durable notebook/protocol location and stable candidate identity. | Partial | Conditional: Governance → Causal notebook establishes authorized location/retrieval; Orchestration → Proof; Protocol identifies repo fields. |
-| G07 · §3.1 | I | Paseo owns lifecycle/workspace/parentage/follow-up/timeline; no Peer orchestration. | Covered as policy | Policy covered: Common, Peer, Delegation. Native-subagent disabling/tool filtering is not implemented; see H06. |
+| G07 · §3.1 | I | Paseo owns lifecycle/workspace/parentage/follow-up/timeline; no Peer orchestration. | Covered as policy plus selected tool gate | Policy covered: Common, Peer, Delegation. Package-owned Peer providers set `paseoTools.disabledTools` for selected orchestration MCP tools; native-subagent disabling remains outside the package. The gate does not prevent shell or direct CLI use; see H06. |
 | G08 · §3.2 | I/C | Independent sessions, neutral briefs and sealed boundaries when needed. | Partial | Policy covered: Delegation — new seats only via agent-scoped create_agent (parent link, report route, sidebar tree), same-team seats sharing the assignment's pinned workspace absent a declared isolation reason; Orchestration → Independent design and council; Peer read-only/sealed handback. |
 | G09 · §3.3 | I/C | One writer per moving scope, real isolation, explicit transfer and frozen review. | Restricted to one writer total | Policy covered: Common; Orchestration → Ownership, isolation and integration. Host worktree creation is conditional. |
 | G10 · §3.4, §6.3 | I/T | Discover providers/models; route by risk/budget; no stale model ID prescriptions. | Partial | Policy and implementation covered: `.paseo-slp/workspace-protocol.md` specifies repo criteria/budget; adjacent `slp-routing.json` describes options/quota for that repo. Lead selects each runtime bundle independently of disposition, with fresh hash/eligibility checks in prepare and live discovery in Delegation. No host/global fallback; two managed profiles and a project Peer pool. |
@@ -88,7 +93,7 @@ Targets refer to the linked materials above and their named sections.
 | G19 · §5.2, §6.5 | C/T/H | Event-first; low-frequency heartbeat safety net when needed, no universal 15-minute cadence. | Explicitly prohibited | Conditional: Monitoring → Heartbeat safety net and low-frequency sweep (protocol-chosen cadence); Protocol → Monitoring and heartbeat; H01/H03. |
 | G20 · §5.2 model tier | T | Monitoring can use economical models; difficult recovery/judgment needs adequate reasoning. | Missing | Policy covered: Governance setup; Protocol → Routing and skills; preserve Human selections. |
 | G21 · §5.3 ownership | I | Lead owns framing/topology/dependencies/integration/verdict; plans provisional; requests reconciled. | Partial | Policy covered: Lead; Orchestration → Frame and select, Reopen/dependencies, Proof. |
-| G22 · §5.3 direct work | C/T | Lead may handle tiny coupled task if protocol allows; avoid difficult self-acceptance. | Restricted: Peer always writes | Policy covered: Lead; Protocol tiny-task row; difficult work uses independent judgment. |
+| G22 · §5.3 direct work | C/T | Lead may handle tiny coupled task if protocol allows; avoid difficult self-acceptance. | Restricted: Peer always writes | Policy covered: Lead assigns all implementation writes to a Peer Engineer; tiny work uses one Peer Engineer; Protocol → Tiny procedure; difficult work uses independent judgment. |
 | G23 · §5.3 trajectory | C | Split large dependency/domain branches with contract/handback, retain main Lead trajectory. | Prohibited additional lanes | Policy covered: Lead; Orchestration → Reopen, dependencies and recovery boundaries. |
 | G24 · §5.3 inputs/outputs | I | Root/protocol/assignment/inventory, owner map, routing, requests, candidate, proof, verdict and risks. | Partial | Policy covered: Lead, Delegation steps 1–3, Orchestration acceptance, Monitoring handback. |
 | G25 · §5.4 disposition | I/C | One Peer profile with task-specific Engineer/Architect/Reviewer/Scout outputs and authority. | Engineer only | Policy covered: Peer; Delegation step 2; Orchestration Frame and select. |
@@ -140,7 +145,7 @@ also identifies the immediate guard or execution procedure when that pattern ari
 | §9.11 Ceremony capture | Restricted topology instead | Orchestration smallest useful topology; Protocol bounded council defaults. |
 | §9.12 Framing capture | Neutral brief only | Fresh reconstruction, hidden preference, sealed report boundary. |
 | §9.13 Forked independence | Guard present | Delegation fresh sessions; Orchestration detects visibility leaks. |
-| §9.14 Attention dilution | Relay only | Governance Human digest and concise decision relay; dependency split. |
+| §9.14 Attention dilution | Relay only | Governance keeps a compact digest; cross-project relay requires an explicit assignment grant, a verified Lead route and minimum authorized data. Otherwise the dependent branch stays BLOCKED. |
 | §9.15 Skill pollution | Peer no-orchestration guard | Role-specific skill selection and conditional reference loading. |
 | §9.16 Status acceptance | Guard present | Lead artifact inspection; Monitoring evidence retrieval/settlement. |
 | §9.17 Supervisor overreach | Guard present | Governance distinguishes observation from bounded recovery mandate. |
@@ -162,7 +167,7 @@ observations, not proof that a future role session has identical tools or permis
 | H03 | No heartbeat list/update API exposed; deletion is owner-scoped. | Persist receipts, bounded lifetime, owner cleanup; missing receipt/cross-owner access yields unknown settlement. Do not claim list_schedules inventories heartbeats. |
 | H04 | get_agent_activity is curated; get_agent_status provides state/capabilities/permissions, not complete instruction/report evidence. | Discover actual full-timeline path when needed or report evidence BLOCKED. Baseline and resource receipts do not prove all processes settled. |
 | H05 | create_workspace exposes worktree isolation; create_agent placement and parentage are host-owned. | Procedure verifies returned paths/base and separates writers; live concurrency and transfer remain NOT_RUN. |
-| H06 | Package injects instructions; it does not disable native tools or enforce read-only/sealed/skill boundaries. | Behavior guard is present; tool/filesystem isolation and fresh-session instruction loading need host evidence. Literal example TOML is not installed over Human settings. |
+| H06 | Package injects instructions and sets `paseoTools.disabledTools` on `slp-{codex,pi,devin,claude}-peer` to block selected orchestration MCP tools. This is a tool-delivery gate, not a sandbox: a Peer with shell can still call Paseo CLI directly. It does not disable native provider subagents or enforce read-only/sealed/skill boundaries. | The policy is written into package-owned provider entries and applies to new/reloaded sessions; actual live tool delivery still needs host evidence. Literal example TOML is not installed over Human settings. |
 | H07 | create_schedule creates new agents with a different argument surface from create_agent. | Separate recurring-work assignment and discovery required; schedule role/settings/parentage path unqualified, no automatic adapter added. |
 | H08 | send_agent_prompt exposes async/background notifications; ancestor/report routing permissions not exercised. | Agree material-report recipient and verify available routing; use timeline/wake fallback within authority, otherwise report observation gap. |
 | H09 | No package-owned durable notebook database; installed files are integrity-bound policy. | Authorized repo notebook or retrievable indexed timeline; missing durable access reported. Never write operational notes into installation. |
@@ -171,6 +176,7 @@ observations, not proof that a future role session has identical tools or permis
 | H12 | `create_heartbeat` rejected an ACP Lead session with "requires an agent-scoped session" (observed 2026-09-16). | Orchestration observability gap beside H02: caller-owned heartbeat may be unavailable to ACP sessions; fall back to the event/notification path within authority or report the gap. |
 | H13 | No agent-facing plugin RPC invoke path: `paseo plugin` CLI is lifecycle-only and the paseo MCP has no invoke tool; the plugin's status/local-target views are reachable only via Manager UI or a hand-rolled WS `plugin.rpc.invoke.request`. | `slp.mjs status`/`local-target` recompute the file-derivable parts (receipt, owned providers/profiles, runtime+launcher integrity, config-drift presence) and report the rest as gaps — never guesses. Mutation RPCs stay Human-authority and are not exposed. Retire when the host ships `paseo plugin invoke` or MCP `invoke_plugin_rpc`. |
 | H14 | Devin seats use the ACP wrapper transport and bypass `sessionOpen`, so the hook-family env overlay never reaches them: no `BEADS_ACTOR` on a Devin seat. The PATH seen by the plugin process can also differ from a seat's provider env when a provider entry overrides PATH. | Devin seats still receive the session-entry `Work tracker:` block through the ACP adapter; the reference's `--actor` fallback covers attribution and the seat-side probe is authoritative over the plugin's. Recorded gap, no workaround. |
+| H15 | One observed `get_agent_status` response exposed `lastUsage.contextWindowUsedTokens=192809` and `lastUsage.contextWindowMaxTokens=1000000`. No verified compaction count, usage trend, degradation event or host threshold was exposed. | These fields are point-in-time usage only. Lead uses qualitative judgment when task decisions or evidence become unreliable to recover; trigger quality and actual handoff remain unverified by E2E evidence. |
 
 Follow-up clarification (2026-09-09): the earlier 44/48 ≈ 92% figure counted textual
 groups equally and overstated routing readiness. G10 now distinguishes implemented
@@ -191,6 +197,7 @@ confirmed Codex/Pi availability and model options, not successful SLP launches o
 | Long observation with incomplete events | Record event gap → choose authorized observer/cadence/bounds → caller-owned heartbeat receipt → inspect delta only → delete on task settlement. |
 | Repeated correction | Lead/Supervisor pointer reaches catalog → gather evidence/counterevidence → open question → revised premise or blocker → causal note. |
 | Recovery under existing mandate | Evidence → old-owner settlement → fresh Lead with explicit contract/state/resources → acknowledgment; unknown control/cleanup remains visible. |
+| Long-lived lane after bounded task | Task A reaches Delivery and has no open correction/re-review → settle A and reconcile its resources while the lane continues; if rework is open, keep the same Engineer and independent reviewers for that task. |
 | Stop with late wake | Common stop and loader assignment boundary prevent reactivation → authorized owned cancellation/cleanup → receipts or unknown settlement, no new cleanup agents. |
 
 These walkthroughs compare instruction branches, authority and references. They do
@@ -202,15 +209,21 @@ coverage. Independent live acceptance remains outside this textual trace.
 - Read the source guide and compared installed policy/procedure branches with the
   50 grouped requirement rows and all 20 §9 entries above.
 - Rendered roleInstructions in memory and followed conditional reference paths:
-  the policy references (four at that revision, nine now) resolve and occur
+  the policy references (four at that revision, eleven now) resolve and occur
   in the recursive package identity. Peer
   has no delegation procedure or orchestration reference pointer in its envelope.
+- Exercised the textual branches for context handoff, bounded-task settlement,
+  Jev off/armed/error and Peer tracker-off/on locator loading. These source checks
+  do not simulate an agent or establish live workflow behavior.
 - At the initial alignment, checked 20 local Markdown links in README, contract, review checklist and this
   matrix; all resolve. Catalog numbering is exactly §9.1 through §9.20.
-- Walked the nine scenarios above, including the distinction between Architect
+- Walked the ten scenarios above, including the distinction between Architect
   reports/material updates and implementation/project acceptance handbacks.
-- Ran git diff --check with no whitespace errors. No npm tests, live agents,
-  runtime installation or host changes were used for this trace.
+- Ran `npm test` (782 passing), `npm run typecheck`,
+  `npm run check:plugin-payload`, `npm run check` and `git diff --check`.
+  These local checks are not E2E acceptance evidence.
+- No live agents, E2E runs, runtime installation or host changes were used for this
+  textual trace.
 
 Routing follow-up: the fifth reference is reached on every delegation. Local routing
 checks cover independent choices for the same disposition, quota edits/stale hashes,
@@ -229,10 +242,11 @@ split axes) is now inlined in the delegation procedure, and Lead re-reads
 orchestration.md/review-gates.md at reviewer selection, re-review and
 acceptance — a compaction-era "Engineer → Reviewer" summary does not license
 one merged seat, and seats that cannot be supplied make the gate BLOCKED.
-Artifact acceptance is not assignment close: accepted Peers stay idle against
-rework and settle in a batch when the assignment that formed the team
-closes; Human stop still takes effect immediately. New seats join the team
-only through agent-scoped
+Artifact acceptance is not assignment close: each bounded task settles when
+Delivery completes and no correction or re-review remains open, even while its
+lane or team mandate continues. Accepted Peers stay idle for task-local rework;
+settlement does not auto-archive, kill or reparent them. Human stop still takes
+effect immediately. New seats join the team only through agent-scoped
 create_agent (parent link, report route, sidebar tree); prompting a standalone
 session observes existing work, never a new delegation.
 Formation follow-up (2026-09-19): delegation now classifies new-team,

@@ -91,7 +91,7 @@ No observer code lives in the immutable `bin/`/`src/` runtime payload.
 | Per-item turn id or authenticated sender on timeline messages | Protocol 0.8.0 `AgentTimelineItem`; hook items are bare. | Matched start/end ordering; the finish-envelope fallback is text correlation, not authentication; ambiguity is unknown. |
 | Normalized timeline shapes per family | Observed 2026-09-26 for codex, claude and devin (live smoke; [fixtures README](../../tests/fixtures/supervision/README.md) rows 16–18) and pi (one authorized pi Peer, row 19). | Only fixture-backed shapes are verified (see Provider coverage). |
 | Devin send outcome | The Devin provider's ACP update for MCP tools carries only `status` — no `rawOutput`, no `content` (its own session record, row 18); the host mapper would keep either. | Devin sends are recognized with verified recipients but their outcome is unknown; a Devin Lead's handling is never judged. A host-side send receipt (sender, recipient, callId, success, turn linkage) would be the fix — not implemented. |
-| `assignmentFile` content, Lead read receipts, structured report recipient | Lifecycle events and snapshots carry none. | Pointer brief → brief and handback unobservable; `report-route-unverifiable` disclosed on every case. |
+| `assignmentFile` content, Lead read receipts, structured report recipient | Lifecycle events and snapshots carry none. | In pointer mode, a brief line with optional leading spaces/tabs, `Assignment file:`, optional spaces/tabs, and a non-whitespace value makes brief and handback unobservable; the daemon never reads file bytes. In snapshot mode, prepare reads and validates the file and the `Assignment snapshot:` carrier plus inline content are ordinary brief text. `report-route-unverifiable` is disclosed on completed Peer cases only. |
 | Cancelling an issued `send()` | `PaseoAgentHandle.send(text, {messageId})` has no abort. | Revalidate, reserve, bound the wait, report uncertain, never retry. |
 | Non-interrupting delivery to a running agent | `PaseoAgentSendOptions` exposes no `activeTurnBehavior`; host 0.9.1 `session.js` defaults it to `interrupt` (protocol enum `interrupt`/`steer`). The handle forwards options untyped, but relying on an undeclared option is a workaround — not used. | Defer while the refreshed Supervisor is `running`; an idle→running race can still interrupt (disclosed). |
 | Plugin-session refresh of a live SLP agent | Live 2026-09-26 (host 0.9.1, app over relay): saving a route for a live `slp-devin-lead` failed "Agent not found" from `paseo.agents.ref(id).refresh()` in the plugin handler, while the app listed the agent. Host `getAgentPayloadById` returns null only through `isProviderVisibleToClient`; root cause not confirmed ([fixtures README](../../tests/fixtures/supervision/README.md) row 15). | A save no longer requires a snapshot: no snapshot (null or thrown) records the agent **unverified** and the save lands; a returned snapshot is still checked exactly. Routes activate only on host evidence (below). |
@@ -208,9 +208,11 @@ The store is `<daemonHome>/slp-runtime/state/supervision.json`, schema 3:
      follow-up (`devin-plain-message-v1`, seen live in r4) — its role comes
      from the host-verified provider, never from the text. Free policy prose
      from the role files is not a fixed line, so a fragment made only of such
-     prose would read as plain — a disclosed residual. A pointer to
-     `assignmentFile` is a content fact (`brief-references-assignment-file`),
-     never read.
+     prose would read as plain — a disclosed residual. A line with optional
+     leading spaces/tabs, `Assignment file:`, optional spaces/tabs, and a
+     non-whitespace value is a content fact (`brief-references-assignment-file`)
+     in pointer mode; the renderer's suffix is not required and the daemon never
+     reads the path. `Assignment snapshot:` does not match that pointer syntax.
    - **each send** — input (`verified` recipient + prompt, or unverified with
      a reason) and outcome: `accepted` needs the semantic success of exactly
      that call in a verified shape; `rejected` needs an explicit failure
@@ -266,7 +268,7 @@ The store is `<daemonHome>/slp-runtime/state/supervision.json`, schema 3:
 
 ### Provider coverage
 
-What each family can contribute today (packet 3, capture `slp-capture-6`).
+What each family can contribute today (packet 3, capture `slp-capture-7`).
 "Verified" means a sanitized normalized fixture observed on a real timeline
 backs the shape; it certifies extraction, not content or authorship.
 
@@ -353,10 +355,10 @@ retried automatically.
 | Scope | Flags | Effect |
 | --- | --- | --- |
 | Case | `capture-paused`, `credential-shaped-content`, `evidence-oversize`, `peer-turn-not-completed`, `no-observable-communication` (brief and handback both missing — an unverified message is communication, not silence) | Close unknown before any Jev call. |
-| Brief | brief `missing`/`unverified`, empty, or `brief-references-assignment-file` | Brief unusable; handback unusable too (request-relative judgment needs the request) and **handling unusable** with the brief's reason (packet 3: the obligation's request must be readable). |
+| Brief | brief `missing`/`unverified`, empty, or `brief-references-assignment-file` (pointer mode only) | Brief unusable; handback unusable too (request-relative judgment needs the request) and **handling unusable** with the brief's reason (packet 3: the obligation's request must be readable). A validated inline snapshot is ordinary brief text and does not add this flag. |
 | Handback | handback `missing`/`unverified` or empty | Handback and handling unusable. |
 | Handling | `lead-start-unmatched`, uncertain sends, Lead send reasons (`send-not-completed`, `send-input-unparsed`, `send-result-unobservable`, `send-result-unsuccessful`, `send-result-contradictory`, `send-shape-unverified`, `recipient-refresh-failed`, `recipient-inactive`), Lead coverage (`send-coverage-unverified` for devin, `unsupported-family`, `lead-provider-unknown`; `family-shape-unverified` only on older rows), `queue-overflow`, `other-room-bodies-omitted` | Handling unusable; brief/handback still judged. |
-| None | `report-route-unverifiable`, `lead-start-end-derived`, `lead-turn-not-completed` | Disclosed only. |
+| None | `report-route-unverifiable` (completed Peer cases only), `lead-start-end-derived`, `lead-turn-not-completed` | Disclosed only. |
 
 **Judgment and findings.** Per axis, below the threshold, `unknown`, or an
 unobservable axis yields no finding. A confident brief or handback `drift`

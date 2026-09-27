@@ -1,11 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
+import * as fs from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync, symlinkSync, chmodSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { install, json, hash } from '../src/package.mjs';
-import { launchPlan, handoffPlan, launchCheck, requestSchema } from '../src/launch.mjs';
+import { launchPlan, handoffPlan, launchCheck, requestSchema, readAssignmentSnapshot } from '../src/launch.mjs';
 import { readCatalog } from '../src/routing.mjs';
 import { spawnKit } from '../src/spawn-kit.mjs';
 
@@ -140,6 +142,173 @@ test('the carrier appears exactly once in a stock-provider prompt', t => {
   assert.ok(plan.create.initialPrompt.includes(readFileSync(join(installed, 'src/roles/lead.md'), 'utf8')));
 });
 
+test('assignmentFile defaults and explicit pointer preserve the legacy prompt bytes', t => {
+  const { dir, installed } = fixture(t);
+  const assignmentFile = join(dir, 'brief.md');
+  writeFileSync(assignmentFile, 'file content remains external');
+  const base = { ...request, repository: dir, role: 'lead', binding: piBinding, assignmentFile };
+  const implicit = launchPlan(installed, base).create.initialPrompt;
+  const explicit = launchPlan(installed, { ...base, assignmentFileMode: 'pointer' }).create.initialPrompt;
+  assert.equal(explicit, implicit);
+  assert.ok(implicit.includes(`Assignment file: ${assignmentFile} — read it first; it is authoritative for scope details.`));
+  assert.ok(!implicit.includes('file content remains external'));
+});
+
+test('snapshot mode validates and inlines normalized, hashed repository content', t => {
+  const { dir, installed } = fixture(t);
+  const assignmentFile = join(dir, 'brief.md');
+  const normalized = 'alpha\nbeta\ngamma';
+  writeFileSync(assignmentFile, Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from('alpha\r\nbeta\rgamma')]));
+  const plan = launchPlan(installed, { ...request, repository: dir, role: 'lead', binding: piBinding,
+    assignmentFile, assignmentFileMode: 'snapshot' });
+  const prompt = plan.create.initialPrompt;
+  const digest = createHash('sha256').update(normalized, 'utf8').digest('hex');
+  assert.ok(prompt.includes(`Assignment snapshot: brief.md — sha256 ${digest}, ${Buffer.byteLength(normalized)} bytes; the inline text below is authoritative, do not re-read the file.`));
+  assert.ok(prompt.includes(`<<<SLP assignment snapshot>>>\n${normalized}\n<<<end SLP assignment snapshot>>>`));
+  assert.ok(!prompt.includes('Assignment file:'));
+  assert.ok(!prompt.includes(assignmentFile), 'snapshot provenance does not reveal the absolute file path');
+  assert.ok(prompt.includes('Workspace ID: wks-launch'));
+});
+
+test('snapshot mode fails closed for missing/invalid mode and reports launchCheck at assignmentFile', t => {
+  const { dir, installed } = fixture(t);
+  const base = { ...request, repository: dir, role: 'lead', binding: piBinding };
+  for (const requestWithMode of [
+    { ...base, assignmentFileMode: 'pointer' },
+    { ...base, assignmentFileMode: 'snapshot' },
+    { ...base, assignmentFileMode: 'inline', assignmentFile: join(dir, 'brief.md') },
+  ]) {
+    assert.throws(() => launchPlan(installed, requestWithMode), error => error.message.startsWith('assignment-snapshot-invalid-mode:'));
+    const checked = launchCheck(installed, requestWithMode);
+    const assignmentCheck = checked.checks.find(check => check.name === 'assignmentFile');
+    assert.equal(assignmentCheck.ok, false);
+    assert.match(assignmentCheck.error, /^assignment-snapshot-invalid-mode:/);
+  }
+});
+
+test('snapshot mode enforces root containment, including file and component symlink escapes', t => {
+  const { dir, installed } = fixture(t);
+  const outsideDir = mkdtempSync(join(dirname(dir), `${basename(dir)}-outside-`));
+  t.after(() => rmSync(outsideDir, { recursive: true, force: true }));
+  const outside = join(outsideDir, 'brief.md');
+  writeFileSync(outside, 'outside');
+  const base = { ...request, repository: dir, role: 'lead', binding: piBinding, assignmentFileMode: 'snapshot' };
+  assert.throws(() => launchPlan(installed, { ...base, assignmentFile: outside }), error => error.message.startsWith('assignment-snapshot-outside-root:'));
+
+  const fileLink = join(dir, 'file-escape.md');
+  symlinkSync(outside, fileLink);
+  assert.throws(() => launchPlan(installed, { ...base, assignmentFile: fileLink }), error => error.message.startsWith('assignment-snapshot-outside-root:'));
+
+  const dirLink = join(dir, 'directory-escape');
+  symlinkSync(outsideDir, dirLink, 'dir');
+  assert.throws(() => launchPlan(installed, { ...base, assignmentFile: join(dirLink, 'brief.md') }), error => error.message.startsWith('assignment-snapshot-outside-root:'));
+
+  const internal = join(dir, 'internal.md');
+  const internalLink = join(dir, 'internal-link.md');
+  writeFileSync(internal, 'inside');
+  symlinkSync(internal, internalLink);
+  const allowed = launchPlan(installed, { ...base, assignmentFile: internalLink });
+  assert.ok(allowed.create.initialPrompt.includes('Assignment snapshot: internal.md'));
+
+  const repositoryLink = join(dirname(dir), `${basename(dir)}-repository-link`);
+  symlinkSync(dir, repositoryLink, 'dir');
+  t.after(() => rmSync(repositoryLink, { force: true }));
+  const throughRepositoryLink = launchPlan(installed, { ...base, repository: repositoryLink, assignmentFile: join(repositoryLink, 'internal.md') });
+  assert.ok(throughRepositoryLink.create.initialPrompt.includes('Assignment snapshot: internal.md'));
+});
+
+test('snapshot mode rejects non-regular, oversize, invalid UTF-8, controls and nested markers', t => {
+  const { dir, installed } = fixture(t);
+  const assignmentFile = join(dir, 'brief.md');
+  const base = { ...request, repository: dir, role: 'lead', binding: piBinding, assignmentFile, assignmentFileMode: 'snapshot' };
+  const code = (expected, contents) => {
+    writeFileSync(assignmentFile, contents);
+    assert.throws(() => launchPlan(installed, base), error => error.message.startsWith(`assignment-snapshot-${expected}:`));
+  };
+
+  const directory = join(dir, 'assignment-directory');
+  mkdirSync(directory);
+  assert.throws(() => launchPlan(installed, { ...base, assignmentFile: directory }), error => error.message.startsWith('assignment-snapshot-not-regular:'));
+  if (process.platform !== 'win32') {
+    const fifo = join(dir, 'assignment-fifo');
+    try {
+      execFileSync('mkfifo', [fifo]);
+      assert.throws(() => launchPlan(installed, { ...base, assignmentFile: fifo }), error => error.message.startsWith('assignment-snapshot-not-regular:'));
+    } catch (error) {
+      if (error?.code === 'ENOENT') t.diagnostic('mkfifo unavailable; FIFO branch not exercised');
+      else throw error;
+    }
+  }
+
+  writeFileSync(assignmentFile, Buffer.alloc(16_384, 0x61));
+  assert.ok(launchPlan(installed, base).create.initialPrompt.includes('16384 bytes;'));
+  code('oversize', Buffer.alloc(16_385, 0x61));
+  code('not-text', Buffer.from([0xc3, 0x28]));
+  code('not-text', 'nul\0byte');
+  code('not-text', 'control\u0001byte');
+  code('not-text', 'control\u0085byte');
+  for (const contents of [
+    'Assignment file: nested.md',
+    ' \tAssignment file: nested.md',
+    'Assignment file: nested.md\r\n',
+    '<<<SLP assignment snapshot>>>',
+    '<<<end SLP assignment snapshot>>>',
+  ]) code('nested-marker', contents);
+});
+
+test('snapshot credential errors disclose only the pattern class', t => {
+  const { dir, installed } = fixture(t);
+  const assignmentFile = join(dir, 'brief.md');
+  const secret = `sk-${'a'.repeat(24)}`;
+  writeFileSync(assignmentFile, `token=${secret}`);
+  let failure;
+  try {
+    launchPlan(installed, { ...request, repository: dir, role: 'lead', binding: piBinding,
+      assignmentFile, assignmentFileMode: 'snapshot' });
+  } catch (error) { failure = error; }
+  assert.match(failure.message, /^assignment-snapshot-credential:.*openai-style-key/);
+  assert.ok(!failure.message.includes(secret));
+});
+
+test('snapshot credential-shaped provenance paths fail without disclosing the path', t => {
+  const { dir, installed } = fixture(t);
+  const secret = `sk-${'a'.repeat(24)}`;
+  const assignmentFile = join(dir, `${secret}.md`);
+  writeFileSync(assignmentFile, 'Ordinary brief.');
+  assert.throws(() => launchPlan(installed, { ...request, repository: dir, role: 'lead', binding: piBinding,
+    assignmentFile, assignmentFileMode: 'snapshot' }), error => {
+    assert.equal(error.code, 'assignment-snapshot-credential');
+    assert.match(error.message, /openai-style-key/);
+    assert.ok(!error.message.includes(secret));
+    assert.ok(!error.message.includes(assignmentFile));
+    return true;
+  });
+});
+
+test('snapshot mode maps unreadable files and detects replacement through the read seam', t => {
+  const { dir, installed } = fixture(t);
+  const assignmentFile = join(dir, 'brief.md');
+  writeFileSync(assignmentFile, 'readable');
+
+  if (typeof process.getuid === 'function' && process.getuid() !== 0) {
+    chmodSync(assignmentFile, 0);
+    assert.throws(() => launchPlan(installed, { ...request, repository: dir, role: 'lead', binding: piBinding,
+      assignmentFile, assignmentFileMode: 'snapshot' }), error => error.message.startsWith('assignment-snapshot-unresolvable:'));
+    chmodSync(assignmentFile, 0o644);
+  }
+
+  const real = fs.realpathSync(assignmentFile);
+  const io = {
+    ...fs,
+    statSync(path, ...args) {
+      const value = fs.statSync(path, ...args);
+      if (path === real) return { dev: value.dev, ino: value.ino + 1, isFile: () => value.isFile() };
+      return value;
+    },
+  };
+  assert.throws(() => readAssignmentSnapshot(dir, assignmentFile, io), error => error.message.startsWith('assignment-snapshot-changed:'));
+});
+
 test('the prompt carrier is dropped only when the target wrapper provably injects it', t => {
   const { dir, installed } = fixture(t);
   const leadProviders = [{ id: 'slp-codex-lead', enabled: true, status: 'available' }];
@@ -171,7 +340,10 @@ test('verbatim provider shape is enforced — added, removed or forged fields re
   const { dir, installed } = fixture(t);
   const route = catalogFixture(dir);
   const base = { ...request, repository: dir, role: 'peer', route };
-  const observed = { id: 'slp-devin-peer', enabled: true, status: 'available' };
+  const observed = {
+    id: 'slp-devin-peer', enabled: true, status: 'available',
+    paseoTools: { disabledTools: ['create_agent'] }, disallowedTools: ['Task'],
+  };
   const plan = launchPlan(installed, { ...base, providers: [observed] });
   assert.match(plan.create.provider, /^slp-devin-peer\//);
   // Added field — a forged marker is outside the live record vocabulary.
@@ -233,13 +405,14 @@ test('orientation carries mechanical locators only', t => {
   for (const rel of ['src/common.md', 'src/roles/lead.md', 'src/delegation.md',
     'src/references/delegation-formation.md', 'src/references/delegation-execution.md',
     'src/references/anti-patterns.md', 'src/references/governance.md', 'src/references/monitoring.md',
-    'src/references/orchestration.md', 'src/references/provider-routing.md', 'src/references/review-gates.md',
-    'src/references/work-tracking.md']) {
+    'src/references/orchestration.md', 'src/references/provider-routing.md', 'src/references/report-records.md',
+    'src/references/review-gates.md',
+    'src/references/work-tracking.md', 'src/references/jev-routing.md']) {
     const entry = byPath[join(installed, rel)];
     const bytes = readFileSync(join(installed, rel));
     assert.deepEqual(entry, { path: join(installed, rel), bytes: bytes.length, sha256: hash(bytes) });
   }
-  assert.equal(lead.orientation.policyBytes.length, 12);
+  assert.equal(lead.orientation.policyBytes.length, 14);
   // Carrier: locators must survive into initialPrompt on the fallback path
   // (stock piBinding is not an injecting wrapper, so the carrier stays).
   assert.ok(lead.create.initialPrompt.includes(`- ${join(installed, 'src/common.md')} — `));
@@ -250,9 +423,11 @@ test('orientation carries mechanical locators only', t => {
   const peer = launchPlan(installed, { ...request, repository: dir, role: 'peer', providers, route });
   assert.equal(peer.orientation.catalogSha256, route.catalogSha256);
   const peerPaths = peer.orientation.policyBytes.map(entry => entry.path);
+  assert.ok(peerPaths.includes(join(installed, 'src/common.md')));
   assert.ok(peerPaths.includes(join(installed, 'src/roles/peer.md')));
   assert.ok(!peerPaths.includes(join(installed, 'src/delegation.md')));
-  assert.equal(peer.orientation.policyBytes.length, 11);
+  assert.deepEqual(peerPaths, [join(installed, 'src/common.md'), join(installed, 'src/roles/peer.md')].sort());
+  assert.equal(peer.orientation.policyBytes.length, 2);
 });
 
 test('launchCheck names every failing stage and separates profile completeness from live provider verification', t => {
@@ -355,6 +530,14 @@ test('handoff plans carry modeId, spawnKit and orientation alongside the packet'
   // Handed-off seats receive the carrier inside the prompt too.
   assert.ok(plan.create.initialPrompt.includes('- create_agent(title: string'));
   assert.match(plan.create.initialPrompt, /Provider handoff evidence:/);
+
+  const assignmentFile = join(dir, 'handoff-brief.md');
+  writeFileSync(assignmentFile, 'handoff snapshot body');
+  const snapshotPlan = handoffPlan(installed, { ...request, role: 'lead', binding: piBinding, handoff,
+    assignmentFile, assignmentFileMode: 'snapshot' });
+  assert.ok(snapshotPlan.create.initialPrompt.includes('Assignment snapshot: .local-checks/'));
+  assert.ok(snapshotPlan.create.initialPrompt.includes('handoff snapshot body'));
+  assert.ok(!snapshotPlan.create.initialPrompt.includes(`Assignment file: ${assignmentFile} — read it first`));
 });
 
 test('prepare paths are tracker-agnostic: off renders identical, on adds one line (T3)', t => {

@@ -198,8 +198,9 @@ test('policyLocators validates role, tolerates absent optional paths and refuses
   // Role is validated at call time, not by a downstream path lookup.
   assert.throws(() => policyLocators(installed, 'engineer'), /Unknown role/);
   // A source checkout without a receipt scans the tree live.
-  const source = policyLocators(root, 'peer');
+  const source = policyLocators(root, 'peer', {});
   assert.ok(source.some(entry => entry.path === join(root, 'src/roles/peer.md') && entry.sha256));
+  assert.deepEqual(source.map(entry => entry.path), [join(root, 'src/common.md'), join(root, 'src/roles/peer.md')].sort());
   // src/references being a plain file is an ENOTDIR absence, not a crash.
   const bare = join(dir, 'bare');
   mkdirSync(bare);
@@ -217,6 +218,43 @@ test('policyLocators validates role, tolerates absent optional paths and refuses
   rmSync(join(installed, 'src/common.md'));
   symlinkSync(join(installed, 'src/roles/lead.md'), join(installed, 'src/common.md'));
   assert.throws(() => policyLocators(installed, 'lead'), /is a symlink/);
+});
+
+test('Peer carrier locators are allowlisted and include work-tracking only when managed session entry enables beads', t => {
+  const dir = fixture(t), installed = join(dir, 'release');
+  install(root, installed);
+  const home = join(dir, 'paseo');
+  const state = join(home, 'slp-runtime/state');
+  mkdirSync(state, { recursive: true });
+  const env = managedEnv(home, { SLP_RUNTIME_ROOT: installed });
+  const paths = instructions => instructions.split('\n')
+    .filter(line => line.startsWith(`- ${installed}/`))
+    .map(line => line.slice(2).split(' — ')[0]);
+
+  writeFileSync(join(state, 'work-tracker.json'), json({ schemaVersion: 1, tracker: 'beads', enabled: false }));
+  const off = roleBundle(installed, 'peer', env);
+  assert.deepEqual(paths(off.instructions), [join(installed, 'src/common.md'), join(installed, 'src/roles/peer.md')].sort());
+  assert.ok(!off.instructions.includes('Work tracker: beads (enabled in SLP settings)'));
+  for (const reference of ['governance.md', 'monitoring.md', 'orchestration.md', 'provider-routing.md', 'jev-routing.md']) {
+    assert.ok(!paths(off.instructions).some(path => path.endsWith(`/references/${reference}`)), `${reference} is not a Peer locator`);
+  }
+
+  writeFileSync(join(state, 'work-tracker.json'), json({ schemaVersion: 1, tracker: 'beads', enabled: true }));
+  const on = roleBundle(installed, 'peer', env);
+  assert.deepEqual(paths(on.instructions), [join(installed, 'src/common.md'), join(installed, 'src/roles/peer.md'), join(installed, 'src/references/work-tracking.md')].sort());
+  assert.ok(on.instructions.includes('Work tracker: beads (enabled in SLP settings)'));
+  assert.ok(on.instructions.includes(`${join(installed, 'src/references/work-tracking.md')} — `));
+
+  for (const role of ['supervisor', 'lead']) {
+    const entries = policyLocators(installed, role, env);
+    assert.equal(entries.length, 3 + 11, `${role} retains its required bundle and all eleven references`);
+    assert.ok(entries.some(entry => entry.path === join(installed, 'src/references/jev-routing.md')));
+  }
+
+  rmSync(join(installed, 'src/references/work-tracking.md'));
+  const missing = policyLocators(installed, 'peer', env);
+  assert.deepEqual(missing.find(entry => entry.path === join(installed, 'src/references/work-tracking.md')),
+    { path: join(installed, 'src/references/work-tracking.md'), missing: true });
 });
 
 test('instructions <role> prints the exact bundle bytes on stdout and metadata on stderr', t => {
@@ -275,8 +313,8 @@ test('managed bundles carry the review-gate invariant and Lead trigger; Peer car
   }
   const leadBundle = roleBundle(installed, 'lead', env).instructions;
   const supervisorBundle = roleBundle(installed, 'supervisor', env).instructions;
-  assert.match(leadBundle, /re-read\s+the review-gate rules/);
-  assert.ok(!/re-read\s+the review-gate rules/.test(supervisorBundle));
+  assert.match(leadBundle, /When the assignment or protocol\s+requires independent review/);
+  assert.ok(!/When the assignment or protocol\s+requires independent review/.test(supervisorBundle));
   assert.match(supervisorBundle, /standalone session never makes\s+it your child/);
   assert.match(leadBundle, /does not adopt it/);
   // The same formation pins must reach the managed path: continuation row and
@@ -288,7 +326,7 @@ test('managed bundles carry the review-gate invariant and Lead trigger; Peer car
   }
   const peer = roleBundle(installed, 'peer', env).instructions;
   assert.ok(!/does not license merging/.test(peer));
-  assert.ok(!/re-read\s+the review-gate rules/.test(peer));
+  assert.ok(!/When the assignment or protocol\s+requires independent review/.test(peer));
   assert.ok(!/cannot carry a new\s+delegation/.test(peer));
   assert.ok(!/New-team delegation|Observe-existing-work|formation record/.test(peer), 'Peer gets no formation doctrine');
   assert.ok(!/not evidence of parentage|not filesystem\s+isolation/.test(peer));

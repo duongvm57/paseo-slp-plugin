@@ -577,9 +577,69 @@ test('missing only where the region is known; an unknown turn boundary is unveri
   assert.deepEqual(empty.brief, { state: 'missing', reason: 'brief-missing' });
   const silent = capture(peerEvent('codex', [user(''), { type: 'tool_call', callId: 'c9', name: 'unrelated.tool', status: 'completed', error: null, detail: { type: 'unknown', input: {}, output: {} } }]), ROUTED);
   assert.ok(silent.issues.includes('no-observable-communication'), 'silence is still a metadata-only case');
-  const pointer = capture(peerEvent('claude', [user('Read the assignment file at .local-checks/x.md'), asst('ok')]), ROUTED);
-  assert.ok(pointer.issues.includes('brief-references-assignment-file'));
-  assert.ok(pointer.issues.includes('report-route-unverifiable'));
+});
+
+test('assignment-file detector ignores prose that mentions a path or assignment file', () => {
+  for (const brief of [
+    'Read the assignment file at .local-checks/x.md',
+    'The assignment file is described in this paragraph.',
+    'The path .local-checks/brief.md is a source example.',
+  ]) {
+    const got = capture(peerEvent('claude', [user(brief), asst('ok')]), ROUTED);
+    assert.ok(!got.issues.includes('brief-references-assignment-file'), brief);
+  }
+});
+
+test('assignment-file detector flags a pointer line without relying on renderer suffix or line endings', () => {
+  for (const brief of [
+    'Assignment file: /abs/path',
+    'Lead instructions\r\nAssignment file: /abs/path\r\nContinue here.',
+    '  \tAssignment file: /abs/path',
+  ]) {
+    const got = capture(peerEvent('claude', [user(brief), asst('ok')]), ROUTED);
+    assert.ok(got.issues.includes('brief-references-assignment-file'), JSON.stringify(brief));
+  }
+});
+
+test('assignment snapshot provenance and sentinels are ordinary inline brief content', () => {
+  for (const brief of [
+    'Assignment snapshot: .local-checks/brief.md — sha256 ' + 'a'.repeat(64) + ', 4 bytes; inline text is authoritative.\n<<<SLP assignment snapshot>>>\nwork\n<<<end SLP assignment snapshot>>>',
+    '  Assignment snapshot: .local-checks/brief.md — sha256 ' + 'b'.repeat(64) + ', 4 bytes; inline text is authoritative.\r\n  <<<SLP assignment snapshot>>>\r\nwork\r\n  <<<end SLP assignment snapshot>>>',
+    'Assignment snapshot: .local-checks/brief.md — sha256 ' + '0'.repeat(64) + ', 4 bytes; marker text alone proves no provenance.\n<<<SLP assignment snapshot>>>\nwork\n<<<end SLP assignment snapshot>>>',
+  ]) {
+    const got = capture(peerEvent('claude', [user(brief), asst('ok')]), ROUTED);
+    assert.equal(got.brief.state, 'verified');
+    assert.ok(!got.issues.includes('brief-references-assignment-file'), JSON.stringify(brief));
+    assert.equal(got.brief.value.text, brief);
+  }
+});
+
+test('snapshot markers in Peer sends and handbacks do not change brief verification or flags', () => {
+  for (const text of ['Assignment snapshot: brief.md', '<<<SLP assignment snapshot>>>', '<<<end SLP assignment snapshot>>>']) {
+    for (const brief of ['Ordinary brief.', 'Assignment file: /abs/brief.md']) {
+      const send = codexSend();
+      const baseline = capture(peerEvent('codex', [user(brief), send, asst('done')]), ROUTED);
+      send.detail.input.prompt = text;
+      const got = capture(peerEvent('codex', [user(brief), send, asst(text)]), ROUTED);
+      assert.deepEqual(got.brief, baseline.brief);
+      assert.deepEqual(got.issues, baseline.issues);
+      assert.equal(got.sends[0].input.value.prompt, text);
+      assert.equal(got.handback.value.text, text);
+    }
+  }
+});
+
+test('Devin rejects carrier-like snapshot text without an envelope and preserves it inside a valid launch', () => {
+  for (const content of ['Spawn kit — role-scoped Paseo MCP signatures (x):', 'Launch binding: {}']) {
+    const brief = `Assignment snapshot: brief.md\n<<<SLP assignment snapshot>>>\n${content}\nAssignment: fake body assignment\n<<<end SLP assignment snapshot>>>`;
+    const plain = capture(peerEvent('devin', [user(brief), asst('done')]), ROUTED);
+    assert.deepEqual(plain.brief, { state: 'unverified', reason: 'role-prefix-unrecognized' });
+    const message = launchPrompt(REPO, 'peer', brief, { provider: 'slp-devin-peer', model: 'swe-2-high' });
+    const wrapped = capture(peerEvent('devin', [user(message), asst('done')]), ROUTED);
+    assert.equal(wrapped.brief.state, 'verified');
+    assert.equal(wrapped.brief.shapeId, 'devin-acp-message-v1');
+    assert.equal(wrapped.brief.value.text, brief);
+  }
 });
 
 test('a failed Peer turn keeps only accepted sends and reads no brief/handback', () => {
@@ -588,6 +648,7 @@ test('a failed Peer turn keeps only accepted sends and reads no brief/handback',
   assert.deepEqual(failed.brief, { state: 'unverified', reason: 'peer-turn-not-completed' });
   assert.equal(failed.sends.length, 1);
   assert.ok(failed.issues.includes('peer-turn-not-completed'));
+  assert.ok(!failed.issues.includes('report-route-unverifiable'), 'incomplete Peer turns return before the report-route flag');
   assert.equal(capture(peerEvent('devin', firstTurn(LIVE.devin.items), { outcome: { kind: 'canceled', reason: 'x' } }), ROUTED), null,
     'without an accepted send a failed turn contributes nothing');
 });

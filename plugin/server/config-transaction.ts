@@ -25,6 +25,7 @@ import {
 import { PaseoServicePortAllocationSchema } from "@getpaseo/protocol/paseo-config-schema";
 import {
   OperationConflict,
+  PEER_PASEO_TOOLS_POLICY,
   type ActivateRequest,
   type BindingValue,
   type ExecutableResolution,
@@ -523,6 +524,9 @@ export function desiredProviderEntries(
     const binary = resolution.binaries[family];
     const binaryPath = binary.available ? binary.path : null;
     const id = ownedProviderId(family, role);
+    const paseoTools = role === "peer"
+      ? { disabledTools: [...PEER_PASEO_TOOLS_POLICY.disabledTools] }
+      : undefined;
     if (HOOK_GATE_FAMILIES.has(family)) {
       // Thin alias: slp-* identity + native extends, argv[0] is the launch
       // set's gate launcher (frozen binary + gate exec, env-free-probe
@@ -550,6 +554,7 @@ export function desiredProviderEntries(
           SLP_FAMILY_BIN: binaryPath ?? "",
         },
         enabled: binary.available,
+        ...(paseoTools ? { paseoTools } : {}),
       };
       continue;
     }
@@ -564,6 +569,7 @@ export function desiredProviderEntries(
         daemonHome,
       }),
       enabled: binary.available,
+      ...(paseoTools ? { paseoTools } : {}),
     };
   }
   return entries;

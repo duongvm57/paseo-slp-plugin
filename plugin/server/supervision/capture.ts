@@ -33,7 +33,7 @@ export type TurnEnded = PluginLifecycleEvents["agent.turn_ended"];
 export type TurnStarted = PluginLifecycleEvents["agent.turn_started"];
 
 /** Parser generation recorded with every assessment (ring metadata). */
-export const CAPTURE_VERSION = "slp-capture-6";
+export const CAPTURE_VERSION = "slp-capture-7";
 
 // Bounded reason vocabulary (wire-visible in the observations list — reason
 // codes only, never message text). Codes no longer produced stay listed so
@@ -182,10 +182,11 @@ const turnStart = (timeline: readonly AgentTimelineItem[]): number => {
   return -1;
 };
 
-// A brief that delegates its content to a file is not observable — a
-// content fact the assessment turns into an unusable brief (never reads the
-// path).
-const ASSIGNMENT_FILE_RE = /assignment\s*file|assignmentFile|\.local-checks\//i;
+// prepare renders assignmentFile as a dedicated "Assignment file:" line.
+// Detect the line prefix and a non-empty value without depending on its prose
+// suffix; mentions inside prose and bare path examples are not pointers. The
+// detector never reads the path.
+const ASSIGNMENT_FILE_RE = /^[ \t]*Assignment file:[ \t]*\S/m;
 
 type ToolCall = Extract<AgentTimelineItem, { type: "tool_call" }>;
 const isRecord = (v: unknown): v is Record<string, unknown> =>

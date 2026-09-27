@@ -1,0 +1,35 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Test
+        run: |
+          temp_paseo_home="$(mktemp -d)"
+          trap 'rm -rf "$temp_paseo_home"' EXIT
+          PASEO_HOME="$temp_paseo_home" npm test
+
+      - run: npm run typecheck
+
+      - run: npm run check
+
+      - run: npm run check:plugin-payload

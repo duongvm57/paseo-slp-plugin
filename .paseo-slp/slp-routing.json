@@ -39,7 +39,7 @@
       "model": "gpt-6-luna",
       "enabled": true,
       "availability": "ready",
-      "thinkingOptionId": "xhigh",
+      "thinkingOptionId": "max",
       "modeId": "full-access",
       "suitableFor": [
         "work:change",
@@ -240,6 +240,24 @@
         "depth:open"
       ],
       "notes": "Package-managed seat: code transformations under a complete rule — codemods, rename sweeps, migrations whose mapping already decides behavior. Work still needing logic choices or open questions prefers another seat."
+    },
+    {
+      "id": "independent-review-claude",
+      "provider": "claude",
+      "roles": [
+        "peer"
+      ],
+      "model": "claude-opus-5-5",
+      "enabled": true,
+      "availability": "ready",
+      "thinkingOptionId": "high",
+      "modeId": "bypassPermissions",
+      "suitableFor": [
+        "work:verify",
+        "domain:software"
+      ],
+      "avoidFor": [],
+      "notes": "Optional cross-family review seat (claude/opus-5-5) for deep independent review of diffs — most useful when the writer is a different provider family."
     }
   ]
 }

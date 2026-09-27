@@ -256,9 +256,8 @@ const credentialPatterns = [
 // path so the key text never reaches the error either.
 export function assertRedacted(payload) {
   const check = (text, path, what) => {
-    for (const { name, pattern } of credentialPatterns) {
-      if (pattern.test(text)) throw jevError('jev-redacted', `Refusing to send: credential-shaped ${what} (${name}) at ${path === '' ? '<root>' : path}`);
-    }
+    const name = credentialShaped(text);
+    if (name) throw jevError('jev-redacted', `Refusing to send: credential-shaped ${what} (${name}) at ${path === '' ? '<root>' : path}`);
   };
   const walk = (value, path) => {
     if (typeof value === 'string') return check(value, path, 'string');
@@ -269,6 +268,11 @@ export function assertRedacted(payload) {
     }
   };
   walk(payload, '');
+}
+
+export function credentialShaped(text) {
+  if (typeof text !== 'string') return null;
+  return credentialPatterns.find(({ pattern }) => pattern.test(text))?.name ?? null;
 }
 
 // ---------------------------------------------------------------------------

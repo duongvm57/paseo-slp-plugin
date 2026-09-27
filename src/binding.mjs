@@ -35,7 +35,7 @@ export function rejectRouteKeys(route, keys, message) {
 // along — normalized reads (src/inventory.mjs) legitimately omit them.
 // `extends` appears on derived providers (devin extends acp). Anything else —
 // including a forged provenance — means the entry was edited after the call.
-export const providerRecordAllowedKeys = ['id', 'enabled', 'status', 'label', 'description', 'modes', 'extends'];
+export const providerRecordAllowedKeys = ['id', 'enabled', 'status', 'label', 'description', 'modes', 'extends', 'paseoTools', 'disallowedTools'];
 
 // One provider-health rule for every Binding source. familyFor resolves the
 // expected provider family from the observed provider id, and may itself reject.

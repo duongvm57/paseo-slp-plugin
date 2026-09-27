@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync, chmodSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { identity, install, readJson, json, hash, verifyInstall } from '../src/package.mjs';
 import { installPaseo, upgradePaseo, initWorkspace } from '../src/paseo-install.mjs';
 import { resolveProfile } from '../src/profiles.mjs';
@@ -345,6 +345,14 @@ test('Claude wrapper appends role policy inside the SDK initialize control reque
   assert.equal(claudeRolePrompt(messages[5], instruction), messages[5]);
   // Non-protocol invocations (--version, auth, interactive) stay a plain passthrough.
   assert.equal(execFileSync(process.execPath, [join(installed, 'bin/claude-role.mjs'), 'peer', '--version'], { env, encoding: 'utf8' }).trim(), 'probe-ok');
+  // An unrecognized --input-format warns but preserves byte-for-byte passthrough.
+  const rawInput = 'plain passthrough bytes\n';
+  const fallback = spawnSync(process.execPath, [join(installed, 'bin/claude-role.mjs'), 'peer', '--input-format', 'json'], {
+    env, input: rawInput, encoding: 'utf8', timeout: 5000,
+  });
+  assert.equal(fallback.status, 0, fallback.stderr);
+  assert.equal(fallback.stdout, rawInput);
+  assert.match(fallback.stderr, /--input-format.+stream-json.+passthrough/i);
   // The '--flag=value' arg style still selects protocol mode.
   const eqLines = run([join(installed, 'bin/claude-role.mjs'), 'peer', '--output-format=stream-json', '--input-format=stream-json']).trim().split('\n').map(JSON.parse);
   assert.equal(eqLines[2].request.appendSystemPrompt, `Daemon append\n\n${instruction}`);

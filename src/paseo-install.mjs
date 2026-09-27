@@ -3,7 +3,7 @@ import { join, resolve, isAbsolute, relative } from 'node:path';
 import { homedir } from 'node:os';
 import { isDeepStrictEqual } from 'node:util';
 import { json, readJson, hash, identity, install, verifyInstall, files, stageInstall, swapIn, verifyReplaceable } from './package.mjs';
-import { roles, profileRoles, families, profileId, providerId } from './profiles.mjs';
+import { roles, profileRoles, families, profileId, providerId, peerPaseoToolsPolicy } from './profiles.mjs';
 import { transportOf } from './binding.mjs';
 import { validateCatalog, routingPath, probeUserPool, catalogPoolDrift } from './routing.mjs';
 import { configFile, writeConfig, mcpFlags, requireMcp, verifyOwnedProviders, verifyOwnedProfiles,
@@ -33,7 +33,11 @@ export function configurationPlan(destination, config) {
     if (Object.hasOwn(hostProviders(config), id) || (profileRoles.includes(role) && existing.some(p => p.id === profileId(role)))) {
       throw new Error(`SLP entry already exists: ${role}; uninstall its owning installation first`);
     }
-    providers[id] = { extends: transportOf(family), label: `SLP ${family} ${role}`, command: [process.execPath, join(destination, `bin/${family}-role.mjs`), role] };
+    providers[id] = {
+      extends: transportOf(family), label: `SLP ${family} ${role}`,
+      command: [process.execPath, join(destination, `bin/${family}-role.mjs`), role],
+      ...(role === 'peer' ? { paseoTools: { disabledTools: [...peerPaseoToolsPolicy.disabledTools] } } : {}),
+    };
   }
   for (const role of profileRoles) {
     profiles.push({ id: profileId(role), name: `SLP ${role[0].toUpperCase() + role.slice(1)}`,

@@ -38,3 +38,22 @@ are explicitly assigned. Respect sealed-report boundaries before cross-review.
 Every handback includes assumptions, risks and unfinished dependencies. Report
 and hand back in the language the assignment states. Your report supplies
 bounded judgment; Lead owns project acceptance.
+
+A handback that asserts a candidate or checks includes a fenced JSON block marked
+`slp-record` with `version: 1` and `kind: "handback"`; report-only handbacks may
+omit the block or use `candidate: null`. Keep prose: the record projects the same
+facts and never replaces the report. Include `seat`, `verdict`, `candidate` and
+`checks`. `seat.role` and `seat.disposition` are required; `seat.agentId` is
+optional. `verdict` is `APPROVE`, `FINDINGS`, `BLOCKED`, `REOPEN_REQUEST`,
+`DEPENDENCY_REQUEST` or `null`. Set `candidate.repository` and exactly one of
+`snapshotSha256` or a full clean commit `head`. Every `checks[]` entry requires
+`cmd`, integer `exit` and `sha`.
+Supply UTF-8 evidence in `output`, or a repository-relative `outputRef` for long
+output; use `sha: null` when no output evidence is available. See
+`references/report-records.md` for extended semantics. Run
+the managed runtime's `bin/slp.mjs` (same path family as the snapshot command)
+with `records --schema`, then `records <report> --require handback` to self-check.
+Pass `--repo <absolute-path>` for the verifier's candidate checkout when reading
+referenced output; it overrides record-declared roots. The hash binds the record
+to those bytes but does not prove a command ran; independent reruns establish
+verification.

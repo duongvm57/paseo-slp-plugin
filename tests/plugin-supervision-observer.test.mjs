@@ -7,14 +7,19 @@
 // network, no daemon, isolated homes only.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { createSupervisionObserver, buildEvidencePayload, linkCandidates } from '../plugin/server/supervision/observer.ts';
+import { capture } from '../plugin/server/supervision/capture.ts';
 import {
   axisGates, buildQuestions, judge, localGate, parseAssessmentResponse, SUPERVISION_QUESTIONS,
 } from '../plugin/server/supervision/assessment.ts';
 import { resolveSupervision, askJevDecision, assertRedacted, JevRequestError } from '../plugin/server/jev.ts';
 import { makeHome } from './helpers/plugin-doubles.mjs';
+import { install, json } from '../src/package.mjs';
+import { readCatalog } from '../src/routing.mjs';
 import { roleDelivery } from '../src/role-bundle.mjs';
 
 const LEAD = '11111111-1111-4111-8111-111111111111';
@@ -24,6 +29,7 @@ const SUP = '33333333-3333-4333-8333-333333333333';
 const OTHER = '44444444-4444-4444-8444-444444444444';
 const OTHER_LEAD = '66666666-6666-4666-8666-666666666666';
 const WKS = 'wks_testworkspace';
+const REPO = fileURLToPath(new URL('..', import.meta.url));
 
 const PROVIDER = { kind: 'openrouter', baseUrl: 'https://openrouter.ai', model: 'typesafe/jev-1.13' };
 const GATE_OK = { ok: true, provider: PROVIDER, authorization: 'Bearer test-key' };
@@ -643,11 +649,10 @@ test('jev askJevDecision: a network throw is single-shot — no automatic retry'
 // observer — the spec scenarios
 // ---------------------------------------------------------------------------
 
-// Host truth: every Peer case carries report-route-unverifiable (no
-// machine-readable report-recipient signal exists). Since rubric 2 it is a
-// disclosed visibility flag, not a gate: a handling disposition or
-// mishandling must be LINKED to a confirmed post-handback message, so the
-// flag is never needed to rule out silence.
+// Completed Peer cases carry report-route-unverifiable (no machine-readable
+// report-recipient signal exists). Incomplete Peer turns return before it.
+// The flag is disclosed, not a gate: handling needs a linked post-handback
+// message, so the flag is never needed to rule out silence.
 const ROUTE_FLAG = 'report-route-unverifiable';
 const until = async cond => { while (!cond()) await sleep(2); };
 
@@ -728,21 +733,154 @@ test('observer scenarios 2+4: direct action or final prose without a send is nev
   }
 });
 
-test('observer scenario 3: assignmentFile pointer — no usable axis, so no Jev call at all', async t => {
-  // Packet 3: handling needs a usable brief too (the obligation's request).
-  // A pointer brief leaves brief, handback and handling unusable → zero HTTP.
-  const { observer, paseo, home, calls } = await baseSetup(t, { route: { pendingDelayMs: 0 }, responses: [BRIEF_GAP] });
-  observer.onCreated(peerHook(), paseo);
-  observer.onTurn(peerEnd([
-    userMsg('Work the assignment file at .local-checks/brief.md'),
-    asstMsg('Done'),
-  ]), paseo);
+test('observer scenario 3: a real prepare assignmentFile pointer gates every axis with no Jev call or delivery', async t => {
+  // Build the prompt through the installed CLI so the test exercises the real
+  // renderer line, then feed that output through normalized Peer capture.
+  const scratch = mkdtempSync(join(REPO, '.local-checks', 'observer-prepare-'));
+  t.after(() => rmSync(scratch, { recursive: true, force: true }));
+  const repository = join(scratch, 'repo');
+  const installed = join(scratch, 'installed');
+  const daemonHome = join(scratch, 'home');
+  mkdirSync(daemonHome, { recursive: true });
+  mkdirSync(join(repository, '.paseo-slp'), { recursive: true });
+  const assignmentFile = join(repository, 'brief.md');
+  writeFileSync(assignmentFile, 'SECRET assignment bytes must stay outside the prompt.');
+  writeFileSync(join(repository, '.paseo-slp', 'slp-routing.json'), json({
+    version: 1, policy: 'Test pool.', quotaFallback: { enabled: false, optionId: null },
+    options: [{ id: 'devin-peer', provider: 'devin', roles: ['peer'], model: 'swe-2-high',
+      modeId: 'bypass', features: { auto_accept: true }, enabled: true, availability: 'ready',
+      priority: 10, suitableFor: ['coding'], avoidFor: [], notes: 'test seat' }],
+  }));
+  const requestFile = join(scratch, 'request.json');
+  const request = {
+    repository, workspaceId: WKS, role: 'peer', disposition: 'engineer',
+    assignment: 'Bounded test assignment.', assignmentFile, paseoHome: daemonHome,
+    providers: [{ id: 'slp-devin-peer', enabled: true, status: 'available' }],
+    route: { optionId: 'devin-peer', catalogSha256: readCatalog(repository).sha256 },
+  };
+  writeFileSync(requestFile, json(request));
+  install(REPO, installed);
+  const prepared = spawnSync(process.execPath, [join(installed, 'bin/slp.mjs'), 'prepare', requestFile, '--emit', 'create'], {
+    cwd: repository, env: { PATH: process.env.PATH ?? '', HOME: process.env.HOME ?? '' }, encoding: 'utf8',
+  });
+  assert.equal(prepared.status, 0, prepared.stderr);
+  const prompt = JSON.parse(prepared.stdout).create.initialPrompt;
+  const pointerLine = `Assignment file: ${assignmentFile} — read it first; it is authoritative for scope details.`;
+  assert.ok(prompt.includes(pointerLine));
+  assert.ok(!prompt.includes('SECRET assignment bytes'), 'prepare emits the pointer, never the file bytes');
+
+  const event = peerEnd([userMsg(prompt), asstMsg('Done')], { agent: { provider: 'slp-devin-peer' } });
+  const captured = capture(event, { has: id => id === LEAD });
+  assert.equal(captured.kind, 'peer');
+  assert.equal(captured.brief.state, 'verified');
+  assert.ok(captured.brief.value.text.includes(pointerLine));
+  assert.ok(captured.issues.includes('brief-references-assignment-file'));
+  assert.ok(captured.issues.includes('report-route-unverifiable'));
+  const gates = axisGates(payloadWith({}, {
+    brief: { text: captured.brief.value.text, messageId: captured.brief.value.messageId,
+      flags: ['brief-references-assignment-file'] },
+    flags: captured.issues,
+  }));
+  assert.deepEqual(gates, {
+    brief: 'brief-references-assignment-file',
+    handback: 'brief-unobservable',
+    handling: 'brief-references-assignment-file',
+  });
+
+  const agents = liveAgents({ [PEER]: snap(PEER, 'slp-devin-peer', { labels: { 'paseo.parent-agent-id': LEAD } }) });
+  const { observer, paseo, home, calls } = await baseSetup(t, {
+    route: { pendingDelayMs: 0 }, responses: [BRIEF_GAP], agents,
+  });
+  observer.onCreated(peerHook(PEER, { provider: 'slp-devin-peer' }), paseo);
+  observer.onTurn(event, paseo);
   await observer.idle();
   assert.equal(calls.length, 0, 'Jev never judges what the brief cannot show');
   const rows = ringRows(home);
   assert.deepEqual(rows[0].findings, [], 'a pointer brief plus "Done" is not a missing-evidence finding');
   assert.equal(rows[0].state, 'unknown');
   assert.equal(rows[0].reason, 'brief-references-assignment-file');
+  assert.deepEqual(deliveryRows(home), [], 'the pointer creates no delivery');
+});
+
+test('observer scenario 3b: a real prepare snapshot opens the brief axis and sends inline text once', async t => {
+  const scratch = mkdtempSync(join(REPO, '.local-checks', 'observer-snapshot-'));
+  t.after(() => rmSync(scratch, { recursive: true, force: true }));
+  const repository = join(scratch, 'repo');
+  const installed = join(scratch, 'installed');
+  const daemonHome = join(scratch, 'home');
+  mkdirSync(daemonHome, { recursive: true });
+  mkdirSync(join(repository, '.paseo-slp'), { recursive: true });
+  const assignmentFile = join(repository, 'brief.md');
+  const snapshotText = 'Implement the bounded task and return the focused evidence.';
+  writeFileSync(assignmentFile, snapshotText);
+  writeFileSync(join(repository, '.paseo-slp', 'slp-routing.json'), json({
+    version: 1, policy: 'Test pool.', quotaFallback: { enabled: false, optionId: null },
+    options: [{ id: 'devin-peer', provider: 'devin', roles: ['peer'], model: 'swe-2-high',
+      modeId: 'bypass', features: { auto_accept: true }, enabled: true, availability: 'ready',
+      priority: 10, suitableFor: ['coding'], avoidFor: [], notes: 'test seat' }],
+  }));
+  const requestFile = join(scratch, 'request.json');
+  const request = {
+    repository, workspaceId: WKS, role: 'peer', disposition: 'engineer',
+    assignment: 'Bounded test assignment.', assignmentFile, assignmentFileMode: 'snapshot', paseoHome: daemonHome,
+    providers: [{ id: 'slp-devin-peer', enabled: true, status: 'available' }],
+    route: { optionId: 'devin-peer', catalogSha256: readCatalog(repository).sha256 },
+  };
+  writeFileSync(requestFile, json(request));
+  install(REPO, installed);
+  const prepared = spawnSync(process.execPath, [join(installed, 'bin/slp.mjs'), 'prepare', requestFile, '--emit', 'create'], {
+    cwd: repository, env: { PATH: process.env.PATH ?? '', HOME: process.env.HOME ?? '' }, encoding: 'utf8',
+  });
+  assert.equal(prepared.status, 0, prepared.stderr);
+  const prompt = JSON.parse(prepared.stdout).create.initialPrompt;
+  assert.match(prompt, /Assignment snapshot: brief\.md — sha256 [a-f0-9]{64}, 59 bytes;/);
+  assert.ok(prompt.includes(snapshotText));
+  assert.ok(!prompt.includes(`Assignment file: ${assignmentFile}`));
+
+  const event = peerEnd([userMsg(prompt), asstMsg('Done — focused evidence returned.')], { agent: { provider: 'slp-devin-peer' } });
+  const captured = capture(event, { has: id => id === LEAD });
+  assert.equal(captured.kind, 'peer');
+  assert.equal(captured.brief.state, 'verified');
+  assert.ok(captured.brief.value.text.includes(snapshotText));
+  assert.ok(!captured.issues.includes('brief-references-assignment-file'));
+
+  const agents = liveAgents({ [PEER]: snap(PEER, 'slp-devin-peer', { labels: { 'paseo.parent-agent-id': LEAD } }) });
+  const { observer, paseo, home, calls } = await baseSetup(t, {
+    route: { pendingDelayMs: 0 }, responses: [HANDLED], agents,
+  });
+  observer.onCreated(peerHook(PEER, { provider: 'slp-devin-peer' }), paseo);
+  observer.onTurn(event, paseo);
+  await observer.idle();
+  assert.equal(calls.length, 1, 'snapshot brief is assessed by one Jev request');
+  assert.ok(calls[0].state.brief.text.includes(snapshotText));
+  assert.ok(calls[0].state.brief.text.includes('Assignment snapshot: brief.md'));
+  const ring = JSON.stringify(ringRows(home));
+  assert.ok(!ring.includes(snapshotText), 'the persisted case ring remains metadata-only');
+  assert.ok(!JSON.stringify(deliveryRows(home)).includes(snapshotText));
+
+  const paused = await baseSetup(t, {
+    route: { pendingDelayMs: 0 }, gate: { ok: false, reason: 'jev-capability-off' }, agents,
+  });
+  paused.observer.onCreated(peerHook(PEER, { provider: 'slp-devin-peer' }), paused.paseo);
+  paused.observer.onTurn(event, paused.paseo);
+  await paused.observer.idle();
+  assert.equal(paused.calls.length, 0, 'a snapshot does not bypass a gate-down window');
+  assert.deepEqual(ringRows(paused.home), [], 'a gate-down snapshot body is not persisted');
+
+  writeFileSync(assignmentFile, 'x'.repeat(16_384));
+  writeFileSync(requestFile, json(request));
+  const nearCap = spawnSync(process.execPath, [join(installed, 'bin/slp.mjs'), 'prepare', requestFile, '--emit', 'create'], {
+    cwd: repository, env: { PATH: process.env.PATH ?? '', HOME: process.env.HOME ?? '' }, encoding: 'utf8',
+  });
+  assert.equal(nearCap.status, 0, nearCap.stderr);
+  const largePrompt = JSON.parse(nearCap.stdout).create.initialPrompt;
+  const largeEvent = peerEnd([userMsg(largePrompt), asstMsg('x'.repeat(50_000))], { agent: { provider: 'slp-devin-peer' } });
+  const tooLarge = await baseSetup(t, { route: { pendingDelayMs: 0 }, agents });
+  tooLarge.observer.onCreated(peerHook(PEER, { provider: 'slp-devin-peer' }), tooLarge.paseo);
+  tooLarge.observer.onTurn(largeEvent, tooLarge.paseo);
+  await settle(tooLarge.observer);
+  assert.equal(tooLarge.calls.length, 0, 'the full oversized snapshot packet is rejected before Jev');
+  assert.equal(ringRows(tooLarge.home)[0].reason, 'evidence-oversize');
 });
 
 test('observer scenario 5: overlapping Lead turns — ambiguous chronology gates handling only', async t => {
@@ -1796,7 +1934,7 @@ test('mixed: claude in both roles — all three axes, the accepted Lead send lin
   const rows = ringRows(home);
   assert.equal(rows[0].state, 'evaluated');
   assert.equal(rows[0].lastAssessment.links.dispositionMessage, 'c1');
-  assert.equal(rows[0].lastAssessment.captureVersion, 'slp-capture-6');
+  assert.equal(rows[0].lastAssessment.captureVersion, 'slp-capture-7');
 });
 
 test('mixed: a related rejected or canceled Lead send keeps handling unknown, offers no candidate and sends no body', async t => {
