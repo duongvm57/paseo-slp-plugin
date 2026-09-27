@@ -1,15 +1,12 @@
-import { join, isAbsolute, basename, relative, sep } from 'node:path';
-import { statSync, accessSync, constants, readFileSync } from 'node:fs';
-import * as fs from 'node:fs';
-import { createHash } from 'node:crypto';
-import { TextDecoder } from 'node:util';
+import { join, isAbsolute, basename } from 'node:path';
+import { readFileSync } from 'node:fs';
 import { savedProfileBinding, roleProvider, providerId, profileId, roles } from './profiles.mjs';
 import { verifyInstall, snapshot, readJson } from './package.mjs';
 import { catalogBinding, readCatalog } from './routing.mjs';
 import { bindingCheck, dispositionPattern, verifyProvider } from './binding.mjs';
 import { roleInstructions, orchestrates, policyLocators, carrierBlock } from './role-bundle.mjs';
 import { spawnKit } from './spawn-kit.mjs';
-import { credentialShaped } from './jev.mjs';
+import { assignmentFileSelection, assignmentCarrier } from './assignment-file.mjs';
 
 // Every Binding source normalises to { binding, routing? } right here, so nothing
 // downstream unwraps a source-specific shape. Order is precedence, highest first.
@@ -110,142 +107,6 @@ function mergeInventory(request) {
   return request;
 }
 
-// Pointer mode preserves the existing read-first reference and never opens
-// the file here; snapshot mode uses the bounded reader below.
-function assignmentFile(path) {
-  if (path == null) return null;
-  if (typeof path !== 'string' || !isAbsolute(path)) throw new Error('Absolute assignmentFile required');
-  let stat;
-  try { stat = statSync(path); }
-  catch (error) {
-    if (error.code === 'ENOENT') throw new Error(`Assignment file does not exist: ${path}`);
-    throw error;
-  }
-  if (!stat.isFile()) throw new Error(`Assignment file must be a regular file: ${path}`);
-  try { accessSync(path, constants.R_OK); }
-  catch { throw new Error(`Assignment file is not readable: ${path}`); }
-  return path;
-}
-
-const ASSIGNMENT_SNAPSHOT_CAP = 16_384;
-const ASSIGNMENT_POINTER_LINE = /^[ \t]*Assignment file:[ \t]*\S/m;
-const ASSIGNMENT_SNAPSHOT_MARKER = /^[ \t]*<<<(?:SLP assignment snapshot|end SLP assignment snapshot)>>>[ \t]*$/m;
-const ASSIGNMENT_CONTROL = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/u;
-const ASSIGNMENT_SNAPSHOT_OPEN = '<<<SLP assignment snapshot>>>';
-const ASSIGNMENT_SNAPSHOT_CLOSE = '<<<end SLP assignment snapshot>>>';
-
-function snapshotError(code, message) {
-  return Object.assign(new Error(`${code}: ${message}`), { code });
-}
-
-function snapshotErrorCode(error) {
-  return typeof error?.code === 'string' && error.code.startsWith('assignment-snapshot-');
-}
-
-export function readAssignmentSnapshot(repository, path, io = fs) {
-  if (typeof repository !== 'string' || !isAbsolute(repository) || typeof path !== 'string' || !isAbsolute(path)) {
-    throw snapshotError('assignment-snapshot-unresolvable', 'repository and assignmentFile must be absolute paths');
-  }
-
-  let root;
-  try {
-    root = io.realpathSync(repository);
-    if (!io.statSync(root).isDirectory()) throw new Error('not a directory');
-  } catch {
-    throw snapshotError('assignment-snapshot-unresolvable', 'repository must resolve to a directory');
-  }
-
-  let real;
-  try { real = io.realpathSync(path); }
-  catch { throw snapshotError('assignment-snapshot-unresolvable', 'assignmentFile could not be resolved'); }
-  const repoRelative = relative(root, real);
-  if (repoRelative === '..' || repoRelative.startsWith(`..${sep}`) || isAbsolute(repoRelative)) {
-    throw snapshotError('assignment-snapshot-outside-root', 'assignmentFile resolves outside the repository');
-  }
-
-  const pathCredential = credentialShaped(repoRelative.split(sep).join('/'));
-  if (pathCredential) throw snapshotError('assignment-snapshot-credential', `assignmentFile path contains credential-shaped content (${pathCredential})`);
-
-  let fd;
-  try { fd = io.openSync(real, io.constants.O_RDONLY | io.constants.O_NOFOLLOW | (io.constants.O_NONBLOCK ?? 0)); }
-  catch (error) {
-    if (error?.code === 'ELOOP') throw snapshotError('assignment-snapshot-not-regular', 'assignmentFile resolved to a symlink');
-    throw snapshotError('assignment-snapshot-unresolvable', 'assignmentFile could not be opened');
-  }
-
-  let result;
-  let failure;
-  try {
-    const opened = io.fstatSync(fd);
-    if (!opened.isFile()) throw snapshotError('assignment-snapshot-not-regular', 'assignmentFile must be a regular file');
-    if (opened.size > ASSIGNMENT_SNAPSHOT_CAP) throw snapshotError('assignment-snapshot-oversize', 'assignmentFile exceeds 16384 bytes');
-
-    const buffer = Buffer.alloc(ASSIGNMENT_SNAPSHOT_CAP + 1);
-    let length = 0;
-    while (length < buffer.length) {
-      const count = io.readSync(fd, buffer, length, buffer.length - length, length);
-      if (count === 0) break;
-      length += count;
-    }
-    if (length > ASSIGNMENT_SNAPSHOT_CAP) throw snapshotError('assignment-snapshot-oversize', 'assignmentFile exceeds 16384 bytes');
-
-    const afterRead = io.fstatSync(fd);
-    let targetStat;
-    let currentReal;
-    try {
-      targetStat = io.statSync(real);
-      currentReal = io.realpathSync(path);
-    } catch {
-      throw snapshotError('assignment-snapshot-changed', 'assignmentFile changed while it was read');
-    }
-    if (!targetStat.isFile() || afterRead.dev !== targetStat.dev || afterRead.ino !== targetStat.ino || currentReal !== real) {
-      throw snapshotError('assignment-snapshot-changed', 'assignmentFile changed while it was read');
-    }
-
-    let text;
-    try { text = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(buffer.subarray(0, length)); }
-    catch { throw snapshotError('assignment-snapshot-not-text', 'assignmentFile is not valid UTF-8'); }
-    if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
-    text = text.replace(/\r\n?/g, '\n');
-    if (ASSIGNMENT_CONTROL.test(text)) throw snapshotError('assignment-snapshot-not-text', 'assignmentFile contains a disallowed control character');
-    if (ASSIGNMENT_POINTER_LINE.test(text) || ASSIGNMENT_SNAPSHOT_MARKER.test(text)) {
-      throw snapshotError('assignment-snapshot-nested-marker', 'assignmentFile contains a nested assignment marker');
-    }
-    const credential = credentialShaped(text);
-    if (credential) throw snapshotError('assignment-snapshot-credential', `assignmentFile contains credential-shaped content (${credential})`);
-
-    const bytes = Buffer.byteLength(text, 'utf8');
-    const sha256 = createHash('sha256').update(text, 'utf8').digest('hex');
-    result = { path: repoRelative.split(sep).join('/'), text, bytes, sha256 };
-  } catch (error) {
-    failure = snapshotErrorCode(error) ? error : snapshotError('assignment-snapshot-unresolvable', 'assignmentFile could not be read');
-  }
-  try { io.closeSync(fd); }
-  catch {
-    if (!failure) failure = snapshotError('assignment-snapshot-unresolvable', 'assignmentFile could not be closed');
-  }
-  if (failure) throw failure;
-  return result;
-}
-
-function assignmentFileSelection(request) {
-  const hasMode = Object.hasOwn(request, 'assignmentFileMode');
-  const mode = hasMode ? request.assignmentFileMode : 'pointer';
-  if (mode !== 'pointer' && mode !== 'snapshot') {
-    throw snapshotError('assignment-snapshot-invalid-mode', 'assignmentFileMode must be "pointer" or "snapshot"');
-  }
-  if (hasMode && request.assignmentFile == null) {
-    throw snapshotError('assignment-snapshot-invalid-mode', 'assignmentFileMode requires assignmentFile');
-  }
-  if (mode === 'pointer') return { file: assignmentFile(request.assignmentFile) };
-  return { file: request.assignmentFile, snapshot: readAssignmentSnapshot(request.repository, request.assignmentFile) };
-}
-
-function assignmentSnapshotCarrier(snapshot) {
-  const separator = snapshot.text.endsWith('\n') ? '' : '\n';
-  return `\nAssignment snapshot: ${snapshot.path} — sha256 ${snapshot.sha256}, ${snapshot.bytes} bytes; the inline text below is authoritative, do not re-read the file.\n${ASSIGNMENT_SNAPSHOT_OPEN}\n${snapshot.text}${separator}${ASSIGNMENT_SNAPSHOT_CLOSE}`;
-}
-
 // The repository's declared default spawn mode — the `agent_mode` key in
 // .paseo-slp/workspace-protocol.md frontmatter. A binding-level modeId wins;
 // this fills the gap before the plan reports 'none'. Read advisory-only:
@@ -271,15 +132,16 @@ function agentMode(repository) {
 // resolves. A permission mode never expands task authority, and the host
 // refuses cross-family inheritance — 'none' is a gap to fix by pinning the
 // mode in the Human-owned option/profile or asking the Human, never a silent
-// inherit.
+// inherit. The provenance warnings live here so plan() and launchCheck report
+// the same words for the same resolution.
 function resolveMode(binding, bindingSource, repository) {
   if (binding?.modeId != null) {
-    return { modeId: binding.modeId, modeIdSource: bindingSource === 'explicit-binding' ? 'binding' : 'bundle' };
+    return { modeId: binding.modeId, modeIdSource: bindingSource === 'explicit-binding' ? 'binding' : 'bundle', warnings: [] };
   }
   const fallback = agentMode(repository);
   return fallback != null
-    ? { modeId: fallback, modeIdSource: 'agent_mode' }
-    : { modeId: null, modeIdSource: 'none' };
+    ? { modeId: fallback, modeIdSource: 'agent_mode', warnings: [`modeId '${fallback}' resolved from .paseo-slp/workspace-protocol.md agent_mode, not pinned in the binding — prefer pinning modeId in the pool option or saved profile so the plan is self-describing`] }
+    : { modeId: null, modeIdSource: 'none', warnings: ['no modeId resolved (none in the binding and no agent_mode in .paseo-slp/workspace-protocol.md) — the spawn would inherit the caller default and cross-family inheritance fails at the host; pin modeId in the pool option or saved profile, or ask the Human'] };
 }
 
 // The orientation manifest carries mechanical locators only — installed root,
@@ -352,15 +214,11 @@ function agentTitle(role, disposition, request, packet) {
 function prepareInputs(request, inspect) {
   const role = request.role ?? 'supervisor';
   const disposition = request.disposition ?? request.route?.disposition;
-  let merged = request, file, assignmentSnapshot, resolved;
+  let merged = request, assignmentSelection, resolved;
   const operations = {
     request: () => requestShape(request, role, disposition),
     inventoryFile: () => { merged = mergeInventory(request); },
-    assignmentFile: () => {
-      const selected = assignmentFileSelection(merged);
-      file = selected.file;
-      assignmentSnapshot = selected.snapshot;
-    },
+    assignmentFile: () => { assignmentSelection = assignmentFileSelection(merged); },
     binding: () => {
       const result = resolveBinding(role, merged, disposition);
       roleProvider(role, result.binding?.provider);
@@ -375,28 +233,22 @@ function prepareInputs(request, inspect) {
     if (inspect) inspect(name, operations[name]);
     else operations[name]();
   }
-  return { request: merged, role, disposition, file, assignmentSnapshot, ...resolved };
+  return { request: merged, role, disposition, assignmentSelection, ...resolved };
 }
 
 // The single owner of the create_agent argument record. Nothing edits it afterwards.
 function plan(root, request, packet) {
   verifyInstall(root);
   const prepared = prepareInputs(request);
-  const { role, disposition, file, assignmentSnapshot, binding, routing, bindingSource } = prepared;
+  const { role, disposition, assignmentSelection, binding, routing, bindingSource } = prepared;
   request = prepared.request;
   const assignment = `Repository: ${request.repository}\nWorkspace ID: ${request.workspaceId}\n${disposition ? `Disposition: ${disposition}\n` : ''}${request.assignment}`
-    + (assignmentSnapshot ? assignmentSnapshotCarrier(assignmentSnapshot)
-      : file ? `\nAssignment file: ${file} — read it first; it is authoritative for scope details.` : '');
+    + assignmentCarrier(assignmentSelection);
   // Surface the intended mode once, at plan level, with its provenance: an
   // unresolved mode would silently fall back to the caller's default at
   // create_agent time — and cross-family inheritance fails at the host.
-  const { modeId, modeIdSource } = resolveMode(binding, bindingSource, request.repository);
-  const warnings = [...(prepared.warnings ?? [])];
-  if (modeIdSource === 'none') {
-    warnings.push('no modeId resolved (none in the binding and no agent_mode in .paseo-slp/workspace-protocol.md) — the spawn would inherit the caller default and cross-family inheritance fails at the host; pin modeId in the pool option or saved profile, or ask the Human');
-  } else if (modeIdSource === 'agent_mode') {
-    warnings.push(`modeId '${modeId}' resolved from .paseo-slp/workspace-protocol.md agent_mode, not pinned in the binding — prefer pinning modeId in the pool option or saved profile so the plan is self-describing`);
-  }
+  const { modeId, modeIdSource, warnings: modeWarnings } = resolveMode(binding, bindingSource, request.repository);
+  const warnings = [...(prepared.warnings ?? []), ...modeWarnings];
   const kit = spawnKit(role);
   const manifest = orientation(root, role, routing);
   return {
@@ -494,15 +346,8 @@ export function launchCheck(root, request, { handoff = false } = {}) {
   }
   if (binding) step('settings', () => bindingCheck(binding));
   else checks.push({ name: 'settings', ok: true, skipped: true, detail: 'skipped — no resolved binding to check' });
-  const warnings = [...(bindingWarnings ?? [])];
-  if (binding != null) {
-    const { modeId, modeIdSource } = resolveMode(binding, bindingSource, merged.repository);
-    if (modeIdSource === 'none') {
-      warnings.push('no modeId resolved (none in the binding and no agent_mode in .paseo-slp/workspace-protocol.md) — the spawn would inherit the caller default and cross-family inheritance fails at the host; pin modeId in the pool option or saved profile, or ask the Human');
-    } else if (modeIdSource === 'agent_mode') {
-      warnings.push(`modeId '${modeId}' resolved from .paseo-slp/workspace-protocol.md agent_mode, not pinned in the binding — prefer pinning modeId in the pool option or saved profile so the plan is self-describing`);
-    }
-  }
+  const warnings = [...(bindingWarnings ?? []),
+    ...(binding != null ? resolveMode(binding, bindingSource, merged.repository).warnings : [])];
   if (handoff) step('handoff', () => { handoffPacket(request); });
   step('plan', () => { (handoff ? handoffPlan : launchPlan)(root, request); });
   return { ok: checks.every(check => check.ok), checks, ...(warnings.length ? { warnings } : {}) };

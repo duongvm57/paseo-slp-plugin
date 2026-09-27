@@ -19,6 +19,35 @@ import { localTarget, runtimeStatus } from '../src/runtime-state.mjs';
 import { probeWorkTracker } from '../src/work-tracker.mjs';
 import { extractRecords, recordSchema, requireRecordKind, RECORD_KINDS } from '../src/report-records.mjs';
 
+// One entry per command: the flags it accepts, the required positional target
+// (--schema stands in for it where offered), whether it takes an optional
+// destination checked by the command itself, and its usage fragment. Order is
+// the usage order.
+const commands = {
+  identity: { usage: 'identity' },
+  snapshot: { target: 'repository', usage: 'snapshot <repo>' },
+  install: { flags: ['--paseo-home', '--apply', '--reload'], optionalTarget: true, usage: 'install [absolute-dir] [--paseo-home <absolute-home>] [--apply] [--reload]' },
+  upgrade: { flags: ['--from', '--apply', '--reload'], optionalTarget: true, usage: 'upgrade <absolute-new-dir> --from <previous-installation> [--apply] [--reload]' },
+  verify: { target: 'dir', usage: 'verify <dir>' },
+  uninstall: { flags: ['--apply', '--reload'], optionalTarget: true, usage: 'uninstall <dir> [--apply] [--reload]' },
+  init: { flags: ['--routing-from', '--apply'], target: 'repository', usage: 'init <absolute-repo> [--routing-from <absolute-json>] [--apply]' },
+  routes: { flags: ['--paseo-home', '--out'], target: 'repository', usage: 'routes <absolute-repo> [--paseo-home <absolute-home>] [--out <path>]' },
+  inventory: { flags: ['--paseo-home'], usage: 'inventory [--paseo-home <absolute-home>]' },
+  agents: { flags: ['--paseo-home'], usage: 'agents [--paseo-home <absolute-home>]' },
+  prepare: { flags: ['--check', '--emit', '--schema', '--out'], target: 'request.json', usage: 'prepare <request.json> [--check | --emit create | --schema] [--out <path>]' },
+  'prepare-handoff': { flags: ['--check', '--emit', '--schema', '--out'], target: 'request.json', usage: 'prepare-handoff <request.json> [--check | --emit create | --schema] [--out <path>]' },
+  materialize: { flags: ['--from', '--apply', '--include', '--paseo-home'], target: 'repository', usage: 'materialize <repository> --from <source-repository> [--include <repo-path>]... [--paseo-home <absolute-home>] [--apply]' },
+  monitor: { flags: [], target: 'request.json', usage: 'monitor <request.json>' },
+  'route-decide': { flags: ['--paseo-home', '--schema', '--out'], target: 'request.json', usage: 'route-decide <request.json> [--schema] [--out <path>] [--paseo-home <absolute-home>]' },
+  notebook: { flags: ['--paseo-home'], target: 'repository', usage: 'notebook <repository> [--paseo-home <absolute-home>]' },
+  records: { flags: ['--kind', '--require', '--repo', '--schema'], target: 'path|-', usage: 'records <path|-> [--kind handback|settlement] [--require handback|settlement] [--repo <absolute-path>] [--schema]' },
+  instructions: { target: 'role', usage: 'instructions <role>' },
+  status: { flags: ['--paseo-home'], usage: 'status [--paseo-home <absolute-home>]' },
+  'local-target': { flags: ['--paseo-home'], usage: 'local-target [--paseo-home <absolute-home>]' },
+  tracker: { flags: ['--paseo-home'], target: 'repository', usage: 'tracker <repository> [--paseo-home <absolute-home>]' },
+};
+const usage = `Usage: slp.mjs ${Object.values(commands).map(entry => entry.usage).join(' | ')}`;
+
 const root = fileURLToPath(new URL('..', import.meta.url));
 const argv = process.argv.slice(2);
 const [command, ...rest] = argv;
@@ -63,20 +92,19 @@ try {
       target = key;
     } else throw new Error(`Unknown flag ${key}`);
   }
-  const commandFlags = { install: ['--paseo-home', '--apply', '--reload'], uninstall: ['--apply', '--reload'], upgrade: ['--from', '--apply', '--reload'], init: ['--routing-from', '--apply'], materialize: ['--from', '--apply', '--include', '--paseo-home'], routes: ['--paseo-home', '--out'], inventory: ['--paseo-home'], agents: ['--paseo-home'], monitor: [], notebook: ['--paseo-home'], prepare: ['--check', '--emit', '--schema', '--out'], 'prepare-handoff': ['--check', '--emit', '--schema', '--out'], 'route-decide': ['--paseo-home', '--schema', '--out'], records: ['--kind', '--require', '--repo', '--schema'], status: ['--paseo-home'], 'local-target': ['--paseo-home'], tracker: ['--paseo-home'] };
-  for (const key of Object.keys(options)) if (!commandFlags[command]?.includes(key)) throw new Error(`${key} is not valid for ${command}`);
+  const spec = Object.hasOwn(commands, command) ? commands[command] : undefined;
+  for (const key of Object.keys(options)) if (!spec?.flags?.includes(key)) throw new Error(`${key} is not valid for ${command}`);
   const prepareModes = ['--check', '--emit', '--schema'].filter(key => options[key]);
   if (prepareModes.length > 1) throw new Error(`${prepareModes.join(' and ')} are separate modes — pick one`);
   if (command === 'upgrade' && !options['--from']) throw new Error('upgrade requires --from <previous-installation>');
   if (command === 'materialize' && !options['--from']) throw new Error('materialize requires --from <source-repository>');
   if (options['--reload'] && !options['--apply']) throw new Error('--reload requires --apply');
-  const targetArg = { snapshot: 'repository', verify: 'dir', prepare: 'request.json', 'prepare-handoff': 'request.json', routes: 'repository', init: 'repository', materialize: 'repository', monitor: 'request.json', notebook: 'repository', instructions: 'role', 'route-decide': 'request.json', records: 'path|-', tracker: 'repository' };
-  if (targetArg[command] && !target && !options['--schema']) throw new Error(`${command} requires <${targetArg[command]}>`);
-  if (target && !targetArg[command] && !['install', 'uninstall', 'upgrade'].includes(command)) throw new Error(`${command} takes no arguments`);
+  if (spec?.target && !target && !options['--schema']) throw new Error(`${command} requires <${spec.target}>`);
+  if (target && !spec?.target && !spec?.optionalTarget) throw new Error(`${command} takes no arguments`);
   // --out persists the response bytes — never the request file. Reject early
   // when it resolves to the request path so the input record is never
   // destroyed by its own result.
-  if (options['--out'] && target && targetArg[command] === 'request.json' && resolve(options['--out']) === resolve(target)) throw new Error('--out must not resolve to the request file — it writes the response, never the request');
+  if (options['--out'] && target && spec?.target === 'request.json' && resolve(options['--out']) === resolve(target)) throw new Error('--out must not resolve to the request file — it writes the response, never the request');
   let result;
   if (command === 'identity') result = identity(root);
   else if (command === 'snapshot') result = snapshot(target);
@@ -183,7 +211,7 @@ try {
         process.exitCode = 1;
       }
     }
-  } else throw new Error('Usage: slp.mjs identity | snapshot <repo> | install [absolute-dir] [--paseo-home <absolute-home>] [--apply] [--reload] | upgrade <absolute-new-dir> --from <previous-installation> [--apply] [--reload] | verify <dir> | uninstall <dir> [--apply] [--reload] | init <absolute-repo> [--routing-from <absolute-json>] [--apply] | routes <absolute-repo> [--paseo-home <absolute-home>] [--out <path>] | inventory [--paseo-home <absolute-home>] | agents [--paseo-home <absolute-home>] | prepare <request.json> [--check | --emit create | --schema] [--out <path>] | prepare-handoff <request.json> [--check | --emit create | --schema] [--out <path>] | materialize <repository> --from <source-repository> [--include <repo-path>]... [--paseo-home <absolute-home>] [--apply] | monitor <request.json> | route-decide <request.json> [--schema] [--out <path>] [--paseo-home <absolute-home>] | notebook <repository> [--paseo-home <absolute-home>] | records <path|-> [--kind handback|settlement] [--require handback|settlement] [--repo <absolute-path>] [--schema] | instructions <role> | status [--paseo-home <absolute-home>] | local-target [--paseo-home <absolute-home>] | tracker <repository> [--paseo-home <absolute-home>]');
+  } else throw new Error(usage);
   // --out persists the RESULT bytes — the response, never the request file —
   // so an audit artifact cannot silently hold the request instead.
   if (result !== undefined && options['--out']) {

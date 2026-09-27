@@ -7,7 +7,8 @@ import { fileURLToPath } from 'node:url';
 import { basename, dirname, join } from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { install, json, hash } from '../src/package.mjs';
-import { launchPlan, handoffPlan, launchCheck, requestSchema, readAssignmentSnapshot } from '../src/launch.mjs';
+import { launchPlan, handoffPlan, launchCheck, requestSchema } from '../src/launch.mjs';
+import { readAssignmentSnapshot } from '../src/assignment-file.mjs';
 import { readCatalog } from '../src/routing.mjs';
 import { spawnKit } from '../src/spawn-kit.mjs';
 
