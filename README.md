@@ -1006,6 +1006,24 @@ plus `gaps` for agent cwds that fail the git probe. Read-only — it never
 copies, merges or edits notebook content, and picks no authoritative
 candidate; where governance lives stays per-checkout.
 
+### `records`
+
+`records <path|-> [--kind handback|settlement] [--require handback|settlement]
+[--repo <absolute-path>]` extracts and validates `slp-record` blocks; `-` reads
+stdin. `--schema` prints the v1 JSON Schema and takes no report path:
+
+```bash
+node "$SLP_RT/bin/slp.mjs" records /absolute/report.md --require handback
+node "$SLP_RT/bin/slp.mjs" records --schema
+```
+
+`--kind` filters returned records only; errors and warnings still cover the full
+report, and any error keeps the command's exit status non-zero. For `outputRef`,
+the per-check candidate repository takes precedence, then the record candidate;
+`--repo` supplies the fallback root. See
+[handback and settlement records](src/references/report-records.md) for the
+record contract.
+
 ### `status` / `local-target`
 
 The plugin's RPC surface (status, local-target, …) has no agent-facing

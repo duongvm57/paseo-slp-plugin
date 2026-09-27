@@ -377,10 +377,11 @@ test('session entry: disabled tracker renders byte-identically — absent file a
 });
 
 // T1 byte-level pin: disabled session entry keeps the historical instruction
-// body after removing the explicitly added common communication policy. Keep
-// the fixture historical; any other body drift remains visible. The locator
-// contract exposes only common.md and the Peer role file.
-test('session entry: disabled Peer render keeps historical body after the common-policy delta (T1)', t => {
+// body after removing the declared common communication-policy and Peer
+// slp-record emit-rule deltas. Keep the fixture historical; any other body
+// drift remains visible. The locator contract exposes only common.md and the
+// Peer role file.
+test('session entry: disabled Peer render keeps historical body after declared policy deltas (T1)', t => {
   const before = JSON.parse(readFileSync(join(root, 'tests/fixtures/pre-tracker-session.json'), 'utf8'));
   const home = tmpHome(t);
   const installed = join(tmp(t, 'wt-inst-'), 'release');
@@ -405,8 +406,14 @@ test('session entry: disabled Peer render keeps historical body after the common
     .split(/\r?\n[ \t]*\r?\n/u)
     .find(paragraph => paragraph.includes('Seat-facing text'));
   assert.ok(communicationPolicy, 'common.md contains the seat-facing text paragraph');
-  const historicalBody = a.body.replace(`\n\n${communicationPolicy}\n\n`, '\n\n');
-  assert.notEqual(historicalBody, a.body, 'the declared common-policy delta is present');
+  const peerEmitRule = readFileSync(join(root, 'src/roles/peer.md'), 'utf8')
+    .split(/\r?\n[ \t]*\r?\n/u)
+    .find(paragraph => paragraph.includes('slp-record'));
+  assert.ok(peerEmitRule, 'peer.md contains the slp-record emit-rule paragraph');
+  const withoutPeerEmitRule = a.body.replace(`\n\n${peerEmitRule}\n`, '\n\n');
+  assert.notEqual(withoutPeerEmitRule, a.body, 'the declared Peer emit-rule delta is present');
+  const historicalBody = withoutPeerEmitRule.replace(`\n\n${communicationPolicy}\n\n`, '\n\n');
+  assert.notEqual(historicalBody, withoutPeerEmitRule, 'the declared common-policy delta is present');
   assert.deepEqual([...a.locators].sort(), [
     '<RUNTIME_ROOT>/src/common.md',
     '<RUNTIME_ROOT>/src/roles/peer.md',

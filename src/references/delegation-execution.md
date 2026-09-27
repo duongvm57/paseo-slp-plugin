@@ -42,6 +42,8 @@ Read/re-read policy text under the common core's freshness rule.
    Use prepare with role=peer, route.optionId, route.catalogSha256, repository,
    workspaceId, assignment and fresh providers to validate the selection and obtain
    create arguments. Profile inventory never overrides a Peer pool selection.
+   State in the brief that candidate/check handbacks require the `slp-record`
+   block; the record does not replace prose.
    When `routes` reports `jevRouting.routing` as `shadow`, `armed` or
    `error`, read `references/jev-routing.md`; skip it for `unconfigured` or
    `off`. `error` blocks the dependent routing branch.

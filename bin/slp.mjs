@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { fileURLToPath } from 'node:url';
 import { resolve, isAbsolute, join, dirname } from 'node:path';
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { identity, install, uninstall, update, verifyInstall, snapshot, readJson, json } from '../src/package.mjs';
 import { launchPlan, handoffPlan, launchCheck, requestSchema } from '../src/launch.mjs';
@@ -17,6 +17,7 @@ import { monitor } from '../src/monitor.mjs';
 import { notebook } from '../src/notebook.mjs';
 import { localTarget, runtimeStatus } from '../src/runtime-state.mjs';
 import { probeWorkTracker } from '../src/work-tracker.mjs';
+import { extractRecords, recordSchema, requireRecordKind, RECORD_KINDS } from '../src/report-records.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const argv = process.argv.slice(2);
@@ -50,20 +51,26 @@ try {
         if (!isAbsolute(args[i + 1])) throw new Error(`Absolute path required for ${key}`);
         options[key] = args[++i];
       } else options[key] = resolveHome(); // bare flag: managed mode resolves SLP_DAEMON_HOME/PASEO_HOME or fails, never ~/.paseo
+    } else if (key === '--kind' || key === '--require' || key === '--repo') {
+      const value = args[++i];
+      if (!value || value.startsWith('-')) throw new Error(`${key} requires a value`);
+      if ((key === '--kind' || key === '--require') && !RECORD_KINDS.includes(value)) throw new Error(`${key} must be ${RECORD_KINDS.join(' or ')}`);
+      if (key === '--repo' && !isAbsolute(value)) throw new Error('Absolute path required for --repo');
+      options[key] = value;
     } else if (!key.startsWith('-')) {
       // Positional target may come after flags (e.g. prepare --check req.json).
       if (target !== undefined) throw new Error(`Unexpected argument ${key}`);
       target = key;
     } else throw new Error(`Unknown flag ${key}`);
   }
-  const commandFlags = { install: ['--paseo-home', '--apply', '--reload'], uninstall: ['--apply', '--reload'], upgrade: ['--from', '--apply', '--reload'], init: ['--routing-from', '--apply'], materialize: ['--from', '--apply', '--include', '--paseo-home'], routes: ['--paseo-home', '--out'], inventory: ['--paseo-home'], agents: ['--paseo-home'], monitor: [], notebook: ['--paseo-home'], prepare: ['--check', '--emit', '--schema', '--out'], 'prepare-handoff': ['--check', '--emit', '--schema', '--out'], 'route-decide': ['--paseo-home', '--schema', '--out'], status: ['--paseo-home'], 'local-target': ['--paseo-home'], tracker: ['--paseo-home'] };
+  const commandFlags = { install: ['--paseo-home', '--apply', '--reload'], uninstall: ['--apply', '--reload'], upgrade: ['--from', '--apply', '--reload'], init: ['--routing-from', '--apply'], materialize: ['--from', '--apply', '--include', '--paseo-home'], routes: ['--paseo-home', '--out'], inventory: ['--paseo-home'], agents: ['--paseo-home'], monitor: [], notebook: ['--paseo-home'], prepare: ['--check', '--emit', '--schema', '--out'], 'prepare-handoff': ['--check', '--emit', '--schema', '--out'], 'route-decide': ['--paseo-home', '--schema', '--out'], records: ['--kind', '--require', '--repo', '--schema'], status: ['--paseo-home'], 'local-target': ['--paseo-home'], tracker: ['--paseo-home'] };
   for (const key of Object.keys(options)) if (!commandFlags[command]?.includes(key)) throw new Error(`${key} is not valid for ${command}`);
   const prepareModes = ['--check', '--emit', '--schema'].filter(key => options[key]);
   if (prepareModes.length > 1) throw new Error(`${prepareModes.join(' and ')} are separate modes — pick one`);
   if (command === 'upgrade' && !options['--from']) throw new Error('upgrade requires --from <previous-installation>');
   if (command === 'materialize' && !options['--from']) throw new Error('materialize requires --from <source-repository>');
   if (options['--reload'] && !options['--apply']) throw new Error('--reload requires --apply');
-  const targetArg = { snapshot: 'repository', verify: 'dir', prepare: 'request.json', 'prepare-handoff': 'request.json', routes: 'repository', init: 'repository', materialize: 'repository', monitor: 'request.json', notebook: 'repository', instructions: 'role', 'route-decide': 'request.json', tracker: 'repository' };
+  const targetArg = { snapshot: 'repository', verify: 'dir', prepare: 'request.json', 'prepare-handoff': 'request.json', routes: 'repository', init: 'repository', materialize: 'repository', monitor: 'request.json', notebook: 'repository', instructions: 'role', 'route-decide': 'request.json', records: 'path|-', tracker: 'repository' };
   if (targetArg[command] && !target && !options['--schema']) throw new Error(`${command} requires <${targetArg[command]}>`);
   if (target && !targetArg[command] && !['install', 'uninstall', 'upgrade'].includes(command)) throw new Error(`${command} takes no arguments`);
   // --out persists the response bytes — never the request file. Reject early
@@ -73,6 +80,20 @@ try {
   let result;
   if (command === 'identity') result = identity(root);
   else if (command === 'snapshot') result = snapshot(target);
+  else if (command === 'records') {
+    if (options['--schema']) {
+      if (target) throw new Error('records --schema takes no report path');
+      result = recordSchema();
+    } else {
+      if (!target) throw new Error('records requires <path|->');
+      const input = target === '-' ? readFileSync(0, 'utf8') : readFileSync(resolve(target), 'utf8');
+      let parsed = extractRecords(input, options['--repo'] ? { repo: options['--repo'] } : {});
+      if (options['--require']) parsed = requireRecordKind(parsed, options['--require']);
+      const records = options['--kind'] ? parsed.records.filter(entry => entry.record?.kind === options['--kind']) : parsed.records;
+      result = { records, errors: parsed.errors, warnings: parsed.warnings };
+      if (parsed.errors.length) process.exitCode = 1;
+    }
+  }
   else if (command === 'verify') result = verifyInstall(resolve(target));
   else if (command === 'prepare' || command === 'prepare-handoff') {
     const handoff = command === 'prepare-handoff';
@@ -162,7 +183,7 @@ try {
         process.exitCode = 1;
       }
     }
-  } else throw new Error('Usage: slp.mjs identity | snapshot <repo> | install [absolute-dir] [--paseo-home <absolute-home>] [--apply] [--reload] | upgrade <absolute-new-dir> --from <previous-installation> [--apply] [--reload] | verify <dir> | uninstall <dir> [--apply] [--reload] | init <absolute-repo> [--routing-from <absolute-json>] [--apply] | routes <absolute-repo> [--paseo-home <absolute-home>] [--out <path>] | inventory [--paseo-home <absolute-home>] | agents [--paseo-home <absolute-home>] | prepare <request.json> [--check | --emit create | --schema] [--out <path>] | prepare-handoff <request.json> [--check | --emit create | --schema] [--out <path>] | materialize <repository> --from <source-repository> [--include <repo-path>]... [--paseo-home <absolute-home>] [--apply] | monitor <request.json> | route-decide <request.json> [--schema] [--out <path>] [--paseo-home <absolute-home>] | notebook <repository> [--paseo-home <absolute-home>] | instructions <role> | status [--paseo-home <absolute-home>] | local-target [--paseo-home <absolute-home>] | tracker <repository> [--paseo-home <absolute-home>]');
+  } else throw new Error('Usage: slp.mjs identity | snapshot <repo> | install [absolute-dir] [--paseo-home <absolute-home>] [--apply] [--reload] | upgrade <absolute-new-dir> --from <previous-installation> [--apply] [--reload] | verify <dir> | uninstall <dir> [--apply] [--reload] | init <absolute-repo> [--routing-from <absolute-json>] [--apply] | routes <absolute-repo> [--paseo-home <absolute-home>] [--out <path>] | inventory [--paseo-home <absolute-home>] | agents [--paseo-home <absolute-home>] | prepare <request.json> [--check | --emit create | --schema] [--out <path>] | prepare-handoff <request.json> [--check | --emit create | --schema] [--out <path>] | materialize <repository> --from <source-repository> [--include <repo-path>]... [--paseo-home <absolute-home>] [--apply] | monitor <request.json> | route-decide <request.json> [--schema] [--out <path>] [--paseo-home <absolute-home>] | notebook <repository> [--paseo-home <absolute-home>] | records <path|-> [--kind handback|settlement] [--require handback|settlement] [--repo <absolute-path>] [--schema] | instructions <role> | status [--paseo-home <absolute-home>] | local-target [--paseo-home <absolute-home>] | tracker <repository> [--paseo-home <absolute-home>]');
   // --out persists the RESULT bytes — the response, never the request file —
   // so an audit artifact cannot silently hold the request instead.
   if (result !== undefined && options['--out']) {

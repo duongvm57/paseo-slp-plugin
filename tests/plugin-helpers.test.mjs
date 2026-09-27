@@ -247,7 +247,7 @@ test('Peer carrier locators are allowlisted and include work-tracking only when 
 
   for (const role of ['supervisor', 'lead']) {
     const entries = policyLocators(installed, role, env);
-    assert.equal(entries.length, 3 + 10, `${role} retains its required bundle and all ten references`);
+    assert.equal(entries.length, 3 + 11, `${role} retains its required bundle and all eleven references`);
     assert.ok(entries.some(entry => entry.path === join(installed, 'src/references/jev-routing.md')));
   }
 

@@ -142,6 +142,15 @@ helper or an exact commit with all relevant working changes accounted for. Recor
 external evidence separately; ignored outputs/processes are outside a Git snapshot.
 The helper aggregates untracked nested repository roots with per-sub-repo identity; staged gitlinks snapshot as `{path, indexOid, headOid, state}` — any state other than `clean` lands in top-level `incomplete`, and that submodule scope stays unproven until separately agreed evidence covers it.
 
+For a handback that claims a candidate or checks, require its `slp-record` block
+and read it with `slp.mjs records <report> --require handback`. Keep the prose as
+the report of record; parser validity and output hashes establish consistency,
+not execution. Lead or CI reruns each claimed check against the identified
+candidate before acceptance. Pass `--repo <absolute-path>` for the verifier's
+candidate checkout when checking referenced output; it overrides roots declared
+in the record. See `references/report-records.md` for field and failure
+semantics.
+
 Keep candidate writers paused during review and verification. A before/after identity
 change invalidates that acceptance attempt. Reviewers report severity, evidence,
 checks and APPROVE/FINDINGS; Engineer supplies proof; Lead issues the project verdict.

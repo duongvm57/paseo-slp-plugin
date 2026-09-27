@@ -19,6 +19,45 @@ test('contract text pins: peer locators, review floor, bounded settle, heartbeat
   assert.ok(monitoring.includes('bounded fallback for gaps in event coverage'));
 });
 
+test('Peer handbacks project candidate and check claims through slp-record', () => {
+  const peer = read('src/roles/peer.md');
+  assert.match(peer, /handback that asserts a candidate or checks includes a fenced JSON block marked\s+`slp-record`/);
+  assert.match(peer, /the record projects the same\s+facts and never replaces the report/);
+  assert.match(peer, /does not prove a command ran/);
+  assert.match(peer, /`seat\.role` and `seat\.disposition` are required; `seat\.agentId` is\s+optional/);
+  assert.match(peer, /`APPROVE`, `FINDINGS`, `BLOCKED`, `REOPEN_REQUEST`,\s+`DEPENDENCY_REQUEST` or `null`/);
+  assert.match(peer, /exactly one of\s+`snapshotSha256` or a full clean commit `head`/);
+  assert.match(peer, /Every `checks\[\]` entry requires\s+`cmd`, integer `exit` and `sha`/);
+  assert.match(peer, /managed runtime's `bin\/slp\.mjs` \(same path family as the snapshot command\)/);
+  assert.match(peer, /Pass `--repo <absolute-path>` for the verifier's candidate checkout when reading\s+referenced output; it overrides record-declared roots/);
+  assert.doesNotMatch(peer, /report-only records use a null candidate|Set `seat\.agentId` only when known/);
+  assert.match(peer, /`records --schema`[\s\S]*`records <report> --require handback`/);
+});
+
+test('report records document safe settlement sinks and effective output roots', () => {
+  const records = read('src/references/report-records.md');
+  const monitoring = read('src/references/monitoring.md');
+  const tracking = read('src/references/work-tracking.md');
+  const orchestration = read('src/references/orchestration.md');
+
+  assert.match(records, /When supplied, `--repo <absolute-path>` is the verifier's authoritative\s+root and overrides every record-declared `candidate\.repository`/);
+  assert.match(records, /otherwise it names an absolute `repository`/);
+  assert.match(records, /Without it, an\s+`outputRef` uses the per-check `candidate\.repository`, then the record's\s+`candidate\.repository`/);
+  assert.match(records, /warn `repository-mismatch` with both resolved paths and still read\s+only from `--repo`/);
+  assert.match(records, /A settlement record\s+or export contains no raw transcript or secrets/);
+  assert.match(records, /the relevant evidence-pointer fields in its authorized causal notebook/);
+  assert.match(records, /When no Supervisor is assigned, the\s+Lead writes the Lead's own\s+settlement pointer/);
+  assert.match(records, /If neither sink is available, the Lead\s+includes the Peer settlement block in the Lead's handback to the assigned\s+Supervisor/);
+  assert.match(records, /`--require` makes a kind mandatory; it is satisfied when a record\s+of that kind is present, while validation errors still make the command exit 1/);
+  assert.match(records, /required-kind-missing[\s\S]*multiple-records[\s\S]*repository-mismatch/);
+  assert.match(records, /`--kind` filters returned\s+records only; parse and validation errors remain complete for every block/);
+  assert.match(orchestration, /Pass `--repo <absolute-path>` for the verifier's\s+candidate checkout when checking referenced output; it overrides roots declared\s+in the record/);
+  assert.match(monitoring, /references\/report-records\.md/);
+  assert.doesNotMatch(monitoring, /root Beads issue comment|causal notebook|durable note location/);
+  assert.match(tracking, /references\/report-records\.md/);
+  assert.match(read('docs/contract.md'), /verifier's `--repo` when supplied, otherwise record-declared candidate roots/);
+});
+
 test('common policy pins seat-facing text communication language', () => {
   const common = read('src/common.md').replace(/\s+/gu, ' ');
   const communicationRule = "Seat-facing text is anything another seat or the Human reads: prompts, assignments, reports, agent-responses, handbacks, briefs and notebook entries. All seat-facing text uses the configured communication language; direct replies to the Human mirror the Human's current language; keep identifiers, paths and commands verbatim.";

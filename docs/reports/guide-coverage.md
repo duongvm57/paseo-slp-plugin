@@ -37,11 +37,12 @@ agent compliance or E2E success.
 | [Routing](../../src/references/provider-routing.md) | Delegation and saved-profile pointer for Supervisor/Lead | Before every spawn: refresh the Human-configured role profile, validate capabilities and record the complete launch bundle; Jev details move to the conditional reference below. |
 | [Jev routing](../../src/references/jev-routing.md) | Pointer from routing and delegation execution | Read only when `routes` reports `jevRouting.routing` as `shadow`, `armed` or `error`. `unconfigured`/`off` skip it; `error` blocks the dependent branch and never falls back silently. |
 | [Work tracking](../../src/references/work-tracking.md) | Managed session-entry `Work tracker:` line rendered by `workTrackerBlock` (between the communication-language output and the assignment) | The reference self-gates on that line. Peer carrier includes its locator only when managed session entry enables beads; Supervisor/Lead keep their established locator set. |
+| [Handback and settlement records](../../src/references/report-records.md) | Peer handback rule; orchestration, monitoring and work-tracking pointers | When a handback claims a candidate/check, records are parsed, or a settlement pointer is written. |
 | [Onboarding skill](../../skills/paseo-slp-onboarding/SKILL.md) | Installable skill at native project/global scope | Human requests repo setup/update: the host triggers the installed skill, which fills protocol and repo-local routing with preserved preferences and discovery evidence. Skill installation is separate from `init`. |
 | [Protocol template](../../src/templates/workspace-protocol.md) | Explicit init creates repository .paseo-slp/workspace-protocol.md | Supervisor and Lead read the repository file when the assignment lands — before tactic-dependent replies or decisions, not only before delegation; Supervisor also reads it for an assigned protocol audit. Peer receives only relevant constraints. |
 
 [Package identity/install](../../src/package.mjs) recursively includes `src/`, so all
-ten references are in the install unit. Role-scoped locators keep Peer metadata
+eleven references are in the install unit. Role-scoped locators keep Peer metadata
 limited to common.md, peer.md and conditional work-tracking.md without reducing
 install integrity coverage. Common resolves `references/` relative to the installed policy directory supplied by
 the loader. The full guide and this matrix remain source documentation under docs/.
@@ -208,7 +209,7 @@ coverage. Independent live acceptance remains outside this textual trace.
 - Read the source guide and compared installed policy/procedure branches with the
   50 grouped requirement rows and all 20 §9 entries above.
 - Rendered roleInstructions in memory and followed conditional reference paths:
-  the policy references (four at that revision, ten now) resolve and occur
+  the policy references (four at that revision, eleven now) resolve and occur
   in the recursive package identity. Peer
   has no delegation procedure or orchestration reference pointer in its envelope.
 - Exercised the textual branches for context handoff, bounded-task settlement,

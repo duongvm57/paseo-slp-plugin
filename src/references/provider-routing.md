@@ -31,6 +31,10 @@ repository catalog wins, routes attaches `userPool` plus
 per-option field differences). The Manager's Peer pool card is that file's sole writer — its
 model/mode/thinking values come from the live provider catalog, so a seat
 cannot name a mode the provider never offered.
+When `poolDrift` or a related warning appears, the Lead records it in the
+checkpoint or timeline and brings it to the Human/Manager to reconcile the
+owned sources. Drift is advisory and never blocks launch. Re-read `routes` for
+the authoritative current scope and diff.
 Each option contains an id, provider family (pi/codex/devin/claude), model, optional modeId,
 thinkingOptionId/features, roles, enabled, availability, suitableFor,
 avoidFor and notes. The 12 archetype ids are reserved standard-seat names:

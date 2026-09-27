@@ -164,3 +164,10 @@ continuing assignments and unknown settlement, and names how to reproduce or
 re-check the result and which inputs a downstream seat can consume. Lifecycle idle
 and a deadline do not prove cancellation, successful cleanup or technical
 acceptance.
+
+At settlement, the owner receiving the report writes a `slp-record` with
+`kind: "settlement"` after Delivery and closed correction or re-review. Follow
+`references/report-records.md` for the writer, durable sink and fallback,
+including the handback fallback when neither durable sink is available. That
+reference also defines timeline export fields and provider-native handle notes.
+A pointer cannot restore a host timeline that has already been removed.
