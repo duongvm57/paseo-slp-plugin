@@ -619,6 +619,22 @@ export const Profile = z.object({
   featureValues: z.record(z.string(), Json).optional(),
   notes: z.string().optional(),
 }).catchall(Json);
+/** Paseo MCP tools withheld from every package-owned Peer provider. */
+export const PEER_PASEO_TOOLS_POLICY = {
+  disabledTools: [
+    "archive_agent",
+    "archive_workspace",
+    "cancel_agent",
+    "create_agent",
+    "create_heartbeat",
+    "create_schedule",
+    "create_workspace",
+    "delete_heartbeat",
+    "delete_schedule",
+    "update_agent",
+  ],
+} as const;
+
 export const OwnedProvider = z.object({
   extends: z.enum(PROVIDER_EXTENDS_IDS),
   label: z.string(),
@@ -629,6 +645,10 @@ export const OwnedProvider = z.object({
   // receipts written by that build readable.
   command: z.array(AbsolutePath).min(1).max(2),
   env: z.record(z.string(), z.string()), enabled: z.boolean(),
+  paseoTools: z.object({
+    enabled: z.boolean().optional(),
+    disabledTools: z.array(z.string()).optional(),
+  }).strict().optional(),
 }).strict();
 export const OwnedProfileSlot = z.object({
   index: z.number().int().nonnegative(), value: Profile,

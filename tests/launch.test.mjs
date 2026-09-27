@@ -340,7 +340,10 @@ test('verbatim provider shape is enforced — added, removed or forged fields re
   const { dir, installed } = fixture(t);
   const route = catalogFixture(dir);
   const base = { ...request, repository: dir, role: 'peer', route };
-  const observed = { id: 'slp-devin-peer', enabled: true, status: 'available' };
+  const observed = {
+    id: 'slp-devin-peer', enabled: true, status: 'available',
+    paseoTools: { disabledTools: ['create_agent'] }, disallowedTools: ['Task'],
+  };
   const plan = launchPlan(installed, { ...base, providers: [observed] });
   assert.match(plan.create.provider, /^slp-devin-peer\//);
   // Added field — a forged marker is outside the live record vocabulary.

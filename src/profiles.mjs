@@ -3,6 +3,20 @@ import { dispositionPattern, rejectRouteKeys, verifyProvider,
 
 export const roles = ['supervisor', 'lead', 'peer'];
 export const profileRoles = ['supervisor', 'lead'];
+export const peerPaseoToolsPolicy = {
+  disabledTools: [
+    'archive_agent',
+    'archive_workspace',
+    'cancel_agent',
+    'create_agent',
+    'create_heartbeat',
+    'create_schedule',
+    'create_workspace',
+    'delete_heartbeat',
+    'delete_schedule',
+    'update_agent',
+  ],
+};
 // Supervisor and Lead orchestrate; Peer owns one bounded outcome and never spawns.
 export const orchestrates = role => role !== 'peer';
 export const families = ['codex', 'pi', 'devin', 'claude'];

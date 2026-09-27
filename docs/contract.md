@@ -187,8 +187,10 @@ the context needed for their bounded assignments.
 The policy describes monitoring, council, recovery and parallel ownership, but these
 paths are not E2E-qualified by this revision. Heartbeat uses discovered host wake
 primitives; `slp.mjs monitor` adds a caller-invoked, delta-only signal scan that
-emits candidates without verdicts — it is not a semantic detector, and no
-lifecycle runner, tool filter or schedule adapter is added. Missing capabilities remain explicit before any fallback. See
+emits candidates without verdicts — it is not a semantic detector. Peer provider
+entries set `paseoTools.disabledTools` for selected orchestration MCP tools; this
+is a tool-delivery gate, not shell or direct-CLI isolation. No lifecycle runner
+or schedule adapter is added. Missing capabilities remain explicit before any fallback. See
 [guide coverage](reports/guide-coverage.md) for requirement mapping, load paths and host gaps.
 
 Codex, Pi, Devin and Claude share role bytes through their respective adapters. Human configures

@@ -8,6 +8,20 @@ import { scenarios } from '../e2e/scenarios.mjs';
 const root = fileURLToPath(new URL('..', import.meta.url));
 const read = path => readFileSync(join(root, path), 'utf8');
 
+test('guide coverage records the Peer Paseo tool-delivery gate and its limit', () => {
+  const guide = read('docs/reports/guide-coverage.md');
+  const h06 = guide.match(/^\| H06 \|.*$/m)?.[0];
+  const g07 = guide.match(/^\| G07 · §3\.1 \|.*$/m)?.[0];
+
+  assert.ok(h06, 'H06 row exists');
+  assert.match(h06, /paseoTools\.disabledTools/);
+  assert.match(h06, /tool-delivery gate, not a sandbox/);
+  assert.match(h06, /shell.*CLI directly/s);
+  assert.ok(g07, 'G07 row exists');
+  assert.match(g07, /paseoTools\.disabledTools/);
+  assert.match(g07, /native-subagent disabling remains outside the package/);
+});
+
 test('Lead implementation ownership stays with Peer Engineers across doctrine and dogfood docs', () => {
   const lead = read('src/roles/lead.md');
   const template = read('src/templates/workspace-protocol.md');

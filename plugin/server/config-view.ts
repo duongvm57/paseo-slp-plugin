@@ -329,8 +329,8 @@ export function effectiveView(config: unknown): EffectiveView {
   };
 }
 
-/** The five fields this plugin writes on a provider entry (§8.1). */
-const WRITTEN_PROVIDER_FIELDS = ["extends", "label", "command", "env", "enabled"] as const;
+/** The six fields this plugin writes on a provider entry (§8.1). */
+const WRITTEN_PROVIDER_FIELDS = ["extends", "label", "command", "env", "enabled", "paseoTools"] as const;
 
 export function providerWrittenFieldsEqual(rawEntry: unknown, liveEntry: unknown): boolean {
   for (const field of WRITTEN_PROVIDER_FIELDS) {

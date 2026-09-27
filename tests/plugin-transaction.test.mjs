@@ -26,12 +26,16 @@ import { createManager } from '../plugin/server/manager.ts';
 import { createStateStore } from '../plugin/server/state-store.ts';
 import {
   assertPersistedCompatible,
+  desiredProviderEntries,
   patchForDirection,
 } from '../plugin/server/config-transaction.ts';
-import { OperationConflict } from '../plugin/shared/contracts.ts';
+import { OperationConflict, OwnedProvider, PEER_PASEO_TOOLS_POLICY } from '../plugin/shared/contracts.ts';
 import { FAMILY_LABEL } from '../plugin/shared/families.ts';
+import { providerWrittenFieldsEqual } from '../plugin/server/config-view.ts';
+import { peerPaseoToolsPolicy } from '../src/profiles.mjs';
 import {
   MiniStore,
+  FAMILIES,
   OWNED_IDS,
   activateInput,
   deactivateInput,
@@ -61,6 +65,40 @@ import {
 // Tests
 // ---------------------------------------------------------------------------
 
+test('plugin provider generation and receipt schemas carry the Peer Paseo tool policy only', () => {
+  assert.deepEqual(PEER_PASEO_TOOLS_POLICY.disabledTools, peerPaseoToolsPolicy.disabledTools);
+  assert.deepEqual(PEER_PASEO_TOOLS_POLICY.disabledTools, [...PEER_PASEO_TOOLS_POLICY.disabledTools].sort());
+
+  const launchSet = {
+    launchSetSha256: 'fixture-launch-set',
+    files: OWNED_IDS.map(id => ({ path: `/launchers/${id}` })),
+  };
+  const resolution = {
+    node: { path: '/usr/bin/node' },
+    binaries: Object.fromEntries(FAMILIES.map(family => [family, { available: true, path: `/usr/bin/${family}` }])),
+  };
+  const entries = desiredProviderEntries(launchSet, resolution, '/slp/runtime', '/paseo');
+  for (const family of FAMILIES) {
+    assert.deepEqual(entries[`slp-${family}-peer`].paseoTools, {
+      disabledTools: PEER_PASEO_TOOLS_POLICY.disabledTools,
+    });
+    for (const role of ['supervisor', 'lead']) {
+      assert.equal(Object.hasOwn(entries[`slp-${family}-${role}`], 'paseoTools'), false);
+    }
+  }
+
+  const ownedPeer = {
+    extends: 'codex',
+    label: 'SLP Codex Peer',
+    command: ['/launchers/slp-codex-peer'],
+    env: {},
+    enabled: true,
+    paseoTools: PEER_PASEO_TOOLS_POLICY,
+  };
+  assert.equal(OwnedProvider.safeParse(ownedPeer).success, true);
+  assert.equal(providerWrittenFieldsEqual(ownedPeer, { ...ownedPeer, paseoTools: { disabledTools: [] } }), false);
+});
+
 test('happy activate: INACTIVE → ACTIVE, providers/profiles/injection written, binding committed', async t => {
   const { home, binaries, daemon, deps } = await makePluginFixture(t);
   const manager = createManager(deps);
@@ -87,6 +125,7 @@ test('happy activate: INACTIVE → ACTIVE, providers/profiles/injection written,
   assert.equal(Object.keys(providers).length, 12);
   for (const id of OWNED_IDS) {
     const family = id.split('-')[1];
+    const role = id.split('-')[2];
     const entry = providers[id];
     const roleLabel = id.split('-')[2][0].toUpperCase() + id.split('-')[2].slice(1);
     assert.equal(entry.enabled, true);
@@ -99,6 +138,11 @@ test('happy activate: INACTIVE → ACTIVE, providers/profiles/injection written,
     assert.equal(entry.env.SLP_MANAGED_RUNTIME, '1');
     assert.equal(entry.env.PASEO_HOME, home);
     assert.ok(entry.env.SLP_NODE_BIN, `SLP_NODE_BIN for ${id}`);
+    if (role === 'peer') {
+      assert.deepEqual(entry.paseoTools, { disabledTools: PEER_PASEO_TOOLS_POLICY.disabledTools });
+    } else {
+      assert.equal(Object.hasOwn(entry, 'paseoTools'), false);
+    }
     // One label template for every transport: `SLP <Family> <Role>` with
     // FAMILY_LABEL as the single display-name source.
     assert.equal(entry.label, `SLP ${FAMILY_LABEL[family]} ${roleLabel}`);

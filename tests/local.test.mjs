@@ -5,12 +5,38 @@ import { fileURLToPath } from 'node:url';
 import { join, dirname, resolve } from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { identity, install, verifyInstall, uninstall, snapshot, json } from '../src/package.mjs';
+import { configurationPlan } from '../src/paseo-install.mjs';
 import { prompt, launchPlan } from '../src/launch.mjs';
 import { roleBundle } from '../src/role-bundle.mjs';
-import { resolveProfile } from '../src/profiles.mjs';
+import { peerPaseoToolsPolicy, resolveProfile } from '../src/profiles.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const binding = { provider: 'codex', model: 'gpt-5.6-luna', modeId: 'auto', thinkingOptionId: 'medium' };
+
+test('standalone provider plan applies the sorted Paseo tool policy to Peer only', () => {
+  const expected = [
+    'archive_agent',
+    'archive_workspace',
+    'cancel_agent',
+    'create_agent',
+    'create_heartbeat',
+    'create_schedule',
+    'create_workspace',
+    'delete_heartbeat',
+    'delete_schedule',
+    'update_agent',
+  ];
+  assert.deepEqual(peerPaseoToolsPolicy.disabledTools, expected);
+  assert.deepEqual(peerPaseoToolsPolicy.disabledTools, [...peerPaseoToolsPolicy.disabledTools].sort());
+  const plan = configurationPlan('/tmp/slp', { agents: { providers: {}, agentProfiles: [] } });
+  for (const family of ['codex', 'pi', 'devin', 'claude']) {
+    assert.deepEqual(plan.providers[`slp-${family}-peer`].paseoTools, { disabledTools: expected });
+    for (const role of ['supervisor', 'lead']) {
+      assert.equal(Object.hasOwn(plan.providers[`slp-${family}-${role}`], 'paseoTools'), false);
+    }
+  }
+});
+
 test('profile resolution preserves user preferences and rejects missing or wrong family', () => {
   const profiles = ['supervisor', 'lead'].map(role => ({ id: `slp-${role}`,
     ...binding, provider: `slp-codex-${role}`, modeId: 'full-access',
