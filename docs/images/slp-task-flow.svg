@@ -1,0 +1,134 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1568 768" role="img" aria-label="A task in Paseo SLP, end to end: you give the Supervisor an objective; it observes or creates a Lead; the Lead frames the work and routes bounded outcomes to Peers; Peers return evidence, challenges or blocked work; the Lead integrates and gives the verdict; the Supervisor checks the handback and reports to you.">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#101a30"/>
+      <stop offset="1" stop-color="#0a0e1a"/>
+    </linearGradient>
+    <radialGradient id="halo" cx="0.5" cy="0.1" r="0.5">
+      <stop offset="0" stop-color="#24304f" stop-opacity="0.5"/>
+      <stop offset="1" stop-color="#24304f" stop-opacity="0"/>
+    </radialGradient>
+    <pattern id="dots" width="26" height="26" patternUnits="userSpaceOnUse">
+      <circle cx="1.2" cy="1.2" r="1.2" fill="#1c2742"/>
+    </pattern>
+    <marker id="ah-amber" markerWidth="10" markerHeight="10" refX="8" refY="4" orient="auto"><path d="M0 0l8 4-8 4z" fill="#e8b04b"/></marker>
+    <marker id="ah-teal" markerWidth="10" markerHeight="10" refX="8" refY="4" orient="auto"><path d="M0 0l8 4-8 4z" fill="#45c8ae"/></marker>
+    <marker id="ah-violet" markerWidth="10" markerHeight="10" refX="8" refY="4" orient="auto"><path d="M0 0l8 4-8 4z" fill="#9d8ceb"/></marker>
+    <marker id="ah-cyan" markerWidth="10" markerHeight="10" refX="8" refY="4" orient="auto"><path d="M0 0l8 4-8 4z" fill="#4fc3d9"/></marker>
+    <marker id="ah-slate" markerWidth="10" markerHeight="10" refX="8" refY="4" orient="auto"><path d="M0 0l8 4-8 4z" fill="#8b98b8"/></marker>
+  </defs>
+  <rect width="1568" height="768" fill="url(#bg)"/>
+  <rect width="1568" height="768" fill="url(#halo)"/>
+  <rect width="1568" height="768" fill="url(#dots)"/>
+  <text x="70" y="76" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="13" letter-spacing="4" fill="#7c8db5">PASEO SLP / A TASK, END TO END</text>
+  <text x="70" y="112" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="34" font-weight="700" fill="#eef2fb">One objective in, one accountable report out.</text>
+  <line x1="70" y1="138" x2="1498" y2="138" stroke="#1c2640" stroke-width="1"/>
+  <rect x="70" y="175" width="1428" height="95" rx="16" fill="#0f1628" fill-opacity="0.72" stroke="#1c2640"/>
+  <rect x="70" y="193" width="3" height="59" rx="1.5" fill="#e8b04b"/>
+  <text x="92" y="216.5" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="11.5" letter-spacing="2.2" fill="#e8b04b">OWNER AUTHORITY</text>
+  <text x="92" y="240.5" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="24" font-weight="700" fill="#eef2fb">You</text>
+  <rect x="70" y="285" width="1428" height="95" rx="16" fill="#0f1628" fill-opacity="0.72" stroke="#1c2640"/>
+  <rect x="70" y="303" width="3" height="59" rx="1.5" fill="#45c8ae"/>
+  <text x="92" y="326.5" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="11.5" letter-spacing="2.2" fill="#45c8ae">GOVERNANCE</text>
+  <text x="92" y="350.5" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="24" font-weight="700" fill="#eef2fb">Supervisor</text>
+  <rect x="70" y="395" width="1428" height="95" rx="16" fill="#0f1628" fill-opacity="0.72" stroke="#1c2640"/>
+  <rect x="70" y="413" width="3" height="59" rx="1.5" fill="#9d8ceb"/>
+  <text x="92" y="436.5" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="11.5" letter-spacing="2.2" fill="#9d8ceb">PROJECT AUTHORITY</text>
+  <text x="92" y="460.5" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="24" font-weight="700" fill="#eef2fb">Lead</text>
+  <rect x="70" y="505" width="1428" height="150" rx="16" fill="#0f1628" fill-opacity="0.72" stroke="#1c2640"/>
+  <rect x="70" y="523" width="3" height="114" rx="1.5" fill="#4fc3d9"/>
+  <text x="92" y="574.0" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="11.5" letter-spacing="2.2" fill="#4fc3d9">BOUNDED WORK</text>
+  <text x="92" y="598.0" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="24" font-weight="700" fill="#eef2fb">Peers</text>
+  <g>
+    <rect x="243.0" y="189.5" width="186" height="66" rx="14" fill="#1a1810" stroke="#e8b04b" stroke-width="1.5"/>
+    <circle cx="265.0" cy="211.5" r="11" fill="#e8b04b"/>
+    <text x="265.0" y="216.0" text-anchor="middle" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="12.5" font-weight="700" fill="#0b1120">1</text>
+    <text x="285.0" y="216.5" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="17" font-weight="700" fill="#eef2fb">Objective</text>
+    <text x="259.0" y="241.5" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="12.5" fill="#a9b8d9">scope · “report back …”</text>
+  </g>
+  <g>
+    <rect x="420.0" y="299.5" width="186" height="66" rx="14" fill="#0d1f1d" stroke="#45c8ae" stroke-width="1.5"/>
+    <circle cx="442.0" cy="321.5" r="11" fill="#45c8ae"/>
+    <text x="442.0" y="326.0" text-anchor="middle" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="12.5" font-weight="700" fill="#0b1120">2</text>
+    <text x="462.0" y="326.5" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="17" font-weight="700" fill="#eef2fb">Observe / create</text>
+    <text x="436.0" y="351.5" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="12.5" fill="#a9b8d9">a Lead · never executes</text>
+  </g>
+  <g>
+    <rect x="597.0" y="409.5" width="186" height="66" rx="14" fill="#1b1636" stroke="#9d8ceb" stroke-width="1.5"/>
+    <circle cx="619.0" cy="431.5" r="11" fill="#9d8ceb"/>
+    <text x="619.0" y="436.0" text-anchor="middle" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="12.5" font-weight="700" fill="#0b1120">3</text>
+    <text x="639.0" y="436.5" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="17" font-weight="700" fill="#eef2fb">Frame &amp; route</text>
+    <text x="613.0" y="461.5" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="12.5" fill="#a9b8d9">topology chosen by risk</text>
+  </g>
+  <g>
+    <rect x="736.0" y="524.0" width="262" height="112" rx="14" fill="#0e1a24" stroke="#4fc3d9" stroke-width="1.5"/>
+    <circle cx="758.0" cy="546.0" r="11" fill="#4fc3d9"/>
+    <text x="758.0" y="550.5" text-anchor="middle" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="12.5" font-weight="700" fill="#0b1120">4</text>
+    <text x="778.0" y="551.0" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="17" font-weight="700" fill="#eef2fb">One outcome each</text>
+    <text x="752.0" y="574.0" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="12.5" fill="#a9b8d9">own scope · runtime from pool</text>
+    <rect x="750.0" y="590.0" width="72" height="26" rx="13" fill="#10283a" stroke="#1f4a5c"/>
+    <text x="786.0" y="607.0" text-anchor="middle" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="12" fill="#bfeaf3">Engineer</text>
+    <rect x="828.0" y="590.0" width="70" height="26" rx="13" fill="#10283a" stroke="#1f4a5c"/>
+    <text x="863.0" y="607.0" text-anchor="middle" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="12" fill="#bfeaf3">Reviewer</text>
+    <rect x="904.0" y="590.0" width="54" height="26" rx="13" fill="#10283a" stroke="#1f4a5c"/>
+    <text x="931.0" y="607.0" text-anchor="middle" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="12" fill="#bfeaf3">Scout</text>
+    <rect x="964.0" y="590.0" width="32" height="26" rx="13" fill="#10283a" stroke="#1f4a5c"/>
+    <text x="980.0" y="607.0" text-anchor="middle" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="12" fill="#bfeaf3">…</text>
+  </g>
+  <g>
+    <rect x="951.0" y="409.5" width="186" height="66" rx="14" fill="#1b1636" stroke="#9d8ceb" stroke-width="1.5"/>
+    <circle cx="973.0" cy="431.5" r="11" fill="#9d8ceb"/>
+    <text x="973.0" y="436.0" text-anchor="middle" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="12.5" font-weight="700" fill="#0b1120">5</text>
+    <text x="993.0" y="436.5" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="17" font-weight="700" fill="#eef2fb">Integrate</text>
+    <text x="967.0" y="461.5" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="12.5" fill="#a9b8d9">review gate · verdict</text>
+  </g>
+  <g>
+    <rect x="1128.0" y="299.5" width="186" height="66" rx="14" fill="#0d1f1d" stroke="#45c8ae" stroke-width="1.5"/>
+    <circle cx="1150.0" cy="321.5" r="11" fill="#45c8ae"/>
+    <text x="1150.0" y="326.0" text-anchor="middle" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="12.5" font-weight="700" fill="#0b1120">6</text>
+    <text x="1170.0" y="326.5" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="17" font-weight="700" fill="#eef2fb">Check handback</text>
+    <text x="1144.0" y="351.5" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="12.5" fill="#a9b8d9">evidence, not status</text>
+  </g>
+  <g>
+    <rect x="1305.0" y="189.5" width="186" height="66" rx="14" fill="#1a1810" stroke="#e8b04b" stroke-width="1.5"/>
+    <circle cx="1327.0" cy="211.5" r="11" fill="#e8b04b"/>
+    <text x="1327.0" y="216.0" text-anchor="middle" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="12.5" font-weight="700" fill="#0b1120">7</text>
+    <text x="1347.0" y="216.5" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="17" font-weight="700" fill="#eef2fb">Report</text>
+    <text x="1321.0" y="241.5" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="12.5" fill="#a9b8d9">+ calls only you make</text>
+  </g>
+  <path d="M336.0 255.5 V318.5 q0 14 14 14 H416.0" fill="none" stroke="#e8b04b" stroke-width="1.8" marker-end="url(#ah-amber)"/>
+  <path d="M513.0 365.5 V428.5 q0 14 14 14 H593.0" fill="none" stroke="#45c8ae" stroke-width="1.8" marker-end="url(#ah-teal)"/>
+  <path d="M690.0 475.5 V566.0 q0 14 14 14 H732.0" fill="none" stroke="#9d8ceb" stroke-width="1.8" marker-end="url(#ah-violet)"/>
+  <rect x="638.0" y="509.75" width="104" height="24" rx="12" fill="#0f1628" stroke="#9d8ceb" stroke-opacity="0.55"/>
+  <text x="690.0" y="525.75" text-anchor="middle" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="11.5" letter-spacing="1.5" fill="#9d8ceb">DELEGATES</text>
+  <path d="M998.0 580.0 H1030.0 q14 0 14 -14 V479.5" fill="none" stroke="#4fc3d9" stroke-width="1.8" marker-end="url(#ah-cyan)"/>
+  <rect x="1056.0" y="519.75" width="256" height="24" rx="12" fill="#0f1628" stroke="#4fc3d9" stroke-opacity="0.55"/>
+  <text x="1184.0" y="535.75" text-anchor="middle" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="11.5" letter-spacing="1.5" fill="#4fc3d9">EVIDENCE · CHALLENGE · BLOCKED</text>
+  <path d="M1137.0 442.5 H1207.0 q14 0 14 -14 V369.5" fill="none" stroke="#9d8ceb" stroke-width="1.8" marker-end="url(#ah-violet)"/>
+  <rect x="1171.0" y="394.0" width="100" height="24" rx="12" fill="#0f1628" stroke="#9d8ceb" stroke-opacity="0.55"/>
+  <text x="1221.0" y="410.0" text-anchor="middle" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="11.5" letter-spacing="1.5" fill="#9d8ceb">HANDBACK</text>
+  <path d="M1314.0 332.5 H1384.0 q14 0 14 -14 V259.5" fill="none" stroke="#45c8ae" stroke-width="1.8" marker-end="url(#ah-teal)"/>
+  <rect x="1352.0" y="284.0" width="92" height="24" rx="12" fill="#0f1628" stroke="#45c8ae" stroke-opacity="0.55"/>
+  <text x="1398.0" y="300.0" text-anchor="middle" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="11.5" letter-spacing="1.5" fill="#45c8ae">REPORTS</text>
+  <line x1="620.0" y1="332.5" x2="1114.0" y2="332.5" stroke="#45c8ae" stroke-width="1.6" stroke-dasharray="5 6" stroke-opacity="0.8"/>
+  <path d="M770.0 336.5 V389" fill="none" stroke="#45c8ae" stroke-width="1.3" stroke-dasharray="3 5" stroke-opacity="0.7" marker-end="url(#ah-teal)"/>
+  <path d="M867.0 336.5 V389" fill="none" stroke="#45c8ae" stroke-width="1.3" stroke-dasharray="3 5" stroke-opacity="0.7" marker-end="url(#ah-teal)"/>
+  <path d="M964.0 336.5 V389" fill="none" stroke="#45c8ae" stroke-width="1.3" stroke-dasharray="3 5" stroke-opacity="0.7" marker-end="url(#ah-teal)"/>
+  <rect x="632.0" y="320.5" width="470" height="24" rx="12" fill="#0f1628" stroke="#45c8ae" stroke-opacity="0.55"/>
+  <text x="867.0" y="336.5" text-anchor="middle" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="11.5" letter-spacing="1.5" fill="#45c8ae">WATCHES THE LEAD · BIAS · STALLS · DRIFT · WEAK EVIDENCE</text>
+  <line x1="443.0" y1="222.5" x2="1291.0" y2="222.5" stroke="#e8b04b" stroke-width="1.4" stroke-dasharray="2 7" stroke-linecap="round" stroke-opacity="0.75"/>
+  <rect x="627.0" y="210.5" width="480" height="24" rx="12" fill="#0f1628" stroke="#e8b04b" stroke-opacity="0.55"/>
+  <text x="867.0" y="226.5" text-anchor="middle" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="11.5" letter-spacing="1.5" fill="#e8b04b">YOU CAN LEAVE · ASKED ONLY FOR DECISIONS THAT ARE YOURS</text>
+  <text x="1474" y="576.0" text-anchor="end" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="13.5" fill="#8a9ac2">never spawn agents</text>
+  <text x="1474" y="596.0" text-anchor="end" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="13.5" fill="#8a9ac2">one writer per moving scope</text>
+  <line x1="70" y1="694" x2="1498" y2="694" stroke="#1c2640" stroke-width="1"/>
+  <circle cx="90" cy="720" r="5" fill="#e8b04b"/>
+  <text x="104" y="725" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="14" fill="#9fb0d4">you set intent and accept</text>
+  <circle cx="350" cy="720" r="5" fill="#45c8ae"/>
+  <text x="364" y="725" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="14" fill="#9fb0d4">governance observation</text>
+  <circle cx="610" cy="720" r="5" fill="#9d8ceb"/>
+  <text x="624" y="725" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="14" fill="#9fb0d4">project coordination</text>
+  <circle cx="870" cy="720" r="5" fill="#4fc3d9"/>
+  <text x="884" y="725" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="14" fill="#9fb0d4">independent bounded work</text>
+  <text x="1498" y="725" text-anchor="end" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="12" letter-spacing="3" fill="#5f6f96">PASEO IS THE ONLY CONTROL PLANE</text>
+</svg>
