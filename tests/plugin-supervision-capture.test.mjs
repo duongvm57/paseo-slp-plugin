@@ -590,6 +590,17 @@ test('assignment-file detector ignores prose that mentions a path or assignment 
   }
 });
 
+test('assignment-file detector flags a pointer line without relying on renderer suffix or line endings', () => {
+  for (const brief of [
+    'Assignment file: /abs/path',
+    'Lead instructions\r\nAssignment file: /abs/path\r\nContinue here.',
+    '  \tAssignment file: /abs/path',
+  ]) {
+    const got = capture(peerEvent('claude', [user(brief), asst('ok')]), ROUTED);
+    assert.ok(got.issues.includes('brief-references-assignment-file'), JSON.stringify(brief));
+  }
+});
+
 test('a failed Peer turn keeps only accepted sends and reads no brief/handback', () => {
   const turn = firstTurn(LIVE.claude.items);
   const failed = capture(peerEvent('claude', turn, { outcome: { kind: 'failed', error: { message: 'x' } } }), ROUTED);

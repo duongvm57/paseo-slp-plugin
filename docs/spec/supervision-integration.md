@@ -91,7 +91,7 @@ No observer code lives in the immutable `bin/`/`src/` runtime payload.
 | Per-item turn id or authenticated sender on timeline messages | Protocol 0.8.0 `AgentTimelineItem`; hook items are bare. | Matched start/end ordering; the finish-envelope fallback is text correlation, not authentication; ambiguity is unknown. |
 | Normalized timeline shapes per family | Observed 2026-09-26 for codex, claude and devin (live smoke; [fixtures README](../../tests/fixtures/supervision/README.md) rows 16–18) and pi (one authorized pi Peer, row 19). | Only fixture-backed shapes are verified (see Provider coverage). |
 | Devin send outcome | The Devin provider's ACP update for MCP tools carries only `status` — no `rawOutput`, no `content` (its own session record, row 18); the host mapper would keep either. | Devin sends are recognized with verified recipients but their outcome is unknown; a Devin Lead's handling is never judged. A host-side send receipt (sender, recipient, callId, success, turn linkage) would be the fix — not implemented. |
-| `assignmentFile` content, Lead read receipts, structured report recipient | Lifecycle events and snapshots carry none. | The rendered `Assignment file: … — read it first; it is authoritative for scope details.` pointer makes brief and handback unobservable; file bytes are never read. `report-route-unverifiable` is disclosed on completed Peer cases only. |
+| `assignmentFile` content, Lead read receipts, structured report recipient | Lifecycle events and snapshots carry none. | A brief line with optional leading spaces/tabs, `Assignment file:`, optional spaces/tabs, and a non-whitespace value makes brief and handback unobservable; file bytes are never read. `report-route-unverifiable` is disclosed on completed Peer cases only. |
 | Cancelling an issued `send()` | `PaseoAgentHandle.send(text, {messageId})` has no abort. | Revalidate, reserve, bound the wait, report uncertain, never retry. |
 | Non-interrupting delivery to a running agent | `PaseoAgentSendOptions` exposes no `activeTurnBehavior`; host 0.9.1 `session.js` defaults it to `interrupt` (protocol enum `interrupt`/`steer`). The handle forwards options untyped, but relying on an undeclared option is a workaround — not used. | Defer while the refreshed Supervisor is `running`; an idle→running race can still interrupt (disclosed). |
 | Plugin-session refresh of a live SLP agent | Live 2026-09-26 (host 0.9.1, app over relay): saving a route for a live `slp-devin-lead` failed "Agent not found" from `paseo.agents.ref(id).refresh()` in the plugin handler, while the app listed the agent. Host `getAgentPayloadById` returns null only through `isProviderVisibleToClient`; root cause not confirmed ([fixtures README](../../tests/fixtures/supervision/README.md) row 15). | A save no longer requires a snapshot: no snapshot (null or thrown) records the agent **unverified** and the save lands; a returned snapshot is still checked exactly. Routes activate only on host evidence (below). |
@@ -208,10 +208,10 @@ The store is `<daemonHome>/slp-runtime/state/supervision.json`, schema 3:
      follow-up (`devin-plain-message-v1`, seen live in r4) — its role comes
      from the host-verified provider, never from the text. Free policy prose
      from the role files is not a fixed line, so a fragment made only of such
-     prose would read as plain — a disclosed residual. Only prepare's rendered
-     `Assignment file: … — read it first; it is authoritative for scope details.`
-     line is a content fact (`brief-references-assignment-file`); the path is
-     never read.
+     prose would read as plain — a disclosed residual. A line with optional
+     leading spaces/tabs, `Assignment file:`, optional spaces/tabs, and a
+     non-whitespace value is a content fact (`brief-references-assignment-file`);
+     the renderer's suffix is not required and the path is never read.
    - **each send** — input (`verified` recipient + prompt, or unverified with
      a reason) and outcome: `accepted` needs the semantic success of exactly
      that call in a verified shape; `rejected` needs an explicit failure

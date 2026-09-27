@@ -283,8 +283,10 @@ communication only: it never infers authority, certifies artifacts, accepts
 work or mutates assignments, and every missing or unverifiable input keeps
 its axis unknown. Local gates: whole-window provenance gaps (paused capture,
 credential guard, oversize, unverified Peer family, failed Peer turn, no
-communication) close the case before any Jev call; a pointer or missing
-brief makes brief and handback unobservable; Lead send-lane and chronology
+communication) close the case before any Jev call; a brief line with optional
+leading spaces/tabs, `Assignment file:`, optional spaces/tabs, and a non-whitespace
+value is a pointer that makes brief and handback unobservable (the path is never
+read); a missing brief has the same effect. Lead send-lane and chronology
 gaps (unmatched start, uncertain sends, failed or unobservable sends,
 unverified Lead family, dropped events, withheld cross-Peer bodies) gate only
 the handling axis. On this host, report-route-unverifiable is added to

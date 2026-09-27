@@ -182,10 +182,11 @@ const turnStart = (timeline: readonly AgentTimelineItem[]): number => {
   return -1;
 };
 
-// prepare renders assignmentFile as one dedicated line. Only that exact
-// pointer is a content fact; prose that mentions the phrase or path is not.
-// The detector never reads the path.
-const ASSIGNMENT_FILE_RE = /^Assignment file: .+ — read it first; it is authoritative for scope details\.$/m;
+// prepare renders assignmentFile as a dedicated "Assignment file:" line.
+// Detect the line prefix and a non-empty value without depending on its prose
+// suffix; mentions inside prose and bare path examples are not pointers. The
+// detector never reads the path.
+const ASSIGNMENT_FILE_RE = /^[ \t]*Assignment file:[ \t]*\S/m;
 
 type ToolCall = Extract<AgentTimelineItem, { type: "tool_call" }>;
 const isRecord = (v: unknown): v is Record<string, unknown> =>
