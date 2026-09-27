@@ -51,6 +51,9 @@ wake/report path meets the job's observation need, report the dependent work BLO
 
 ## Heartbeat safety net
 
+A heartbeat is the bounded fallback for gaps in event coverage, never the default
+observation plan — and it ends at settlement, not on a cadence.
+
 Whether to use a heartbeat at all is the workspace protocol/assignment's choice
 from the task's duration, risk and event coverage; cadence, timezone, expiry/run
 bounds and observer ownership are likewise repository/assignment choices — there
@@ -157,5 +160,7 @@ resources and portfolio monitoring whose assignment continues. Stop other owned
 resources only within authority; report any that remain active or unknown.
 
 Handback lists candidate/verdict separately from resource IDs, cleanup receipts,
-continuing assignments and unknown settlement. Lifecycle idle and a deadline do not
-prove cancellation, successful cleanup or technical acceptance.
+continuing assignments and unknown settlement, and names how to reproduce or
+re-check the result and which inputs a downstream seat can consume. Lifecycle idle
+and a deadline do not prove cancellation, successful cleanup or technical
+acceptance.

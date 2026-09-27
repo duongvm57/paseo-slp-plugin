@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, writeFileSync, readFileSync, rmSync, existsSync, realpathSync, symlinkSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync, readFileSync, rmSync, existsSync, realpathSync, symlinkSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
@@ -149,6 +149,53 @@ test('materialize validates the catalog and refuses missing source files before 
   assert.throws(() => materializeWorkspace(source, target, true), /lacks \.paseo-slp\/workspace-protocol\.md/);
   assert.throws(() => materializeWorkspace(join(dir, 'gone'), target, true), /ENOENT/);
   assert.throws(() => materializeWorkspace(source, 'relative-target', true), /Absolute repository directory required/);
+});
+
+test('materialize refuses symlinked managed paths before writing', t => {
+  const dir = fixture(t), source = slpCheckout(join(dir, 'source'));
+
+  const linkedTree = join(dir, 'linked-tree');
+  mkdirSync(linkedTree);
+  writeFileSync(join(linkedTree, 'sentinel.txt'), 'preserve linked target\n');
+  const targetWithLinkedTree = join(dir, 'target-with-linked-tree');
+  mkdirSync(targetWithLinkedTree);
+  symlinkSync(linkedTree, join(targetWithLinkedTree, '.paseo-slp'), 'dir');
+  assert.throws(() => materializeWorkspace(source, targetWithLinkedTree, true), /Expected repo directory/);
+  assert.deepEqual(readdirSync(linkedTree).sort(), ['sentinel.txt']);
+  assert.equal(readFileSync(join(linkedTree, 'sentinel.txt'), 'utf8'), 'preserve linked target\n');
+
+  const outsideProtocol = join(dir, 'outside-protocol.md');
+  writeFileSync(outsideProtocol, 'preserve linked protocol\n');
+  const linkedFileTarget = join(dir, 'target-with-linked-file');
+  mkdirSync(join(linkedFileTarget, '.paseo-slp'), { recursive: true });
+  symlinkSync(outsideProtocol, join(linkedFileTarget, '.paseo-slp/workspace-protocol.md'));
+  assert.throws(() => materializeWorkspace(source, linkedFileTarget, true), /Expected regular repo file/);
+  assert.equal(readFileSync(outsideProtocol, 'utf8'), 'preserve linked protocol\n');
+  assert.equal(existsSync(join(linkedFileTarget, '.paseo-slp/slp-routing.json')), false);
+
+  const sourceWithLinkedProtocol = join(dir, 'source-with-linked-protocol');
+  slpCheckout(sourceWithLinkedProtocol);
+  rmSync(join(sourceWithLinkedProtocol, '.paseo-slp/workspace-protocol.md'));
+  symlinkSync(outsideProtocol, join(sourceWithLinkedProtocol, '.paseo-slp/workspace-protocol.md'));
+  const untouchedTarget = join(dir, 'target-with-linked-source');
+  mkdirSync(untouchedTarget);
+  assert.throws(() => materializeWorkspace(sourceWithLinkedProtocol, untouchedTarget, true),
+    /Source checkout lacks \.paseo-slp\/workspace-protocol\.md/);
+  assert.equal(existsSync(join(untouchedTarget, '.paseo-slp')), false);
+});
+
+test('materialize rejects the bare managed include and directories at file targets', t => {
+  const dir = fixture(t), source = slpCheckout(join(dir, 'source'));
+  const target = join(dir, 'target');
+  mkdirSync(target);
+  assert.throws(() => materializeWorkspace(source, target, true, { includePaths: ['.paseo-slp'] }), /managed by materialize/);
+  assert.equal(existsSync(join(target, '.paseo-slp')), false);
+
+  const directoryAtFileTarget = join(dir, 'directory-at-file-target');
+  mkdirSync(join(directoryAtFileTarget, '.paseo-slp/workspace-protocol.md'), { recursive: true });
+  assert.throws(() => materializeWorkspace(source, directoryAtFileTarget, true), /Expected regular repo file/);
+  assert.equal(existsSync(join(directoryAtFileTarget, '.paseo-slp/slp-routing.json')), false);
+  assert.deepEqual(readdirSync(join(directoryAtFileTarget, '.paseo-slp/workspace-protocol.md')), []);
 });
 
 test('materialize preserves existing target files and the CLI reports per-file results', t => {

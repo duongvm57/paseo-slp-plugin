@@ -377,10 +377,10 @@ test('session entry: disabled tracker renders byte-identically — absent file a
 });
 
 // T1 byte-level pin: disabled session entry keeps the historical instruction
-// body, while the role-scoped locator contract exposes only common.md and the
-// Peer role file. The fixture captures the historical render with normalized
-// paths; its old all-reference locator list is intentionally not reused.
-test('session entry: disabled Peer render keeps its body and uses the role locator allowlist (T1)', t => {
+// body after removing the explicitly added common communication policy. Keep
+// the fixture historical; any other body drift remains visible. The locator
+// contract exposes only common.md and the Peer role file.
+test('session entry: disabled Peer render keeps historical body after the common-policy delta (T1)', t => {
   const before = JSON.parse(readFileSync(join(root, 'tests/fixtures/pre-tracker-session.json'), 'utf8'));
   const home = tmpHome(t);
   const installed = join(tmp(t, 'wt-inst-'), 'release');
@@ -401,11 +401,17 @@ test('session entry: disabled Peer render keeps its body and uses the role locat
     return { locators, body: body.join('\n') };
   };
   const a = splitRender(after), b = { body: before.body };
+  const communicationPolicy = readFileSync(join(root, 'src/common.md'), 'utf8')
+    .split(/\r?\n[ \t]*\r?\n/u)
+    .find(paragraph => paragraph.includes('Seat-facing text'));
+  assert.ok(communicationPolicy, 'common.md contains the seat-facing text paragraph');
+  const historicalBody = a.body.replace(`\n\n${communicationPolicy}\n\n`, '\n\n');
+  assert.notEqual(historicalBody, a.body, 'the declared common-policy delta is present');
   assert.deepEqual([...a.locators].sort(), [
     '<RUNTIME_ROOT>/src/common.md',
     '<RUNTIME_ROOT>/src/roles/peer.md',
   ].sort(), 'tracker-off Peer carrier contains only its role allowlist');
-  assert.equal(a.body, b.body, 'disabled render body must equal the pre-feature render byte-for-byte');
+  assert.equal(historicalBody, b.body, 'the remaining disabled render body equals the historical baseline byte-for-byte');
 });
 
 test('session entry: enabled setting adds one pointer line between language and assignment (T3)', t => {

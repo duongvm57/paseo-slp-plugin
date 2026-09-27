@@ -8,6 +8,24 @@ import { scenarios } from '../e2e/scenarios.mjs';
 const root = fileURLToPath(new URL('..', import.meta.url));
 const read = path => readFileSync(join(root, path), 'utf8');
 
+test('contract text pins: peer locators, review floor, bounded settle, heartbeat cleanup', () => {
+  const contract = read('docs/contract.md').replace(/\s+/gu, ' ');
+  const monitoring = read('src/references/monitoring.md').replace(/\s+/gu, ' ');
+
+  assert.ok(contract.includes('Peer locators contain `common.md` and `roles/peer.md`, plus `work-tracking.md` only when managed session entry enables beads.'));
+  assert.ok(contract.includes('a required gate is parallel seats on split axes — never one merged seat — and seats that cannot be supplied make it BLOCKED rather than skipped.'));
+  assert.ok(monitoring.includes('settle each bounded task after Delivery completes and no correction or re-review remains open'));
+  assert.ok(monitoring.includes('Each heartbeat owner deletes its recorded task heartbeat and records the receipt.'));
+  assert.ok(monitoring.includes('bounded fallback for gaps in event coverage'));
+});
+
+test('common policy pins seat-facing text communication language', () => {
+  const common = read('src/common.md').replace(/\s+/gu, ' ');
+  const communicationRule = "Seat-facing text is anything another seat or the Human reads: prompts, assignments, reports, agent-responses, handbacks, briefs and notebook entries. All seat-facing text uses the configured communication language; direct replies to the Human mirror the Human's current language; keep identifiers, paths and commands verbatim.";
+
+  assert.ok(common.includes(communicationRule));
+});
+
 test('guide coverage records the Peer Paseo tool-delivery gate and its limit', () => {
   const guide = read('docs/reports/guide-coverage.md');
   const h06 = guide.match(/^\| H06 \|.*$/m)?.[0];

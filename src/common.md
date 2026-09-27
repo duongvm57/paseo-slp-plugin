@@ -5,6 +5,12 @@ features, including full-access when configured. Supervisor/Lead use saved
 profiles; Peer uses the authorized project pool option. A permission mode
 does not expand task authority or guarantee that MCP elicitation is disabled.
 
+Seat-facing text is anything another seat or the Human reads: prompts,
+assignments, reports, agent-responses, handbacks, briefs and notebook
+entries. All seat-facing text uses the configured communication language;
+direct replies to the Human mirror the Human's current language; keep
+identifiers, paths and commands verbatim.
+
 Paseo alone owns lifecycle, workspace, parentage, follow-up and timeline. Native
 subagents are prohibited for this workflow even if their tools are exposed.
 One moving write scope has one writer. Concurrent writers use separate worktrees;

@@ -39,7 +39,7 @@
       "model": "gpt-6-luna",
       "enabled": true,
       "availability": "ready",
-      "thinkingOptionId": "xhigh",
+      "thinkingOptionId": "max",
       "modeId": "full-access",
       "suitableFor": [
         "work:change",
