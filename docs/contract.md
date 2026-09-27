@@ -342,6 +342,8 @@ inline arrays win, including `[]`). `assignmentFileMode` defaults to `pointer`,
 which appends the existing read-first pointer without inlining file bytes;
 `snapshot` reads and validates a repository-contained file during prepare, then
 inlines its bounded, normalized text with relative-path and SHA-256 provenance.
+The credential guard checks both snapshot text and its repository-relative
+provenance path, reporting only the matched pattern name on rejection.
 Snapshot errors fail prepare with no pointer fallback. Both assignment fields
 apply to prepare-handoff through the shared plan builder; supervision never
 reads the file.

@@ -732,11 +732,13 @@ never replace the pool. Three more optional fields, all also honored by
   prompt behavior) or `snapshot`. Snapshot mode is opt-in per prepare request:
   supplying this field without `assignmentFile`, or using another value, fails
   with `assignment-snapshot-invalid-mode`.
-  Prepare resolves the repository and file paths, requires the file target to
-  remain inside the repository, opens a regular file without following a final
-  symlink, reads at most 16 KiB, strictly decodes UTF-8, removes a leading BOM,
+  Prepare resolves symlinks in both the repository and file paths. The real
+  file target must remain inside the real repository and be a regular file;
+  symlinks escaping the repository are rejected. Prepare reads at most 16 KiB,
+  strictly decodes UTF-8, removes a leading BOM,
   normalizes CRLF/CR to LF, and rejects control characters, nested markers and
-  credential-shaped text. It replaces the generated pointer with an
+  credential-shaped text or repository-relative provenance paths. It replaces
+  the generated pointer with an
   `Assignment snapshot:` provenance line (repository-relative path, SHA-256
   and normalized byte count), sentinels and the normalized inline text. Any
   validation or read error fails prepare; it never falls back to pointer mode.

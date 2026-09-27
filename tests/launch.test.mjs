@@ -270,6 +270,21 @@ test('snapshot credential errors disclose only the pattern class', t => {
   assert.ok(!failure.message.includes(secret));
 });
 
+test('snapshot credential-shaped provenance paths fail without disclosing the path', t => {
+  const { dir, installed } = fixture(t);
+  const secret = `sk-${'a'.repeat(24)}`;
+  const assignmentFile = join(dir, `${secret}.md`);
+  writeFileSync(assignmentFile, 'Ordinary brief.');
+  assert.throws(() => launchPlan(installed, { ...request, repository: dir, role: 'lead', binding: piBinding,
+    assignmentFile, assignmentFileMode: 'snapshot' }), error => {
+    assert.equal(error.code, 'assignment-snapshot-credential');
+    assert.match(error.message, /openai-style-key/);
+    assert.ok(!error.message.includes(secret));
+    assert.ok(!error.message.includes(assignmentFile));
+    return true;
+  });
+});
+
 test('snapshot mode maps unreadable files and detects replacement through the read seam', t => {
   const { dir, installed } = fixture(t);
   const assignmentFile = join(dir, 'brief.md');

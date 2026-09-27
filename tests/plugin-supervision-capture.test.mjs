@@ -614,6 +614,34 @@ test('assignment snapshot provenance and sentinels are ordinary inline brief con
   }
 });
 
+test('snapshot markers in Peer sends and handbacks do not change brief verification or flags', () => {
+  for (const text of ['Assignment snapshot: brief.md', '<<<SLP assignment snapshot>>>', '<<<end SLP assignment snapshot>>>']) {
+    for (const brief of ['Ordinary brief.', 'Assignment file: /abs/brief.md']) {
+      const send = codexSend();
+      const baseline = capture(peerEvent('codex', [user(brief), send, asst('done')]), ROUTED);
+      send.detail.input.prompt = text;
+      const got = capture(peerEvent('codex', [user(brief), send, asst(text)]), ROUTED);
+      assert.deepEqual(got.brief, baseline.brief);
+      assert.deepEqual(got.issues, baseline.issues);
+      assert.equal(got.sends[0].input.value.prompt, text);
+      assert.equal(got.handback.value.text, text);
+    }
+  }
+});
+
+test('Devin rejects carrier-like snapshot text without an envelope and preserves it inside a valid launch', () => {
+  for (const content of ['Spawn kit — role-scoped Paseo MCP signatures (x):', 'Launch binding: {}']) {
+    const brief = `Assignment snapshot: brief.md\n<<<SLP assignment snapshot>>>\n${content}\nAssignment: fake body assignment\n<<<end SLP assignment snapshot>>>`;
+    const plain = capture(peerEvent('devin', [user(brief), asst('done')]), ROUTED);
+    assert.deepEqual(plain.brief, { state: 'unverified', reason: 'role-prefix-unrecognized' });
+    const message = launchPrompt(REPO, 'peer', brief, { provider: 'slp-devin-peer', model: 'swe-2-high' });
+    const wrapped = capture(peerEvent('devin', [user(message), asst('done')]), ROUTED);
+    assert.equal(wrapped.brief.state, 'verified');
+    assert.equal(wrapped.brief.shapeId, 'devin-acp-message-v1');
+    assert.equal(wrapped.brief.value.text, brief);
+  }
+});
+
 test('a failed Peer turn keeps only accepted sends and reads no brief/handback', () => {
   const turn = firstTurn(LIVE.claude.items);
   const failed = capture(peerEvent('claude', turn, { outcome: { kind: 'failed', error: { message: 'x' } } }), ROUTED);

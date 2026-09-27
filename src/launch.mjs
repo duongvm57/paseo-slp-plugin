@@ -163,6 +163,9 @@ export function readAssignmentSnapshot(repository, path, io = fs) {
     throw snapshotError('assignment-snapshot-outside-root', 'assignmentFile resolves outside the repository');
   }
 
+  const pathCredential = credentialShaped(repoRelative.split(sep).join('/'));
+  if (pathCredential) throw snapshotError('assignment-snapshot-credential', `assignmentFile path contains credential-shaped content (${pathCredential})`);
+
   let fd;
   try { fd = io.openSync(real, io.constants.O_RDONLY | io.constants.O_NOFOLLOW | (io.constants.O_NONBLOCK ?? 0)); }
   catch (error) {
