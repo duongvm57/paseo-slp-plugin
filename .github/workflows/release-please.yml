@@ -29,10 +29,11 @@ jobs:
   # The release PR bumps package.json, which is part of the install unit
   # embedded in plugin/server/generated/runtime-payload.ts, so the payload
   # must be regenerated on the PR branch or the release commit fails
-  # check:plugin-payload. PRs opened with GITHUB_TOKEN never trigger ci, so
-  # nothing else catches it before merge. release-please rewrites the branch
-  # on every update and reports the PR only when it created or updated it,
-  # so this job re-adds the payload commit exactly when it is needed.
+  # check:plugin-payload. ci on the bot-opened release PR waits for manual
+  # approval (action_required), so the PR is easy to merge before that run
+  # reports; fixing the branch here keeps it green. release-please rewrites
+  # the branch on every update and reports the PR only when it created or
+  # updated it, so this job re-adds the payload commit exactly when needed.
   release-payload:
     needs: release-please
     if: needs.release-please.outputs.prs_created == 'true'
