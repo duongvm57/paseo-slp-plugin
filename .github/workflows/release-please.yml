@@ -8,12 +8,54 @@ permissions:
   contents: write
   pull-requests: write
 
+concurrency:
+  group: release-please
+  cancel-in-progress: false
+
 jobs:
   release-please:
     runs-on: ubuntu-latest
+    outputs:
+      prs_created: ${{ steps.release.outputs.prs_created }}
+      pr: ${{ steps.release.outputs.pr }}
     steps:
-      - uses: googleapis/release-please-action@v4
+      - id: release
+        uses: googleapis/release-please-action@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           config-file: .github/release-please-config.json
           manifest-file: .github/release-please-manifest.json
+
+  # The release PR bumps package.json, which is part of the install unit
+  # embedded in plugin/server/generated/runtime-payload.ts, so the payload
+  # must be regenerated on the PR branch or the release commit fails
+  # check:plugin-payload. ci on the bot-opened release PR waits for manual
+  # approval (action_required), so the PR is easy to merge before that run
+  # reports; fixing the branch here keeps it green. release-please rewrites
+  # the branch on every update and reports the PR only when it created or
+  # updated it, so this job re-adds the payload commit exactly when needed.
+  release-payload:
+    needs: release-please
+    if: needs.release-please.outputs.prs_created == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ fromJSON(needs.release-please.outputs.pr).headBranchName }}
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - name: Regenerate plugin payload
+        run: |
+          npm run generate:plugin-payload
+          if git diff --quiet -- plugin/server/generated/runtime-payload.ts; then
+            echo "runtime-payload.ts already matches the release PR"
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add plugin/server/generated/runtime-payload.ts
+          git commit -m 'chore: regenerate plugin payload for release'
+          git push origin HEAD
