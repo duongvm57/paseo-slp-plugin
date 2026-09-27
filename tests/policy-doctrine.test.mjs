@@ -81,9 +81,10 @@ test('bounded task settlement waits for Delivery and open correction or re-revie
   const orchestration = read('src/references/orchestration.md');
   const monitoring = read('src/references/monitoring.md');
   const template = read('src/templates/workspace-protocol.md');
+  const protocol = read('.paseo-slp/workspace-protocol.md');
 
-  for (const [name, body] of [['orchestration', orchestration], ['monitoring', monitoring], ['template', template]]) {
-    assert.match(body, /Delivery completes/iu, `${name} names Delivery completion`);
+  for (const [name, body] of [['orchestration', orchestration], ['monitoring', monitoring], ['template', template], ['protocol', protocol]]) {
+    assert.match(body, /Delivery\s+completes/iu, `${name} names Delivery completion`);
     assert.match(body, /no\s+correction or re-review remains open/iu, `${name} waits for rework closure`);
   }
   assert.match(orchestration, /same\s+Engineer and independent review seats for open rework/);
@@ -91,6 +92,9 @@ test('bounded task settlement waits for Delivery and open correction or re-revie
   assert.match(template, /Keep the same Engineer and\s+independent review seats available for correction or re-review/);
   assert.match(template, /Settlement does not\s+itself archive, kill or reparent sessions/);
   assert.doesNotMatch(template, /assignment that formed the team closes|batch archive/i);
+  assert.match(protocol, /Accepted seats stay idle\s+for correction or re-review in that bounded task/);
+  assert.match(protocol, /settlement does not itself\s+archive, kill or reparent sessions/);
+  assert.doesNotMatch(protocol, /assignment that formed the team settles|team's assignment settles/i);
 });
 
 test('Jev routing procedure is conditional and unreadable mode fails closed', () => {
@@ -100,6 +104,7 @@ test('Jev routing procedure is conditional and unreadable mode fails closed', ()
   const onboarding = read('skills/paseo-slp-onboarding/references/peer-pool.md');
   const template = read('src/templates/workspace-protocol.md');
 
+  assert.ok(jev.length > 0, 'the installed src/references Jev target exists');
   assert.match(jev, /jevRouting\.routing` set to\s+`shadow`, `armed` or `error`/);
   assert.match(jev, /Do not read it for `unconfigured` or `off`/);
   assert.match(jev, /`error` means the configured state is unreadable: block the dependent routing branch/);
@@ -107,7 +112,8 @@ test('Jev routing procedure is conditional and unreadable mode fails closed', ()
   assert.match(provider, /references\/jev-routing\.md/);
   const conditionalJevPointer = /When `routes` reports\s+`jevRouting\.routing` as\s+`shadow`, `armed` or\s+`error`, read `references\/jev-routing\.md`; skip it for `unconfigured` or\s+`off`\. `error` blocks the dependent routing branch\./;
   assert.match(execution, conditionalJevPointer);
-  assert.match(onboarding, conditionalJevPointer);
+  const onboardingJevPointer = /When `routes` reports\s+`jevRouting\.routing` as\s+`shadow`, `armed` or\s+`error`, read installed `src\/references\/jev-routing\.md`; skip it for `unconfigured` or\s+`off`\. `error` blocks the dependent routing branch\./;
+  assert.match(onboarding, onboardingJevPointer);
   assert.doesNotMatch(provider, /Shadow evaluation is the gate before arming/);
   assert.doesNotMatch(execution, /enabled-but-unarmed daemon/);
   assert.match(template, /Jev-specific\s+routing guidance is conditional on `jevRouting\.routing`/);

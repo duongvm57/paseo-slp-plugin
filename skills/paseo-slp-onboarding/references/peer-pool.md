@@ -96,7 +96,7 @@ Use `prepare --schema` for required fields. Launch assignments carry scope,
 authority, recipient and verification/handback expectations; follow installed
 provider-routing.md for topology and runtime validation. When `routes` reports
 `jevRouting.routing` as `shadow`, `armed` or
-`error`, read `references/jev-routing.md`; skip it for `unconfigured` or
+`error`, read installed `src/references/jev-routing.md`; skip it for `unconfigured` or
 `off`. `error` blocks the dependent routing branch.
 
 For repeated prepares, capture discovery once: `node <slp-cli> inventory
