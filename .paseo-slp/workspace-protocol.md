@@ -1,5 +1,5 @@
 ---
-version: '6'
+version: '7'
 owner: 'duongvm (Human)'
 applies_to: 'paseo-slp source repository'
 last_reviewed: '2026-09-27'
