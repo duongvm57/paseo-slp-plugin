@@ -78,7 +78,7 @@ different providers, models and effort levels.
 
 You need:
 
-- Paseo `>=0.8.0 <0.10.0`, with `pluginsEnabled: true` and an effective `mcp.enabled: true`
+- Paseo `>=0.8.0 <0.11.0`, with `pluginsEnabled: true` and an effective `mcp.enabled: true`
 - Node.js 22 or newer on the daemon host
 - the CLI of each provider family you use (Codex, Pi, Devin, Claude), signed in on the daemon host;
   Pi needs repeatable `--append-system-prompt` support
