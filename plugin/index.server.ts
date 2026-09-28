@@ -7,7 +7,7 @@ import { realpathSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { activate, reconcile, deactivate, status, localTarget, catalog, setLanguage, getRoleRouting, setRoleRouting, getPeerPool, setPeerPool, getJev, setJev, setJevKey, testJev, getWorkTracker, setWorkTracker } from "./shared/contracts.ts";
 import { disableSupervisionNotifications, getSupervision, getSupervisionStatus, setSupervision } from "./shared/supervision.ts";
-import { enforcementStatus } from "./shared/enforcement.ts";
+import { enforcementStatus, enforcementRuntimePin } from "./shared/enforcement.ts";
 import type { Manager } from "./shared/contracts.ts";
 import { loadCatalog } from "./server/provider-catalog.ts";
 import { createManager } from "./server/manager.ts";
@@ -24,6 +24,7 @@ import { createJournal } from "./server/journal.ts";
 import { createRoleInjection } from "./server/role-injection.ts";
 import { createWorkTracker, readWorkTrackerEnabled } from "./server/work-tracker.ts";
 import { createEnforcement } from "./server/enforcement.ts";
+import { readRuntimePinView } from "./server/runtime-pin.ts";
 // Host note: this must stay a hoisted function declaration, not a const —
 // the daemon compiler's Hermes interop eagerly copies export values before
 // module bodies run, so `export default const` evaluates to undefined.
@@ -110,6 +111,11 @@ export default function contribute(server: Parameters<PluginServerContribution>[
   // so P1+ state lands behind the same Interface, not in this handler.
   const enforcement = createEnforcement({ journal });
   server.handle(enforcementStatus, (input, { paseo }) => enforcement.readView(input, paseo));
+  // RuntimePin (P2-b): read-only verdict on the served home's active
+  // binding — journal reads only, the materializer's verifyPublished is the
+  // integrity oracle. No paseo surface, no mutex, no mutation.
+  const runtimePinDeps = { journal, verifyPublished: materializer.verifyPublished };
+  server.handle(enforcementRuntimePin, input => readRuntimePinView(input, runtimePinDeps));
   const injection = createRoleInjection({
     readActiveBinding: () => readActiveBinding(journal),
     // Same daemon-home resolution as readActiveBinding: the setting lives at

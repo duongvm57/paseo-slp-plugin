@@ -65,7 +65,7 @@ const FIXED_LIMITATIONS = Object.freeze([
   'match means claims agree with observation at capture time; writer quiescence and write-then-restore are not observed',
   'no assignment/epoch binding: the desk ledger arrives in P2',
   'checks are claimed evidence; this view never runs a command',
-  'runtime is not bound to the install receipt in P1 (P2 RuntimePin)',
+  'runtime is checked only against a caller-supplied candidate hash (--expect-runtime); the pin authority is the plugin runtime-pin view',
   "the contract pin proves the hash of the caller-named file; which file governs the task is the caller's declaration",
 ]);
 const SLP_PROVIDER_PATTERN = /^slp-(codex|pi|devin|claude)-(supervisor|lead|peer)$/u;
@@ -301,7 +301,7 @@ function validatePin(pin, field) {
   return { path: pin.path, sha256: pin.sha256 };
 }
 
-const INPUT_KEYS = Object.freeze(['reportPath', 'repo', 'paseoHome', 'expectParent', 'expectWorkspace', 'expectContract', 'expectFiles']);
+const INPUT_KEYS = Object.freeze(['reportPath', 'repo', 'paseoHome', 'expectParent', 'expectWorkspace', 'expectContract', 'expectFiles', 'expectRuntime']);
 
 function validateInput(input) {
   if (!isObject(input)) throw invalidRequest('input must be an object');
@@ -322,6 +322,10 @@ function validateInput(input) {
   if (!Array.isArray(expectFiles) || expectFiles.length > VERIFY_LIMITS.pins) {
     throw invalidRequest(`expectFiles must be an array of at most ${VERIFY_LIMITS.pins} pins`);
   }
+  if (input.expectRuntime !== undefined && input.expectRuntime !== null
+    && (typeof input.expectRuntime !== 'string' || !SHA256_PATTERN.test(input.expectRuntime))) {
+    throw invalidRequest('expectRuntime must be a 64-character lowercase sha256');
+  }
   return {
     reportPath: input.reportPath,
     repo: input.repo,
@@ -330,6 +334,7 @@ function validateInput(input) {
     expectWorkspace: input.expectWorkspace ?? null,
     expectContract,
     expectFiles: expectFiles.map((pin, index) => validatePin(pin, `expectFiles[${index}]`)),
+    expectRuntime: input.expectRuntime ?? null,
   };
 }
 
@@ -591,6 +596,20 @@ function run(input, internals) {
 
   const limitations = ledger.cap('limitations', seatRead ? [...FIXED_LIMITATIONS, SEAT_LIMITATION] : [...FIXED_LIMITATIONS], VERIFY_LIMITS.limitations, l => l, VERIFY_LIMITS.limitationLen);
 
+  // Runtime measurement (P2-b amend): identity() is a local measurement with
+  // no incomplete branch — a throw is IO_FAILURE, and a null expectation is
+  // report-only (the P1 behavior) rather than a comparison.
+  let runtimeSha256;
+  try { runtimeSha256 = identity(PACKAGE_ROOT).sha256; }
+  catch (error) { throw ioFailure(`runtime identity measurement failed: ${summarize(error)}`); }
+  const runtime = {
+    expected: request.expectRuntime,
+    observed: runtimeSha256,
+    result: request.expectRuntime === null ? 'report-only'
+      : request.expectRuntime === runtimeSha256 ? 'match' : 'mismatch',
+    reason: null,
+  };
+
   // summary is a fold, never a verdict (§5.3): record-invalid wins first,
   // then any mismatch or inconsistent check, then any incomplete.
   const outcomes = [];
@@ -601,6 +620,7 @@ function run(input, internals) {
   if (seat !== null && seat.result !== 'report-only') outcomes.push(seat.result);
   outcomes.push(contractResult.result);
   for (const pin of pinResults) outcomes.push(pin.result);
+  outcomes.push(runtime.result);
   const conclusive = outcomes.filter(result => result === 'mismatch' || result === 'incomplete' || result === 'match');
   const summary = validation !== 'valid' ? 'record-invalid'
     : conclusive.includes('mismatch') || checks.some(check => check.consistency === 'inconsistent') ? 'mismatch'
@@ -614,7 +634,8 @@ function run(input, internals) {
     measurement: {
       snapshotAlgorithm: 'slp-snapshot/package.mjs',
       packageRoot: realpathSync(PACKAGE_ROOT),
-      runtimeSha256: identity(PACKAGE_ROOT).sha256,
+      runtimeSha256,
+      runtime,
     },
     input: {
       reportSha256: hash(reportBytes),

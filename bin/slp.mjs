@@ -42,7 +42,7 @@ const commands = {
   'route-decide': { flags: ['--paseo-home', '--schema', '--out'], target: 'request.json', usage: 'route-decide <request.json> [--schema] [--out <path>] [--paseo-home <absolute-home>]' },
   notebook: { flags: ['--paseo-home'], target: 'repository', usage: 'notebook <repository> [--paseo-home <absolute-home>]' },
   records: { flags: ['--kind', '--require', '--repo', '--schema'], target: 'path|-', usage: 'records <path|-> [--kind handback|settlement] [--require handback|settlement] [--repo <absolute-path>] [--schema]' },
-  'verify-handback': { flags: ['--repo', '--paseo-home', '--expect-contract', '--expect-file', '--expect-parent', '--expect-workspace'], target: 'report', usage: 'verify-handback <report-path> --repo <absolute-repo> --expect-contract <repo-path>=<sha256> [--expect-file <repo-path>=<sha256>]... [--paseo-home [<absolute-home>]] [--expect-parent <agentId>] [--expect-workspace <workspaceId>]' },
+  'verify-handback': { flags: ['--repo', '--paseo-home', '--expect-contract', '--expect-file', '--expect-parent', '--expect-workspace', '--expect-runtime'], target: 'report', usage: 'verify-handback <report-path> --repo <absolute-repo> --expect-contract <repo-path>=<sha256> [--expect-file <repo-path>=<sha256>]... [--expect-runtime <candidateSha256>] [--paseo-home [<absolute-home>]] [--expect-parent <agentId>] [--expect-workspace <workspaceId>]' },
   instructions: { target: 'role', usage: 'instructions <role>' },
   status: { flags: ['--paseo-home'], usage: 'status [--paseo-home <absolute-home>]' },
   'local-target': { flags: ['--paseo-home'], usage: 'local-target [--paseo-home <absolute-home>]' },
@@ -89,7 +89,7 @@ try {
       if ((key === '--kind' || key === '--require') && !RECORD_KINDS.includes(value)) throw new Error(`${key} must be ${RECORD_KINDS.join(' or ')}`);
       if (key === '--repo' && !isAbsolute(value)) throw new Error('Absolute path required for --repo');
       options[key] = value;
-    } else if (key === '--expect-contract' || key === '--expect-parent' || key === '--expect-workspace') {
+    } else if (key === '--expect-contract' || key === '--expect-parent' || key === '--expect-workspace' || key === '--expect-runtime') {
       const value = args[++i];
       if (!value || value.startsWith('-')) throw new Error(`${key} requires a value`);
       options[key] = value;
@@ -143,6 +143,7 @@ try {
       paseoHome: resolveHome(options['--paseo-home']),
       expectParent: options['--expect-parent'] ?? null,
       expectWorkspace: options['--expect-workspace'] ?? null,
+      ...(options['--expect-runtime'] === undefined ? {} : { expectRuntime: options['--expect-runtime'] }),
       ...(options['--expect-contract'] === undefined ? {} : { expectContract: pin(options['--expect-contract']) }),
       expectFiles: (options['--expect-file'] ?? []).map(pin),
     });

@@ -18,7 +18,7 @@ import {
   RECORD_VALIDATION, CHECK_CONSISTENCY, SUMMARY_VALUES, CWD_RELATIONS,
   COMPLETENESS_COLLECTIONS, COMPLETENESS_REASONS, VERIFY_LIMITS,
 } from '../src/candidate-verify.mjs';
-import { snapshot, hash } from '../src/package.mjs';
+import { snapshot, hash, identity } from '../src/package.mjs';
 
 const PKG = fileURLToPath(new URL('..', import.meta.url));
 const ENGINE_PATH = join(PKG, 'src', 'candidate-verify.mjs');
@@ -351,6 +351,11 @@ function assertRow(row, view) {
   }
 
   assert.equal(view.seat.result, 'report-only'); // spine rows never name a seat
+  // Spine rows never pass --expect-runtime: the runtime block is report-only
+  // and never disturbs the fold.
+  assert.equal(view.measurement.runtime.result, 'report-only');
+  assert.equal(view.measurement.runtime.expected, null);
+  assert.equal(view.measurement.runtime.observed, view.measurement.runtimeSha256);
   assert.ok(!view.limitations.includes('seat observation reads daemon files (host-internal format)'));
   const issueCodes = [...view.record.errors, ...view.record.warnings].map(e => e.code);
   if (row.M === 'true') assert.ok(issueCodes.includes('multiple-records'));
@@ -1025,6 +1030,82 @@ test('integration — no-handback pure observation', async t => {
   assert.equal(view.summary, 'record-invalid');
 });
 
+// ---- Runtime measurement (P2-b --expect-runtime) ----------------------------
+test('runtime measurement — absent flag is report-only and preserves the P1 fold', async t => {
+  const w = world(t);
+  const view = await verifyHandback({
+    reportPath: w.writeReport([buildRecord(w, completeRow({ S: 'equal' }), w.measure())]),
+    repo: w.repo, paseoHome: w.home, expectParent: null, expectWorkspace: null,
+    expectContract: w.contract,
+  });
+  assert.deepEqual(view.measurement.runtime, {
+    expected: null, observed: identity(PKG).sha256, result: 'report-only', reason: null,
+  });
+  assert.equal(view.measurement.runtimeSha256, identity(PKG).sha256);
+  assert.equal(view.summary, 'match');
+  assert.ok(view.limitations.includes(
+    'runtime is checked only against a caller-supplied candidate hash (--expect-runtime); the pin authority is the plugin runtime-pin view'));
+});
+
+test('runtime measurement — a matching --expect-runtime compares match', async t => {
+  const w = world(t);
+  const view = await verifyHandback({
+    reportPath: w.writeReport([buildRecord(w, completeRow({ S: 'equal' }), w.measure())]),
+    repo: w.repo, paseoHome: w.home, expectParent: null, expectWorkspace: null,
+    expectContract: w.contract,
+    expectRuntime: identity(PKG).sha256,
+  });
+  assert.equal(view.measurement.runtime.result, 'match');
+  assert.equal(view.measurement.runtime.expected, identity(PKG).sha256);
+  assert.equal(view.summary, 'match');
+});
+
+test('runtime measurement — a mismatching --expect-runtime folds into summary mismatch', async t => {
+  const w = world(t);
+  const view = await verifyHandback({
+    reportPath: w.writeReport([buildRecord(w, completeRow({ S: 'equal' }), w.measure())]),
+    repo: w.repo, paseoHome: w.home, expectParent: null, expectWorkspace: null,
+    expectContract: w.contract,
+    expectRuntime: 'f'.repeat(64),
+  });
+  assert.equal(view.measurement.runtime.result, 'mismatch');
+  assert.equal(view.summary, 'mismatch');
+});
+
+test('runtime measurement — a record-invalid view still carries the runtime block', async t => {
+  const w = world(t);
+  const view = await verifyHandback({
+    reportPath: w.writeReport(['no record here']),
+    repo: w.repo, paseoHome: w.home, expectParent: null, expectWorkspace: null,
+    expectContract: w.contract,
+    expectRuntime: 'f'.repeat(64),
+  });
+  assert.equal(view.record.validation, 'no-handback');
+  assert.equal(view.measurement.runtime.result, 'mismatch');
+  assert.equal(view.summary, 'record-invalid', 'record-invalid wins before any comparison result');
+});
+
+test('runtime measurement — malformed --expect-runtime is INVALID_REQUEST', async t => {
+  for (const bad of ['not-a-sha', 'A'.repeat(64), 42, {}]) {
+    await expectCode('INVALID_REQUEST', invalidInput(t, { expectRuntime: bad }));
+  }
+});
+
+// P2-b §5/Y4 — the verifier compares a caller-supplied runtime hash only; it
+// must never grow a receipt parser, read the daemon config or reach for
+// runtime-state.mjs. These are source-level pins.
+test('static — the engine never touches receipt.json, config.json or runtime-state.mjs', () => {
+  const source = readFileSync(ENGINE_PATH, 'utf8');
+  assert.ok(!source.includes('receipt.json'), 'engine must not open receipt.json');
+  assert.ok(!source.includes('config.json'), 'engine must not read config.json');
+  assert.ok(!/runtime-state/.test(source), 'engine must not import runtime-state.mjs');
+});
+
+test('static — the predicate catches an injected receipt.json literal', () => {
+  const mutant = `${readFileSync(ENGINE_PATH, 'utf8')}\n// receipt.json\n`;
+  assert.ok(mutant.includes('receipt.json'), 'sanity: the static pin would catch a receipt.json reference');
+});
+
 // ---- Canonical fixture artifact -------------------------------------------
 // C-S4 — the canonical fixture must re-derive byte-identical bytes. The
 // fixture world is built on a fixed path under tmpdir so every embedded
@@ -1038,8 +1119,8 @@ test('integration — no-handback pure observation', async t => {
 // R2-C1 — the test writes nothing into the repo tree: the artifact bytes are
 // asserted in memory and dropped into the (cleaned) fixture dir for
 // inspection, so a clean checkout without .local-checks passes on CI.
-const CANONICAL_LITERAL_BYTES = 4542;
-const CANONICAL_LITERAL_SHA256 = '962def198c809068f0cf075533fa972e75ea10e89f4ba6c8e0416a77d0c36ec1';
+const CANONICAL_LITERAL_BYTES = 4748;
+const CANONICAL_LITERAL_SHA256 = 'bdbc72dcb3d9ef31fc38c9e5591dd6575bf4a467ca5007e30aefbf7263da9bc3';
 test('canonical representative fixture — reproducible bytes + sha256', async t => {
   const dir = join(tmpdir(), 'slp-p1-canonical-fixture');
   rmSync(dir, { recursive: true, force: true });
@@ -1059,9 +1140,10 @@ test('canonical representative fixture — reproducible bytes + sha256', async t
   canonical.generatedAt = '2000-01-01T00:00:00.000Z';
   canonical.measurement.packageRoot = '<package-root>';
   canonical.measurement.runtimeSha256 = '<runtime-sha256>';
+  canonical.measurement.runtime.observed = '<runtime-sha256>';
   const bytes = Buffer.from(`${JSON.stringify(canonical, null, 2)}\n`, 'utf8');
   writeFileSync(join(w.dir, 'canonical-fixture.json'), bytes);
+  t.diagnostic(`canonical-fixture bytes=${bytes.length} sha256=${sha256hex(bytes)} (artifact at ${join(w.dir, 'canonical-fixture.json')} during the run)`);
   assert.equal(bytes.length, CANONICAL_LITERAL_BYTES);
   assert.equal(sha256hex(bytes), CANONICAL_LITERAL_SHA256, 'canonical fixture bytes drifted — re-derive and re-pin if the view change is intended');
-  t.diagnostic(`canonical-fixture bytes=${bytes.length} sha256=${sha256hex(bytes)} (artifact at ${join(w.dir, 'canonical-fixture.json')} during the run)`);
 });

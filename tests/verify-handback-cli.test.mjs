@@ -9,7 +9,7 @@ import { chmodSync, cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeF
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { hash, snapshot } from '../src/package.mjs';
+import { hash, identity, snapshot } from '../src/package.mjs';
 
 const PKG = fileURLToPath(new URL('..', import.meta.url));
 const BIN = join(PKG, 'bin', 'slp.mjs');
@@ -71,6 +71,38 @@ test('verify-handback wires --expect-file repeats, --expect-parent/--expect-work
   assert.equal(view.input.expect.files, 2);
   assert.equal(view.input.expect.parent, 'lead-1');
   assert.equal(view.input.expect.workspace, 'wks_9');
+});
+
+test('verify-handback wires --expect-runtime: match, mismatch, report-only', t => {
+  const w = world(t);
+  const base = ['verify-handback', w.report, '--repo', w.repo, '--expect-contract', `CONTRACT.md=${w.contractSha}`, '--paseo-home', w.home];
+  const match = run([...base, '--expect-runtime', identity(PKG).sha256]);
+  assert.equal(match.status, 0, match.stderr);
+  const matchView = JSON.parse(match.stdout);
+  assert.equal(matchView.measurement.runtime.result, 'match');
+  assert.equal(matchView.measurement.runtime.expected, identity(PKG).sha256);
+  assert.equal(matchView.summary, 'match');
+
+  const mismatch = run([...base, '--expect-runtime', 'f'.repeat(64)]);
+  assert.equal(mismatch.status, 0, mismatch.stderr);
+  const mismatchView = JSON.parse(mismatch.stdout);
+  assert.equal(mismatchView.measurement.runtime.result, 'mismatch');
+  assert.equal(mismatchView.summary, 'mismatch');
+
+  const absent = run(base);
+  assert.equal(absent.status, 0, absent.stderr);
+  assert.equal(JSON.parse(absent.stdout).measurement.runtime.result, 'report-only');
+});
+
+test('a malformed --expect-runtime is INVALID_REQUEST — typed stderr, empty stdout', t => {
+  const w = world(t);
+  const res = run(['verify-handback', w.report, '--repo', w.repo, '--expect-contract', `CONTRACT.md=${w.contractSha}`, '--expect-runtime', 'not-a-sha', '--paseo-home', w.home]);
+  assert.equal(res.status, 1);
+  assert.equal(res.stdout, '');
+  assert.match(res.stderr, /^INVALID_REQUEST: /);
+  const missing = run(['verify-handback', w.report, '--repo', w.repo, '--expect-contract', `CONTRACT.md=${w.contractSha}`, '--expect-runtime', '--paseo-home', w.home]);
+  assert.equal(missing.status, 1);
+  assert.match(missing.stderr, /--expect-runtime requires a value/);
 });
 
 test('mismatch is data: a divergent claim still exits 0 with a view', t => {

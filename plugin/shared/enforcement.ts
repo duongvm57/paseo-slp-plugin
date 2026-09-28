@@ -14,7 +14,7 @@
 
 import { z } from "zod";
 import { defineRpc } from "@getpaseo/plugin";
-import { Family, Time, isAbsolutePath } from "./contracts.ts";
+import { Family, Sha, Time, isAbsolutePath } from "./contracts.ts";
 
 /** The closed ledger vocabulary (§2.1): every collection the producer may
  *  charge an omission against. Enum order is the canonical ledger sort order —
@@ -98,6 +98,13 @@ export const WIRE_LIMITS = {
   gaps: 17,
   /** P0 emits `bindings: []` — a non-empty view is producer-invalid. */
   bindings: 0,
+  // enforcement-runtime-pin (P2-b): pin field and limitation caps. The pin's
+  // node.path pins at the manager's daemonHome cap, not the narrower
+  // enforcement target cap.
+  runtimePinPath: 4096,
+  runtimePinNodeVersion: 64,
+  runtimePinLimitations: 4,
+  runtimePinLimitationLen: 160,
 } as const;
 
 // ---------------------------------------------------------------------------
@@ -415,6 +422,100 @@ export const enforcementStatus = defineRpc({
 });
 
 // ---------------------------------------------------------------------------
+// enforcement-runtime-pin RPC (P2-b) — read-only RuntimePin of the active
+// receipt binding. The pin is the P0 §5 measurement/runtime pin: the seat and
+// engine pins are separate pins under later slices. The producer's closed
+// predicate decides between exactly two shapes on the wire — `bound` with a
+// pin and its canonical digest, or `not-bound` with one closed reason; every
+// predicate fault surfaces as a thrown OperationConflict, never a row.
+// ---------------------------------------------------------------------------
+
+/** Why no pin was emitted. Closed vocabulary — first-failure order is the
+ *  predicate's sequential check order, not this declaration order. */
+export const RuntimePinReason = z.enum([
+  /** No exported PASEO_HOME: the served home is unverified as this daemon's. */
+  "unverified-home",
+  /** The caller's target is not the verified served home, or the receipt's
+   *  recorded target is not the caller's (deliberate not-bound, matching the
+   *  P0 readView TARGET_MISMATCH degrade). */
+  "target-mismatch",
+  /** No receipt exists under the verified home's stable root. */
+  "no-receipt",
+  /** The receipt exists but is not ACTIVE. */
+  "state-not-active",
+  /** An operation intent is pending or one is recorded active. */
+  "operation-pending",
+  /** The ACTIVE receipt carries no binding. */
+  "no-binding",
+]);
+
+/** The wire pin: digest fields are canonicalSha256 values computed by the
+ *  server producer (config-view.ts — the only canonicalizer); `binaries` and
+ *  `owned` enter as digests, never verbatim, so the pin stays small and
+ *  client-safe. `bridgeSha256`/`bridgeProtocolVersion` are always null at
+ *  P2-b — a later slice amends the literals when bridge values land. */
+export const RuntimePin = z.object({
+  schemaVersion: z.literal(1),
+  /** Literal: a pin exists only while the receipt reads ACTIVE. */
+  state: z.literal("ACTIVE"),
+  candidateSha256: Sha,
+  payloadSha256: Sha,
+  launchSetSha256: Sha,
+  launchManifestSha256: Sha,
+  bindingSha256: Sha,
+  /** canonicalSha256(receipt.binding.owned) — the P0 §5 "policy bundle". */
+  policyBundleSha256: Sha,
+  /** canonicalSha256(receipt.binding.binaries) — per-family resolution. */
+  binariesSha256: Sha,
+  node: z.object({
+    path: z.string().min(1).max(WIRE_LIMITS.runtimePinPath).refine(isAbsolutePath),
+    version: z.string().min(1).max(WIRE_LIMITS.runtimePinNodeVersion),
+  }).strict(),
+  bridgeSha256: z.null(),
+  bridgeProtocolVersion: z.null(),
+  /** Canonical target — daemonHome is the realpath'd served home. */
+  target: EnforcementTarget,
+  receiptRevision: z.number().int().nonnegative(),
+  snapshotAlgorithmVersion: z.literal("slp-snapshot/package.mjs"),
+  recordContractVersion: z.literal(1),
+}).strict();
+
+/** Same input shape as enforcement-status (P0): the caller-supplied target. */
+export const GetRuntimePinInput = GetEnforcementStatusInput;
+
+export const GetRuntimePinOutput = z.object({
+  schemaVersion: z.literal(1),
+  target: EnforcementTarget,
+  generatedAt: Time,
+  result: z.enum(["bound", "not-bound"]),
+  reason: RuntimePinReason.nullable(),
+  pin: RuntimePin.nullable(),
+  pinSha256: Sha.nullable(),
+  limitations: z.array(z.string().min(1).max(WIRE_LIMITS.runtimePinLimitationLen)).max(WIRE_LIMITS.runtimePinLimitations),
+  /** Hard literal: a read view is not an acceptance verdict, ever. */
+  acceptance: z.literal("not-established-by-this-view"),
+}).strict().superRefine((output, ctx) => {
+  // The wire-level coupling: bound carries a pin and its digest and no
+  // reason; not-bound carries a reason and no pin material. The remaining
+  // cross-constraint — pinSha256 === canonicalSha256(pin) — is enforced by
+  // the server emit guard (boundRuntimePinView): this shared module stays
+  // client-safe and cannot hash.
+  if (output.result === "bound") {
+    if (output.pin === null || output.pinSha256 === null || output.reason !== null) {
+      ctx.addIssue({ code: "custom", message: "bound output must carry pin, pinSha256 and reason:null" });
+    }
+  } else if (output.pin !== null || output.pinSha256 !== null || output.reason === null) {
+    ctx.addIssue({ code: "custom", message: "not-bound output must carry a reason and pin/pinSha256:null" });
+  }
+});
+
+export const enforcementRuntimePin = defineRpc({
+  name: "enforcement-runtime-pin",
+  input: GetRuntimePinInput,
+  output: GetRuntimePinOutput,
+});
+
+// ---------------------------------------------------------------------------
 // Value types (z.infer — same idiom as contracts.ts)
 // ---------------------------------------------------------------------------
 
@@ -426,3 +527,7 @@ export type CompletenessReasonValue = z.infer<typeof CompletenessReason>;
 export type CompletenessEntryValue = z.infer<typeof CompletenessEntry>;
 export type GetEnforcementStatusInputValue = z.infer<typeof GetEnforcementStatusInput>;
 export type GetEnforcementStatusOutputValue = z.infer<typeof GetEnforcementStatusOutput>;
+export type RuntimePinReasonValue = z.infer<typeof RuntimePinReason>;
+export type RuntimePinValue = z.infer<typeof RuntimePin>;
+export type GetRuntimePinInputValue = z.infer<typeof GetRuntimePinInput>;
+export type GetRuntimePinOutputValue = z.infer<typeof GetRuntimePinOutput>;
