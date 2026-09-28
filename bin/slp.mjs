@@ -18,6 +18,7 @@ import { notebook } from '../src/notebook.mjs';
 import { localTarget, runtimeStatus } from '../src/runtime-state.mjs';
 import { probeWorkTracker } from '../src/work-tracker.mjs';
 import { extractRecords, recordSchema, requireRecordKind, RECORD_KINDS } from '../src/report-records.mjs';
+import { verifyHandback, VerifyError } from '../src/candidate-verify.mjs';
 
 // One entry per command: the flags it accepts, the required positional target
 // (--schema stands in for it where offered), whether it takes an optional
@@ -41,6 +42,7 @@ const commands = {
   'route-decide': { flags: ['--paseo-home', '--schema', '--out'], target: 'request.json', usage: 'route-decide <request.json> [--schema] [--out <path>] [--paseo-home <absolute-home>]' },
   notebook: { flags: ['--paseo-home'], target: 'repository', usage: 'notebook <repository> [--paseo-home <absolute-home>]' },
   records: { flags: ['--kind', '--require', '--repo', '--schema'], target: 'path|-', usage: 'records <path|-> [--kind handback|settlement] [--require handback|settlement] [--repo <absolute-path>] [--schema]' },
+  'verify-handback': { flags: ['--repo', '--paseo-home', '--expect-contract', '--expect-file', '--expect-parent', '--expect-workspace'], target: 'report', usage: 'verify-handback <report-path> --repo <absolute-repo> --expect-contract <repo-path>=<sha256> [--expect-file <repo-path>=<sha256>]... [--paseo-home [<absolute-home>]] [--expect-parent <agentId>] [--expect-workspace <workspaceId>]' },
   instructions: { target: 'role', usage: 'instructions <role>' },
   status: { flags: ['--paseo-home'], usage: 'status [--paseo-home <absolute-home>]' },
   'local-target': { flags: ['--paseo-home'], usage: 'local-target [--paseo-home <absolute-home>]' },
@@ -56,10 +58,11 @@ try {
   const options = {};
   for (let i = 0; i < args.length; i++) {
     const key = args[i];
-    if (key === '--include') {
-      // Repeatable: each use appends one repository-relative path to stage.
+    if (key === '--include' || key === '--expect-file') {
+      // Repeatable: each use appends one repository-relative path to stage /
+      // one artifact pin for verify-handback.
       const value = args[++i];
-      if (value === undefined || value.startsWith('-')) throw new Error('--include requires a repository-relative path');
+      if (value === undefined || value.startsWith('-')) throw new Error(key === '--include' ? '--include requires a repository-relative path' : '--expect-file requires <repo-relative-path>=<sha256>');
       (options[key] ??= []).push(value);
       continue;
     }
@@ -85,6 +88,10 @@ try {
       if (!value || value.startsWith('-')) throw new Error(`${key} requires a value`);
       if ((key === '--kind' || key === '--require') && !RECORD_KINDS.includes(value)) throw new Error(`${key} must be ${RECORD_KINDS.join(' or ')}`);
       if (key === '--repo' && !isAbsolute(value)) throw new Error('Absolute path required for --repo');
+      options[key] = value;
+    } else if (key === '--expect-contract' || key === '--expect-parent' || key === '--expect-workspace') {
+      const value = args[++i];
+      if (!value || value.startsWith('-')) throw new Error(`${key} requires a value`);
       options[key] = value;
     } else if (!key.startsWith('-')) {
       // Positional target may come after flags (e.g. prepare --check req.json).
@@ -121,6 +128,24 @@ try {
       result = { records, errors: parsed.errors, warnings: parsed.warnings };
       if (parsed.errors.length) process.exitCode = 1;
     }
+  }
+  else if (command === 'verify-handback') {
+    // Read-only claim verification (P1): the engine owns pin validation, so
+    // the facade only splits <repo-relative-path>=<sha256>; a malformed pin
+    // surfaces as INVALID_REQUEST, not a separate parser dialect.
+    const pin = value => {
+      const at = value.lastIndexOf('=');
+      return { path: at === -1 ? value : value.slice(0, at), sha256: at === -1 ? '' : value.slice(at + 1) };
+    };
+    result = await verifyHandback({
+      reportPath: resolve(target),
+      repo: options['--repo'],
+      paseoHome: resolveHome(options['--paseo-home']),
+      expectParent: options['--expect-parent'] ?? null,
+      expectWorkspace: options['--expect-workspace'] ?? null,
+      ...(options['--expect-contract'] === undefined ? {} : { expectContract: pin(options['--expect-contract']) }),
+      expectFiles: (options['--expect-file'] ?? []).map(pin),
+    });
   }
   else if (command === 'verify') result = verifyInstall(resolve(target));
   else if (command === 'prepare' || command === 'prepare-handoff') {
@@ -220,4 +245,4 @@ try {
     writeFileSync(out, json(result));
   }
   if (result !== undefined) process.stdout.write(json(result));
-} catch (error) { console.error(error.message); process.exitCode = 1; }
+} catch (error) { console.error(error instanceof VerifyError ? `${error.code}: ${error.message}` : error.message); process.exitCode = 1; }

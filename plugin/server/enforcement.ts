@@ -68,7 +68,7 @@ export const P0_STATIC_LIMITATIONS = [
   "bindings[] is empty by construction: no desk binding ledger exists yet, and observed host agents are not desk-bound seats",
   "capability rows default to unknown; source-static-compat evidence proves interfaces, never live delivery",
   "a requested catalog model is not the effective model; per-agent model rows are outside the P0 contract",
-  "configured provider values are not projected in P0; effective provider policy is not observable",
+  "configured provider values are not projected by this view; effective provider policy is not observable",
   "no reviewer axis or verdict exists in this view; a view is never acceptance",
 ] as const;
 

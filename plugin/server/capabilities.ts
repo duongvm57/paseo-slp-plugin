@@ -80,8 +80,8 @@ export const PROVIDER_TOOLS_PROJECTION_GAP: CapabilityGapValue = gap({
   capabilityId: "providerTools-projection",
   family: null,
   missingPrimitive: "host lacks an introspection surface for effective tool policy (F10)",
-  neededBy: "P1",
-  ownerAction: "request an upstream introspection surface or build a P1 observer, then make an explicit scope decision",
+  neededBy: "upstream-host (F10 permanent gap)",
+  ownerAction: "Human: raise a Paseo core request for effective tool-policy introspection; SLP ships no projection",
 });
 
 const STATIC: CapabilityRecordValue["evidenceKind"] = "source-static-compat";

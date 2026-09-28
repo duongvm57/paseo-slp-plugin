@@ -232,7 +232,7 @@ test('auditCapabilities emits per-family rows for all four families plus host-wi
   for (const g of gaps) assert.deepEqual(CapabilityGap.parse(g), g);
 });
 
-test('the mandatory providerTools-projection gap carries the pinned P1-backlog semantics', () => {
+test('the mandatory providerTools-projection gap carries the pinned permanent-gap semantics', () => {
   const { gaps } = auditCapabilities({ now: NOW, observed: silentHost });
   const row = gaps.filter(g => g.capabilityId === 'providerTools-projection');
   assert.equal(row.length, 1, 'exactly one mandatory gap');
@@ -240,8 +240,8 @@ test('the mandatory providerTools-projection gap carries the pinned P1-backlog s
     capabilityId: 'providerTools-projection',
     family: null,
     missingPrimitive: 'host lacks an introspection surface for effective tool policy (F10)',
-    neededBy: 'P1',
-    ownerAction: 'request an upstream introspection surface or build a P1 observer, then make an explicit scope decision',
+    neededBy: 'upstream-host (F10 permanent gap)',
+    ownerAction: 'Human: raise a Paseo core request for effective tool-policy introspection; SLP ships no projection',
   });
 });
 
@@ -512,7 +512,7 @@ test('readView on a verified served home attaches receipt and host evidence; out
   assert.equal(view.installation.bound, false);
   assert.equal(view.installation.error, null);
   // P0 never projects provider policy, per-agent models or binding rows.
-  assert.equal('providerTools' in view, false);
+  assert.equal(Object.keys(view).some(key => key.startsWith('providerTools')), false);
   assert.equal('modelObservations' in view, false);
   assert.deepEqual(view.bindings, []);
   assert.equal(view.acceptance, 'not-established-by-this-view');
@@ -521,7 +521,7 @@ test('readView on a verified served home attaches receipt and host evidence; out
   assert.equal(capRow(view, CAPABILITY_IDS.agentsList).status, 'supported');
   assert.equal(capRow(view, CAPABILITY_IDS.agentsList).evidenceKind, 'host-observation');
   assert.ok(view.limitations.some(l => l.includes('observational only')));
-  assert.ok(view.limitations.some(l => l.includes('not projected in P0')));
+  assert.ok(view.limitations.some(l => l.includes('not projected by this view')));
 });
 
 test('readView without an exported PASEO_HOME keeps static-only evidence — no receipt read, no host calls', async t => {
