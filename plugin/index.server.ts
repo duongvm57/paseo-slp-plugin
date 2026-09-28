@@ -7,6 +7,7 @@ import { realpathSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { activate, reconcile, deactivate, status, localTarget, catalog, setLanguage, getRoleRouting, setRoleRouting, getPeerPool, setPeerPool, getJev, setJev, setJevKey, testJev, getWorkTracker, setWorkTracker } from "./shared/contracts.ts";
 import { disableSupervisionNotifications, getSupervision, getSupervisionStatus, setSupervision } from "./shared/supervision.ts";
+import { enforcementStatus } from "./shared/enforcement.ts";
 import type { Manager } from "./shared/contracts.ts";
 import { loadCatalog } from "./server/provider-catalog.ts";
 import { createManager } from "./server/manager.ts";
@@ -22,6 +23,7 @@ import { createLauncherBuilder } from "./server/launchers.ts";
 import { createJournal } from "./server/journal.ts";
 import { createRoleInjection } from "./server/role-injection.ts";
 import { createWorkTracker, readWorkTrackerEnabled } from "./server/work-tracker.ts";
+import { createEnforcement } from "./server/enforcement.ts";
 // Host note: this must stay a hoisted function declaration, not a const —
 // the daemon compiler's Hermes interop eagerly copies export values before
 // module bodies run, so `export default const` evaluates to undefined.
@@ -102,6 +104,12 @@ export default function contribute(server: Parameters<PluginServerContribution>[
   // picked up without re-registering; failures propagate to the host, which
   // is what makes the managed path fail closed during a hook gap.
   const journal = createJournal();
+  // Enforcement desk (P0): read-only capability rows plus a literal-empty
+  // binding list — no provider-policy or per-agent model projection. No
+  // ledger, no mutation; the desk seam itself lives in server/enforcement.ts
+  // so P1+ state lands behind the same Interface, not in this handler.
+  const enforcement = createEnforcement({ journal });
+  server.handle(enforcementStatus, (input, { paseo }) => enforcement.readView(input, paseo));
   const injection = createRoleInjection({
     readActiveBinding: () => readActiveBinding(journal),
     // Same daemon-home resolution as readActiveBinding: the setting lives at

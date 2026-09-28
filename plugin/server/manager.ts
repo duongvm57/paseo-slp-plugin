@@ -15,6 +15,7 @@ import { join } from "node:path";
 import {
   ActivateInput,
   DeactivateInput,
+  MAX_RPC_BYTES,
   OperationConflict,
   ReconcileInput,
   StatusInput,
@@ -38,7 +39,7 @@ import {
   type StatusResult,
 } from "../shared/contracts.ts";
 import { createJournal, emptyReceipt, findOperation, pendingOperation } from "./journal.ts";
-import { resolveDaemonHome } from "./daemon-home.ts";
+import { receiptMatchesTarget, resolveDaemonHome } from "./daemon-home.ts";
 import { readLanguage, readRoleRouting } from "./state-store.ts";
 import { OWNED_PROVIDER_ID_RE } from "../shared/families.ts";
 import {
@@ -69,8 +70,6 @@ import {
   planActivation,
   planDeactivation,
 } from "./config-transaction.ts";
-
-const MAX_RPC_BYTES = 64 * 1024;
 
 const MAX_CONFLICTS = 64;
 const POLL_PENDING_MS = 1000;
@@ -600,8 +599,10 @@ export function createManager(deps: ManagerDeps): Manager {
     const receipt = journal.read(ctx.stableRoot);
     if (
       receipt &&
-      (receipt.target.hostId !== input.target.hostId ||
-        receipt.target.daemonHome !== ctx.canonicalHome)
+      !receiptMatchesTarget(receipt.target, {
+        hostId: input.target.hostId,
+        canonicalHome: ctx.canonicalHome,
+      })
     ) {
       throw new OperationConflict(
         "TARGET_MISMATCH",

@@ -230,7 +230,8 @@ function migrateProviderSettings(
   return ProviderOverridesSchema.parse(migrated);
 }
 
-/** Port of the `normalizeAgentProviders` preprocess in S/persisted-config.js. */
+/** Port of the `normalizeAgentProviders` preprocess in S/persisted-config.js —
+ *  the one legacy normalization shared by every provider-config consumer. */
 function normalizeAgentProviders(value: unknown): unknown {
   if (!isRecord(value)) return value;
   const rawProviders = value;

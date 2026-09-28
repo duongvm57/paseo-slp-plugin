@@ -182,6 +182,7 @@ test('contribute() registers the RPCs plus the two before-hooks, cleanup unregis
       'catalog',
       'deactivate',
       'disable-supervision-notifications',
+      'enforcement-status',
       'get-jev',
       'get-peer-pool',
       'get-role-routing',

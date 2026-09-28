@@ -146,9 +146,12 @@ export function readRawConfig(configPath: string): RawConfigView {
   try {
     json = JSON.parse(bytes.toString("utf8"));
   } catch (error) {
+    // V8 parse messages quote raw input fragments — a config may carry
+    // secrets, so only the byte position (never the bytes) may surface.
+    const position = /position (\d+)/.exec((error as Error).message)?.[1];
     throw new OperationConflict(
       "SCHEMA_LOSS",
-      `config.json is not valid JSON; persisted-schema validation cannot run: ${(error as Error).message}`,
+      `config.json is not valid JSON${position ? ` (at position ${position})` : ""}; persisted-schema validation cannot run`,
       { path: configPath },
     );
   }

@@ -11,6 +11,11 @@ import { z } from "zod";
 import { defineRpc } from "@getpaseo/plugin";
 import { FAMILY_IDS, OWNED_PROVIDER_ID_RE, PROVIDER_EXTENDS_IDS, ROLES } from "./families.ts";
 
+/** The serialized-RPC byte contract: every request and response envelope
+ *  stays inside this many UTF-8 bytes. Defined once here — producers bound
+ *  or shed to it, never restate the literal. */
+export const MAX_RPC_BYTES = 64 * 1024;
+
 // ---------------------------------------------------------------------------
 // §3 wire schemas
 // ---------------------------------------------------------------------------
@@ -26,8 +31,9 @@ export const Family = z.enum(FAMILY_IDS);
  *  with the family set; the inferred type stays Record<FamilyName, …>. */
 const familyKeyed = <S extends z.ZodType>(schema: S): Record<FamilyName, S> =>
   Object.fromEntries(FAMILY_IDS.map(id => [id, schema])) as Record<FamilyName, S>;
-export const AbsolutePath = z.string().min(1).max(4096)
-  .refine(s => !s.includes("\0") && /^(\/|[A-Za-z]:[\\/]|\\\\)/.test(s));
+export const isAbsolutePath = (s: string): boolean =>
+  !s.includes("\0") && /^(\/|[A-Za-z]:[\\/]|\\\\)/.test(s);
+export const AbsolutePath = z.string().min(1).max(4096).refine(isAbsolutePath);
 export const Target = z.object({
   hostId: z.string().min(1).max(256),
   daemonHome: AbsolutePath,
