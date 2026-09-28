@@ -18,9 +18,12 @@ a "no plugin change" outcome.
 | `@getpaseo/server` | host 0.9.1 (unpinned) | 0.10.0 | Touchpoint-map files + parity backend exercised at 0.10.0 | 2026-09-28 | No break found; auth internals renamed, unused |
 | `@getpaseo/cli` | host 0.9.1 (unpinned) | 0.10.0 | Full `.d.ts`/`.js` diff 0.9.1→0.10.0 | 2026-09-28 | Additive; `paseo run` caller-agent verify is strictly safer |
 
-`requirements.paseo` in `plugin/paseo-plugin.json`: `>=0.8.0 <0.11.0`, extended
-from `>=0.8.0 <0.10.0` by the 0.10.0 assessment (widening only; the 0.8.0
-floor stands). Manifest verified by the real 0.10.0 `readPluginManifest`.
+`requirements.paseo` in `plugin/paseo-plugin.json`: `>=0.8.0` — upper bound
+dropped by Human decision after the 0.10.0 sync (daemon upgrades must not
+block the plugin; the 0.8.0 floor stands because the plugin SDK does not
+exist earlier). Field must stay present: an absent `requirements.paseo` is
+treated by the daemon as a pre-0.8 legacy plugin and blocked.
+Manifest verified by the real 0.10.0 `readPluginManifest`.
 
 ## Open items from the last assessment
 
