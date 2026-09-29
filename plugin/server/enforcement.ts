@@ -75,6 +75,11 @@ export interface EnforcementDeps {
    *  `readdir` lists the repos directory. Tests inject faults here. */
   deskStore?: (stableRoot: string) => Pick<DeskStore, "read">;
   readdir?: (path: string) => string[];
+  /** P2-d — the desk-bridge adapter's live lifecycle state as observed by
+   *  this process. Absent/unmapped answers null → the capability row stays
+   *  `unknown` (fail-closed); `listening`/`unavailable` are real host
+   *  observations. */
+  observeDeskBridge?: () => "listening" | "unavailable" | null;
 }
 
 /** The static limitation strings every view carries — exported so the
@@ -452,7 +457,14 @@ export function createEnforcement(deps: EnforcementDeps) {
 
     const audit = auditCapabilities({
       now: generatedAt,
-      observed: { rpcDispatched: true, providersSnapshot, agentsList },
+      observed: {
+        // This handler ran because a real daemon→plugin RPC dispatched —
+        // that invocation itself is the honest rpcDispatched evidence.
+        rpcDispatched: true,
+        providersSnapshot,
+        agentsList,
+        deskBridge: deps.observeDeskBridge?.() ?? null,
+      },
     });
     // Producer caps (§2.1): the pins equal the audit inventory exactly, so
     // growth past a pin is a producer bug — fail closed rather than shed

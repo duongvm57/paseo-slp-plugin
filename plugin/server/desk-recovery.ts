@@ -24,7 +24,7 @@ import {
 } from "../shared/enforcement.ts";
 import { MAX_RPC_BYTES, OperationConflict } from "../shared/contracts.ts";
 import { detectDaemonHome } from "./daemon-home.ts";
-import { deskRepoPaths, repoKeyFor } from "./desk-store.ts";
+import { DESK_BRIDGE_REPO, deskRepoPaths, repoKeyFor } from "./desk-store.ts";
 import { fsyncDirectory, lstatOrNull, PRIVATE_FILE_MODE } from "./kept-files.ts";
 
 export interface DeskRecoveryReceipt {
@@ -473,7 +473,11 @@ export async function recoverLockView(
   }
   const { target, repo } = parsed.data;
   const actorKey = "operator:rpc";
-  const repoKey = repoKeyFor({ hostId: "local", gitCommonDir: repo.gitCommonDir });
+  // E-P2D-3 — the explicit sentinel descriptor reaches the P2-d desk-bridge
+  // lifecycle lock; every other input keeps real-repo derivation verbatim.
+  const repoKey = "sentinel" in repo
+    ? repoKeyFor(DESK_BRIDGE_REPO)
+    : repoKeyFor({ hostId: "local", gitCommonDir: repo.gitCommonDir });
   // The clock seam reads inside the try — a throwing clock degrades to
   // internal-error like every other off-table exception (§3.2); the catch
   // falls back to the real clock for the receipt's `at`.

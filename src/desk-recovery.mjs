@@ -45,6 +45,11 @@ export function repoKeyFor({ hostId, gitCommonDir }) {
   return createHash('sha256').update(`${hostId}|${gitCommonDir}`).digest('hex');
 }
 
+// Mirror of DESK_BRIDGE_REPO (plugin/server/desk-store.ts): the reserved
+// repo descriptor the desk-bridge lifecycle lock lives under — a sentinel,
+// never a real repository. Reached only via the explicit --bridge flag.
+export const DESK_BRIDGE_REPO = { hostId: 'desk-bridge', gitCommonDir: 'desk-bus' };
+
 // Mirror of deskRepoPaths (plugin/server/desk-store.ts) — the single owner of
 // every path join under the stable root; kept verbatim, nothing restated.
 const deskRepoPaths = (stableRoot, repoKey) => {
@@ -410,7 +415,7 @@ export function cliActorKey(io = {}) {
  *  result, not an exception. A failed username lookup still produces the
  *  actor-invalid result — with a real repoKey in the receipt — and no desk
  *  file is ever touched on that path. */
-export function deskRecover({ repository, home, io = {}, kill, now, uuid, pid, platform, userInfo: userInfoSeam }) {
+export function deskRecover({ repository, bridge = false, home, io = {}, kill, now, uuid, pid, platform, userInfo: userInfoSeam }) {
   // The boundary rule is the same as the RPC surface: no raw exception ever
   // leaves — off-table faults (a throwing clock seam, an unresolvable home)
   // degrade to the internal-error outcome. DeskRecoverUsage stays a usage
@@ -419,7 +424,10 @@ export function deskRecover({ repository, home, io = {}, kill, now, uuid, pid, p
   try {
     const realpath = io.realpath ?? realpathSync;
     const nowFn = now ?? (() => new Date());
-    repoKey = repoKeyOf(repository, io);
+    // E-P2D-3 — the explicit --bridge flag resolves the sentinel repo key
+    // for the desk-bridge lifecycle lock directly; no git invocation, no
+    // realpath, and real-repo derivation is untouched.
+    repoKey = bridge ? repoKeyFor(DESK_BRIDGE_REPO) : repoKeyOf(repository, io);
     // A3 precedes any desk file operation — the actor resolves before the
     // home is even realpath'd; an invalid actor yields the result, nothing
     // under the stable root is touched.

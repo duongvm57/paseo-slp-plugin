@@ -300,16 +300,17 @@ test('exact MCP preapproval follows the registry contract per family', () => {
   assert.equal(status('devin'), 'unsupported');
 });
 
-test('every one of the 18 observation tuples yields the exact pinned inventory', () => {
-  // The closed observation domain (spec §2.1): rpcDispatched {false,true} ×
-  // providersSnapshot {null,false,true} × agentsList {null,false,true}.
+test('every one of the 54 observation tuples yields the exact pinned inventory', () => {
+  // The closed observation domain (spec §2.1 + P2-d T6): rpcDispatched
+  // {false,true} × providersSnapshot {null,false,true} × agentsList
+  // {null,false,true} × deskBridge {undefined,listening,unavailable}.
   const HOST_IDS = [
     'hook.agent.create', 'hook.agent.session-open', 'hook.workspace.create',
     'create.caller-principal', 'create.agent-id', 'parent-agent-id.label',
     'plugin-rpc.dispatch', 'host.providers-snapshot', 'host.agents-list',
     'host.server-info-accessor', 'paseo-tools.disabled-tools',
     'model-resolution.introspection', 'mcp-servers.agent-record-persistence',
-    'enforcement.desk-ledger',
+    'enforcement.desk-ledger', 'desk-bridge.transport',
   ];
   const FAMILY_ROW_IDS = [
     'tool-policy.mcp-preapproval', 'mcp-servers.stdio-launch',
@@ -321,13 +322,14 @@ test('every one of the 18 observation tuples yields the exact pinned inventory',
   for (const rpcDispatched of [false, true])
     for (const providersSnapshot of [null, false, true])
       for (const agentsList of [null, false, true])
-        tuples.push({ rpcDispatched, providersSnapshot, agentsList });
-  assert.equal(tuples.length, 18);
+        for (const deskBridge of [undefined, 'listening', 'unavailable'])
+          tuples.push({ rpcDispatched, providersSnapshot, agentsList, deskBridge });
+  assert.equal(tuples.length, 54);
   for (const observed of tuples) {
     const label = JSON.stringify(observed);
     const { records, gaps } = auditCapabilities({ now: NOW, observed });
-    assert.equal(records.length, 38, `records ${label}`);
-    assert.equal(gaps.length, 17, `gaps ${label}`);
+    assert.equal(records.length, 39, `records ${label}`);
+    assert.equal(gaps.length, 18, `gaps ${label}`);
     // Exact id/family inventory — a new row or family without a pin raise
     // must fail here, never be shed by the wire cap.
     assert.deepEqual(
@@ -349,7 +351,7 @@ test('every one of the 18 observation tuples yields the exact pinned inventory',
     }
     assert.deepEqual(
       gaps.filter(g => g.family === null).map(g => g.capabilityId),
-      ['providerTools-projection'],
+      ['providerTools-projection', 'invoke-plugin-rpc-mcp'],
       `mandatory gap ${label}`,
     );
     // Production domain fits the pins with room for nothing else — the
@@ -533,6 +535,40 @@ test('readView on a verified served home attaches receipt and host evidence; out
   assert.equal(capRow(view, CAPABILITY_IDS.agentsList).evidenceKind, 'host-observation');
   assert.ok(view.limitations.some(l => l.includes('observational only')));
   assert.ok(view.limitations.some(l => l.includes('not projected by this view')));
+});
+
+test('T6: readView wires the desk-bridge adapter state into desk-bridge.transport', async t => {
+  const home = fixtureHome(t);
+  serveHome(t, home);
+  const receipt = emptyReceipt({
+    hostId: 'test',
+    canonicalHome: realpathSync(home),
+    stableRoot: join(realpathSync(home), 'slp-runtime'),
+    now: NOW,
+  });
+  const paseo = { providers: { snapshot: async () => ({ entries: [] }) }, agents: { list: agentsListOk() } };
+  // The closed observation domain: a real adapter state answers supported /
+  // unsupported; an unobserved or absent seam keeps the row unknown.
+  for (const [observed, status, evidenceKind] of [
+    ['listening', 'supported', 'host-observation'],
+    ['unavailable', 'unsupported', 'host-observation'],
+    [null, 'unknown', 'source-static-compat'],
+  ]) {
+    const enforcement = createEnforcement({
+      journal: stubJournal(receipt),
+      now: () => new Date(NOW),
+      observeDeskBridge: () => observed,
+    });
+    const view = await enforcement.readView({ schemaVersion: 1, target: target(home) }, paseo);
+    const row = capRow(view, CAPABILITY_IDS.deskBridgeTransport);
+    assert.equal(row.status, status, `observed=${observed}`);
+    assert.equal(row.evidenceKind, evidenceKind, `observed=${observed}`);
+    assert.equal(row.observedAt, observed === 'listening' ? NOW : null);
+  }
+  // No seam at all — the same unknown (fail-closed, never faked).
+  const bare = createEnforcement({ journal: stubJournal(receipt), now: () => new Date(NOW) });
+  const view = await bare.readView({ schemaVersion: 1, target: target(home) }, paseo);
+  assert.equal(capRow(view, CAPABILITY_IDS.deskBridgeTransport).status, 'unknown');
 });
 
 test('readView without an exported PASEO_HOME keeps static-only evidence — no receipt read, no host calls', async t => {
@@ -730,9 +766,9 @@ test('the production view emits the full pinned inventory with zero omissions', 
   const enforcement = createEnforcement({ journal: stubJournal(null), now: () => new Date(NOW) });
   const view = await enforcement.readView({ schemaVersion: 1, target: target(home) }, { agents: { list: agentsListOk() } });
   // Pins equal the audit inventory: everything produced is emitted verbatim.
-  assert.equal(view.capabilities.length, 38);
+  assert.equal(view.capabilities.length, 39);
   assert.equal(view.capabilities.length, WIRE_LIMITS.capabilities);
-  assert.equal(view.gaps.length, 17);
+  assert.equal(view.gaps.length, 18);
   assert.equal(view.gaps.length, WIRE_LIMITS.gaps);
   // No omission in the production domain — completeness is the empty report.
   assert.deepEqual(view.completeness, []);

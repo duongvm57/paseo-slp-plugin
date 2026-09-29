@@ -53,6 +53,8 @@ export const CAPABILITY_IDS = {
   probeCreateMcpEnv: "probe.create-mcp-env-to-mcp-child",
   probeCreateEnvEcho: "probe.create-env-to-session-open-request",
   probeMcpResume: "probe.mcp-servers-resume-persistence",
+  /** P2-d — the desk MCP bridge's own transport surface. */
+  deskBridgeTransport: "desk-bridge.transport",
 } as const;
 
 export type CapabilityId = (typeof CAPABILITY_IDS)[keyof typeof CAPABILITY_IDS];
@@ -66,6 +68,9 @@ export interface CapabilityHostObservation {
   providersSnapshot: boolean | null;
   /** agents.list answered (true) / failed (false). */
   agentsList: boolean | null;
+  /** P2-d — the desk bridge lifecycle state this view observed; absent/undefined
+   *  means the caller never saw it (unknown, never fabricated). */
+  deskBridge?: "listening" | "unavailable" | null;
 }
 
 const record = (r: CapabilityRecordValue): CapabilityRecordValue =>
@@ -83,6 +88,20 @@ export const PROVIDER_TOOLS_PROJECTION_GAP: CapabilityGapValue = gap({
   missingPrimitive: "host lacks an introspection surface for effective tool policy (F10)",
   neededBy: "upstream-host (F10 permanent gap)",
   ownerAction: "Human: raise a Paseo core request for effective tool-policy introspection; SLP ships no projection",
+});
+
+/** P2-d — the operator transport finding: DaemonClient.invokePluginRpc
+ *  exists in the client API and the daemon dispatches plugin RPCs through
+ *  it, but no MCP tool exposes that surface to a seat. Typed gap, never a
+ *  fabricated transport. */
+export const OPERATOR_MCP_TRANSPORT_GAP: CapabilityGapValue = gap({
+  capabilityId: "invoke-plugin-rpc-mcp",
+  family: null,
+  missingPrimitive:
+    "an MCP tool or CLI verb reaching DaemonClient.invokePluginRpc — API exists, no operator transport",
+  neededBy: "operator reach to plugin RPCs without the app client",
+  ownerAction:
+    "Human: raise a Paseo core request for an MCP-side plugin RPC surface; SLP ships no workaround",
 });
 
 const STATIC: CapabilityRecordValue["evidenceKind"] = "source-static-compat";
@@ -313,6 +332,27 @@ function hostRecords(now: string, observed: CapabilityHostObservation): Capabili
       observedAt: now,
       limitations: [
         limitation("C-DL"),
+      ],
+    }),
+    record({
+      schemaVersion: 1,
+      capabilityId: CAPABILITY_IDS.deskBridgeTransport,
+      family: null,
+      probeId: null,
+      status: observed.deskBridge === "listening"
+        ? "supported"
+        : observed.deskBridge === "unavailable"
+          ? "unsupported"
+          : "unknown",
+      source: "host-file",
+      sourceRef: "<stableRoot>/state/enforcement/desk.sock + reserved-repo lifecycle lock",
+      evidenceKind: observed.deskBridge === undefined || observed.deskBridge === null ? STATIC : "host-observation",
+      evidenceRef: "desk-bridge adapter state observed by this view's caller",
+      observedAt: observed.deskBridge === "listening" ? now : null,
+      limitations: [
+        "unix-domain socket only — Windows is a typed CAPABILITY_GAP with no named-pipe fallback",
+        "a listening socket is not seat delivery — MCP stdio env arrival stays probe (b), unproven until a live seat",
+        "desk-busy and lifecycle-lock gaps are process-wide, not per-seat",
       ],
     }),
   ];
@@ -585,8 +625,12 @@ export function auditCapabilities(input: {
   try {
     const records = [...hostRecords(input.now, input.observed)];
     // The mandatory providerTools-projection gap leads so the wire cap can
-    // never shed it behind family probe gaps (§2.1).
-    const gaps: CapabilityGapValue[] = [PROVIDER_TOOLS_PROJECTION_GAP];
+    // never shed it behind family probe gaps (§2.1); the P2-d operator
+    // transport gap follows it for the same reason.
+    const gaps: CapabilityGapValue[] = [
+      PROVIDER_TOOLS_PROJECTION_GAP,
+      OPERATOR_MCP_TRANSPORT_GAP,
+    ];
     for (const family of FAMILY_IDS) {
       const block = familyRecords(input.now, family, facts[family]);
       records.push(...block.records);

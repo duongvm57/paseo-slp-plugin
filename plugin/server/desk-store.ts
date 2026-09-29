@@ -133,6 +133,42 @@ export function repoKeyFor(repo: { hostId: string; gitCommonDir: string }): stri
   return sha256Hex(`${repo.hostId}|${repo.gitCommonDir}`);
 }
 
+/** P2-d — the reserved repo descriptor the desk-bridge lifecycle lock lives
+ *  under. The values are a sentinel, never a real repository: they keep the
+ *  lock inside the single path-owner rule (`repos/<repoKey>/lock`) and let
+ *  the operator recovery seam reach it like any other orphaned repo lock.
+ *  `gitCommonDir` is a marker string, not a path. */
+export const DESK_BRIDGE_REPO = {
+  hostId: "desk-bridge",
+  gitCommonDir: "desk-bus",
+} as const;
+
+/** P2-d — the desk-bridge transport paths. The Unix socket lives at the
+ *  enforcement root (not inside a repo namespace — it serves every seat
+ *  repo); the lifecycle lockfile reuses the reserved repo namespace above so
+ *  acquisition, staleness and recovery follow exactly the repo-lock rules. */
+export function deskBridgePaths(stableRoot: string): {
+  enforcementDir: string;
+  socketPath: string;
+  /** The self-installed bridge binary — a stable non-SHA path the
+   *  agent.create graft points at (the candidate sha-dir is GC-able). */
+  bridgePath: string;
+  repoKey: string;
+  repoDir: string;
+  lockPath: string;
+} {
+  const repoKey = repoKeyFor(DESK_BRIDGE_REPO);
+  const paths = deskRepoPaths(stableRoot, repoKey);
+  return {
+    enforcementDir: paths.enforcementDir,
+    socketPath: join(paths.enforcementDir, "desk.sock"),
+    bridgePath: join(paths.enforcementDir, "slp-desk-mcp.mjs"),
+    repoKey,
+    repoDir: paths.repoDir,
+    lockPath: paths.lockPath,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Schemas — strict zod, header-first read, cross-field refinement layered on.
 // ---------------------------------------------------------------------------

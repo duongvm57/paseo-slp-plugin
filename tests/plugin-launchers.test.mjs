@@ -7,6 +7,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import {
   appendFileSync,
   chmodSync,
@@ -624,6 +625,71 @@ test('launchers: publish writes manifest + 12 quoted launchers (9 gate + 3 shim)
       `exec ${sq(f.node.path)} ${sq(join(f.candidate, 'bin', 'slp-gate.mjs'))} "$@"\n`;
     assert.equal(gate, gateExpected, `gate launcher for ${family}`);
   }
+});
+
+test('launchers: the desk-bridge pin is recorded in the manifest and projected by verify', async t => {
+  const f = await fixtureRuntime(t);
+  const bridgeBytes = readFileSync(join(f.candidate, 'bin', 'slp-desk-mcp.mjs'));
+  const expectedSha = createHash('sha256').update(bridgeBytes).digest('hex');
+  const manifest = JSON.parse(readFileSync(f.manifestPath).toString('utf8'));
+  assert.equal(manifest.bridgeSha256, expectedSha);
+  assert.equal(manifest.bridgeProtocolVersion, 'slp-desk-bridge/1');
+  const verified = await f.launchers.verify(f.set.directory);
+  assert.equal(verified.bridgeSha256, expectedSha);
+  assert.equal(verified.bridgeProtocolVersion, 'slp-desk-bridge/1');
+});
+
+test('launchers: verify refuses a malformed or wrong bridge pin', async t => {
+  // The digest check binds the directory name to launch.json bytes, so a
+  // schema-level pin violation is exercised through a self-digested set:
+  // same launcher members, launch.json carrying the bad field, directory
+  // named the tampered manifest's own digest.
+  const f = await fixtureRuntime(t);
+  const manifest = JSON.parse(readFileSync(f.manifestPath).toString('utf8'));
+  const members = readdirSync(f.set.directory).filter(name => name !== 'launch.json');
+  for (const [field, value] of [
+    ['bridgeSha256', 'not-a-sha'],
+    ['bridgeProtocolVersion', 'slp-desk-bridge/2'],
+  ]) {
+    const bytes = Buffer.from(JSON.stringify({ ...manifest, [field]: value }));
+    const dir = join(f.stableRoot, 'launchers', createHash('sha256').update(bytes).digest('hex'));
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'launch.json'), bytes);
+    for (const name of members) {
+      writeFileSync(join(dir, name), readFileSync(join(f.set.directory, name)), { mode: 0o755 });
+    }
+    await assert.rejects(f.launchers.verify(dir), error => {
+      assert.equal(error.code, 'RUNTIME_INTEGRITY');
+      return true;
+    });
+  }
+  // The untampered set still verifies.
+  const verified = await f.launchers.verify(f.set.directory);
+  assert.equal(verified.bridgeSha256, manifest.bridgeSha256);
+});
+
+test('launchers: a candidate without the bridge binary publishes no pin', async t => {
+  const f = await fixtureRuntime(t);
+  rmSync(join(f.candidate, 'bin', 'slp-desk-mcp.mjs'));
+  // Re-hash the candidate identity after removal: the package identity
+  // covers candidate bytes, so publish a fresh candidate without the file.
+  const noSha = 'f'.repeat(64);
+  const noCandidate = join(f.stableRoot, noSha);
+  install(root, noCandidate);
+  rmSync(join(noCandidate, 'bin', 'slp-desk-mcp.mjs'));
+  const set = await f.launchers.publish({
+    daemonHome: f.home,
+    stableRoot: f.stableRoot,
+    operationId: 'op-nobridge',
+    candidate: { sha256: noSha, runtimePath: noCandidate },
+    node: f.node,
+    binaries: f.binaries,
+  });
+  const manifest = JSON.parse(readFileSync(join(set.directory, 'launch.json')).toString('utf8'));
+  assert.equal(manifest.bridgeSha256, undefined);
+  assert.equal(manifest.bridgeProtocolVersion, undefined);
+  const verified = await f.launchers.verify(set.directory);
+  assert.equal(verified.bridgeSha256, undefined);
 });
 
 test('launchers: publish refuses symlink or non-directory staging paths', async t => {

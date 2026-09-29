@@ -38,7 +38,9 @@ import {
   stat,
 } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join } from "node:path";
+import { readFileSync } from "node:fs";
 import { OperationConflict } from "../shared/contracts.ts";
+import { DESK_BRIDGE_PROTOCOL } from "../shared/enforcement.ts";
 import type {
   BinaryResolution,
   FamilyName,
@@ -88,6 +90,12 @@ interface LaunchManifest {
    *  shim-style (the v1 and devin-only layouts). Must be a subset of
    *  `launcherFamilies`. */
   gateFamilies?: FamilyName[];
+  /** P2-d — the desk-bridge provenance pin recorded at publish: sha256 of
+   *  the candidate's packaged bin/slp-desk-mcp.mjs plus the bridge protocol
+   *  literal. Optional so pre-P2-d manifests still verify; a candidate that
+   *  ships the binary always publishes both fields. */
+  bridgeSha256?: string;
+  bridgeProtocolVersion?: string;
 }
 
 const sha256 = (bytes: string | Buffer): string =>
@@ -115,7 +123,7 @@ function buildManifest(request: LaunchSetRequest): LaunchManifest {
       ? { available: true, path: entry.path, version: entry.version }
       : { available: false, path: null, version: null };
   }
-  return {
+  const manifest: LaunchManifest = {
     schemaVersion: 1,
     daemonHome: request.daemonHome,
     candidate: { sha256: request.candidate.sha256, path: request.candidate.runtimePath },
@@ -126,6 +134,20 @@ function buildManifest(request: LaunchSetRequest): LaunchManifest {
     launcherFamilies: [...FAMILIES],
     gateFamilies: [...GATE_FAMILIES],
   };
+  // P2-d — the bridge pin is recorded at publish, inside the manifest the
+  // binding's launchManifestSha256 already commits to (P2-b amend seam:
+  // the manager's Binding record carries no per-file fields). A candidate
+  // that ships bin/slp-desk-mcp.mjs always publishes the pin; an older
+  // candidate without the file simply omits it.
+  try {
+    manifest.bridgeSha256 = sha256(
+      readFileSync(join(request.candidate.runtimePath, "bin", "slp-desk-mcp.mjs")),
+    );
+    manifest.bridgeProtocolVersion = DESK_BRIDGE_PROTOCOL;
+  } catch {
+    /* candidate ships no bridge binary — the pin stays absent */
+  }
+  return manifest;
 }
 
 const manifestBytes = (manifest: LaunchManifest): Buffer =>
@@ -276,6 +298,15 @@ function parseManifest(bytes: Buffer): LaunchManifest {
     ) {
       fail("gateFamilies is malformed or outside launcherFamilies");
     }
+  }
+  if (
+    m.bridgeSha256 !== undefined &&
+    (typeof m.bridgeSha256 !== "string" || !/^[0-9a-f]{64}$/.test(m.bridgeSha256))
+  ) {
+    fail("bridgeSha256 is malformed");
+  }
+  if (m.bridgeProtocolVersion !== undefined && m.bridgeProtocolVersion !== DESK_BRIDGE_PROTOCOL) {
+    fail("bridgeProtocolVersion is not the pinned bridge protocol");
   }
   return m as LaunchManifest;
 }
@@ -510,6 +541,13 @@ export function createLauncherBuilder(deps: { platform?: string } = {}): Launche
       launchManifestSha256,
       directory: real,
       files,
+      // P2-d — project the verified manifest's bridge pin so the desk
+      // bridge can compare it against the packaged/runtime binary without
+      // re-reading the manifest a second time.
+      ...(manifest.bridgeSha256 !== undefined ? { bridgeSha256: manifest.bridgeSha256 } : {}),
+      ...(manifest.bridgeProtocolVersion !== undefined
+        ? { bridgeProtocolVersion: manifest.bridgeProtocolVersion }
+        : {}),
     };
   }
 

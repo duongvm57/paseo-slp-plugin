@@ -93,12 +93,14 @@ export const WIRE_LIMITS = {
   /** Per-pair omission count ceiling — finite so a count can never be a
    *  float or an escape past the capacity contract. */
   completenessCount: Number.MAX_SAFE_INTEGER,
-  /** Exact P0 inventory: 14 host-wide rows + 6 rows × 4 families. Growth
-   *  without a pin raise is producer-invalid, never a row-limit shed. */
-  capabilities: 38,
-  /** Exact P0 inventory: the mandatory `providerTools-projection` row +
+  /** Exact P0+P2-d inventory: 15 host-wide rows + 6 rows × 4 families.
+   *  Growth without a pin raise is producer-invalid, never a row-limit
+   *  shed. */
+  capabilities: 39,
+  /** Exact P0+P2-d inventory: the mandatory `providerTools-projection`
+   *  row + the P2-d `invoke-plugin-rpc-mcp` operator-transport gap +
    *  4 probe gaps × 4 families. */
-  gaps: 17,
+  gaps: 18,
   /** P2-e membership projection — the cap is the largest of {64, 32, 16}
    *  whose worst-case enforcement-status output stays under MAX_RPC_BYTES
    *  (measured by the capacity fixture, §4.4); rows beyond it shed
@@ -123,6 +125,18 @@ export const WIRE_LIMITS = {
   recoverActorKey: 128,
   recoverNonce: 64,
   recoverResult: 32,
+  // desk MCP bridge (P2-d): raw UTF-8 line caps per direction — inbound
+  // request frames to the adapter (and seat-side stdin) vs outbound
+  // response frames (adapter writes and socket→stdout relay). Both are
+  // 256 KiB; keeping them as separate keys lets a later phase widen one
+  // without touching the other. Plus the bounded handle/tool-name/args
+  // lengths on the hello and tools/call envelope.
+  deskBridgeRequestBytes: 262144,
+  deskBridgeResponseBytes: 262144,
+  deskBridgeHandle: 512,
+  deskBridgeToolName: 64,
+  deskBridgeToolDescription: 256,
+  deskBridgeLimitations: 8,
 } as const;
 
 // ---------------------------------------------------------------------------
@@ -347,6 +361,13 @@ export const DeskErrorCode = z.enum([
   "RECOVERY_REQUIRED",
   "EXECUTION_UNKNOWN",
   "JOB_RUNNING",
+  // P2-d typed frame-limit codes — the desk bridge surfaces an over-cap
+  // frame as a machine-readable code, never just a message string.
+  "REQUEST_TOO_LARGE",
+  "RESPONSE_TOO_LARGE",
+  // A path component under the verified stable root is a symlink or not a
+  // real directory — the host filesystem itself failed integrity.
+  "RUNTIME_INTEGRITY",
 ]);
 
 export const DeskRejection = z.object({
@@ -358,6 +379,114 @@ export const DeskRejection = z.object({
 }).strict();
 
 export type DeskRejectionValue = z.infer<typeof DeskRejection>;
+
+// ---------------------------------------------------------------------------
+// Desk MCP bridge (P2-d) — the stdio↔UDS transport contract. The seat-facing
+// binary relays raw NDJSON lines to the adapter's Unix socket; the first
+// line on every connection is the hello carrying the minted desk handle —
+// the ONLY caller-supplied identity (the adapter resolves membership and
+// actor server-side; role/cwd claims are never trusted). A bounded
+// connection-level schema keeps the wire honest end to end.
+// ---------------------------------------------------------------------------
+
+/** The pinned bridge protocol literal — handshake, graft manifest and the
+ *  packaged binary all carry exactly this string. */
+export const DESK_BRIDGE_PROTOCOL = "slp-desk-bridge/1";
+
+export const DeskBridgeHello = z.object({
+  schemaVersion: z.literal(1),
+  protocol: z.literal(DESK_BRIDGE_PROTOCOL),
+  handle: z.string().min(1).max(WIRE_LIMITS.deskBridgeHandle),
+  /** sha256 of the packaged bin/slp-desk-mcp.mjs the seat is running —
+   *  self-reported drift check against the binding's recorded pin; never a
+   *  trust decision on its own. */
+  bridgeSha256: Sha,
+  pid: z.number().int().positive().optional(),
+}).strict();
+
+/** The adapter's single-line handshake answer. Rejections carry the same
+ *  typed vocabulary as every other desk surface; on `ok:false` the adapter
+ *  closes the connection. */
+export const DeskBridgeAck = z.union([
+  z.object({
+    schemaVersion: z.literal(1),
+    protocol: z.literal(DESK_BRIDGE_PROTOCOL),
+    ok: z.literal(true),
+  }).strict(),
+  z.object({
+    schemaVersion: z.literal(1),
+    protocol: z.literal(DESK_BRIDGE_PROTOCOL),
+    ok: z.literal(false),
+    error: z.object({
+      code: DeskErrorCode,
+      message: z.string().min(1).max(WIRE_LIMITS.rejectionMessage),
+    }).strict(),
+  }).strict(),
+]);
+
+/** tools/call parameter envelope — validated before any dispatch. */
+export const DeskBridgeToolCall = z.object({
+  name: z.string().min(1).max(WIRE_LIMITS.deskBridgeToolName),
+  arguments: z.record(z.string(), z.unknown()).optional(),
+}).strict();
+
+/** A bridge-emitted JSON-RPC error object: the numeric JSON-RPC code stays
+ *  for wire compatibility while the typed SLP desk code rides in
+ *  `data.slpCode` — adapters never smuggle the vocabulary through free-form
+ *  message text. Emitted errors parse against this before they are sent. */
+export const DeskBridgeFrameError = z.object({
+  code: z.number().int(),
+  message: z.string().min(1).max(WIRE_LIMITS.rejectionMessage),
+  data: z.object({
+    slpCode: DeskErrorCode,
+  }).strict(),
+}).strict();
+
+/** One catalog row — `visible:false` entries exist to prove the mechanism
+ *  (a direct dispatch is still rejected by a typed code), never as usable
+ *  tools. The adapter owns the input schema and the run implementation. */
+export const DeskBridgeToolEntry = z.object({
+  name: z.string().min(1).max(WIRE_LIMITS.deskBridgeToolName),
+  visible: z.boolean(),
+  mutation: z.boolean(),
+  description: z.string().min(1).max(WIRE_LIMITS.deskBridgeToolDescription),
+}).strict();
+
+/** The seat-facing status view slp_status answers — the caller's own
+ *  membership row plus desk availability; same `acceptance` guard literal
+ *  as every other read view. */
+export const DeskSeatStatus = z.object({
+  schemaVersion: z.literal(1),
+  generatedAt: Time,
+  seat: z.object({
+    membershipId: z.string().min(1).max(WIRE_LIMITS.membershipId),
+    agentId: z.string().min(1).max(WIRE_LIMITS.agentId),
+    state: SeatBindingState,
+    family: Family,
+    role: z.string().min(1).max(32),
+    provider: z.string().min(1).max(64),
+    workspaceId: z.string().min(1).max(128).nullable(),
+    createCwd: z.string().min(1).max(4096),
+    openGeneration: z.number().int().nonnegative(),
+    createdAt: Time,
+    hostConfirmedAt: Time.nullable(),
+    registeredAt: Time.nullable(),
+  }).strict(),
+  desk: z.object({
+    /** The repo ledger the bound seat lives under. */
+    repoKey: Sha,
+    state: z.enum(["available", "recovery-required", "degraded"]),
+    protocol: z.literal(DESK_BRIDGE_PROTOCOL),
+  }).strict(),
+  limitations: z.array(z.string().min(1).max(WIRE_LIMITS.limitationLen)).max(WIRE_LIMITS.deskBridgeLimitations),
+  acceptance: z.literal("not-established-by-this-view"),
+}).strict();
+
+export type DeskBridgeHelloValue = z.infer<typeof DeskBridgeHello>;
+export type DeskBridgeAckValue = z.infer<typeof DeskBridgeAck>;
+export type DeskBridgeToolCallValue = z.infer<typeof DeskBridgeToolCall>;
+export type DeskBridgeToolEntryValue = z.infer<typeof DeskBridgeToolEntry>;
+export type DeskSeatStatusValue = z.infer<typeof DeskSeatStatus>;
 
 // ---------------------------------------------------------------------------
 // enforcement-status RPC — read-only desk status. It mutates nothing, assigns
@@ -477,9 +606,18 @@ export type DeskRecoveryResultValue = z.infer<typeof DeskRecoveryResult>;
 export const RecoverLockInput = z.object({
   schemaVersion: z.literal(1),
   target: EnforcementTarget,
-  repo: z.object({
-    gitCommonDir: z.string().min(1).max(WIRE_LIMITS.targetDaemonHome).refine(isAbsolutePath),
-  }).strict(),
+  repo: z.union([
+    z.object({
+      gitCommonDir: z.string().min(1).max(WIRE_LIMITS.targetDaemonHome).refine(isAbsolutePath),
+    }).strict(),
+    // E-P2D-3 — the explicit sentinel descriptor: the P2-d desk-bridge
+    // lifecycle lock lives under the reserved DESK_BRIDGE_REPO namespace;
+    // only this literal reaches it — a caller-supplied repoKey is never
+    // accepted, and real-repo derivation is untouched.
+    z.object({
+      sentinel: z.literal("desk-bridge"),
+    }).strict(),
+  ]),
 }).strict();
 
 /** The recovery receipt — returned on every outcome, ok or rejection, with

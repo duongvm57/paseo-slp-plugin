@@ -978,6 +978,11 @@ export interface LaunchSet {
   /** The generated launcher files (Phase 2: the three devin wrapper
    *  launchers), with recorded sha256/mode. */
   files: LauncherFileValue[];
+  /** P2-d — the manifest's desk-bridge pin, when the published manifest
+   *  carries it. Absent on pre-P2-d launch sets; the bridge treats absence
+   *  as "no pin recorded" and refuses graft/hello rather than guessing. */
+  bridgeSha256?: string;
+  bridgeProtocolVersion?: string;
 }
 export interface LauncherBuilder {
   /** Build launch.json deterministically, stage the POSIX launchers, verify

@@ -31,7 +31,7 @@ import {
   recoverLockView,
   recoveryOutput,
 } from '../plugin/server/desk-recovery.ts';
-import { createDeskStore, deskRepoPaths, repoKeyFor } from '../plugin/server/desk-store.ts';
+import { createDeskStore, DESK_BRIDGE_REPO, deskRepoPaths, repoKeyFor } from '../plugin/server/desk-store.ts';
 import { createDeskSeat, DESK_HANDLE_KEY } from '../plugin/server/desk-seat.ts';
 import { sha256Hex } from '../plugin/server/config-view.ts';
 import {
@@ -864,6 +864,53 @@ test('RPC end-to-end: provenance verified → the orphan lock is recovered with 
   assert.deepEqual(RecoverLockOutput.parse(out), out);
   assert.equal(existsSync(paths.lockPath), false);
   assert.equal(existsSync(paths.recoverLockPath), false);
+});
+
+// E-P2D-3 — the explicit sentinel descriptor reaches the desk-bridge
+// lifecycle lock under its reserved repo namespace; gates and algorithm
+// are identical to a real-repo run.
+
+test('E-P2D-3: repo {sentinel:"desk-bridge"} recovers the DESK_BRIDGE_REPO namespace', async t => {
+  const { home, stableRoot } = homeFixture(t);
+  const sentinelKey = repoKeyFor(DESK_BRIDGE_REPO);
+  const paths = deskRepoPaths(stableRoot, sentinelKey);
+  mkdirSync(paths.eventsDir, { recursive: true });
+  const pid = await deadPid();
+  writeFileSync(paths.lockPath, lockContent(pid, 'bridge-orphan'));
+  const out = await recoverLockView(
+    {
+      schemaVersion: 1,
+      target: { hostId: 'local', daemonHome: home },
+      repo: { sentinel: 'desk-bridge' },
+    },
+    {
+      detectDaemonHome: () => ({ daemonHome: home, source: 'env' }),
+      now: () => new Date(NOW),
+    },
+  );
+  SEEN.add(out.receipt.result);
+  assert.equal(out.ok, true);
+  assert.equal(out.receipt.result, 'recovered');
+  assert.equal(out.receipt.repoKey, sentinelKey);
+  assert.equal(out.receipt.actorKey, 'operator:rpc');
+  assert.deepEqual(RecoverLockOutput.parse(out), out);
+  assert.equal(existsSync(paths.lockPath), false);
+});
+
+test('E-P2D-3: the sentinel input is strict — wrong literal or extra fields refuse', async () => {
+  await assert.rejects(
+    recoverLockView({ schemaVersion: 1, target: { hostId: 'l', daemonHome: '/x' }, repo: { sentinel: 'other' } }),
+    error => error.code === 'INVALID_REQUEST',
+  );
+  await assert.rejects(
+    recoverLockView({ schemaVersion: 1, target: { hostId: 'l', daemonHome: '/x' }, repo: { sentinel: 'desk-bridge', gitCommonDir: '/r/.git' } }),
+    error => error.code === 'INVALID_REQUEST',
+  );
+  // A caller-supplied repoKey can never name the sentinel directly.
+  await assert.rejects(
+    recoverLockView({ schemaVersion: 1, target: { hostId: 'l', daemonHome: '/x' }, repoKey: 'a'.repeat(64), repo: { sentinel: 'desk-bridge' } }),
+    error => error.code === 'INVALID_REQUEST',
+  );
 });
 
 test('RPC internal-error: an off-table throw inside the algorithm becomes the closed result', async t => {

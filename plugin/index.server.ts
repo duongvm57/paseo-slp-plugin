@@ -28,6 +28,7 @@ import { createWorkTracker, readWorkTrackerEnabled } from "./server/work-tracker
 import { createEnforcement } from "./server/enforcement.ts";
 import { recoverLockView } from "./server/desk-recovery.ts";
 import { readRuntimePinView } from "./server/runtime-pin.ts";
+import { createDeskBridge } from "./server/desk-bridge.ts";
 // Host note: this must stay a hoisted function declaration, not a const —
 // the daemon compiler's Hermes interop eagerly copies export values before
 // module bodies run, so `export default const` evaluates to undefined.
@@ -113,8 +114,35 @@ export default function contribute(server: Parameters<PluginServerContribution>[
   // provider-policy or per-agent model projection, no mutation; the desk
   // seam itself lives in server/enforcement.ts so P1+ state lands behind
   // the same Interface, not in this handler.
-  const enforcement = createEnforcement({ journal });
-  server.handle(enforcementStatus, (input, { paseo }) => enforcement.readView(input, paseo));
+  // Desk MCP bridge (P2-d): the seat↔desk transport — one UDS adapter plus
+  // lifecycle lock under the verified stable root, and the agent.create
+  // graft that hands managed seats their stdio MCP server. start() is
+  // fire-and-forget: a failed lifecycle leaves the bridge "unavailable",
+  // never throws — graft/dispatch fail closed on their own. The before-hook
+  // registrations land AFTER role-injection's below, on purpose.
+  const deskBridge = createDeskBridge({
+    journal,
+    launchers: createLauncherBuilder(),
+    payload: embeddedPayload,
+    paseoRef: { current: null },
+  });
+  void deskBridge.start();
+  const enforcement = createEnforcement({
+    journal,
+    // T6: wire the live bridge lifecycle into the capability audit —
+    // "starting" is genuinely unobserved (null → unknown), never a fake
+    // supported/unsupported claim.
+    observeDeskBridge: () => {
+      const kind = deskBridge.state().kind;
+      return kind === "listening" ? "listening" : kind === "unavailable" ? "unavailable" : null;
+    },
+  });
+  server.handle(enforcementStatus, (input, { paseo }) => {
+    // E-P2D-4: this is a REAL daemon→plugin RPC dispatch — the only call
+    // site allowed to record dispatch evidence (hook stashes never count).
+    deskBridge.noteDispatch(paseo);
+    return enforcement.readView(input, paseo);
+  });
   // Desk lock recovery (P2-e): operator-only RPC — the provenance gate
   // (exported PASEO_HOME + realpath match) runs before the algorithm, so an
   // unverified or foreign home is never mutated. No hook reaches this path.
@@ -155,6 +183,13 @@ export default function contribute(server: Parameters<PluginServerContribution>[
   // untouched. Both fail-open, never reject.
   const offDeskRegister = server.on("agent.created", event => deskSeat.deskRegister(event));
   const offDeskRevoke = server.on("agent.archived", event => deskSeat.deskRevoke(event));
+  // P2-d hook registrations — ordered AFTER role-injection's hooks above:
+  // before-handlers compose sequentially in registration order, so the
+  // graft sees request.env already carrying the minted SLP_DESK_HANDLE.
+  // The session_open stash only supplies the connected SDK (no request
+  // change — the host rejects non-env changes anyway).
+  const offBridgeGraft = server.before("agent.create", deskBridge.agentCreateGraft);
+  const offBridgeStash = server.before("agent.session_open", deskBridge.sessionOpenStash);
   // Observer lifecycle hooks — synchronous capture only; every async step
   // (refresh, Jev HTTP, ring write, notify delivery) runs on the observer's
   // own queue.
@@ -166,6 +201,8 @@ export default function contribute(server: Parameters<PluginServerContribution>[
   return () => {
     offAgentCreate();
     offSessionOpen();
+    offBridgeGraft();
+    offBridgeStash();
     offDeskRegister();
     offDeskRevoke();
     offCreated?.();
@@ -173,6 +210,7 @@ export default function contribute(server: Parameters<PluginServerContribution>[
     offStarted?.();
     offEnded?.();
     void ob?.stop();
+    deskBridge.stop();
     manager.close();
   };
 }

@@ -48,7 +48,7 @@ const commands = {
   status: { flags: ['--paseo-home'], usage: 'status [--paseo-home <absolute-home>]' },
   'local-target': { flags: ['--paseo-home'], usage: 'local-target [--paseo-home <absolute-home>]' },
   tracker: { flags: ['--paseo-home'], target: 'repository', usage: 'tracker <repository> [--paseo-home <absolute-home>]' },
-  'desk-recover': { flags: ['--paseo-home', '--json'], target: 'repository', usage: 'desk-recover <repository> [--paseo-home <absolute-home>] [--json]' },
+  'desk-recover': { flags: ['--paseo-home', '--json', '--bridge'], target: 'repository', usage: 'desk-recover <repository|--bridge> [--paseo-home <absolute-home>] [--json]' },
 };
 const usage = `Usage: slp.mjs ${Object.values(commands).map(entry => entry.usage).join(' | ')}`;
 
@@ -70,7 +70,7 @@ try {
       continue;
     }
     if (Object.hasOwn(options, key)) throw new Error(`Repeated option ${key}`);
-    if (key === '--apply' || key === '--reload' || key === '--check' || key === '--schema' || key === '--json') options[key] = true;
+    if (key === '--apply' || key === '--reload' || key === '--check' || key === '--schema' || key === '--json' || key === '--bridge') options[key] = true;
     else if (key === '--emit') {
       if (args[i + 1] !== 'create') throw new Error('--emit requires create');
       options[key] = args[++i];
@@ -109,7 +109,10 @@ try {
   if (command === 'upgrade' && !options['--from']) throw new Error('upgrade requires --from <previous-installation>');
   if (command === 'materialize' && !options['--from']) throw new Error('materialize requires --from <source-repository>');
   if (options['--reload'] && !options['--apply']) throw new Error('--reload requires --apply');
-  if (spec?.target && !target && !options['--schema']) throw new Error(`${command} requires <${spec.target}>`);
+  // desk-recover --bridge targets the reserved desk-bridge sentinel lock —
+  // it substitutes for <repository>, and the two are mutually exclusive.
+  if (command === 'desk-recover' && options['--bridge'] && target) throw new Error('desk-recover takes either <repository> or --bridge, not both');
+  if (spec?.target && !target && !options['--schema'] && !(command === 'desk-recover' && options['--bridge'])) throw new Error(`${command} requires <${spec.target}>`);
   if (target && !spec?.target && !spec?.optionalTarget) throw new Error(`${command} takes no arguments`);
   // --out persists the response bytes — never the request file. Reject early
   // when it resolves to the request path so the input record is never
@@ -220,7 +223,8 @@ try {
     // output object the RPC returns. Exit: 0 recovered/no-lock, 1 any
     // rejection, 2 usage (handled by the shared catch below).
     const { outcome, output } = deskRecover({
-      repository: resolve(target),
+      repository: options['--bridge'] ? undefined : resolve(target),
+      bridge: Boolean(options['--bridge']),
       home: resolveHome(options['--paseo-home']),
     });
     if (options['--json']) process.stdout.write(JSON.stringify(output) + '\n');

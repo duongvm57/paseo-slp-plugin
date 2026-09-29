@@ -18,6 +18,7 @@ import {
   mkdirSync,
   openSync,
 } from "node:fs";
+import { isAbsolute, join, relative, sep } from "node:path";
 import { OperationConflict } from "../shared/contracts.ts";
 
 export const PRIVATE_DIR_MODE = 0o700;
@@ -51,6 +52,36 @@ export function ensurePrivateDirectory(path: string, platform: string) {
     } catch {
       // Permission bits are best-effort on unusual filesystems; the create
       // mode already requested privacy.
+    }
+  }
+}
+
+/** Component-walk under a verified root: lstat every component from `root`
+ *  down to `target` inclusive and refuse when any existing level is a
+ *  symlink or a non-directory — a symlinked intermediate would silently
+ *  place the ensured directory outside the verified root (same discipline
+ *  as launchers.ts assertRealSetPath). Missing components are allowed:
+ *  ensurePrivateDirectory's recursive mkdir will create them. */
+export function assertRealComponents(root: string, target: string, what: string) {
+  const rel = relative(root, target);
+  if (rel.startsWith("..") || isAbsolute(rel)) {
+    throw new OperationConflict("RUNTIME_INTEGRITY", `${what} escapes the verified root`, {
+      path: target,
+    });
+  }
+  const levels = [root, ...rel.split(sep).filter(Boolean).reduce<string[]>((acc, part) => {
+    acc.push(join(acc[acc.length - 1] ?? root, part));
+    return acc;
+  }, [])];
+  for (const level of levels) {
+    const info = lstatOrNull(level);
+    if (info === null) return;
+    if (info.isSymbolicLink() || !info.isDirectory()) {
+      throw new OperationConflict(
+        "RUNTIME_INTEGRITY",
+        `${what} path component ${level} is not a real directory`,
+        { path: level },
+      );
     }
   }
 }

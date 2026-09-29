@@ -22,7 +22,7 @@ import { recoverDeskLock, recoverLockView, recoveryOutput } from '../plugin/serv
 import { repoKeyFor } from '../plugin/server/desk-store.ts';
 import { DeskRecoveryResult, RecoverLockOutput, WIRE_LIMITS } from '../plugin/shared/enforcement.ts';
 import {
-  deskRecover, repoKeyOf, repoKeyFor as mirrorRepoKeyFor, cliActorKey,
+  deskRecover, repoKeyOf, repoKeyFor as mirrorRepoKeyFor, cliActorKey, DESK_BRIDGE_REPO,
 } from '../src/desk-recovery.mjs';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
@@ -176,6 +176,41 @@ test('actor-invalid: an over-cap username yields actor-invalid with the untrunca
   assert.equal(outcome.receipt.actorKey, `operator:cli:${username}`, 'never truncated');
   assert.equal(existsSync(paths.recoverLockPath), false, 'refused before file ops');
   assert.equal(existsSync(paths.auditPath), false);
+});
+
+// --- E-P2D-3 — the explicit --bridge sentinel target ----------------------------
+
+test('deskRecover({bridge:true}) resolves the DESK_BRIDGE_REPO sentinel — git is never invoked', async t => {
+  const home = homeDir(t);
+  const repoKey = mirrorRepoKeyFor(DESK_BRIDGE_REPO);
+  assert.equal(repoKey, repoKeyFor({ hostId: 'desk-bridge', gitCommonDir: 'desk-bus' }));
+  const paths = namespace(t, home, repoKey);
+  lockFile(paths, await deadPid(), 'bridge-orphan');
+  const { outcome, output } = deskRecover({
+    bridge: true,
+    home,
+    // If input resolution touched the repo path this would throw — it must not.
+    io: { spawnGit: () => { throw new Error('git must not run for --bridge'); } },
+  });
+  assert.equal(outcome.ok, true);
+  assert.equal(outcome.receipt.repoKey, repoKey);
+  assert.equal(outcome.receipt.result, 'recovered');
+  assert.equal(existsSync(paths.lockPath), false);
+  assert.deepEqual(RecoverLockOutput.parse(output), output);
+});
+
+test('deskRecover({bridge:true}) on a held sentinel lock is `held` — never unlinked', t => {
+  const home = homeDir(t);
+  const repoKey = mirrorRepoKeyFor(DESK_BRIDGE_REPO);
+  const paths = namespace(t, home, repoKey);
+  lockFile(paths, process.pid, 'bridge-live');
+  const bytes = readFileSync(paths.lockPath);
+  const { outcome } = deskRecover({ bridge: true, home });
+  assert.equal(outcome.ok, false);
+  assert.equal(outcome.receipt.result, 'held');
+  assert.equal(outcome.receipt.repoKey, repoKey);
+  assert.equal(outcome.code, 'CAPABILITY_GAP');
+  assert.ok(readFileSync(paths.lockPath).equals(bytes));
 });
 
 // --- X2 parity ------------------------------------------------------------------
@@ -398,6 +433,28 @@ test('--json prints exactly the RPC output object on one line', async t => {
   const direct = deskRecover({ repository: repo, home });
   // direct is a second run → no-lock; pin the JSON shape instead:
   assert.equal(direct.output.receipt.result, 'no-lock');
+});
+
+test('desk-recover --bridge recovers the sentinel lock end-to-end; <repo> + --bridge is usage error', async t => {
+  const repo = gitRepo(t);
+  const home = homeDir(t);
+
+  const both = cli([repo, '--bridge', '--paseo-home', home]);
+  assert.equal(both.status, 2, `mutual exclusion: ${both.stderr}`);
+
+  const repoKey = mirrorRepoKeyFor(DESK_BRIDGE_REPO);
+  const paths = namespace(t, home, repoKey);
+  lockFile(paths, await deadPid(), 'bridge-orphan');
+  const out = cli(['--bridge', '--paseo-home', home]);
+  assert.equal(out.status, 0, `--bridge recovered: ${out.stderr}`);
+  assert.match(out.stdout, /result: recovered/);
+  assert.match(out.stdout, new RegExp(`repoKey: ${repoKey}`));
+  assert.equal(existsSync(paths.lockPath), false);
+  // A real-repository run is untouched — same namespace mechanics.
+  const realPaths = namespace(t, home, repoKeyOf(repo));
+  lockFile(realPaths, await deadPid(), 'real-orphan');
+  const real = cli([repo, '--paseo-home', home]);
+  assert.equal(real.status, 0, `real repo still works: ${real.stderr}`);
 });
 
 test('human output names the result, pid, nonce, message and recovery fields', async t => {

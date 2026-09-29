@@ -207,9 +207,12 @@ test('contribute() registers the RPCs plus the two before-hooks, cleanup unregis
   for (const { handler } of registrations) {
     assert.equal(typeof handler, 'function');
   }
+  // Two hooks per event: the P2-c role-injection pair, then the P2-d
+  // bridge graft/session-stash pair — registration order is the wiring
+  // contract, so names sort identically and duplicates are expected.
   assert.deepEqual(
     beforeHooks.map(h => h.name).sort(),
-    ['agent.create', 'agent.session_open'],
+    ['agent.create', 'agent.create', 'agent.session_open', 'agent.session_open'],
   );
   for (const { handler } of beforeHooks) {
     assert.equal(typeof handler, 'function');
@@ -239,8 +242,10 @@ test('contribute() registers the RPCs plus the two before-hooks, cleanup unregis
       'agent.archived',
       'agent.archived',
       'agent.create',
+      'agent.create',
       'agent.created',
       'agent.created',
+      'agent.session_open',
       'agent.session_open',
       'agent.turn_ended',
       'agent.turn_started',
