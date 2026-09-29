@@ -16,6 +16,7 @@ import { createStateStore } from "./server/state-store.ts";
 import { createSupervisionState } from "./server/supervision/state.ts";
 import { createSupervisionObserver, type SupervisionObserver } from "./server/supervision/observer.ts";
 import { detectDaemonHome, resolveDaemonHome } from "./server/daemon-home.ts";
+import { readInjectionBinding } from "./server/injection-binding.ts";
 import { createMaterializer } from "./server/materializer.ts";
 import { embeddedPayload } from "./server/generated/runtime-payload.ts";
 import { createExecutableResolver } from "./server/executables.ts";
@@ -152,22 +153,13 @@ export default function contribute(server: Parameters<PluginServerContribution>[
   };
 }
 
-// The hooks resolve the live binding from the journal receipt under this
-// daemon's own <home>/slp-runtime — the same canonical home resolution the
+// The hooks resolve the live binding via the O1 usable-for-injection
+// predicate (server/injection-binding.ts): the journal receipt under this
+// daemon's own <home>/slp-runtime, the same canonical home resolution the
 // manager uses (realpath before the stable-root join). null when no
-// receipt/binding exists; journal integrity failures propagate (fail closed
-// for managed providers, never a silently unroled spawn).
+// receipt/binding exists; journal integrity failures and unusable states
+// (DEACTIVATING, RECOVERY_REQUIRED, target/state inconsistency) throw —
+// fail closed for managed providers, never a silently unroled spawn.
 function readActiveBinding(journal: ReturnType<typeof createJournal>) {
-  const { daemonHome } = detectDaemonHome();
-  const stableRoot = join(realpathSync(daemonHome), "slp-runtime");
-  const receipt = journal.read(stableRoot);
-  if (receipt === null || receipt.binding === null) return null;
-  const binding = receipt.binding;
-  return {
-    candidateSha256: binding.candidateSha256,
-    payloadSha256: binding.payloadSha256,
-    runtimePath: binding.runtimePath,
-    nodePath: binding.node.path,
-    daemonHome: receipt.target.daemonHome,
-  };
+  return readInjectionBinding({ journal });
 }
