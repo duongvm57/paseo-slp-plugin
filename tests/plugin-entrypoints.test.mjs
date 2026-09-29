@@ -213,10 +213,19 @@ test('contribute() registers the RPCs plus the two before-hooks, cleanup unregis
   for (const { handler } of beforeHooks) {
     assert.equal(typeof handler, 'function');
   }
-  // Shadow-observer lifecycle hooks (Phase B): synchronous capture only.
+  // Shadow-observer lifecycle hooks (Phase B) plus the P2-c desk
+  // registration/revoke handlers — the desk handlers register separately on
+  // the same two events, so those names appear twice.
   assert.deepEqual(
     onHooks.map(h => h.name).sort(),
-    ['agent.archived', 'agent.created', 'agent.turn_ended', 'agent.turn_started'],
+    [
+      'agent.archived',
+      'agent.archived',
+      'agent.created',
+      'agent.created',
+      'agent.turn_ended',
+      'agent.turn_started',
+    ],
   );
   for (const { handler } of onHooks) {
     assert.equal(typeof handler, 'function');
@@ -225,7 +234,16 @@ test('contribute() registers the RPCs plus the two before-hooks, cleanup unregis
   assert.doesNotThrow(() => cleanup());
   assert.deepEqual(
     unregistered.sort(),
-    ['agent.archived', 'agent.create', 'agent.created', 'agent.session_open', 'agent.turn_ended', 'agent.turn_started'],
+    [
+      'agent.archived',
+      'agent.archived',
+      'agent.create',
+      'agent.created',
+      'agent.created',
+      'agent.session_open',
+      'agent.turn_ended',
+      'agent.turn_started',
+    ],
   );
   assert.doesNotThrow(() => cleanup(), 'cleanup must be idempotent');
 });
@@ -235,17 +253,62 @@ test('contribute() leaves the shadow observer inert when the served home is only
   // No PASEO_HOME export → detectDaemonHome() answers source "default" and
   // the observer must stay null: a default-guessed home is never observed
   // (spec §Configuration — a prefill is not proof of host-home mapping).
+  // The P2-c desk handshake handlers are NOT gated the same way: their
+  // stable-root resolution deliberately accepts the default home (contract
+  // §4.2, Q1), so exactly the desk pair registers here.
   const prevHome = process.env.PASEO_HOME;
   delete process.env.PASEO_HOME;
   t.after(() => { if (prevHome !== undefined) process.env.PASEO_HOME = prevHome; });
-  const onHooks = [];
+  // L1(3) — the warn spy is installed BEFORE contribute(): the observation
+  // window covers construction and the whole drive, so a warning emitted
+  // during contribute() itself cannot escape the oracle.
+  const warnings = [];
+  const originalWarn = console.warn;
+  console.warn = line => warnings.push(String(line));
+  t.after(() => { console.warn = originalWarn; });
+  const registrations = [];
   const server = {
     handle() {},
     before() { return () => {}; },
-    on(name) { onHooks.push(name); return () => {}; },
+    on(name, handler) { registrations.push({ name, handler }); return () => {}; },
   };
   const cleanup = contribute(server);
-  assert.deepEqual(onHooks, [], 'no lifecycle hooks register without a verified served home');
+  // (a) exactly two lifecycle registrations, on the desk pair only — no
+  // turn_started/turn_ended hook, so the shadow observer is inert (b).
+  assert.deepEqual(
+    registrations.map(r => r.name).sort(),
+    ['agent.archived', 'agent.created'],
+    'only the desk handshake registers without a verified served home; the shadow observer stays inert',
+  );
+  // (c) provenance: driving each handler with an slp-* payload over a
+  // non-git cwd yields exactly the desk diagnostic warn and never throws —
+  // the desk handlers are fail-open. An observer handler driven the same
+  // way would throw on the missing hook context, so a mutant that swaps
+  // the pairs fails here. The non-git cwd keeps the drive off the real
+  // daemon home (the resolver fails before any store access).
+  const plainDir = mkdtempSync(join(tmpdir(), 'paseo-entry-plain-'));
+  t.after(() => rmSync(plainDir, { recursive: true, force: true }));
+  const slpEvent = {
+    agent: { id: 'agent-1', workspaceId: null, parentAgentId: null, provider: 'slp-codex-peer', cwd: plainDir, title: null },
+  };
+  const expectedOp = { 'agent.created': 'register', 'agent.archived': 'revoke' };
+  for (const { name, handler } of registrations) {
+    assert.equal(typeof handler, 'function');
+    await handler(slpEvent, {});
+    assert.deepEqual(warnings.at(-1), `slp: desk ${expectedOp[name]} skipped: not-git`, `${name} handler is the desk ${expectedOp[name]}`);
+    const beforeSilent = warnings.length;
+    await handler({ agent: { ...slpEvent.agent, provider: 'custom-tool' } }, {});
+    assert.equal(warnings.length, beforeSilent, 'a non-slp provider is a silent no-op');
+  }
+  // L1(3) — the FULL console.warn stream from the spy install (before
+  // contribute()) through the whole drive is exactly the two desk
+  // diagnostics: no filter, no narrower window — any extra warning
+  // (prefixed or not) fails the oracle.
+  assert.deepEqual(
+    warnings,
+    ['slp: desk register skipped: not-git', 'slp: desk revoke skipped: not-git'],
+    'every console.warn from construction through the drive is exactly the two desk diagnostics',
+  );
   cleanup();
 });
 

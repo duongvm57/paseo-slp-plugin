@@ -40,12 +40,13 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
-import { OperationConflict, Sha, Time } from "../shared/contracts.ts";
+import { Family, OperationConflict, Sha, Time } from "../shared/contracts.ts";
 import {
   DeskRejection,
   WIRE_LIMITS,
   type DeskRejectionValue,
 } from "../shared/enforcement.ts";
+import { ROLES } from "../shared/families.ts";
 import { canonicalJson, canonicalSha256, sha256Hex } from "./config-view.ts";
 import {
   ensurePrivateDirectory,
@@ -66,10 +67,17 @@ export const LEDGER_LIMITS = {
   idLen: 128,
   lockWaitMs: 2000,
   ledgerBytes: 16777216,
+  memberships: 4096,
+  pathLen: 4096,
+  unboundTtlMs: 86400000,
+  registrationWindowMs: 600000,
+  ttlSweepPerCommit: 60,
+  hookGitProbeMs: 2000,
+  hookDeskTransactMs: 5000,
 } as const;
 
 const LEDGER_FORMAT = "paseo-slp/enforcement";
-const LEDGER_SCHEMA_VERSION = 1;
+const LEDGER_SCHEMA_VERSION = 2;
 /** The one repoKey algorithm label — schema literal and namespace refinement
  *  both read it from here; nothing else may restate it. */
 export const REPO_KEY_ALGORITHM = "sha256(hostId|gitCommonDir)@1";
@@ -162,19 +170,81 @@ const RepoSchema = z
   })
   .strict();
 
-const LedgerSchema = z
+const isAbsolutePath = (value: string): boolean => value.startsWith("/");
+
+/** P2-c membership states — the subset of SeatBindingState the handshake
+ *  writes; `attached`/`active` belong to P2-e and no P2-c path creates
+ *  them (guard is checked again in the seat decide). */
+const MEMBERSHIP_STATES = ["unbound-open", "host-confirmed", "revoked"] as const;
+const REVOKE_REASONS = [
+  "archived",
+  "expired-unbound",
+  "registration-mismatch",
+  "registration-timeout",
+] as const;
+
+/** v2 membership row (contract §2). Deliberately narrower than the P0 §5
+ *  Membership: duty/epoch/seatRuntime/hostSessionId/nativeHandle/
+ *  observedParentAgentId arrive in v3 (P2-e) by another additive
+ *  migration — P2-c has no writer for them. The raw handle is never
+ *  stored; only its SHA-256. */
+const MembershipSchema = z
   .object({
-    format: z.literal(LEDGER_FORMAT),
-    schemaVersion: z.literal(LEDGER_SCHEMA_VERSION),
-    repo: RepoSchema,
-    revision: z.number().int().min(0),
+    membershipId: z.string().uuid(),
+    state: z.enum(MEMBERSHIP_STATES),
+    bindingHandleSha256: Sha,
+    provider: z.string().min(1).max(LEDGER_LIMITS.idLen),
+    family: Family,
+    role: z.enum(ROLES),
+    createCwd: z.string().min(1).max(LEDGER_LIMITS.pathLen).refine(isAbsolutePath),
+    openGeneration: z.literal(1),
+    agentId: z.string().min(1).max(WIRE_LIMITS.agentId).nullable(),
+    workspaceId: z.string().min(1).max(LEDGER_LIMITS.idLen).nullable(),
     createdAt: Time,
-    updatedAt: Time,
-    lastEventSeq: z.number().int().min(0),
-    lastEventSha256: Sha.nullable(),
-    requests: z.array(RequestRecordSchema).max(LEDGER_LIMITS.requests),
+    hostConfirmedAt: Time.nullable(),
+    registeredAt: Time.nullable(),
+    revokedAt: Time.nullable(),
+    revokeReason: z.enum(REVOKE_REASONS).nullable(),
   })
   .strict();
+
+const LedgerBodyFields = {
+  format: z.literal(LEDGER_FORMAT),
+  repo: RepoSchema,
+  revision: z.number().int().min(0),
+  createdAt: Time,
+  updatedAt: Time,
+  lastEventSeq: z.number().int().min(0),
+  lastEventSha256: Sha.nullable(),
+  requests: z.array(RequestRecordSchema).max(LEDGER_LIMITS.requests),
+} as const;
+
+/** v1 — the P2-a shape, kept only so `read`/`transact` can migrate it
+ *  in-memory (MIGRATIONS[1]). Never written again. */
+const LedgerSchemaV1 = z
+  .object({ ...LedgerBodyFields, schemaVersion: z.literal(1) })
+  .strict();
+
+/** v2 — adds `memberships` (C2). Every other field is untouched. */
+const LedgerSchema = z
+  .object({
+    ...LedgerBodyFields,
+    schemaVersion: z.literal(LEDGER_SCHEMA_VERSION),
+    memberships: z.array(MembershipSchema).max(LEDGER_LIMITS.memberships),
+  })
+  .strict();
+
+/** Additive ledger migrations keyed by the on-disk schemaVersion. Pure: the
+ *  input is never mutated; the output reuses the frozen input's records
+ *  verbatim. v1 → v2 adds the empty memberships table (C2); requests and
+ *  events are untouched. */
+export const MIGRATIONS = {
+  1: (ledger: z.infer<typeof LedgerSchemaV1>): LedgerValue => ({
+    ...ledger,
+    schemaVersion: LEDGER_SCHEMA_VERSION,
+    memberships: [],
+  }),
+} as const;
 
 const EnvelopeSchema = z
   .object({
@@ -194,6 +264,7 @@ const EnvelopeSchema = z
 const DecideEventSchema = z.object({ kind: z.string().min(1).max(LEDGER_LIMITS.eventKind), payload: JsonObject }).strict();
 
 export type LedgerValue = z.infer<typeof LedgerSchema>;
+export type MembershipValue = z.infer<typeof MembershipSchema>;
 export type RequestRecordValue = z.infer<typeof RequestRecordSchema>;
 export type EventValue = z.infer<typeof EventSchema>;
 export type DeskStoreEnvelope = z.infer<typeof EnvelopeSchema>;
@@ -205,7 +276,7 @@ export type DeskStoreEnvelope = z.infer<typeof EnvelopeSchema>;
  *  repo-key-invalid | repo-mismatch). */
 export type DeskStoreRead =
   | { state: "absent" }
-  | { state: "ok"; ledger: LedgerValue }
+  | { state: "ok"; ledger: LedgerValue; persistedSchemaVersion: 1 | 2 }
   | { state: "corrupt" | "future" | "unsafe"; diagnostics: { code: string; schemaVersion: number | null } };
 
 export type TransactReceipt = {
@@ -217,7 +288,15 @@ export type TransactReceipt = {
 export type TransactResult = { ok: true; receipt: TransactReceipt } | DeskRejectionValue;
 
 type DecideOutcome =
-  | { ok: true; events: { kind: string; payload: Record<string, unknown> }[] }
+  | {
+      ok: true;
+      events: { kind: string; payload: Record<string, unknown> }[];
+      /** §2.2 decide → state channel: when present, the FULL replacement
+       *  memberships table. When absent, the snapshot's table carries over
+       *  verbatim (P2-a behavior). Schema- and refinement-checked by the
+       *  store; seat semantics stay in the decide. */
+      memberships?: MembershipValue[];
+    }
   | DeskRejectionValue;
 export type DecideFunction = (ledger: Readonly<LedgerValue>, command: Record<string, unknown>) => DecideOutcome;
 
@@ -345,6 +424,37 @@ export function createDeskStore(deps: DeskStoreDeps): DeskStore {
     if ((ledger.lastEventSeq === 0) !== (ledger.lastEventSha256 === null)) {
       return { state: "corrupt", diagnostics: { code: "refinement-failed", schemaVersion: ledger.schemaVersion } };
     }
+    // Membership refinements (contract §2): state ⇔ null invariants, a
+    // unique handle hash, and at most one live row per agentId.
+    const corrupt = (): DeskStoreRead => ({
+      state: "corrupt",
+      diagnostics: { code: "refinement-failed", schemaVersion: ledger.schemaVersion },
+    });
+    const handles = new Set<string>();
+    const liveAgents = new Set<string>();
+    for (const row of ledger.memberships) {
+      const unboundNulls =
+        row.agentId === null &&
+        row.workspaceId === null &&
+        row.hostConfirmedAt === null &&
+        row.registeredAt === null &&
+        row.revokedAt === null;
+      if (row.state === "unbound-open" && !unboundNulls) return corrupt();
+      if (
+        row.state === "host-confirmed" &&
+        !(row.agentId !== null && row.hostConfirmedAt !== null && row.revokedAt === null)
+      ) {
+        return corrupt();
+      }
+      if (row.state === "revoked" && !(row.revokedAt !== null && row.revokeReason !== null)) return corrupt();
+      if (row.registeredAt !== null && row.hostConfirmedAt === null) return corrupt();
+      if (handles.has(row.bindingHandleSha256)) return corrupt();
+      handles.add(row.bindingHandleSha256);
+      if (row.agentId !== null && row.state !== "revoked") {
+        if (liveAgents.has(row.agentId)) return corrupt();
+        liveAgents.add(row.agentId);
+      }
+    }
     return null;
   }
 
@@ -452,17 +562,32 @@ export function createDeskStore(deps: DeskStoreDeps): DeskStore {
       if (schemaVersion > LEDGER_SCHEMA_VERSION) {
         return { state: "future", diagnostics: { code: "future-version", schemaVersion } };
       }
-      const parsed = LedgerSchema.safeParse(json);
-      if (!parsed.success) {
-        return { state: "corrupt", diagnostics: { code: "schema-invalid", schemaVersion } };
+      // v1 ledgers migrate in-memory (MIGRATIONS[1]) and read as ok with
+      // persistedSchemaVersion 1; the on-disk bytes are never touched by
+      // read — the bump happens in the next transact's commit.
+      let ledger: LedgerValue;
+      let persistedSchemaVersion: 1 | 2;
+      if (schemaVersion === 1) {
+        const v1 = LedgerSchemaV1.safeParse(json);
+        if (!v1.success) {
+          return { state: "corrupt", diagnostics: { code: "schema-invalid", schemaVersion } };
+        }
+        ledger = MIGRATIONS[1](v1.data);
+        persistedSchemaVersion = 1;
+      } else {
+        const parsed = LedgerSchema.safeParse(json);
+        if (!parsed.success) {
+          return { state: "corrupt", diagnostics: { code: "schema-invalid", schemaVersion } };
+        }
+        ledger = parsed.data;
+        persistedSchemaVersion = 2;
       }
-      const ledger = parsed.data;
       const refinement = checkRefinements(ledger, repoKey);
       if (refinement !== null) return refinement;
       if (!verifyChain(repoKey, ledger)) {
         return { state: "corrupt", diagnostics: { code: "hash-chain-broken", schemaVersion } };
       }
-      return { state: "ok", ledger };
+      return { state: "ok", ledger, persistedSchemaVersion };
     } catch (error) {
       if (error instanceof OperationConflict) throw error;
       throw new OperationConflict("IO_FAILURE", `ledger read failed: ${summarize(error)}`);
@@ -627,6 +752,7 @@ export function createDeskStore(deps: DeskStoreDeps): DeskStore {
       lastEventSeq: 0,
       lastEventSha256: null,
       requests: [],
+      memberships: [],
     };
   }
 
@@ -678,6 +804,10 @@ export function createDeskStore(deps: DeskStoreDeps): DeskStore {
         );
       }
       const ledger = state.state === "absent" ? freshLedger(envelope.repo, repoKey) : state.ledger;
+      // A v1 ledger read under this lock migrates in-memory; this commit is
+      // the first write after the bump, so it records schemaVersion 2 plus
+      // the schema-migrated event (contract §2).
+      const migratedFrom = state.state === "ok" && state.persistedSchemaVersion === 1 ? 1 : null;
       if (state.state === "ok") {
         if (ledger.repo.hostId !== envelope.repo.hostId || ledger.repo.gitCommonDir !== envelope.repo.gitCommonDir) {
           return invalidRecord("envelope repo does not match the ledger's repo binding", "transact against the repo the ledger is bound to");
@@ -738,12 +868,45 @@ export function createDeskStore(deps: DeskStoreDeps): DeskStore {
         }
       }
       const decided = outcome as DecideOutcome;
-      const events = decided.ok === true ? decided.events : [];
-      if (!Array.isArray(events)) {
+      const decidedEvents = decided.ok === true ? decided.events : [];
+      if (!Array.isArray(decidedEvents)) {
         return invalidRecord("decide must return an events array", "return {ok:true, events:[...]}");
       }
+      // E-P2C-2 — the migration event rides the first SUCCESSFUL commit
+      // after an in-memory bump. A rejection on a v1 ledger commits into
+      // the v1 shape (no memberships, no event); the next successful
+      // commit migrates.
+      const events =
+        migratedFrom === 1 && decided.ok === true
+          ? [{ kind: "schema-migrated", payload: { from: 1, to: LEDGER_SCHEMA_VERSION } }, ...decidedEvents]
+          : decidedEvents;
       const eventsCheck = checkDecideEvents(events);
       if ("rejection" in eventsCheck) return eventsCheck.rejection;
+
+      // §2.2 — the decide → state channel, checked after decide and before
+      // the segment write, schema-level only: the replacement table must
+      // parse strict and the candidate ledger must pass the same
+      // refinements read() applies. A violation is a consumer error —
+      // INVALID_RECORD, nothing recorded (the decide-threw branch of P2-a
+      // step 5).
+      let nextMemberships = ledger.memberships;
+      if (decided.ok === true && decided.memberships !== undefined) {
+        const parsedMemberships = z.array(MembershipSchema).max(LEDGER_LIMITS.memberships).safeParse(decided.memberships);
+        if (!parsedMemberships.success) {
+          return invalidRecord(
+            `decide returned invalid memberships: ${firstIssue(parsedMemberships.error)}`,
+            "fix the decide function to return a schema-valid memberships table",
+          );
+        }
+        const candidateInvalid = checkRefinements({ ...ledger, memberships: parsedMemberships.data }, repoKey);
+        if (candidateInvalid !== null) {
+          return invalidRecord(
+            "decide returned invalid memberships (refinement failed)",
+            "fix the decide function to return a table that satisfies the ledger refinements",
+          );
+        }
+        nextMemberships = parsedMemberships.data;
+      }
 
       const receiptId = uuid();
       const revision = ledger.revision + 1;
@@ -819,21 +982,40 @@ export function createDeskStore(deps: DeskStoreDeps): DeskStore {
         eventSeqs,
         rejection: rejectionForRecord,
       };
-      const next: LedgerValue = {
+      const candidate: LedgerValue = {
         ...ledger,
         revision,
         updatedAt: stamp,
         lastEventSeq,
         lastEventSha256,
         requests: [...ledger.requests, record],
+        memberships: nextMemberships,
       };
       // The pre-commit refinement pass is the same one read() applies — a
       // ledger that would read as unsafe/corrupt is never written.
-      const invalid = checkRefinements(next, repoKey);
-      if (invalid !== null || !LedgerSchema.safeParse(next).success) {
+      const invalid = checkRefinements(candidate, repoKey);
+      if (invalid !== null) {
         throw new OperationConflict("IO_FAILURE", "refusing to commit a ledger that would not read back cleanly");
       }
-      atomicWrite(ledgerPath(repoKey), JSON.stringify(next, null, 2) + "\n", repoDir(repoKey));
+      // E-P2C-2 — a rejection on a v1 ledger keeps the on-disk v1 shape:
+      // the empty migrated memberships table is dropped and the version
+      // literal stays 1, so the bump (with its schema-migrated event)
+      // happens on the first successful commit instead.
+      let nextBytes: string;
+      if (migratedFrom === 1 && decided.ok === false) {
+        const { memberships: _dropped, ...v1Body } = candidate;
+        const v1Next = { ...v1Body, schemaVersion: 1 };
+        if (!LedgerSchemaV1.safeParse(v1Next).success) {
+          throw new OperationConflict("IO_FAILURE", "refusing to commit a ledger that would not read back cleanly");
+        }
+        nextBytes = JSON.stringify(v1Next, null, 2) + "\n";
+      } else {
+        if (!LedgerSchema.safeParse(candidate).success) {
+          throw new OperationConflict("IO_FAILURE", "refusing to commit a ledger that would not read back cleanly");
+        }
+        nextBytes = JSON.stringify(candidate, null, 2) + "\n";
+      }
+      atomicWrite(ledgerPath(repoKey), nextBytes, repoDir(repoKey));
       // c4 — the commit point passed; only release and the reply remain.
       await faults.ledgerCommitted?.();
 

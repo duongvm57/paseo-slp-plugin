@@ -41,7 +41,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { PluginBeforeRequests } from "@getpaseo/plugin/server";
-import { HOOK_PROVIDER_ID_RE, ROLES, WRAPPER_PROVIDER_ID_RE } from "../shared/families.ts";
+import { familyFromProviderId, HOOK_PROVIDER_ID_RE, ROLES, WRAPPER_PROVIDER_ID_RE, type FamilyId } from "../shared/families.ts";
 import { beadsSeatEnv } from "./work-tracker.ts";
 
 type AgentCreateRequest = PluginBeforeRequests["agent.create"];
@@ -94,6 +94,29 @@ export interface RoleInjectionDeps {
    *  disabled: sessionOpen emits only the grant overlay, exactly as before
    *  the feature. */
   readWorkTrackerEnabled?: () => boolean;
+  /** P2-c desk seams — both optional and asynchronous; absent means the
+   *  pre-P2-c behavior byte-for-byte. Neither promise ever rejects (the
+   *  desk-seat module wraps everything fail-open); the composer still
+   *  belt-catches so a seam bug can never abort a create or an open (W5).
+   *  deskMint resolves the membership handle AFTER the seat.mint commit
+   *  (G1) or null on any failure; deskBind reports the env-echoed handle
+   *  and never throws. */
+  deskMint?: (input: {
+    provider: string;
+    family: FamilyId;
+    role: string;
+    cwd: string | undefined;
+    env: Record<string, string>;
+  }) => Promise<{ handle: string } | null>;
+  deskBind?: (input: {
+    agentId: string;
+    workspaceId: string | null;
+    provider: string;
+    cwd: string;
+    reason: SessionOpenRequest["reason"];
+    purpose: SessionOpenRequest["purpose"];
+    env: Record<string, string>;
+  }) => Promise<void>;
 }
 
 // The id classes derive from the family registry (shared/families.ts): hook
@@ -166,6 +189,33 @@ export function createRoleInjection(deps: RoleInjectionDeps) {
     return promise;
   }
 
+  /** P2-c mint — fail-open belt around the desk seam: the seam itself never
+   *  rejects (W5/G4), and a belt catch here keeps a seam bug from aborting
+   *  the create. No seam, or a family the registry cannot name, means no
+   *  handle — the request returns exactly as before P2-c. */
+  async function mintFor(input: {
+    provider: string;
+    family: FamilyId | null;
+    role: string;
+    config: AgentCreateRequest["config"];
+    env: Record<string, string>;
+  }): Promise<string | null> {
+    const seam = deps.deskMint;
+    if (seam === undefined || input.family === null) return null;
+    try {
+      const out = await seam({
+        provider: input.provider,
+        family: input.family,
+        role: input.role,
+        cwd: input.config.cwd,
+        env: input.env,
+      });
+      return out === null ? null : out.handle;
+    } catch {
+      return null;
+    }
+  }
+
   return {
     /** agent.create before-hook. Returns nothing for pass-through providers;
      *  throws (aborts the create) for slp-* providers whose role, binding or
@@ -174,8 +224,27 @@ export function createRoleInjection(deps: RoleInjectionDeps) {
       const config = input.request.config;
       const provider = config?.provider;
       if (typeof provider !== "string" || !provider.startsWith("slp-")) return;
+      // R2 (C10) — the devin wrapper path now grafts ONLY the desk handle
+      // into request.env: no config change, no binding, no role bytes. A
+      // failed or absent mint returns the request untouched, exactly as
+      // before P2-c.
+      const wrapper = DEVIN_PROVIDER.exec(provider);
+      if (wrapper !== null) {
+        const handle = await mintFor({
+          provider,
+          family: familyFromProviderId(provider),
+          role: wrapper[2],
+          config,
+          env: input.request.env ?? {},
+        });
+        if (handle === null) return;
+        return {
+          ...input.request,
+          env: { ...(input.request.env ?? {}), SLP_DESK_HANDLE: handle },
+        };
+      }
       const role = roleForCreate(provider, config.featureValues);
-      if (role === null) return; // slp-devin-* — wrapper transport handles it
+      if (role === null) return;
       const binding = deps.readActiveBinding();
       if (binding === null) {
         throw new Error(
@@ -202,36 +271,73 @@ export function createRoleInjection(deps: RoleInjectionDeps) {
             ? bundle.instructions + existing
             : `${bundle.instructions}\n${existing}`
           : bundle.instructions;
+      // P2-c — after every fail-closed gate has passed, mint the seat
+      // membership; the handle joins the request env only after the
+      // seat.mint commit (G1). No handle → the request as before P2-c.
+      const handle = await mintFor({
+        provider,
+        family: familyFromProviderId(provider),
+        role,
+        config,
+        env: input.request.env ?? {},
+      });
+      if (handle === null) {
+        return {
+          ...input.request,
+          config: { ...config, systemPrompt },
+        };
+      }
       return {
         ...input.request,
         config: { ...config, systemPrompt },
+        env: { ...(input.request.env ?? {}), SLP_DESK_HANDLE: handle },
       };
     },
 
-    /** agent.session_open before-hook: overlay the per-open grant onto the
-     *  provider env for hook-family managed ids — plus the beads seat env
-     *  (BEADS_ACTOR and the two BD_* defaults) when the manager-owned
-     *  work-tracker setting is enabled. A disabled/absent/corrupt setting
-     *  emits only the grant overlay: any read error is a gap, never an
-     *  aborted open. All other fields are returned unchanged (the host
-     *  rejects changes beyond env). Runs for every open reason — create,
-     *  resume, refresh, import — so a resumed seat keeps its actor. */
+    /** agent.session_open before-hook: with the desk seam present, first
+     *  bind the env-echoed handle for every managed slp-* open (the seam's
+     *  GATE/JOIN cells decide whether anything happens), then overlay as
+     *  before. Without the seam the hook stays synchronous and returns
+     *  byte-for-byte the pre-P2-c result. The overlay itself is unchanged:
+     *  per-open grant plus the beads seat env when enabled; a disabled/
+     *  absent/corrupt setting emits only the grant overlay; all other
+     *  fields return unchanged (the host rejects changes beyond env). */
     sessionOpen(input: { request: SessionOpenRequest }) {
       const request = input.request;
-      const owned = HOOK_FAMILY_PROVIDER.exec(request.provider);
-      if (owned === null) return;
-      let enabled = false;
-      try {
-        enabled = deps.readWorkTrackerEnabled?.() === true;
-      } catch { /* a setting read failure must never abort the open */ }
-      return {
-        ...request,
-        env: {
-          ...(request.env ?? {}),
-          ...(enabled ? beadsSeatEnv({ role: owned[2], agentId: request.agentId, env: request.env ?? {} }) : {}),
-          SLP_SESSION_OPEN_GRANT: grantToken(request),
-        },
+      const overlay = () => {
+        const owned = HOOK_FAMILY_PROVIDER.exec(request.provider);
+        if (owned === null) return;
+        let enabled = false;
+        try {
+          enabled = deps.readWorkTrackerEnabled?.() === true;
+        } catch { /* a setting read failure must never abort the open */ }
+        return {
+          ...request,
+          env: {
+            ...(request.env ?? {}),
+            ...(enabled ? beadsSeatEnv({ role: owned[2], agentId: request.agentId, env: request.env ?? {} }) : {}),
+            SLP_SESSION_OPEN_GRANT: grantToken(request),
+          },
+        };
       };
+      const seam = deps.deskBind;
+      if (seam === undefined || !request.provider.startsWith("slp-")) return overlay();
+      // P2-c — bind before the overlay (§5); fail-open belt: the seam never
+      // rejects, and a belt catch keeps a seam bug from aborting the open.
+      return (async () => {
+        try {
+          await seam({
+            agentId: request.agentId,
+            workspaceId: request.workspaceId,
+            provider: request.provider,
+            cwd: request.cwd,
+            reason: request.reason,
+            purpose: request.purpose,
+            env: request.env ?? {},
+          });
+        } catch { /* fail-open: the open proceeds unbound */ }
+        return overlay();
+      })();
     },
   };
 }

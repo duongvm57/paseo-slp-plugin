@@ -17,6 +17,7 @@ import { createSupervisionState } from "./server/supervision/state.ts";
 import { createSupervisionObserver, type SupervisionObserver } from "./server/supervision/observer.ts";
 import { detectDaemonHome, resolveDaemonHome } from "./server/daemon-home.ts";
 import { readInjectionBinding } from "./server/injection-binding.ts";
+import { createDeskSeat } from "./server/desk-seat.ts";
 import { createMaterializer } from "./server/materializer.ts";
 import { embeddedPayload } from "./server/generated/runtime-payload.ts";
 import { createExecutableResolver } from "./server/executables.ts";
@@ -117,6 +118,12 @@ export default function contribute(server: Parameters<PluginServerContribution>[
   // integrity oracle. No paseo surface, no mutex, no mutation.
   const runtimePinDeps = { journal, verifyPublished: materializer.verifyPublished };
   server.handle(enforcementRuntimePin, input => readRuntimePinView(input, runtimePinDeps));
+  // Desk seat handshake (P2-c): one store per stable root, created lazily
+  // inside desk-seat on first use; the seams are fail-open and budgeted, so
+  // a desk failure never aborts a create or an open (Q3).
+  const deskSeat = createDeskSeat({
+    stableRoot: join(realpathSync(detectDaemonHome().daemonHome), "slp-runtime"),
+  });
   const injection = createRoleInjection({
     readActiveBinding: () => readActiveBinding(journal),
     // Same daemon-home resolution as readActiveBinding: the setting lives at
@@ -130,9 +137,18 @@ export default function contribute(server: Parameters<PluginServerContribution>[
     // role-injection.ts header).
     verifyCandidate: binding =>
       materializer.verifyPublished(binding.runtimePath, binding.candidateSha256, binding.payloadSha256),
+    // P2-c: mint at create (env handle after the seat.mint commit), bind at
+    // session_open (env echo). Both fail-open.
+    deskMint: deskSeat.deskMint,
+    deskBind: deskSeat.deskBind,
   });
   const offAgentCreate = server.before("agent.create", injection.agentCreate);
   const offSessionOpen = server.before("agent.session_open", injection.sessionOpen);
+  // P2-c registration confirm + revoke — separate handlers on the same
+  // events the shadow observer uses; the observer's registrations are
+  // untouched. Both fail-open, never reject.
+  const offDeskRegister = server.on("agent.created", event => deskSeat.deskRegister(event));
+  const offDeskRevoke = server.on("agent.archived", event => deskSeat.deskRevoke(event));
   // Observer lifecycle hooks — synchronous capture only; every async step
   // (refresh, Jev HTTP, ring write, notify delivery) runs on the observer's
   // own queue.
@@ -144,6 +160,8 @@ export default function contribute(server: Parameters<PluginServerContribution>[
   return () => {
     offAgentCreate();
     offSessionOpen();
+    offDeskRegister();
+    offDeskRevoke();
     offCreated?.();
     offArchived?.();
     offStarted?.();
