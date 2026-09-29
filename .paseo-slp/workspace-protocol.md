@@ -1,8 +1,8 @@
 ---
-version: '7'
+version: '8'
 owner: 'duongvm (Human)'
 applies_to: 'paseo-slp source repository'
-last_reviewed: '2026-09-27'
+last_reviewed: '2026-09-29'
 package_version: '0.4.0'
 template_sha256: 'c5b6db392e3d9646d931cda658c3364fe64287caf1f9717ad323681f2e860ad1'
 template_source: 'source checkout; unreleased working candidate'
@@ -82,6 +82,24 @@ independent Spec + Standards seats; no single-seat classes.
    both axis results and remaining risks/resources.
 4. The delivery-grant holder delivers with a receipt.
 
+Test oracles in a gated candidate meet four duties; the engineer supplies
+the evidence, the reviewer falsifies it, and Lead replays a mutant before
+accepting. These duties are evidence judgment, not machine checks — no test
+runner can verify them, which is why they live in protocol rather than
+harness.
+
+- Non-empty: a real assert on the driven input and fixture. An assert on a
+  different fixture than the one driven, or none at all, fails.
+- Mutation-sensitive: removing the guarded behavior turns the test red. The
+  engineer attaches the temporary patch, the red log naming the behavior,
+  and a confirmed revert; without them the finding stays open.
+- Observation window: spies and hooks install before the scenario starts,
+  and no prefix or subset filter may blind them to what they must catch.
+- Pinned evidence: every mutation log carries the test file sha256 at
+  mutant time, the product file sha before and after, and the candidate
+  snapshot; the test sha must equal the handback candidate's, and an
+  unpinned log is no evidence.
+
 Seat taskLabels: `Peer — Reviewer — <task> / Spec` and `Peer — Reviewer —
 <task> / Standard`; running seats keep their titles. Accepted seats stay idle
 for correction or re-review in that bounded task. Settle its team after Delivery
@@ -134,4 +152,8 @@ installed CLI; the checkout's `bin/slp.mjs` is the candidate under test.
 
 ## Overrides
 
-None; sections condense the template without changing its meaning.
+| Section | Change | Decided by / date |
+|---|---|---|
+| Gate | test-oracle duties | duongvm (Human) / 2026-09-29 |
+
+Other sections condense the template without changing its meaning.

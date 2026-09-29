@@ -198,7 +198,7 @@ test('Lead reloads review gates only when a gate applies and blocks when its rul
   assert.match(lead, /When the assignment or protocol\s+requires independent review/);
   assert.match(lead, /If applicable gate rules are unavailable, stale or unclear, mark the branch BLOCKED/);
   assert.match(lead, /When the assignment or protocol\s+requires independent review, follow its gate rules and references\/review-gates\.md\.\s+While that gate applies, re-read the gate rules in references\/orchestration\.md and\s+references\/review-gates\.md from the installed candidate immediately before each\s+decision to choose reviewer seats, reuse reviewers for re-review or issue\s+acceptance, including after resume or compaction; a surviving summary like\s+"Engineer → Reviewer" is not the rule/);
-  assert.match(repoProtocol, /^version: ['"]?7['"]?$/m);
+  assert.match(repoProtocol, /^version: ['"]?8['"]?$/m);
   assert.match(repoProtocol, /^## Gate$/m);
 });
 
