@@ -81,8 +81,50 @@ const LEDGER_SCHEMA_VERSION = 2;
 /** The one repoKey algorithm label — schema literal and namespace refinement
  *  both read it from here; nothing else may restate it. */
 export const REPO_KEY_ALGORITHM = "sha256(hostId|gitCommonDir)@1";
+
+const deskStateDir = (stableRoot: string) => join(stableRoot, "state");
+const deskEnforcementDir = (stableRoot: string) => join(deskStateDir(stableRoot), "enforcement");
+
+/** The repos root every repo namespace lives under — the companion owner
+ *  for callers (the P2-e projection) that scan the root itself rather than
+ *  one repo's paths. The join rule lives here and nowhere else. */
+export function deskReposDir(stableRoot: string): string {
+  return join(deskEnforcementDir(stableRoot), "repos");
+}
+
+/** The repo-directory layout recovery shares with the store — the single
+ *  owner of every path join under the stable root, so the store, the
+ *  recovery module and the projection never restate a join rule.
+ *  `acquireLock`/`releaseLock` are unchanged. */
+export function deskRepoPaths(stableRoot: string, repoKey: string): {
+  stateDir: string;
+  enforcementDir: string;
+  baseDir: string;
+  repoDir: string;
+  eventsDir: string;
+  ledgerPath: string;
+  lockPath: string;
+  recoverLockPath: string;
+  auditPath: string;
+} {
+  const baseDir = deskReposDir(stableRoot);
+  const repoDir = join(baseDir, repoKey);
+  return {
+    stateDir: deskStateDir(stableRoot),
+    enforcementDir: deskEnforcementDir(stableRoot),
+    baseDir,
+    repoDir,
+    eventsDir: join(repoDir, "events"),
+    ledgerPath: join(repoDir, "ledger.json"),
+    lockPath: join(repoDir, "lock"),
+    recoverLockPath: join(repoDir, "recover.lock"),
+    auditPath: join(repoDir, "recovery-log.jsonl"),
+  };
+}
 const CANONICALIZATION = "slp-canonical-json/1";
-const REPO_KEY_PATTERN = /^[0-9a-f]{64}$/;
+/** Exported for the P2-e bindings projection — repo directory names are
+ *  filtered by this pattern before any ledger read (§4.1). */
+export const REPO_KEY_PATTERN = /^[0-9a-f]{64}$/;
 const SEGMENT_NAME = /^(\d+)-(\d+)\.jsonl$/;
 const LOCK_RETRY_MS = 25;
 
@@ -176,7 +218,9 @@ const isAbsolutePath = (value: string): boolean => value.startsWith("/");
  *  writes; `attached`/`active` belong to P2-e and no P2-c path creates
  *  them (guard is checked again in the seat decide). */
 const MEMBERSHIP_STATES = ["unbound-open", "host-confirmed", "revoked"] as const;
-const REVOKE_REASONS = [
+/** Exported for the P2-e limitation table — the `revoked: <reason>` row
+ *  limitation's worst-case entry derives from this enum, never a copy. */
+export const REVOKE_REASONS = [
   "archived",
   "expired-unbound",
   "registration-mismatch",
@@ -379,22 +423,21 @@ export function createDeskStore(deps: DeskStoreDeps): DeskStore {
   const instanceNonce = uuid();
   const mutex = new Map<string, Promise<void>>();
 
-  const baseDir = join(deps.stableRoot, "state", "enforcement", "repos");
-  const repoDir = (repoKey: string) => join(baseDir, repoKey);
-  const eventsDir = (repoKey: string) => join(repoDir(repoKey), "events");
-  const ledgerPath = (repoKey: string) => join(repoDir(repoKey), "ledger.json");
-  const lockPath = (repoKey: string) => join(repoDir(repoKey), "lock");
+  /** Every path under the stable root comes from the single owner,
+   *  deskRepoPaths — the store never restates a join rule. */
+  const repoPaths = (repoKey: string) => deskRepoPaths(deps.stableRoot, repoKey);
 
   /** The ancestor chain must be real directories all the way down; a
    *  symlinked or non-directory component makes the namespace unsafe. */
   function unsafeAncestors(repoKey: string): boolean {
+    const paths = repoPaths(repoKey);
     for (const path of [
       deps.stableRoot,
-      join(deps.stableRoot, "state"),
-      join(deps.stableRoot, "state", "enforcement"),
-      baseDir,
-      repoDir(repoKey),
-      eventsDir(repoKey),
+      paths.stateDir,
+      paths.enforcementDir,
+      paths.baseDir,
+      paths.repoDir,
+      paths.eventsDir,
     ]) {
       const stat = lstatOrNull(path);
       if (stat !== null && (!stat.isDirectory() || stat.isSymbolicLink())) return true;
@@ -466,7 +509,7 @@ export function createDeskStore(deps: DeskStoreDeps): DeskStore {
    *  chain. */
   function verifyChain(repoKey: string, ledger: LedgerValue): boolean {
     if (ledger.lastEventSeq === 0) return true;
-    const dir = eventsDir(repoKey);
+    const dir = repoPaths(repoKey).eventsDir;
     let names: string[];
     try {
       names = readdirSync(dir);
@@ -528,7 +571,7 @@ export function createDeskStore(deps: DeskStoreDeps): DeskStore {
       if (unsafeAncestors(repoKey)) {
         return { state: "unsafe", diagnostics: { code: "unsafe-path", schemaVersion: null } };
       }
-      const path = ledgerPath(repoKey);
+      const path = repoPaths(repoKey).ledgerPath;
       const stat = lstatOrNull(path);
       if (stat === null) return { state: "absent" };
       if (!stat.isFile() || stat.isSymbolicLink()) {
@@ -595,17 +638,18 @@ export function createDeskStore(deps: DeskStoreDeps): DeskStore {
   }
 
   function ensureRepoDir(repoKey: string): void {
-    ensurePrivateDirectory(join(deps.stableRoot, "state"), platform);
-    ensurePrivateDirectory(join(deps.stableRoot, "state", "enforcement"), platform);
-    ensurePrivateDirectory(baseDir, platform);
-    ensurePrivateDirectory(repoDir(repoKey), platform);
+    const paths = repoPaths(repoKey);
+    ensurePrivateDirectory(paths.stateDir, platform);
+    ensurePrivateDirectory(paths.enforcementDir, platform);
+    ensurePrivateDirectory(paths.baseDir, platform);
+    ensurePrivateDirectory(paths.repoDir, platform);
   }
 
   /** wx-create the lockfile and retry until lockWaitMs expires; on expiry,
    *  classify the holder — a live pid answers desk-busy, anything else is
    *  RECOVERY_REQUIRED. The file is never deleted or overwritten. */
   async function acquireLock(repoKey: string): Promise<{ held: true } | { rejection: DeskRejectionValue }> {
-    const path = lockPath(repoKey);
+    const path = repoPaths(repoKey).lockPath;
     const content = JSON.stringify({
       pid: process.pid,
       instanceNonce,
@@ -687,7 +731,7 @@ export function createDeskStore(deps: DeskStoreDeps): DeskStore {
    *  pid AND nonce. Anything else is IO_FAILURE; a foreign lock is never
    *  removed. */
   function releaseLock(repoKey: string): void {
-    const path = lockPath(repoKey);
+    const path = repoPaths(repoKey).lockPath;
     let content: string;
     try {
       content = readFileSync(path, "utf8");
@@ -706,7 +750,7 @@ export function createDeskStore(deps: DeskStoreDeps): DeskStore {
     }
     try {
       unlinkSync(path);
-      fsyncDirectory(repoDir(repoKey), platform);
+      fsyncDirectory(repoPaths(repoKey).repoDir, platform);
     } catch (error) {
       throw new OperationConflict("IO_FAILURE", `cannot release desk lock: ${summarize(error)}`);
     }
@@ -940,8 +984,9 @@ export function createDeskStore(deps: DeskStoreDeps): DeskStore {
         }
         lastEventSha256 = prev;
         eventSeqs = [built[0]!.seq, built[built.length - 1]!.seq];
-        ensurePrivateDirectory(eventsDir(repoKey), platform);
-        const segmentPath = join(eventsDir(repoKey), `${eventSeqs[0]}-${eventSeqs[1]}.jsonl`);
+        const evDir = repoPaths(repoKey).eventsDir;
+        ensurePrivateDirectory(evDir, platform);
+        const segmentPath = join(evDir, `${eventSeqs[0]}-${eventSeqs[1]}.jsonl`);
         const temp = `${segmentPath}.${uuid()}.tmp`;
         let fd: number | null = null;
         try {
@@ -953,7 +998,7 @@ export function createDeskStore(deps: DeskStoreDeps): DeskStore {
           // c2 — temp segment durable, not yet renamed.
           await faults.segmentTempWritten?.();
           renameSync(temp, segmentPath);
-          fsyncDirectory(eventsDir(repoKey), platform);
+          fsyncDirectory(evDir, platform);
           // c3 — segment renamed (durable), ledger not yet committed.
           await faults.segmentRenamed?.();
         } catch (error) {
@@ -1015,7 +1060,8 @@ export function createDeskStore(deps: DeskStoreDeps): DeskStore {
         }
         nextBytes = JSON.stringify(candidate, null, 2) + "\n";
       }
-      atomicWrite(ledgerPath(repoKey), nextBytes, repoDir(repoKey));
+      const commitPaths = repoPaths(repoKey);
+      atomicWrite(commitPaths.ledgerPath, nextBytes, commitPaths.repoDir);
       // c4 — the commit point passed; only release and the reply remain.
       await faults.ledgerCommitted?.();
 

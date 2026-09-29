@@ -6,8 +6,9 @@
 // provider projection is the P1 backlog (gap `providerTools-projection`).
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { createHash, randomUUID } from 'node:crypto';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
 import {
@@ -31,6 +32,13 @@ import {
 } from '../plugin/shared/enforcement.ts';
 import { auditCapabilities, CAPABILITY_IDS, PASEO_SOURCE_REVISION, PROVIDER_TOOLS_PROJECTION_GAP } from '../plugin/server/capabilities.ts';
 import { createEnforcement, boundStatusView, P0_STATIC_LIMITATIONS } from '../plugin/server/enforcement.ts';
+import {
+  LIMITATION_TABLE,
+  limitation,
+  renderSkippedLedgers,
+  renderRevoked,
+} from '../plugin/server/limitations.ts';
+import { createDeskStore, repoKeyFor, REVOKE_REASONS } from '../plugin/server/desk-store.ts';
 import { emptyReceipt } from '../plugin/server/journal.ts';
 import { readRawConfig } from '../plugin/server/config-view.ts';
 import { MAX_RPC_BYTES, OperationConflict } from '../plugin/shared/contracts.ts';
@@ -40,8 +48,9 @@ import { FAMILY_IDS } from '../plugin/shared/families.ts';
 const root = fileURLToPath(new URL('..', import.meta.url));
 
 function tmp(t, prefix = 'enf-') {
-  mkdirSync(join(root, '.local-checks'), { recursive: true });
-  const dir = mkdtempSync(join(root, '.local-checks/', prefix));
+  // §7 hermetic rule: fixtures live under the OS tmpdir — the repo tree and
+  // .local-checks are never written by tests.
+  const dir = mkdtempSync(join(tmpdir(), prefix));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   return dir;
 }
@@ -511,7 +520,9 @@ test('readView on a verified served home attaches receipt and host evidence; out
   assert.equal(view.installation.revision, 0);
   assert.equal(view.installation.bound, false);
   assert.equal(view.installation.error, null);
-  // P0 never projects provider policy, per-agent models or binding rows.
+  // No provider-policy or per-agent model projection; bindings is the P2-e
+  // read-only membership projection — empty here because the verified home
+  // has no repos directory yet.
   assert.equal(Object.keys(view).some(key => key.startsWith('providerTools')), false);
   assert.equal('modelObservations' in view, false);
   assert.deepEqual(view.bindings, []);
@@ -546,6 +557,11 @@ test('readView without an exported PASEO_HOME keeps static-only evidence — no 
   // rpcDispatched is proven by this very response, not by a host call.
   assert.equal(capRow(view, CAPABILITY_IDS.pluginRpcDispatch).status, 'supported');
   assert.equal(view.completeness.filter(e => e.collection === 'agents.list').length, 0);
+  // P2-e: the projection is withheld under the provenance gate — never a
+  // pretend "no memberships" answer.
+  assert.deepEqual(view.bindings, []);
+  assert.equal(omitted(view, 'bindings', 'source-incomplete'), 1);
+  assert.ok(view.limitations.includes(limitation('L-P')), 'L-P fires on the unverified home');
   assert.deepEqual(view.gaps[0], PROVIDER_TOOLS_PROJECTION_GAP);
 });
 
@@ -877,7 +893,10 @@ test('one bound owner: every wire cap lives in WIRE_LIMITS and is enforced by th
   assert.deepEqual([...CompletenessCollection.options].sort(), [
     'agents.list', 'bindings', 'capabilities', 'completeness', 'gaps', 'limitations',
   ]);
-  assert.equal(arrayCap(out.bindings), 0, 'bindings is literal [] — non-empty is producer-invalid');
+  // P2-e: bindings carries real membership rows, capped at the pinned limit.
+  assert.equal(arrayCap(out.bindings), WIRE_LIMITS.bindings);
+  assert.equal(WIRE_LIMITS.bindings, 16);
+  assert.equal(WIRE_LIMITS.bindingsRepos, 16);
 });
 
 // Fill scalars to exactly their pinned maxima; rows/entries generated at cap.
@@ -1082,10 +1101,11 @@ test('§2.1 overflow fixture: a schema-valid escape-filled envelope over budget 
 
 test('§2.1 fixture states: every positive-capacity collection accepts zero and cap, rejects cap+1', () => {
   // The states table (§2.1): zero / cap / cap+1 per collection; gaps "zero"
-  // still carries the mandatory row; bindings has only the literal-zero state.
+  // still carries the mandatory row. P2-e gives bindings a real cap.
   const collections = [
     ['capabilities', WIRE_LIMITS.capabilities],
     ['gaps', WIRE_LIMITS.gaps],
+    ['bindings', WIRE_LIMITS.bindings],
     ['limitations', WIRE_LIMITS.limitations],
     ['completeness', WIRE_LIMITS.completenessEntries],
   ];
@@ -1114,15 +1134,8 @@ test('§2.1 fixture states: every positive-capacity collection accepts zero and 
       `${name} at cap+1 → IO_FAILURE`,
     );
   }
-  // bindings: only the literal-empty state exists; one row is producer-invalid.
-  assert.doesNotThrow(() => GetEnforcementStatusOutput.parse(fixtureAt({ bindings: 0 })));
-  const withBinding = fixtureAt();
-  withBinding.bindings = [fatBinding()];
-  assert.equal(GetEnforcementStatusOutput.safeParse(withBinding).success, false);
-  assert.throws(
-    () => boundStatusView(withBinding),
-    error => error instanceof OperationConflict && error.code === 'IO_FAILURE',
-  );
+  // A schema-valid bindings row now parses — cap overflow is what fails.
+  assert.doesNotThrow(() => GetEnforcementStatusOutput.parse(fixtureAt({ bindings: 1 })));
   // gaps.zero keeps exactly the mandatory row — never a synthetic omission.
   const zeroGaps = fixtureAt({ gaps: 0 });
   assert.deepEqual(zeroGaps.gaps, [PROVIDER_TOOLS_PROJECTION_GAP]);
@@ -1144,4 +1157,436 @@ test('open vocabulary, duplicate pairs, non-null detail and non-int counts are w
   assert.throws(() => CompletenessEntry.parse({ ...entry, count: 1.5 }));
   assert.throws(() => CompletenessEntry.parse({ ...entry, count: 0 }));
   assert.throws(() => CompletenessEntriesSchema.parse([entry, entry]));
+});
+
+// ---------------------------------------------------------------------------
+// P2-e — read-only membership projection (contract §4) + §4.5 limitation table
+// ---------------------------------------------------------------------------
+//
+// Fixture discipline: memberships land through the store's real `transact`
+// (the same channel desk-seat uses), so projection tests read bytes that a
+// real writer produced. readView itself must only read — the read-only proof
+// below snapshots the repos tree before and after.
+
+const reposDirOf = stableRoot => join(stableRoot, 'state', 'enforcement', 'repos');
+
+/** A verified served home + its stable root; repos dir is NOT pre-created. */
+function projectionHome(t) {
+  const home = fixtureHome(t);
+  serveHome(t, home);
+  const stableRoot = join(realpathSync(home), 'slp-runtime');
+  const view = (over = {}) =>
+    createEnforcement({ journal: stubJournal(null), now: () => new Date(NOW), ...over })
+      .readView({ schemaVersion: 1, target: target(home) }, undefined);
+  return { home, stableRoot, view };
+}
+
+/** A repo key derived the same way the store derives it. */
+const repoKeyAt = i => repoKeyFor({ hostId: 'local', gitCommonDir: `/gc/${i}` });
+
+/** Seed a repo ledger through the real writer channel (P2-c memberships);
+ *  the envelope's repo must hash to the same key (repo-mismatch → unsafe). */
+async function seedMemberships(stableRoot, gcIndex, rows) {
+  const gitCommonDir = `/gc/${gcIndex}`;
+  const repoKey = repoKeyFor({ hostId: 'local', gitCommonDir });
+  const store = createDeskStore({ stableRoot });
+  const result = await store.transact(
+    repoKey,
+    {
+      repo: { hostId: 'local', gitCommonDir },
+      actorKey: 'desk:hook',
+      assignmentId: 'unassigned',
+      requestId: randomUUID(),
+      command: { kind: 'seed' },
+    },
+    () => ({ ok: true, events: [], memberships: rows }),
+  );
+  assert.ok(result.ok, `seed commit failed: ${JSON.stringify(result)}`);
+  return repoKey;
+}
+
+/** A schema-valid v2 membership row (refinement-clean per variant). */
+const member = (over = {}) => ({
+  membershipId: randomUUID(),
+  state: 'unbound-open',
+  bindingHandleSha256: createHash('sha256').update(randomUUID()).digest('hex'),
+  provider: 'slp-codex-peer',
+  family: 'codex',
+  role: 'peer',
+  createCwd: '/repo',
+  openGeneration: 1,
+  agentId: null,
+  workspaceId: null,
+  createdAt: NOW,
+  hostConfirmedAt: null,
+  registeredAt: null,
+  revokedAt: null,
+  revokeReason: null,
+  ...over,
+});
+
+test('P2-e: no repos directory (and an empty one) projects [] with no omissions', async t => {
+  const absent = await projectionHome(t).view();
+  assert.deepEqual(absent.bindings, []);
+  assert.equal(absent.completeness.filter(e => e.collection === 'bindings').length, 0);
+
+  const { home, stableRoot, view } = projectionHome(t);
+  mkdirSync(reposDirOf(stableRoot), { recursive: true });
+  const empty = await view();
+  assert.deepEqual(GetEnforcementStatusOutput.parse(empty), empty);
+  assert.deepEqual(empty.bindings, []);
+  assert.equal(empty.completeness.filter(e => e.collection === 'bindings').length, 0);
+  assert.equal(omitted(empty, 'bindings', 'source-incomplete'), 0);
+});
+
+test('P2-e: only rows with an agentId project; states pass through; rows are wire-valid', async t => {
+  const { stableRoot, view } = projectionHome(t);
+  const confirmed = member({
+    state: 'host-confirmed', agentId: 'agent-confirmed', workspaceId: 'wks-1',
+    hostConfirmedAt: '2026-01-01T00:00:01.000Z',
+  });
+  const revokedBound = member({
+    state: 'revoked', agentId: 'agent-revoked', workspaceId: 'wks-2',
+    hostConfirmedAt: '2026-01-01T00:00:02.000Z',
+    registeredAt: '2026-01-01T00:00:03.000Z',
+    revokedAt: '2026-01-01T00:00:04.000Z',
+    revokeReason: 'archived',
+  });
+  await seedMemberships(stableRoot, 0, [
+    member(), // unbound-open — no agentId
+    member({ state: 'revoked', revokedAt: '2026-01-01T00:00:05.000Z', revokeReason: 'expired-unbound' }), // revoked, never bound
+    confirmed,
+    revokedBound,
+  ]);
+  const out = await view();
+  assert.deepEqual(GetEnforcementStatusOutput.parse(out), out);
+  assert.equal(out.bindings.length, 2);
+  assert.equal(omitted(out, 'bindings', 'state-excluded'), 2,
+    'both agentId-less rows count — unbound-open and expired-unbound');
+  // Order: observedAt desc — the revoked row (…:04) leads the confirmed (…:01).
+  const [rev, conf] = out.bindings;
+  assert.equal(rev.agentId, 'agent-revoked');
+  assert.equal(rev.state, 'revoked');
+  assert.equal(rev.observedAt, '2026-01-01T00:00:04.000Z');
+  assert.equal(rev.membershipId, revokedBound.membershipId);
+  assert.equal(rev.family, 'codex');
+  assert.equal(rev.epoch, null);
+  assert.deepEqual(rev.limitations, [
+    'registration: confirmed', 'attestation: none', 'revoked: archived',
+  ]);
+  assert.equal(conf.agentId, 'agent-confirmed');
+  assert.equal(conf.state, 'host-confirmed');
+  assert.equal(conf.observedAt, '2026-01-01T00:00:01.000Z');
+  assert.deepEqual(conf.limitations, ['registration: pending', 'attestation: none']);
+  // The emitted vocabulary never includes attached/active.
+  assert.ok(out.bindings.every(row => !['attached', 'active', 'unbound-open'].includes(row.state)));
+  for (const row of out.bindings) assert.deepEqual(SeatBindingView.parse(row), row);
+  // The static L-B literal is always present.
+  assert.ok(out.limitations.includes(limitation('L-B')));
+});
+
+test('P2-e: rows from multiple repos project together', async t => {
+  const { stableRoot, view } = projectionHome(t);
+  for (const i of [0, 1, 2]) {
+    await seedMemberships(stableRoot, i, [
+      member({ state: 'host-confirmed', agentId: `agent-${i}`, hostConfirmedAt: `2026-01-01T00:00:0${i}.000Z` }),
+    ]);
+  }
+  const out = await view();
+  assert.equal(out.bindings.length, 3);
+  // observedAt descending across repos.
+  assert.deepEqual(out.bindings.map(r => r.agentId), ['agent-2', 'agent-1', 'agent-0']);
+});
+
+// Ordering is by instant, not string bytes — a '+09:00' timestamp sorts
+// EARLIER chronologically than a lexically-later 'Z' one (S6). Both the
+// per-row max selection and the cross-row sort must use Date.parse.
+test('P2-e §4.2: observedAt ordering follows the parsed instant — non-Z offsets', async t => {
+  const { stableRoot, view } = projectionHome(t);
+  await seedMemberships(stableRoot, 0, [
+    // '2026-01-02T00:00:00+09:00' == 2026-01-01T15:00Z — lexically later than
+    // agent-zulu's string but chronologically earlier.
+    member({
+      state: 'host-confirmed', agentId: 'agent-offset',
+      hostConfirmedAt: '2026-01-02T00:00:00+09:00',
+    }),
+    member({
+      state: 'host-confirmed', agentId: 'agent-zulu',
+      hostConfirmedAt: '2026-01-01T23:00:00.000Z',
+    }),
+    // Same trap inside one row: registeredAt '23:00+09:00' (14:00Z) loses to
+    // revokedAt '20:00Z' (20:00Z) by instant, wins by string bytes.
+    member({
+      state: 'revoked', agentId: 'agent-mixed',
+      hostConfirmedAt: '2026-01-01T00:00:00.000Z',
+      registeredAt: '2026-01-01T23:00:00+09:00',
+      revokedAt: '2026-01-01T20:00:00.000Z',
+      revokeReason: 'archived',
+    }),
+  ]);
+  const out = await view();
+  assert.deepEqual(GetEnforcementStatusOutput.parse(out), out);
+  // Instants: zulu 23:00Z > mixed 20:00Z > offset 15:00Z.
+  assert.deepEqual(out.bindings.map(r => r.agentId), ['agent-zulu', 'agent-mixed', 'agent-offset']);
+  assert.equal(out.bindings[1].observedAt, '2026-01-01T20:00:00.000Z',
+    'the stored string is emitted, but the max was chosen by instant');
+});
+
+// Regression (S6-reg): Date.parse of the epoch is 0 — a real instant, not a
+// falsy one. A `||`-style instant() would sink epoch rows below pre-epoch.
+test('P2-e §4.2: the epoch is a real instant — sorts ahead of pre-epoch', async t => {
+  const { stableRoot, view } = projectionHome(t);
+  await seedMemberships(stableRoot, 0, [
+    member({ state: 'host-confirmed', agentId: 'agent-epoch', hostConfirmedAt: '1970-01-01T00:00:00.000Z' }),
+    member({ state: 'host-confirmed', agentId: 'agent-preepoch', hostConfirmedAt: '1969-12-31T23:59:59.000Z' }),
+  ]);
+  const out = await view();
+  assert.deepEqual(out.bindings.map(r => r.agentId), ['agent-epoch', 'agent-preepoch'],
+    'epoch (parse = 0) must sort before 1969-12-31 (parse = -1000), not after');
+});
+
+test('P2-e: absent/corrupt/future/unsafe ledgers and read exceptions — one L-S1, exact completeness', async t => {
+  const { stableRoot, view } = projectionHome(t);
+  const repos = reposDirOf(stableRoot);
+  // absent: repo dir exists, no ledger.json.
+  mkdirSync(join(repos, repoKeyAt(0)), { recursive: true });
+  // corrupt: invalid JSON.
+  mkdirSync(join(repos, repoKeyAt(1)), { recursive: true });
+  writeFileSync(join(repos, repoKeyAt(1), 'ledger.json'), 'not json{');
+  // future: header-valid, schemaVersion ahead.
+  mkdirSync(join(repos, repoKeyAt(2)), { recursive: true });
+  writeFileSync(join(repos, repoKeyAt(2), 'ledger.json'), JSON.stringify({ format: 'paseo-slp/enforcement', schemaVersion: 3 }));
+  // unsafe: ledger.json is a directory (not a regular file).
+  mkdirSync(join(repos, repoKeyAt(3), 'ledger.json'), { recursive: true });
+  // read throws: injected store seam maps a chosen key to IO_FAILURE.
+  const throwing = repoKeyAt(4);
+  mkdirSync(join(repos, throwing), { recursive: true });
+  const deskStore = () => ({
+    read: key => {
+      if (key === throwing) throw new OperationConflict('IO_FAILURE', 'disk error');
+      return createDeskStore({ stableRoot }).read(key);
+    },
+  });
+  const out = await view({ deskStore });
+  assert.deepEqual(GetEnforcementStatusOutput.parse(out), out);
+  assert.deepEqual(out.bindings, []);
+  // absent contributes nothing; corrupt+future+unsafe → malformed 3;
+  // the thrown read → source-incomplete 1. All four dropped repos count
+  // once into the aggregate L-S1 (N = 4).
+  assert.equal(omitted(out, 'bindings', 'malformed'), 3);
+  assert.equal(omitted(out, 'bindings', 'source-incomplete'), 1);
+  const ls1 = `bindings: 4 repo ledger(s) skipped; inspect slp-runtime/state/enforcement/repos/*/ledger.json`;
+  assert.ok(out.limitations.includes(ls1), `L-S1(N=4): ${JSON.stringify(out.limitations)}`);
+  assert.equal(renderSkippedLedgers(4), ls1, 'the render helper produces the pinned literal');
+  // No L-S2 — the repos dir listed fine.
+  assert.equal(out.limitations.includes(limitation('L-S2')), false);
+});
+
+test('P2-e: a non-ENOENT readdir failure withholds bindings with L-S2 — never L-S1', async t => {
+  const { view } = projectionHome(t);
+  const out = await view({
+    readdir: () => { const e = new Error('denied'); e.code = 'EACCES'; throw e; },
+  });
+  assert.deepEqual(GetEnforcementStatusOutput.parse(out), out);
+  assert.deepEqual(out.bindings, []);
+  assert.equal(omitted(out, 'bindings', 'source-incomplete'), 1);
+  assert.ok(out.limitations.includes(limitation('L-S2')));
+  assert.equal(out.limitations.some(l => /repo ledger\(s\) skipped/.test(l)), false, 'L-S1 must not appear when nothing was scanned');
+});
+
+test('P2-e: repos beyond bindingsRepos count as source-incomplete only — never into L-S1', async t => {
+  const { stableRoot, view } = projectionHome(t);
+  const repos = reposDirOf(stableRoot);
+  // 17 candidate dirs; the corrupt one sorts first (within the scan cap),
+  // one absent dir lands beyond it.
+  const keys = Array.from({ length: WIRE_LIMITS.bindingsRepos + 1 }, (_, i) => repoKeyAt(i)).sort();
+  for (const key of keys) mkdirSync(join(repos, key), { recursive: true });
+  writeFileSync(join(repos, keys[0], 'ledger.json'), 'corrupt{');
+  const out = await view();
+  assert.deepEqual(GetEnforcementStatusOutput.parse(out), out);
+  // scanned: 16 dirs (1 corrupt → malformed; 15 absent → nothing); beyond: 1.
+  assert.equal(omitted(out, 'bindings', 'malformed'), 1);
+  assert.equal(omitted(out, 'bindings', 'source-incomplete'), 1);
+  assert.ok(out.limitations.includes(renderSkippedLedgers(1)), 'L-S1 counts only the read-and-dropped repo');
+});
+
+test('P2-e: directories whose names fail REPO_KEY_PATTERN are ignored silently', async t => {
+  const { stableRoot, view } = projectionHome(t);
+  const repos = reposDirOf(stableRoot);
+  mkdirSync(join(repos, 'not-a-repo-key', 'nested'), { recursive: true });
+  writeFileSync(join(repos, 'README'), 'x');
+  const out = await view();
+  assert.deepEqual(out.bindings, []);
+  assert.equal(out.completeness.filter(e => e.collection === 'bindings').length, 0);
+});
+
+test('P2-e: over the bindings cap sheds the OLDEST rows into row-limit', async t => {
+  const { stableRoot, view } = projectionHome(t);
+  const rows = Array.from({ length: WIRE_LIMITS.bindings + 1 }, (_, i) => member({
+    state: 'host-confirmed',
+    agentId: `agent-${String(i).padStart(2, '0')}`,
+    hostConfirmedAt: `2026-01-01T00:00:${String(i).padStart(2, '0')}.000Z`,
+  }));
+  await seedMemberships(stableRoot, 0, rows);
+  const out = await view();
+  assert.deepEqual(GetEnforcementStatusOutput.parse(out), out);
+  assert.equal(out.bindings.length, WIRE_LIMITS.bindings);
+  assert.equal(omitted(out, 'bindings', 'row-limit'), 1);
+  // The shed row is the oldest — agent-00 is absent, agent-16 survives.
+  assert.equal(out.bindings.some(r => r.agentId === 'agent-00'), false);
+  assert.equal(out.bindings[0].agentId, `agent-${String(WIRE_LIMITS.bindings).padStart(2, '0')}`);
+});
+
+test('P2-e: an over-cap field elides the whole row as field-overflow — never truncated', async t => {
+  const { stableRoot, view } = projectionHome(t);
+  const key = repoKeyAt(0);
+  mkdirSync(join(reposDirOf(stableRoot), key), { recursive: true });
+  const row = member({ state: 'host-confirmed', agentId: 'a'.repeat(WIRE_LIMITS.agentId + 1), hostConfirmedAt: NOW });
+  const deskStore = () => ({ read: () => ({ state: 'ok', ledger: { memberships: [row] }, persistedSchemaVersion: 2 }) });
+  const out = await view({ deskStore });
+  assert.deepEqual(out.bindings, []);
+  assert.equal(omitted(out, 'bindings', 'field-overflow'), 1);
+});
+
+test('P2-e: the projection is read-only — the repos tree is byte-identical after readView', async t => {
+  const { stableRoot, view } = projectionHome(t);
+  await seedMemberships(stableRoot, 0, [member({ state: 'host-confirmed', agentId: 'agent-1', hostConfirmedAt: NOW })]);
+  const repos = reposDirOf(stableRoot);
+  const snapshot = () => {
+    const listing = [];
+    for (const name of readdirSync(repos).sort()) {
+      for (const file of readdirSync(join(repos, name)).sort()) {
+        const path = join(repos, name, file);
+        listing.push([name, file, readFileSync(path, 'utf8')]);
+      }
+    }
+    return listing;
+  };
+  const before = snapshot();
+  const out = await view();
+  assert.equal(out.bindings.length, 1);
+  assert.deepEqual(snapshot(), before, 'readView must never write under repos/');
+  // And no desk locks or recovery artifacts appear.
+  assert.equal(existsSync(join(repos, repoKeyAt(0), 'lock')), false);
+  assert.equal(existsSync(join(repos, repoKeyAt(0), 'recover.lock')), false);
+  assert.equal(existsSync(join(repos, repoKeyAt(0), 'recovery-log.jsonl')), false);
+});
+
+test('P2-e §4.5: the limitation table matches the pinned literals verbatim, byte-measured', () => {
+  // The contract pins these strings byte-for-byte — a literal change without
+  // a contract bump is a mutation this test kills.
+  const longestReason = REVOKE_REASONS.reduce((a, b) => (b.length > a.length ? b : a));
+  assert.equal(longestReason, 'registration-mismatch');
+  const PINNED = {
+    'L-B': 'bindings: desk handshake rows with an agentId; no attestation or authority; rows without agentId are only counted',
+    'L-P': 'bindings withheld: PASEO_HOME not exported; memberships still recorded; export it or run desk-recover --paseo-home',
+    'L-S1': `bindings: ${WIRE_LIMITS.bindingsRepos} repo ledger(s) skipped; inspect slp-runtime/state/enforcement/repos/*/ledger.json`,
+    'L-S2': 'bindings: repos directory unreadable; check slp-runtime/state/enforcement/repos exists and is readable',
+    'C-DL': 'desk ledger exists (P2-a store, P2-c memberships); bindings show handshakes, no attestation; no dispatch or authority',
+    'R-RC': 'registration: confirmed',
+    'R-RP': 'registration: pending',
+    'R-AN': 'attestation: none',
+    'R-RV': `revoked: ${longestReason}`,
+  };
+  assert.deepEqual(LIMITATION_TABLE.map(e => e.id).sort(), Object.keys(PINNED).sort(),
+    'every pinned id exists and no id was added silently');
+  for (const entry of LIMITATION_TABLE) {
+    assert.equal(entry.text, PINNED[entry.id], `${entry.id} literal drifted`);
+    const bytes = Buffer.byteLength(entry.text, 'utf8');
+    assert.equal(bytes, entry.text.length, `${entry.id} must be printable ASCII (bytes === chars)`);
+    assert.ok([...entry.text].every(c => c >= ' ' && c <= '~'), `${entry.id} non-ASCII`);
+    assert.ok(bytes <= WIRE_LIMITS[entry.capKey], `${entry.id} ${bytes}B exceeds ${entry.capKey}=${WIRE_LIMITS[entry.capKey]}`);
+    assert.equal(limitation(entry.id), entry.text, `${entry.id} accessor agrees`);
+  }
+  // §4.5 byte column, re-measured: L-B 113, L-P 114, L-S1 94 (N=16), L-S2 102,
+  // C-DL 117, R-RC 23, R-RP 21, R-AN 17, R-RV 30.
+  const measured = Object.fromEntries(LIMITATION_TABLE.map(e => [e.id, Buffer.byteLength(e.text, 'utf8')]));
+  assert.deepEqual(measured, {
+    'L-B': 113, 'L-P': 114, 'L-S1': 94, 'L-S2': 102,
+    'C-DL': 117, 'R-RC': 23, 'R-RP': 21, 'R-AN': 17, 'R-RV': 30,
+  });
+  // Render helpers interpolate only the placeholder.
+  assert.equal(renderSkippedLedgers(7), `bindings: 7 repo ledger(s) skipped; inspect slp-runtime/state/enforcement/repos/*/ledger.json`);
+  assert.equal(renderRevoked('archived'), 'revoked: archived');
+  // §4.5 worst-case: the P0 static count + one dynamic entry stays under cap.
+  assert.ok(
+    P0_STATIC_LIMITATIONS.length + 1 <= WIRE_LIMITS.limitations,
+    'view limitations worst case must fit the collection cap',
+  );
+});
+
+test('P2-e §4.4: 16 is the largest bindings cap whose worst-case view stays under 64 KiB', () => {
+  const audit = fixtureAudit();
+  // §4.4 builder per errata E-P2E-2 (contract-p2e-errata.vi.md): collections
+  // sit at their caps; every CALLER- or DATA-DERIVED string is escape-filled
+  // at its wire cap (target.*, installation.*, membershipId, agentId — the
+  // seed escape of P0/P2-b). Producer-fixed strings stay at their real
+  // pinned bytes —
+  // capability/gap rows are compile-time literals in capabilities.ts (P0's
+  // normative fixture uses `audit.records`/`audit.gaps` verbatim), and
+  // limitations are the pinned §4.5 literals at their worst combination
+  // (§4.5: static count + one dynamic; L-P is the longest dynamic), never
+  // escape-filled schema-freak content — schema-only maxima on
+  // producer-fixed fields belong to the overflow fixture, which already
+  // proves the emit guard fails closed.
+  const worstLimitations = [
+    ...P0_STATIC_LIMITATIONS,
+    [limitation('L-P'), limitation('L-S2'), renderSkippedLedgers(WIRE_LIMITS.bindingsRepos)]
+      .reduce((a, b) => (b.length > a.length ? b : a)),
+  ];
+  const fatBindingWorst = () => ({
+    schemaVersion: 1,
+    membershipId: escapeFill(WIRE_LIMITS.membershipId),
+    agentId: escapeFill(WIRE_LIMITS.agentId),
+    family: 'codex',
+    state: 'revoked',
+    epoch: Number.MAX_SAFE_INTEGER,
+    observedAt: NOW,
+    limitations: [
+      limitation('R-RC'), limitation('R-AN'), renderRevoked('registration-mismatch'),
+    ],
+  });
+  const worstAt = n => GetEnforcementStatusOutput.parse({
+    schemaVersion: 1,
+    target: {
+      hostId: escapeFill(WIRE_LIMITS.targetHostId),
+      daemonHome: '/' + escapeFill(WIRE_LIMITS.targetDaemonHome - 1),
+    },
+    generatedAt: NOW,
+    installation: {
+      state: escapeFill(WIRE_LIMITS.installationState),
+      revision: Number.MAX_SAFE_INTEGER,
+      bound: true,
+      error: escapeFill(WIRE_LIMITS.installationError),
+    },
+    capabilities: audit.records,
+    gaps: audit.gaps,
+    bindings: Array.from({ length: n }, fatBindingWorst),
+    limitations: worstLimitations,
+    completeness: allPairs(),
+    acceptance: 'not-established-by-this-view',
+  });
+  // Candidate set from the contract: {64, 32, 16} — measure all three
+  // (the schema caps bindings at WIRE_LIMITS.bindings, so the over-cap
+  // candidates are measured on the pre-parse object).
+  const measured = Object.fromEntries(
+    [64, 32, 16].map(n => [n, utf8Bytes({ ...worstAt(Math.min(n, WIRE_LIMITS.bindings)), bindings: Array.from({ length: n }, fatBindingWorst) })]),
+  );
+  console.info('P2-e bindings worst-case fixture', { measured, cap: WIRE_LIMITS.bindings });
+  // 64 and 32 exceed the schema cap anyway; byte-wise they are also over.
+  assert.ok(measured[64] > MAX_RPC_BYTES && measured[32] > MAX_RPC_BYTES);
+  assert.ok(measured[16] < MAX_RPC_BYTES, `worst-case at cap 16 is ${measured[16]} bytes`);
+  assert.equal(WIRE_LIMITS.bindings, 16, 'the largest fitting candidate');
+  // The at-cap fixture passes the emit guard verbatim.
+  const atCap = worstAt(WIRE_LIMITS.bindings);
+  assert.deepEqual(boundStatusView(atCap), atCap);
+});
+
+test('P2-e: capabilities row enforcement.desk-ledger keeps unsupported and carries C-DL', () => {
+  const { records } = auditCapabilities({ now: NOW, observed: silentHost });
+  const row = records.find(r => r.capabilityId === 'enforcement.desk-ledger');
+  assert.equal(row.status, 'unsupported');
+  assert.ok(row.limitations.includes(limitation('C-DL')));
+  // The old P0 literal must be gone (mutation-sensitive pin).
+  assert.equal(row.limitations.some(l => l.includes('does not exist')), false);
 });

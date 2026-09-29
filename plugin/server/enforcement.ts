@@ -3,9 +3,10 @@
 // This module is the single use-case Interface the migration table assigns:
 // callers reach the desk only through `readView` / `dispatch` — sequencing of
 // locks, grants, pins and receipts is the desk's job, never the caller's.
-// At P0 the desk is observational by construction:
+// The desk stays observational by construction:
 //   - `readView` answers the capability audit, the install-receipt state and
-//     a literal-empty binding list, all read-only — it never projects
+//     the P2-e membership projection (bindings rows carrying an agentId,
+//     read-only from the verified served home) — it never projects
 //     configured provider values, effective policy or per-agent model rows;
 //   - `dispatch` exists so every future mutation enters through one typed
 //     rejection boundary — at P0 it refuses everything with CAPABILITY_GAP.
@@ -15,7 +16,7 @@
 // the preference owner, and no view here is an acceptance verdict.
 
 import { z } from "zod";
-import { realpathSync } from "node:fs";
+import { readdirSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import { FetchAgentsResponseMessageSchema } from "@getpaseo/protocol/messages";
 import {
@@ -30,12 +31,22 @@ import {
   type CompletenessReasonValue,
   type DeskRejectionValue,
   type GetEnforcementStatusOutputValue,
+  type SeatBindingViewValue,
 } from "../shared/enforcement.ts";
 import { isRecord } from "./config-view.ts";
 import { detectDaemonHome, receiptMatchesTarget } from "./daemon-home.ts";
 import { MAX_RPC_BYTES, OperationConflict } from "../shared/contracts.ts";
 import type { Journal } from "./journal.ts";
 import { auditCapabilities } from "./capabilities.ts";
+import {
+  createDeskStore,
+  deskReposDir,
+  REPO_KEY_PATTERN,
+  type DeskStore,
+  type DeskStoreRead,
+  type MembershipValue,
+} from "./desk-store.ts";
+import { limitation, renderSkippedLedgers, renderRevoked } from "./limitations.ts";
 
 /** The pinned agents.list oracle: DaemonClient validates the wire envelope
  *  before a plugin ever sees it, so the host surface derives from the
@@ -59,13 +70,20 @@ export interface EnforcementHostApi {
 export interface EnforcementDeps {
   journal: Journal;
   now?: () => Date;
+  /** P2-e projection seams — production leaves both unset. `deskStore`
+   *  returns the read half of a store over the verified home's stable root;
+   *  `readdir` lists the repos directory. Tests inject faults here. */
+  deskStore?: (stableRoot: string) => Pick<DeskStore, "read">;
+  readdir?: (path: string) => string[];
 }
 
-/** The P0 static limitation strings every view carries — exported so the
- *  capacity fixture uses the producer's real content, not a second copy. */
+/** The static limitation strings every view carries — exported so the
+ *  capacity fixture uses the producer's real content, not a second copy.
+ *  The bindings entry is the P2-e L-B literal, read from the single
+ *  limitation table (contract §4.7). */
 export const P0_STATIC_LIMITATIONS = [
   "P0 is observational only — nothing in this view is enforced by a desk; dispatch rejects every command",
-  "bindings[] is empty by construction: no desk binding ledger exists yet, and observed host agents are not desk-bound seats",
+  limitation("L-B"),
   "capability rows default to unknown; source-static-compat evidence proves interfaces, never live delivery",
   "a requested catalog model is not the effective model; per-agent model rows are outside the P0 contract",
   "configured provider values are not projected by this view; effective provider policy is not observable",
@@ -173,6 +191,136 @@ export function boundStatusView(
 
 export function createEnforcement(deps: EnforcementDeps) {
   const now = () => (deps.now ?? (() => new Date()))().toISOString();
+  const readdir = (path: string): string[] =>
+    deps.readdir ? deps.readdir(path) : readdirSync(path);
+  const storeFor = (stableRoot: string): Pick<DeskStore, "read"> =>
+    deps.deskStore ? deps.deskStore(stableRoot) : createDeskStore({ stableRoot });
+
+  /** §4.2 row mapping — a membership row becomes a SeatBindingView only when
+   *  it carries an agentId. Row limitations come from the single §4.5 table;
+   *  an over-cap field elides the row (field-overflow), never truncates. */
+  function seatBindingView(row: MembershipValue): SeatBindingViewValue | null {
+    // Chronological max of the row's timestamps — Date.parse, not lexical
+    // order, so a non-Z offset can never reorder the projection.
+    const observedAt = [row.revokedAt, row.registeredAt, row.hostConfirmedAt]
+      .filter((t): t is string => t !== null)
+      .reduce<string | null>(
+        (max, t) => (max === null || Date.parse(t) > Date.parse(max) ? t : max),
+        null,
+      );
+    const rowLimitations = [
+      row.registeredAt === null ? limitation("R-RP") : limitation("R-RC"),
+      limitation("R-AN"),
+      ...(row.state === "revoked" && row.revokeReason !== null ? [renderRevoked(row.revokeReason)] : []),
+    ];
+    const view: SeatBindingViewValue = {
+      schemaVersion: 1,
+      membershipId: row.membershipId,
+      agentId: row.agentId!,
+      family: row.family,
+      state: row.state,
+      epoch: null,
+      observedAt,
+      limitations: rowLimitations,
+    };
+    if (row.membershipId.length > WIRE_LIMITS.membershipId
+        || view.agentId.length > WIRE_LIMITS.agentId
+        || rowLimitations.some(l => l.length > WIRE_LIMITS.limitationLen)) {
+      return null;
+    }
+    return view;
+  }
+
+  /** §4.1/§4.4 — enumerate the repos directory under the VERIFIED served
+   *  home, read each ledger through store.read (no lock, no write, no
+   *  directory creation), and project the membership rows that carry an
+   *  agentId. Every elision lands in the completeness ledger; skipped
+   *  ledgers fold into the single aggregate L-S1 limitation (errata: only
+   *  read-then-excluded repos count toward N). */
+  function projectBindings(
+    home: string,
+    ledger: CompletenessLedger,
+    limitations: string[],
+  ): SeatBindingViewValue[] {
+    const stableRoot = join(home, "slp-runtime");
+    let names: string[];
+    try {
+      names = readdir(deskReposDir(stableRoot));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+      ledger.sourceIn("bindings");
+      ledger.drop("bindings", "source-incomplete");
+      limitations.push(limitation("L-S2"));
+      return [];
+    }
+    const store = storeFor(stableRoot);
+    const candidates = names.filter(name => REPO_KEY_PATTERN.test(name)).sort();
+    const readable = candidates.slice(0, WIRE_LIMITS.bindingsRepos);
+    const beyond = candidates.length - readable.length;
+    if (beyond > 0) {
+      // Repos past the scan cap are never opened (E-P2E-1) — reported only
+      // as source-incomplete; they do not enter L-S1's N.
+      ledger.sourceIn("bindings", beyond);
+      ledger.drop("bindings", "source-incomplete", beyond);
+    }
+    const rows: SeatBindingViewValue[] = [];
+    let skipped = 0;
+    for (const repoKey of readable) {
+      let read: DeskStoreRead;
+      try {
+        read = store.read(repoKey);
+      } catch {
+        ledger.sourceIn("bindings");
+        ledger.drop("bindings", "source-incomplete");
+        skipped += 1;
+        continue;
+      }
+      if (read.state === "absent") continue;
+      if (read.state !== "ok") {
+        ledger.sourceIn("bindings");
+        ledger.drop("bindings", "malformed");
+        skipped += 1;
+        continue;
+      }
+      for (const row of read.ledger.memberships) {
+        ledger.sourceIn("bindings");
+        if (row.agentId === null) {
+          ledger.drop("bindings", "state-excluded");
+          continue;
+        }
+        const view = seatBindingView(row);
+        if (view === null) {
+          ledger.drop("bindings", "field-overflow");
+          continue;
+        }
+        rows.push(view);
+      }
+    }
+    if (skipped > 0) limitations.push(renderSkippedLedgers(skipped));
+    // §4.2 order: observedAt descending by parsed instant (a non-Z offset
+    // can never reorder rows), membershipId ascending on ties; the
+    // collection cap sheds the oldest rows into row-limit.
+    // NaN-aware, not falsy: the epoch (1970-01-01T00:00:00.000Z) parses to
+    // 0 — a real instant — and must never degrade to NEGATIVE_INFINITY.
+    const instant = (value: string | null): number => {
+      if (value === null) return Number.NEGATIVE_INFINITY;
+      const t = Date.parse(value);
+      return Number.isNaN(t) ? Number.NEGATIVE_INFINITY : t;
+    };
+    rows.sort((a, b) => {
+      const diff = instant(b.observedAt) - instant(a.observedAt);
+      if (diff !== 0) return diff;
+      const am = a.membershipId ?? "";
+      const bm = b.membershipId ?? "";
+      return am < bm ? -1 : am > bm ? 1 : 0;
+    });
+    const kept = rows.slice(0, WIRE_LIMITS.bindings);
+    if (rows.length > kept.length) {
+      ledger.drop("bindings", "row-limit", rows.length - kept.length);
+    }
+    ledger.emitted("bindings", kept.length);
+    return kept;
+  }
 
   /** Read-only desk status. Every host touch is a read; failures degrade to
    *  limitations in the view, never to a hidden empty truth. Receipt and
@@ -318,6 +466,19 @@ export function createEnforcement(deps: EnforcementDeps) {
     assertProducerBound("gaps", gaps.length, WIRE_LIMITS.gaps);
     ledger.emitted("gaps", gaps.length);
 
+    // P2-e bindings projection (§4): read-only membership rows with an
+    // agentId from the verified served home's repo ledgers. Runs only when
+    // provenance held; an unverified home withholds the collection with L-P
+    // + source-incomplete — never a pretend "no memberships" answer.
+    const bindings = servedHome === null
+      ? (() => {
+          ledger.sourceIn("bindings");
+          ledger.drop("bindings", "source-incomplete");
+          limitations.push(limitation("L-P"));
+          return [];
+        })()
+      : projectBindings(servedHome, ledger, limitations);
+
     limitations.push(...P0_STATIC_LIMITATIONS);
 
     // Producer cap for the limitations collection itself — same fail-closed
@@ -343,7 +504,7 @@ export function createEnforcement(deps: EnforcementDeps) {
       installation,
       capabilities: records,
       gaps,
-      bindings: [],
+      bindings,
       limitations,
       completeness,
       acceptance: "not-established-by-this-view",

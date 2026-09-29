@@ -7,7 +7,7 @@ import { realpathSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { activate, reconcile, deactivate, status, localTarget, catalog, setLanguage, getRoleRouting, setRoleRouting, getPeerPool, setPeerPool, getJev, setJev, setJevKey, testJev, getWorkTracker, setWorkTracker } from "./shared/contracts.ts";
 import { disableSupervisionNotifications, getSupervision, getSupervisionStatus, setSupervision } from "./shared/supervision.ts";
-import { enforcementStatus, enforcementRuntimePin } from "./shared/enforcement.ts";
+import { enforcementStatus, enforcementRecoverLock, enforcementRuntimePin } from "./shared/enforcement.ts";
 import type { Manager } from "./shared/contracts.ts";
 import { loadCatalog } from "./server/provider-catalog.ts";
 import { createManager } from "./server/manager.ts";
@@ -26,6 +26,7 @@ import { createJournal } from "./server/journal.ts";
 import { createRoleInjection } from "./server/role-injection.ts";
 import { createWorkTracker, readWorkTrackerEnabled } from "./server/work-tracker.ts";
 import { createEnforcement } from "./server/enforcement.ts";
+import { recoverLockView } from "./server/desk-recovery.ts";
 import { readRuntimePinView } from "./server/runtime-pin.ts";
 // Host note: this must stay a hoisted function declaration, not a const —
 // the daemon compiler's Hermes interop eagerly copies export values before
@@ -107,12 +108,17 @@ export default function contribute(server: Parameters<PluginServerContribution>[
   // picked up without re-registering; failures propagate to the host, which
   // is what makes the managed path fail closed during a hook gap.
   const journal = createJournal();
-  // Enforcement desk (P0): read-only capability rows plus a literal-empty
-  // binding list — no provider-policy or per-agent model projection. No
-  // ledger, no mutation; the desk seam itself lives in server/enforcement.ts
-  // so P1+ state lands behind the same Interface, not in this handler.
+  // Enforcement desk (P0 + P2-e projection): read-only capability rows plus
+  // the membership projection over the verified home's repo ledgers — no
+  // provider-policy or per-agent model projection, no mutation; the desk
+  // seam itself lives in server/enforcement.ts so P1+ state lands behind
+  // the same Interface, not in this handler.
   const enforcement = createEnforcement({ journal });
   server.handle(enforcementStatus, (input, { paseo }) => enforcement.readView(input, paseo));
+  // Desk lock recovery (P2-e): operator-only RPC — the provenance gate
+  // (exported PASEO_HOME + realpath match) runs before the algorithm, so an
+  // unverified or foreign home is never mutated. No hook reaches this path.
+  server.handle(enforcementRecoverLock, input => recoverLockView(input));
   // RuntimePin (P2-b): read-only verdict on the served home's active
   // binding — journal reads only, the materializer's verifyPublished is the
   // integrity oracle. No paseo surface, no mutex, no mutation.

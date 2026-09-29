@@ -19,6 +19,7 @@ import { localTarget, runtimeStatus } from '../src/runtime-state.mjs';
 import { probeWorkTracker } from '../src/work-tracker.mjs';
 import { extractRecords, recordSchema, requireRecordKind, RECORD_KINDS } from '../src/report-records.mjs';
 import { verifyHandback, VerifyError } from '../src/candidate-verify.mjs';
+import { deskRecover, DeskRecoverUsage } from '../src/desk-recovery.mjs';
 
 // One entry per command: the flags it accepts, the required positional target
 // (--schema stands in for it where offered), whether it takes an optional
@@ -47,6 +48,7 @@ const commands = {
   status: { flags: ['--paseo-home'], usage: 'status [--paseo-home <absolute-home>]' },
   'local-target': { flags: ['--paseo-home'], usage: 'local-target [--paseo-home <absolute-home>]' },
   tracker: { flags: ['--paseo-home'], target: 'repository', usage: 'tracker <repository> [--paseo-home <absolute-home>]' },
+  'desk-recover': { flags: ['--paseo-home', '--json'], target: 'repository', usage: 'desk-recover <repository> [--paseo-home <absolute-home>] [--json]' },
 };
 const usage = `Usage: slp.mjs ${Object.values(commands).map(entry => entry.usage).join(' | ')}`;
 
@@ -54,6 +56,7 @@ const root = fileURLToPath(new URL('..', import.meta.url));
 const argv = process.argv.slice(2);
 const [command, ...rest] = argv;
 let [target, ...args] = rest[0]?.startsWith('--') ? [undefined, ...rest] : rest;
+let parsed = false; // argument parse finished — desk-recover distinguishes usage errors from operational ones
 try {
   const options = {};
   for (let i = 0; i < args.length; i++) {
@@ -67,7 +70,7 @@ try {
       continue;
     }
     if (Object.hasOwn(options, key)) throw new Error(`Repeated option ${key}`);
-    if (key === '--apply' || key === '--reload' || key === '--check' || key === '--schema') options[key] = true;
+    if (key === '--apply' || key === '--reload' || key === '--check' || key === '--schema' || key === '--json') options[key] = true;
     else if (key === '--emit') {
       if (args[i + 1] !== 'create') throw new Error('--emit requires create');
       options[key] = args[++i];
@@ -113,6 +116,7 @@ try {
   // destroyed by its own result.
   if (options['--out'] && target && spec?.target === 'request.json' && resolve(options['--out']) === resolve(target)) throw new Error('--out must not resolve to the request file — it writes the response, never the request');
   let result;
+  parsed = true;
   if (command === 'identity') result = identity(root);
   else if (command === 'snapshot') result = snapshot(target);
   else if (command === 'records') {
@@ -210,6 +214,36 @@ try {
     process.stdout.write(roleBundle(root, target, process.env).instructions);
   }
   else if (command === 'notebook') result = notebook(target, options['--paseo-home']);
+  else if (command === 'desk-recover') {
+    // P2-e operator recovery — the CLI owns input resolution (repo → realpath
+    // → repoKey, explicit/resolved home → stable root) and prints the same
+    // output object the RPC returns. Exit: 0 recovered/no-lock, 1 any
+    // rejection, 2 usage (handled by the shared catch below).
+    const { outcome, output } = deskRecover({
+      repository: resolve(target),
+      home: resolveHome(options['--paseo-home']),
+    });
+    if (options['--json']) process.stdout.write(JSON.stringify(output) + '\n');
+    else {
+      const r = outcome.receipt;
+      const lines = [
+        `result: ${r.result}`,
+        `ok: ${outcome.ok}`,
+        outcome.code === null ? null : `code: ${outcome.code}`,
+        `pid: ${r.pid === null ? '-' : r.pid}`,
+        `nonce: ${r.instanceNonce === null ? '-' : r.instanceNonce}`,
+        `actorKey: ${r.actorKey}`,
+        `repoKey: ${r.repoKey}`,
+        `at: ${r.at}`,
+        `auditAppended: ${r.auditAppended}`,
+        `recoverLockReleased: ${r.recoverLockReleased === null ? '-' : r.recoverLockReleased}`,
+        outcome.message === null ? null : `message: ${outcome.message}`,
+        outcome.recovery === null ? null : `recovery: ${outcome.recovery}`,
+      ].filter(line => line !== null);
+      process.stdout.write(lines.join('\n') + '\n');
+    }
+    if (!outcome.ok) process.exitCode = 1;
+  }
   else if (command === 'install' || command === 'uninstall' || command === 'upgrade') {
     if (command === 'install' && !target) target = process.env.SLP_HOME || installHome();
     if (!target || !isAbsolute(target)) throw new Error('Absolute destination required');
@@ -246,4 +280,11 @@ try {
     writeFileSync(out, json(result));
   }
   if (result !== undefined) process.stdout.write(json(result));
-} catch (error) { console.error(error instanceof VerifyError ? `${error.code}: ${error.message}` : error.message); process.exitCode = 1; }
+} catch (error) {
+  console.error(error instanceof VerifyError ? `${error.code}: ${error.message}` : error.message);
+  // desk-recover alone reserves exit 2 for usage errors — argument-parse
+  // failures (before `parsed` is set) and DeskRecoverUsage thrown while
+  // resolving its inputs. Every other command keeps exit 1.
+  const usage = parsed === false || error instanceof DeskRecoverUsage;
+  process.exitCode = command === 'desk-recover' && usage ? 2 : 1;
+}

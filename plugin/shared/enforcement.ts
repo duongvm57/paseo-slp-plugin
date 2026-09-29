@@ -38,6 +38,9 @@ export const CompletenessReason = z.enum([
   "field-overflow",
   /** A source entry did not match the expected shape. */
   "malformed",
+  /** A membership row without an agentId cannot be projected to a seat —
+   *  counted, never shown (P2-e §4.2). */
+  "state-excluded",
   /** A wire-required field was present but empty. */
   "empty",
   /** A collection cap dropped trailing (sorted) rows. */
@@ -96,8 +99,15 @@ export const WIRE_LIMITS = {
   /** Exact P0 inventory: the mandatory `providerTools-projection` row +
    *  4 probe gaps × 4 families. */
   gaps: 17,
-  /** P0 emits `bindings: []` — a non-empty view is producer-invalid. */
-  bindings: 0,
+  /** P2-e membership projection — the cap is the largest of {64, 32, 16}
+   *  whose worst-case enforcement-status output stays under MAX_RPC_BYTES
+   *  (measured by the capacity fixture, §4.4); rows beyond it shed
+   *  oldest-first into `row-limit`. */
+  bindings: 16,
+  /** Repo-ledger scan bound for the bindings projection — an interactive
+   *  call, each ledger up to LEDGER_LIMITS.ledgerBytes; 16 caps the
+   *  worst-case read cost. Repos beyond the cap are source-incomplete. */
+  bindingsRepos: 16,
   // enforcement-runtime-pin (P2-b): pin field and limitation caps. The pin's
   // node.path pins at the manager's daemonHome cap, not the narrower
   // enforcement target cap.
@@ -105,6 +115,14 @@ export const WIRE_LIMITS = {
   runtimePinNodeVersion: 64,
   runtimePinLimitations: 4,
   runtimePinLimitationLen: 160,
+  // enforcement-recover-lock (P2-e): actor key (prefix + username) is
+  // refused, never truncated, past the cap; the nonce is opaque and
+  // bounded by length only — the writer emits randomUUID, the reader
+  // accepts any nonempty string up to the cap; the result name bound
+  // covers the longest result string.
+  recoverActorKey: 128,
+  recoverNonce: 64,
+  recoverResult: 32,
 } as const;
 
 // ---------------------------------------------------------------------------
@@ -402,8 +420,9 @@ export const GetEnforcementStatusOutput = z.object({
   }).strict().nullable(),
   capabilities: z.array(CapabilityRecord).max(WIRE_LIMITS.capabilities),
   gaps: z.array(CapabilityGap).max(WIRE_LIMITS.gaps),
-  /** Desk-issued seat bindings — P0 has none: always literal `[]`, never
-   *  inferred from observed host agents. */
+  /** Desk-issued seat bindings — P2-e projects membership rows that carry
+   *  an agentId from the verified served home's repo ledgers; an
+   *  unverified home withholds the collection with source-incomplete. */
   bindings: z.array(SeatBindingView).max(WIRE_LIMITS.bindings),
   limitations: z.array(z.string().min(1).max(WIRE_LIMITS.limitationLen)).max(WIRE_LIMITS.limitations),
   /** Structured omission/completeness report — every producer elision,
@@ -422,6 +441,91 @@ export const enforcementStatus = defineRpc({
 });
 
 // ---------------------------------------------------------------------------
+// enforcement-recover-lock RPC (P2-e) — operator recovery of an orphan desk
+// repo lock. Unlink happens only when the lock reads, its pid is a positive
+// integer, kill(pid, 0) throws ESRCH, the bytes are unchanged, and the
+// pre-unlink audit line is durable. No force mode, no `expected` field: the
+// schema below is the only input. The provenance gate (exported PASEO_HOME +
+// realpath match) runs before the algorithm.
+// ---------------------------------------------------------------------------
+
+/** The closed recovery-result vocabulary — exactly 17 values (P2-e §3.2–3.3).
+ *  Precedence group E adds none: it keeps the original result and only swaps
+ *  the envelope + recoverLockReleased. Tests enumerate this enum. */
+export const DeskRecoveryResult = z.enum([
+  "home-unverified",
+  "target-mismatch",
+  "actor-invalid",
+  "unsafe",
+  "recover-lock-io",
+  "busy",
+  "recover-lock-orphan",
+  "no-lock",
+  "unreadable",
+  "held",
+  "undetermined",
+  "changed",
+  "audit-failed",
+  "unlink-failed",
+  "unlink-unsynced",
+  "recovered",
+  "internal-error",
+]);
+
+export type DeskRecoveryResultValue = z.infer<typeof DeskRecoveryResult>;
+
+export const RecoverLockInput = z.object({
+  schemaVersion: z.literal(1),
+  target: EnforcementTarget,
+  repo: z.object({
+    gitCommonDir: z.string().min(1).max(WIRE_LIMITS.targetDaemonHome).refine(isAbsolutePath),
+  }).strict(),
+}).strict();
+
+/** The recovery receipt — returned on every outcome, ok or rejection, with
+ *  keys in exactly this order. `recoverLockReleased` is null when the
+ *  recoverer never held the recover.lock (precedence groups A and B). */
+export const DeskRecoveryReceipt = z.object({
+  schemaVersion: z.literal(1),
+  repoKey: Sha,
+  /** The attempted actor key, verbatim — an actor-invalid receipt records
+   *  the rejected key raw (never truncated, never invented), so no wire cap
+   *  applies here; the acceptance cap lives in the A3 check. */
+  actorKey: z.string(),
+  at: Time,
+  result: DeskRecoveryResult,
+  pid: z.number().int().min(1).nullable(),
+  instanceNonce: z.string().min(1).max(WIRE_LIMITS.recoverNonce).nullable(),
+  auditAppended: z.boolean(),
+  recoverLockReleased: z.boolean().nullable(),
+}).strict();
+
+/** One output shape per outcome (P2-e §3.4): success carries only
+ *  `{ ok: true, receipt }`; rejection adds `code`, `message`, `recovery`.
+ *  `recovery` is null on CAPABILITY_GAP results and always present on
+ *  RECOVERY_REQUIRED ones (it carries the bounded file pointer). */
+export const RecoverLockOutput = z.union([
+  z.object({
+    ok: z.literal(true),
+    receipt: DeskRecoveryReceipt,
+  }).strict(),
+  z.object({
+    ok: z.literal(false),
+    code: DeskErrorCode,
+    message: z.string().min(1).max(WIRE_LIMITS.rejectionMessage),
+    recovery: z.string().min(1).max(WIRE_LIMITS.rejectionRecovery).nullable(),
+    receipt: DeskRecoveryReceipt,
+  }).strict(),
+]);
+
+export const enforcementRecoverLock = defineRpc({
+  name: "enforcement-recover-lock",
+  input: RecoverLockInput,
+  output: RecoverLockOutput,
+});
+
+export type RecoverLockOutputValue = z.infer<typeof RecoverLockOutput>;
+
 // enforcement-runtime-pin RPC (P2-b) — read-only RuntimePin of the active
 // receipt binding. The pin is the P0 §5 measurement/runtime pin: the seat and
 // engine pins are separate pins under later slices. The producer's closed

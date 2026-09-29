@@ -19,6 +19,7 @@
 
 import { z } from "zod";
 import { OperationConflict } from "../shared/contracts.ts";
+import { limitation } from "./limitations.ts";
 import {
   CapabilityRecord,
   CapabilityGap,
@@ -311,7 +312,7 @@ function hostRecords(now: string, observed: CapabilityHostObservation): Capabili
       evidenceRef: null,
       observedAt: now,
       limitations: [
-        "no desk ledger exists at P0 — durable state, bindings and dispatch land in P1/P2; bindings[] is empty by construction",
+        limitation("C-DL"),
       ],
     }),
   ];
