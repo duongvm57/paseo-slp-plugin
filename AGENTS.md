@@ -15,6 +15,16 @@ Keep repository tactics in workspace-protocol.md, outside global roles.
 Runtime installation, host configuration, live agents, commit and push require
 task authority. Other repositories are read-only unless explicitly authorized.
 
+Mutation evidence follows protocol §Gate. R1 binds every mutation log,
+including the acceptance owner's replay: beyond the meta file, the log
+carries the verbatim `sha256sum <test file>` output captured immediately
+before the mutant runs, so readers see the sha without trusting a declared
+field. R2 then makes that replayed, pinned log the evidence of record; the
+engineer's log is supporting material only, and any sha mismatch between
+log, meta and the handback candidate voids the log's claim — no intent needs
+proving. These evidence-reliability rules bind every contributor, not just
+repo ceremony.
+
 ## Ceremony boundary
 
 Global policy owns authority, delegation, ownership and review invariants;
