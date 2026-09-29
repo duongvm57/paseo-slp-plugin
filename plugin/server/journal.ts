@@ -14,14 +14,11 @@ import { randomUUID } from "node:crypto";
 import {
   closeSync,
   fsyncSync,
-  lstatSync,
-  mkdirSync,
   openSync,
   readFileSync,
   renameSync,
   rmSync,
   writeSync,
-  chmodSync,
 } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import {
@@ -39,10 +36,16 @@ import {
   canonicalSha256,
   providerExtendsForId,
 } from "./config-view.ts";
+import {
+  assertRealDirectory,
+  ensurePrivateDirectory,
+  fsyncDirectory,
+  lstatOrNull,
+  PRIVATE_FILE_MODE,
+} from "./kept-files.ts";
 
 export const RECEIPT_FILE = join("state", "receipt.json");
-const PRIVATE_DIR_MODE = 0o700;
-const RECEIPT_MODE = 0o600;
+const RECEIPT_MODE = PRIVATE_FILE_MODE;
 
 export interface JournalDeps {
   /** Temp-file name entropy; injected for deterministic fault tests. */
@@ -70,48 +73,6 @@ export interface Journal {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function lstatOrNull(path: string) {
-  try {
-    return lstatSync(path);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
-    throw error;
-  }
-}
-
-function assertRealDirectory(path: string, what: string) {
-  const stat = lstatOrNull(path);
-  if (stat === null) return;
-  if (!stat.isDirectory() || stat.isSymbolicLink()) {
-    throw new OperationConflict("RECOVERY_REQUIRED", `${what} is not a real directory: ${path}`, {
-      path,
-    });
-  }
-}
-
-function ensurePrivateDirectory(path: string, platform: string) {
-  assertRealDirectory(path, "SLP state path");
-  mkdirSync(path, { recursive: true, mode: PRIVATE_DIR_MODE });
-  if (platform !== "win32") {
-    try {
-      chmodSync(path, PRIVATE_DIR_MODE);
-    } catch {
-      // Permission bits are best-effort on unusual filesystems; the create
-      // mode already requested privacy.
-    }
-  }
-}
-
-function fsyncDirectory(path: string, platform: string) {
-  if (platform === "win32") return;
-  const fd = openSync(path, "r");
-  try {
-    fsyncSync(fd);
-  } finally {
-    closeSync(fd);
-  }
 }
 
 /** Phases at or past plan commitment — the op has computed (and may already
