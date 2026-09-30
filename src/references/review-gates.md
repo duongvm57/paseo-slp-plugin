@@ -1,25 +1,36 @@
 # Review gates
 
-A review gate is not one reviewer. When the assignment or protocol requires
-independent review of a stable candidate, run parallel Peer seats on split
-axes so no axis can mask another. A single reviewer is a degenerate gate —
-valid only for the change classes the protocol lists explicitly (for example
-docs-only edits that touch no semantics, generated-payload regeneration,
-typo or metadata fixes); a required gate over doctrine, delegation,
-packaging, behaviour or code is never single-seat.
+A review gate runs independent reviewer seats against a frozen candidate.
+When the assignment or protocol requires independent review of a stable
+candidate, the gate takes the shape the effective workspace protocol
+declares; absent a declaration, the package default applies: parallel Peer
+seats on split Spec and Standards axes so no axis can mask another. A single
+reviewer is a degenerate gate — valid only for the change classes the
+protocol lists explicitly (for example docs-only edits that touch no
+semantics, generated-payload regeneration, typo or metadata fixes) or where
+the protocol declares a one-seat shape; a required gate over doctrine,
+delegation, packaging, behaviour or code keeps the split default unless the
+protocol records otherwise.
 
 ## Policy provenance
 
-For a required review gate, this package intentionally sets a two-seat floor
-with separate Spec and Standards axes. That is stricter than corpus §§9–11,
-which leaves each repository to choose its review rigor. The Human chose this
-floor in `cc80974` (2026-09-24) so one review axis cannot mask the other. Change
-it only after a later explicit Human decision revisits the assurance and cost
-trade-off; a workspace protocol cannot lower a required gate to one seat.
+The package default is a two-seat gate on separate Spec and Standards axes —
+stricter than corpus §§9–11, which leaves each repository to choose its
+review rigor. The Human chose this default in `cc80974` (2026-09-24) so one
+review axis cannot mask the other, then made the shape itself protocol-owned
+(2026-09-30): the workspace protocol defines its gate's seats and axes and
+may set them stricter or looser than this default — including a declared
+one-seat gate — as a Human protocol decision recorded under Overrides. A
+required gate always has at least one independent seat; removing review for
+a change class is the listed-class mechanism, not a gate shape. What no
+protocol or Lead relaxes: a required gate is never skipped or merged ad hoc,
+and declared seats that cannot be supplied BLOCK the gate rather than
+license merging or skipping.
 
 ## Axes
 
-Two default axes, each on its own fresh seat:
+Two default axes, each on its own fresh seat — a protocol that declares
+other axes replaces or adds to this set:
 
 - **Spec** — does the candidate implement what the spec/assignment asked?
   Findings: requirements missing or partial; behaviour beyond the ask
@@ -32,14 +43,14 @@ Two default axes, each on its own fresh seat:
   smells); a documented repo standard overrides the baseline; skip
   whatever tooling already enforces.
 
-The two split seats are the complete required gate. A **cross-family**
-seat — one reviewer running the same axes from a provider family different
-from the writer's, whose blind spots differ — is a suggested extra for a
-second opinion worth its cost, never a required seat. When routing declines
-the cross-family option or the pool holds no other-family seat, that seat
-reports BLOCKED: the gate does not fail and still runs on the Spec and
-Standards seats. A blocked seat is never permission to merge axes into one
-seat or to skip the gate.
+The protocol's declared seats — the two split seats under the default — are
+the complete required gate. A **cross-family** seat — one reviewer running
+the declared axes from a provider family different from the writer's, whose
+blind spots differ — is a suggested extra for a second opinion worth its
+cost, never a required seat. When routing declines the cross-family option
+or the pool holds no other-family seat, that seat reports BLOCKED: the gate
+does not fail and still runs on its declared seats. A blocked seat is never
+permission to merge axes into one seat or to skip the gate.
 
 ## Verification stays with the Lead
 
@@ -79,10 +90,12 @@ Report axes side by side; never merge or rerank findings into one verdict
 list — a candidate can pass one axis and fail the other, and merged
 rankings let one axis mask the failure. Corrections route to the owning
 lane; re-review returns to the same seat under session continuity. The
-protocol may set seats and axes stricter than this floor; it cannot
-loosen a required gate into one seat — a listed-class exception removes
-the requirement rather than relaxing it, and the Lead decides it and
-records the call in the task's brief or reconcile checkpoint.
+protocol owns the gate's seats and axes in either direction through a
+recorded Overrides decision; a listed-class exception removes the
+requirement rather than relaxing it, and the Lead decides it and records
+the call in the task's brief or reconcile checkpoint. Inside a task the
+declared shape is fixed: the Lead cannot merge, drop or add seats on its
+own.
 
 ## Correction loops
 

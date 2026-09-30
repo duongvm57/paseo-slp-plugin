@@ -563,10 +563,12 @@ test('decision-doctrine lines reach the standalone bundles that need them and ne
   assert.match(monitoring, /never by cwd/, 'seat enumeration is not cwd-scoped');
   assert.match(monitoring, /empty list_agents result does not prove/, 'empty list is not nonexistence');
   assert.match(monitoring, /refs\/heads\/<lane>/, 'lane branches carry lane commits');
-  // M2: the single-seat exception is class-listed and Lead-recorded; a
-  // required gate never collapses into one seat.
+  // M2: the gate shape is protocol-owned — the package default is the
+  // split-axis Spec/Standards gate; the single-seat exception stays
+  // class-listed and Lead-recorded, and a required gate never merges ad hoc.
   const gates = readFileSync(join(installed, 'src/references/review-gates.md'), 'utf8');
-  assert.match(gates, /change classes the protocol lists\s+explicitly/, 'single-seat exception is class-listed');
-  assert.match(gates, /never single-seat/, 'required gate never collapses to one seat');
+  assert.match(gates, /shape the effective workspace protocol\s+declares/, 'gate shape is protocol-declared');
+  assert.match(gates, /change classes the\s+protocol\s+lists\s+explicitly/, 'single-seat exception is class-listed');
+  assert.match(gates, /never skipped or merged ad hoc/, 'a required gate never merges ad hoc');
   assert.match(gates, /Lead decides it and\s+records/, 'exception authority and record are pinned');
 });

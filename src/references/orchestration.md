@@ -43,9 +43,11 @@ Engineer, Architect, Reviewer and Scout use the same Peer role. Assign each a
 self-contained question and disposition-specific output (defined in Peer policy).
 Read-only reports stay in the session unless a separate report write scope is
 granted. When a review gate is required, structure it per
-references/review-gates.md: parallel seats on split axes — a single reviewer is
-a degenerate gate, not the default. A protocol can make review gates stricter;
-inability to supply a required gate is BLOCKED, not permission to skip it.
+references/review-gates.md and the effective protocol's declared shape — the
+default is parallel seats on split axes; a single reviewer remains a
+degenerate gate unless the protocol declares it. The protocol sets gates
+stricter or looser by recorded decision; inability to supply a required gate
+is BLOCKED, not permission to skip it.
 
 ## Session continuity
 

@@ -98,10 +98,13 @@ implementation.
 ## Review gate
 
 This protocol requires an independent review gate for every recipe's code,
-behavior, doctrine or decision artifact, before acceptance or execution:
-parallel Spec and Standards seats — split-axis seats, never one merged seat — on
-the frozen candidate, in sessions separate from the writer and structured by the
-installed review-gate rules. Reviewer seats are checkers, not implementation
+behavior, doctrine or decision artifact, before acceptance or execution.
+Declared shape: parallel Spec and Standards seats — split-axis seats, never one merged seat —
+on the frozen candidate, in sessions separate from the writer and
+structured by the installed review-gate rules. The protocol owns the gate's
+shape: redefining its seats or axes in either direction — stricter or down to
+one seat — is a Human protocol decision recorded under Overrides, and without
+one the declared shape stands. Reviewer seats are checkers, not implementation
 owners, so they never take a task out of Lean. This template lists no single-seat
 change classes; adding one is a Human protocol decision recorded under
 Overrides. Seat titles name the seat inside taskLabel —
