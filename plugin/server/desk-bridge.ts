@@ -49,6 +49,7 @@ import {
   deskRepoPaths,
   deskReposDir,
   type DeskStore,
+  type DeskStoreRead,
   type MembershipValue,
 } from "./desk-store.ts";
 import { assertRealComponents, ensurePrivateDirectory } from "./kept-files.ts";
@@ -58,17 +59,32 @@ import type { Journal } from "./journal.ts";
 import type { LauncherBuilder } from "../shared/contracts.ts";
 import {
   DESK_BRIDGE_PROTOCOL,
+  DeskAssignmentAttachInput,
+  DeskAssignmentCloseInput,
+  DeskAssignmentRegisterInput,
   DeskBridgeAck,
   DeskBridgeFrameError,
   DeskBridgeHello,
   DeskBridgeToolCall,
+  DeskBridgeToolEntry,
   DeskErrorCode as DeskErrorCodeSchema,
+  DeskHandbackSubmitInput,
   DeskSeatStatus,
   WIRE_LIMITS,
   type DeskRejectionValue,
   type DeskSeatStatusValue,
 } from "../shared/enforcement.ts";
 import { auditCapabilities, CAPABILITY_IDS } from "./capabilities.ts";
+import {
+  captureSeatSnapshot,
+  runAssignmentAttach,
+  runAssignmentClose,
+  runAssignmentRegister,
+  runHandbackSubmit,
+  seatAssignmentsView,
+  type DeskRunnerDeps,
+  type ObservedCaptureValue,
+} from "./desk-handback.ts";
 
 type AgentCreateRequest = PluginBeforeRequests["agent.create"];
 type SessionOpenRequest = PluginBeforeRequests["agent.session_open"];
@@ -83,6 +99,10 @@ const LOCK_POLL_MS = 50;
 const BRIDGE_FILE = join("bin", "slp-desk-mcp.mjs");
 const HIDDEN_TOOL = "slp_desk_internal";
 const STATUS_TOOL = "slp_status";
+const HANDBACK_SUBMIT_TOOL = "slp_handback_submit";
+const ASSIGNMENT_REGISTER_TOOL = "slp_assignment_register";
+const ASSIGNMENT_ATTACH_TOOL = "slp_assignment_attach";
+const ASSIGNMENT_CLOSE_TOOL = "slp_assignment_close";
 
 /** The bridge's own limitation literals — the seat-facing read view's
  *  bounded flag strings (kept in one table, same discipline as
@@ -91,7 +111,63 @@ const BRIDGE_LIMITATIONS = {
   deskRecoveryRequired:
     "desk lock orphaned or unreadable — operator recovery required before desk mutations",
   deskDegraded: "desk ledger is not readable — seat view is best-effort",
+  assignmentsWithheld: "assignments view withheld — the desk ledger cannot be read",
 } as const;
+
+/** The desk tool catalog's wire contract — metadata lives at module level so
+ *  the whole catalog (visible and hidden rows) is enumerable for cap checks.
+ *  createDeskBridge binds each row's input schema and run implementation; a
+ *  row that fails DeskBridgeToolEntry is a producer bug, never an emitted
+ *  tool. */
+export const DESK_TOOL_CATALOG = [
+  {
+    name: STATUS_TOOL,
+    visible: true,
+    mutation: false,
+    description: "Seat-facing desk status: this seat's own membership view plus desk availability.",
+  },
+  {
+    name: HANDBACK_SUBMIT_TOOL,
+    visible: true,
+    mutation: true,
+    description:
+      "Submit a structured handback record (v1, kind handback) against an assignment this seat is bound to. " +
+      "Input: {requestId, assignmentId, recordV1, candidateId|null}. " +
+      "Response: {ok, revision, receiptId, gaps, handbackId, observedCandidateId}.",
+  },
+  {
+    name: ASSIGNMENT_REGISTER_TOOL,
+    visible: true,
+    mutation: true,
+    description:
+      "Lead-only: register a durable assignment binding on this desk. " +
+      "Input: {requestId, authorityRef, objective|null}. authorityRef is stored verbatim as a pointer to the grant — never dereferenced. " +
+      "Response: {ok, receiptId, assignmentId, state}.",
+  },
+  {
+    name: ASSIGNMENT_ATTACH_TOOL,
+    visible: true,
+    mutation: true,
+    description:
+      "Lead owner only: bind a live seat to an open assignment. " +
+      "Input: {requestId, assignmentId, agentId}. Idempotent on an already-bound seat. " +
+      "Response: {ok, receiptId, assignmentId, seat}.",
+  },
+  {
+    name: ASSIGNMENT_CLOSE_TOOL,
+    visible: true,
+    mutation: true,
+    description:
+      "Lead owner only: close an assignment; submissions against a closed assignment reject. " +
+      "Input: {requestId, assignmentId}. Response: {ok, receiptId, assignmentId, state}.",
+  },
+  {
+    name: HIDDEN_TOOL,
+    visible: false,
+    mutation: false,
+    description: "Internal mechanism entry — exists to prove hidden-catalog dispatch rejection.",
+  },
+] as const;
 
 /** The SDK surface the dispatch guards need — a structural subset of
  *  PaseoApi (same narrowing convention as supervision/state.ts): tests
@@ -135,6 +211,14 @@ export interface DeskBridgeDeps {
   uuid?: () => string;
   kill?: (pid: number, signal?: number) => void;
   warn?: (line: string) => void;
+  /** P3-a observed capture — tests substitute a deterministic double; the
+   *  default spawns the bound runtime's snapshot under 60s/32MiB. */
+  capture?: (deps: {
+    nodePath: string;
+    runtimePath: string;
+    repository: string;
+    now: () => Date;
+  }) => Promise<ObservedCaptureValue>;
 }
 
 export type DeskBridgeState =
@@ -148,6 +232,11 @@ type BoundSeat = {
   membershipId: string;
   agentId: string;
   openGeneration: number;
+  /** The handshake-resolved membership row — the only honest snapshot the
+   *  status tool can still answer from when the ledger itself stops
+   *  reading. Never written back; never a substitute for a live row on any
+   *  other tool. */
+  row: SeatRow;
 };
 
 type SeatRow = MembershipValue;
@@ -156,6 +245,14 @@ type Availability = "available" | "recovery-required" | "degraded";
 
 const isRecord = (v: unknown): v is Record<string, unknown> =>
   typeof v === "object" && v !== null && !Array.isArray(v);
+
+/** The wire schema caps the limitations array itself — an aggregate that
+ *  would exceed the cap sheds trailing entries into one counting marker so
+ *  a saturated view stays schema-valid instead of failing the reply. */
+const boundLimitations = (entries: string[], cap: number): string[] =>
+  entries.length <= cap
+    ? entries
+    : [...entries.slice(0, cap - 1), `${entries.length - (cap - 1)} more limitation(s) elided`];
 
 const rejection = (code: DeskErrorCode, message: string, recovery: string): DeskRejectionValue => ({
   ok: false,
@@ -182,6 +279,7 @@ export function createDeskBridge(deps: DeskBridgeDeps) {
   const realpath = deps.realpath ?? realpathSync;
   const createStore = deps.createStore ?? (stableRoot => createDeskStore({ stableRoot }));
   const audit = deps.audit ?? auditCapabilities;
+  const capture = deps.capture ?? captureSeatSnapshot;
   const instanceNonce = uuid();
   /** The connected-SDK slot — every hook/handler context that reaches the
    *  plugin stashes it here so dispatch guards can verify live identity
@@ -455,7 +553,20 @@ export function createDeskBridge(deps: DeskBridgeDeps) {
       };
     }
     for (const repoKey of repos) {
-      const read = store.read(repoKey);
+      let read: DeskStoreRead;
+      try {
+        read = store.read(repoKey);
+      } catch {
+        // A repo that throws cannot prove the handle absent — refuse the
+        // handshake typed rather than skip it and fabricate ACTOR_MISMATCH.
+        return {
+          error: rejection(
+            "STATE_UNREADABLE",
+            "a desk ledger cannot be read while resolving the seat",
+            "inspect the desk state on disk; the hello stays unbound",
+          ),
+        };
+      }
       if (read.state !== "ok") continue;
       const row = read.ledger.memberships.find(m => m.bindingHandleSha256 === handleSha);
       if (row !== undefined) return { row, repoKey };
@@ -473,11 +584,30 @@ export function createDeskBridge(deps: DeskBridgeDeps) {
   // dispatch guards (D5) — every call, fail closed
   // ---------------------------------------------------------------------
 
-  function freshRow(bound: BoundSeat): SeatRow | { error: DeskRejectionValue } {
+  /** The fresh membership read behind every dispatch. The carried `read` is
+   *  the single ledger observation the status tool also derives
+   *  availability and its projection from — identity, availability and
+   *  projection can never disagree inside one call. A THROWN read is still
+   *  a bounded outcome: it maps to STATE_UNREADABLE like a non-ok state. */
+  function freshRow(bound: BoundSeat):
+    | { row: SeatRow; read: DeskStoreRead }
+    | { error: DeskRejectionValue; read: DeskStoreRead | null } {
     if (store === null) {
-      return { error: rejection("STATE_UNREADABLE", "desk store closed", "restart the plugin session") };
+      return { error: rejection("STATE_UNREADABLE", "desk store closed", "restart the plugin session"), read: null };
     }
-    const read = store.read(bound.repoKey);
+    let read: DeskStoreRead;
+    try {
+      read = store.read(bound.repoKey);
+    } catch (error) {
+      return {
+        error: rejection(
+          "STATE_UNREADABLE",
+          `the bound repo ledger read threw: ${(error as Error).message.slice(0, 120)}`,
+          "inspect the ledger on disk; dispatch refuses a desk it cannot read",
+        ),
+        read: null,
+      };
+    }
     if (read.state === "absent") {
       return {
         error: rejection(
@@ -485,6 +615,7 @@ export function createDeskBridge(deps: DeskBridgeDeps) {
           "the bound repo ledger is gone",
           "the desk state no longer records this seat — rebind the session",
         ),
+        read,
       };
     }
     if (read.state !== "ok") {
@@ -494,6 +625,7 @@ export function createDeskBridge(deps: DeskBridgeDeps) {
           `the bound repo ledger reads ${read.state}`,
           "inspect the ledger on disk; dispatch refuses a desk it cannot read",
         ),
+        read,
       };
     }
     const row = read.ledger.memberships.find(m => m.membershipId === bound.membershipId);
@@ -509,6 +641,7 @@ export function createDeskBridge(deps: DeskBridgeDeps) {
           "the membership row vanished, re-bound or ended its epoch",
           "the seat epoch ended — reconnect with a fresh handle",
         ),
+        read,
       };
     }
     if (row.agentId === null) {
@@ -518,6 +651,7 @@ export function createDeskBridge(deps: DeskBridgeDeps) {
           "the membership is not host-bound to an agent",
           "the seat handshake completes at session_open — a bridge cannot bind a seat",
         ),
+        read,
       };
     }
     if (row.registeredAt === null) {
@@ -527,9 +661,10 @@ export function createDeskBridge(deps: DeskBridgeDeps) {
           "the seat registration is not host-confirmed yet",
           "registration confirms on agent.created — retry once the seat is live",
         ),
+        read,
       };
     }
-    return row;
+    return { row, read };
   }
 
   /** Guard item — live SDK identity (contract §4 guard). `agents.ref`
@@ -612,8 +747,11 @@ export function createDeskBridge(deps: DeskBridgeDeps) {
     return null;
   }
 
-  function probeAvailability(repoKey: string): Availability {
-    if (stableRoot === null || store === null) return "degraded";
+  /** The lock-holder probe — deliberately ledger-free so the status tool
+   *  can combine it with the single freshRow observation instead of paying
+   *  a second ledger read that could diverge mid-call. */
+  function probeLock(repoKey: string): "clear" | "recovery-required" {
+    if (stableRoot === null) return "recovery-required";
     const { lockPath } = deskRepoPaths(stableRoot, repoKey);
     if (existsSync(lockPath)) {
       let holder: LockHolder | null = null;
@@ -624,7 +762,20 @@ export function createDeskBridge(deps: DeskBridgeDeps) {
       }
       if (holder === null || !pidAlive(holder.pid)) return "recovery-required";
     }
-    const read = store.read(repoKey);
+    return "clear";
+  }
+
+  function probeAvailability(repoKey: string): Availability {
+    if (stableRoot === null || store === null) return "degraded";
+    if (probeLock(repoKey) === "recovery-required") return "recovery-required";
+    let read: DeskStoreRead;
+    try {
+      read = store.read(repoKey);
+    } catch {
+      // A thrown read still answers: degraded — mutations reject via the
+      // availability gate, status reports the desk it cannot read.
+      return "degraded";
+    }
     if (read.state !== "ok" && read.state !== "absent") return "degraded";
     return "available";
   }
@@ -639,22 +790,56 @@ export function createDeskBridge(deps: DeskBridgeDeps) {
     mutation: boolean;
     description: string;
     input: z.ZodType;
-    run(ctx: { row: SeatRow; bound: BoundSeat; availability: Availability }): Promise<unknown>;
+    run(ctx: {
+      row: SeatRow;
+      bound: BoundSeat;
+      availability: Availability;
+      /** The one ledger observation behind this dispatch — the status
+       *  runner projects it directly; mutations re-read under the lock. */
+      seatRead: DeskStoreRead | null;
+      input: unknown;
+    }): Promise<unknown>;
   }
 
-  const TOOLS: ToolDef[] = [
-    {
-      name: STATUS_TOOL,
-      visible: true,
-      mutation: false,
-      description: "Seat-facing desk status: this seat's own membership view plus desk availability.",
+  /** Runner deps shared by the mutation tools — the store and bound-runtime
+   *  capture wiring live in the bridge scope. */
+  const runnerDeps = (): DeskRunnerDeps => ({
+    store: store as DeskRunnerDeps["store"],
+    capture,
+    uuid,
+    now,
+    binding: binding === null ? null : { runtimePath: binding.runtimePath, nodePath: binding.nodePath },
+  });
+
+  const TOOL_IMPLS: Record<string, { input: z.ZodType; run: ToolDef["run"] }> = {
+    [STATUS_TOOL]: {
       input: z.object({}).strict(),
-      async run({ row, bound, availability }) {
+      async run({ row, bound, availability, seatRead }) {
         const limitations: string[] = [];
         if (availability === "recovery-required") {
           limitations.push(BRIDGE_LIMITATIONS.deskRecoveryRequired);
         } else if (availability === "degraded") {
           limitations.push(BRIDGE_LIMITATIONS.deskDegraded);
+        }
+        let assignments: DeskSeatStatusValue["assignments"] = [];
+        if (availability === "available" && seatRead !== null && seatRead.state === "ok") {
+          // The projection reads the SAME ledger observation that resolved
+          // this seat's identity — availability and assignments can never
+          // come from different ledger versions inside one status call.
+          const projection = seatAssignmentsView(seatRead.ledger, row, {
+            assignments: WIRE_LIMITS.deskStatusAssignments,
+            seats: WIRE_LIMITS.deskStatusSeats,
+            handbacks: WIRE_LIMITS.deskStatusHandbacks,
+          });
+          assignments = projection.assignments;
+          limitations.push(...projection.limitations);
+        } else if (availability !== "available") {
+          // The projection is withheld, not faked — a desk that cannot be
+          // read cannot serve a trustworthy seat view; the limitation
+          // records the elision instead of silently returning [].
+          limitations.push(BRIDGE_LIMITATIONS.assignmentsWithheld);
+        } else {
+          limitations.push("assignments view unavailable — ledger did not read cleanly");
         }
         const view: DeskSeatStatusValue = {
           schemaVersion: 1,
@@ -674,23 +859,74 @@ export function createDeskBridge(deps: DeskBridgeDeps) {
             registeredAt: row.registeredAt,
           },
           desk: { repoKey: bound.repoKey, state: availability, protocol: DESK_BRIDGE_PROTOCOL },
-          limitations,
+          assignments,
+          limitations: boundLimitations(limitations, WIRE_LIMITS.deskBridgeLimitations),
           acceptance: "not-established-by-this-view",
         };
         return DeskSeatStatus.parse(view);
       },
     },
-    {
-      name: HIDDEN_TOOL,
-      visible: false,
-      mutation: false,
-      description: "Internal mechanism entry — exists to prove hidden-catalog dispatch rejection.",
+    [HANDBACK_SUBMIT_TOOL]: {
+      input: DeskHandbackSubmitInput,
+      async run({ row, bound, input }) {
+        return runHandbackSubmit(
+          { repoKey: bound.repoKey, row },
+          input as {
+            requestId: string;
+            assignmentId: string;
+            recordV1: Record<string, unknown>;
+            candidateId: string | null;
+          },
+          runnerDeps(),
+        );
+      },
+    },
+    [ASSIGNMENT_REGISTER_TOOL]: {
+      input: DeskAssignmentRegisterInput,
+      async run({ row, bound, input }) {
+        return runAssignmentRegister(
+          { repoKey: bound.repoKey, row },
+          input as { requestId: string; authorityRef: string; objective: string | null },
+          runnerDeps(),
+        );
+      },
+    },
+    [ASSIGNMENT_ATTACH_TOOL]: {
+      input: DeskAssignmentAttachInput,
+      async run({ row, bound, input }) {
+        return runAssignmentAttach(
+          { repoKey: bound.repoKey, row },
+          input as { requestId: string; assignmentId: string; agentId: string },
+          runnerDeps(),
+        );
+      },
+    },
+    [ASSIGNMENT_CLOSE_TOOL]: {
+      input: DeskAssignmentCloseInput,
+      async run({ row, bound, input }) {
+        return runAssignmentClose(
+          { repoKey: bound.repoKey, row },
+          input as { requestId: string; assignmentId: string },
+          runnerDeps(),
+        );
+      },
+    },
+    [HIDDEN_TOOL]: {
       input: z.object({}).strict(),
       async run() {
         throw new Error("hidden tool must never run");
       },
     },
-  ];
+  };
+  // Producer contract: every catalog row — visible or hidden — must satisfy
+  // the centralized DeskBridgeToolEntry caps and bind an implementation
+  // before one can be served.
+  const TOOLS: ToolDef[] = DESK_TOOL_CATALOG.map(meta => {
+    DeskBridgeToolEntry.parse(meta);
+    const impl = TOOL_IMPLS[meta.name];
+    if (impl === undefined) throw new Error(`desk tool ${meta.name} has no run implementation`);
+    return { ...meta, ...impl };
+  });
 
   function mcpToolsList() {
     return TOOLS.filter(t => t.visible).map(t => ({
@@ -732,8 +968,24 @@ export function createDeskBridge(deps: DeskBridgeDeps) {
       ));
     }
     const rowOrError = freshRow(bound);
-    if ("error" in rowOrError) return fail(rowOrError.error);
-    const identityError = await sdkIdentity(rowOrError);
+    let row: SeatRow;
+    let seatRead: DeskStoreRead | null;
+    if ("error" in rowOrError) {
+      // slp_status is the seat's own health reporter — a ledger that cannot
+      // be read at all is exactly what it must describe: the
+      // handshake-bound row still answers, desk.state degrades and the
+      // assignments projection is withheld. Every other tool — and every
+      // other error class — fails closed unchanged.
+      if (tool.name !== STATUS_TOOL || rowOrError.error.code !== "STATE_UNREADABLE") {
+        return fail(rowOrError.error);
+      }
+      row = bound.row;
+      seatRead = rowOrError.read;
+    } else {
+      row = rowOrError.row;
+      seatRead = rowOrError.read;
+    }
+    const identityError = await sdkIdentity(row);
     if (identityError !== null) return fail(identityError);
     const capError = capabilityGate();
     if (capError !== null) return fail(capError);
@@ -745,16 +997,30 @@ export function createDeskBridge(deps: DeskBridgeDeps) {
         "dispatch carries only the fields the tool's schema declares",
       ));
     }
-    const availability = probeAvailability(bound.repoKey);
-    if (tool.mutation && availability !== "available") {
-      return fail(rejection(
-        "RECOVERY_REQUIRED",
-        "desk-unavailable: the bound desk is recovery-required",
-        "run the operator desk recovery before mutating desk state",
-      ));
+    let availability: Availability;
+    if (tool.mutation) {
+      availability = probeAvailability(bound.repoKey);
+      if (availability !== "available") {
+        return fail(rejection(
+          "RECOVERY_REQUIRED",
+          "desk-unavailable: the bound desk is recovery-required",
+          "run the operator desk recovery before mutating desk state",
+        ));
+      }
+    } else {
+      // Status answers from the ONE read that resolved the seat row: the
+      // lock probe is a filesystem check, while availability and the
+      // assignments projection share freshRow's ledger observation — a
+      // mid-call read transition can never split the view.
+      availability =
+        probeLock(bound.repoKey) === "recovery-required"
+          ? "recovery-required"
+          : seatRead !== null && seatRead.state === "ok"
+            ? "available"
+            : "degraded";
     }
     try {
-      const result = await tool.run({ row: rowOrError, bound, availability });
+      const result = await tool.run({ row, bound, availability, seatRead, input: input.data });
       return { content: [{ type: "text", text: text(result) }] };
     } catch (error) {
       return fail(rejection(
@@ -915,6 +1181,7 @@ export function createDeskBridge(deps: DeskBridgeDeps) {
           membershipId: seat.row.membershipId,
           agentId: seat.row.agentId,
           openGeneration: seat.row.openGeneration,
+          row: seat.row,
         };
         // ackLine already terminates its own frame — write it raw so no
         // empty line follows the handshake answer.
@@ -940,8 +1207,19 @@ export function createDeskBridge(deps: DeskBridgeDeps) {
         return;
       }
       if (msg.method === "tools/call" && "id" in msg && msg.id !== undefined) {
-        const result = await callTool(msg.params, bound);
-        writeResult(msg.id, result);
+        try {
+          const result = await callTool(msg.params, bound);
+          writeResult(msg.id, result);
+        } catch (error) {
+          // No frame may go unacknowledged — a guard or runner fault still
+          // answers with a bounded typed error, never a silent timeout.
+          writeError(
+            msg.id,
+            -32603,
+            `slp-desk: dispatch fault — ${(error as Error).message.slice(0, 200)}`,
+            "EXECUTION_UNKNOWN",
+          );
+        }
         return;
       }
       const reply = dispatchMessage(msg);
@@ -1008,6 +1286,15 @@ export function createDeskBridge(deps: DeskBridgeDeps) {
         // the previous one fully answered.
         pending = pending.then(() => onLine(line)).catch(error => {
           warn("dispatch-fault", `slp: desk bridge dispatch fault: ${(error as Error).message}`);
+          // Warn-only is not a response: a fault outside the guarded
+          // callTool path still owes the client one bounded frame.
+          try {
+            if (bound === null) {
+              rejectConn(conn, "EXECUTION_UNKNOWN", "slp-desk: dispatch fault during the handshake");
+            } else {
+              writeError(null, -32603, `slp-desk: dispatch fault — ${(error as Error).message.slice(0, 200)}`, "EXECUTION_UNKNOWN");
+            }
+          } catch { /* the connection is already closing */ }
         });
       }
     });

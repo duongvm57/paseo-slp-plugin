@@ -79,6 +79,14 @@ settlement pointer to the root issue or the durable note location named by the
 repository's workspace protocol, and includes it in the Lead's handback. A Lead
 does not write in a Supervisor-owned notebook.
 
+Separately, the plugin's durable desk (`slp_handback_submit`, P3-a) stores an
+accepted handback record verbatim as the seat's `claimed` revision under
+`<stableRoot>/state/enforcement/` — durable claim storage bound to an
+assignment, with the plugin's own observed candidate written alongside it.
+This desk row is evidence storage, not a settlement sink and not acceptance:
+the sink rules above are unchanged, and a desk record carries no verdict about
+whether the handback was accepted.
+
 ## Extraction and failures
 
 Run `slp.mjs records <path|->`; `-` reads stdin. `--kind` filters returned

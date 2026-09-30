@@ -154,7 +154,7 @@ test('bounded task settlement waits for Delivery and open correction or re-revie
   const template = read('src/templates/workspace-protocol.md');
   const protocol = read('.paseo-slp/workspace-protocol.md');
 
-  for (const [name, body] of [['orchestration', orchestration], ['monitoring', monitoring], ['template', template], ['protocol', protocol]]) {
+  for (const [name, body] of [['orchestration', orchestration], ['monitoring', monitoring], ['template', template]]) {
     assert.match(body, /Delivery\s+completes/iu, `${name} names Delivery completion`);
     assert.match(body, /no\s+correction or re-review remains open/iu, `${name} waits for rework closure`);
   }
@@ -163,8 +163,9 @@ test('bounded task settlement waits for Delivery and open correction or re-revie
   assert.match(template, /Keep the same Engineer and\s+independent review seats available for correction or re-review/);
   assert.match(template, /Settlement does not\s+itself archive, kill or reparent sessions/);
   assert.doesNotMatch(template, /assignment that formed the team closes|batch archive/i);
-  assert.match(protocol, /Accepted seats stay idle\s+for correction or re-review in that bounded task/);
-  assert.match(protocol, /settlement does not itself\s+archive, kill or reparent sessions/);
+  assert.match(protocol, /Keep an idle session only for assigned rework with an expiry\./);
+  assert.match(protocol, /Monitoring needs\s+an assignment, owner and stop condition\./);
+  assert.match(protocol, /\| Delivery\/completion \| Artifact and evidence for Human acceptance unless the assignment specifies otherwise \|/);
   assert.doesNotMatch(protocol, /assignment that formed the team settles|team's assignment settles/i);
 });
 
@@ -198,7 +199,7 @@ test('Lead reloads review gates only when a gate applies and blocks when its rul
   assert.match(lead, /When the assignment or protocol\s+requires independent review/);
   assert.match(lead, /If applicable gate rules are unavailable, stale or unclear, mark the branch BLOCKED/);
   assert.match(lead, /When the assignment or protocol\s+requires independent review, follow its gate rules and references\/review-gates\.md\.\s+While that gate applies, re-read the gate rules in references\/orchestration\.md and\s+references\/review-gates\.md from the installed candidate immediately before each\s+decision to choose reviewer seats, reuse reviewers for re-review or issue\s+acceptance, including after resume or compaction; a surviving summary like\s+"Engineer → Reviewer" is not the rule/);
-  assert.match(repoProtocol, /^version: ['"]?8['"]?$/m);
+  assert.match(repoProtocol, /^version: ['"]?10['"]?$/m);
   assert.match(repoProtocol, /^## Gate$/m);
 });
 

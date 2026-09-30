@@ -1,9 +1,10 @@
 // tests/plugin-desk-store-v2.test.mjs — P2-c store-level coverage (contract
-// §7, ADDENDUM item 2): the §2.2 decide → state channel, the positive v1→v2
-// migration, `persistedSchemaVersion`, and the v3 future threshold. A
-// synthetic decide drives the channel — no seat semantics here (those live
-// in tests/plugin-desk-seat.test.mjs). Fixtures live under tmpdir(); the
-// real daemon home, the repo tree and .local-checks are never touched.
+// §7, ADDENDUM item 2): the §2.2 decide → state channel, the positive v1→v3
+// migration chain (v1→v2→v3 through MIGRATIONS), `persistedSchemaVersion`,
+// and the v4 future threshold. A synthetic decide drives the channel — no
+// seat semantics here (those live in tests/plugin-desk-seat.test.mjs).
+// Fixtures live under tmpdir(); the real daemon home, the repo tree and
+// .local-checks are never touched.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -146,7 +147,7 @@ test('§2.2: decide with a valid memberships table → read returns it, same com
   const read = store.read(REPO_KEY);
   assert.equal(read.state, 'ok');
   assert.deepEqual(read.ledger.memberships, [row]);
-  assert.equal(read.persistedSchemaVersion, 2);
+  assert.equal(read.persistedSchemaVersion, 3);
 });
 
 test('§2.2: memberships with a bad schema → INVALID_RECORD, file bytes unchanged, no request record', async t => {
@@ -271,7 +272,7 @@ test('migration: a valid v1 ledger reads ok with persistedSchemaVersion 1', t =>
   assert.equal(readFileSync(ledgerPath(dir), 'utf8'), JSON.stringify(v1), 'read never rewrites the file');
 });
 
-test('migration: the first transact after a v1 read writes v2 + schema-migrated and keeps requests', async t => {
+test('migration: the first transact after a v1 read writes v3 + schema-migrated and keeps requests', async t => {
   const dir = fixture(t);
   const store = freshStore(dir);
   mkdirSync(repoDir(dir), { recursive: true });
@@ -283,13 +284,16 @@ test('migration: the first transact after a v1 read writes v2 + schema-migrated 
   }));
   assert.equal(result.ok, true);
   const onDisk = JSON.parse(readFileSync(ledgerPath(dir), 'utf8'));
-  assert.equal(onDisk.schemaVersion, 2);
+  assert.equal(onDisk.schemaVersion, 3);
   assert.deepEqual(onDisk.memberships, []);
+  assert.deepEqual(onDisk.assignments, []);
+  assert.deepEqual(onDisk.candidates, []);
+  assert.deepEqual(onDisk.handbacks, []);
   assert.deepEqual(onDisk.requests.slice(0, -1), v1.requests, 'pre-bump requests verbatim');
   // The migration event is in the chain: read it back from the segments.
   const read = store.read(REPO_KEY);
   assert.equal(read.state, 'ok');
-  assert.equal(read.persistedSchemaVersion, 2);
+  assert.equal(read.persistedSchemaVersion, 3);
   // Replay a pre-bump requestId — idempotency survives the bump.
   const replay = await store.transact(REPO_KEY, envelope(), () => {
     throw new Error('decide must not run on a replay');
@@ -308,20 +312,20 @@ test('migration: MIGRATIONS[1] is pure and total — input untouched, output add
   assert.equal(JSON.stringify(v1), snapshot, 'the input object is never mutated');
 });
 
-test('header v3 → future', t => {
+test('header v4 → future', t => {
   const dir = fixture(t);
   const store = freshStore(dir);
   mkdirSync(repoDir(dir), { recursive: true });
-  const body = JSON.stringify({ format: 'paseo-slp/enforcement', schemaVersion: 3, anything: 'goes' });
+  const body = JSON.stringify({ format: 'paseo-slp/enforcement', schemaVersion: 4, anything: 'goes' });
   writeFileSync(ledgerPath(dir), body);
   const read = store.read(REPO_KEY);
   assert.equal(read.state, 'future');
   assert.equal(read.diagnostics.code, 'future-version');
-  assert.equal(read.diagnostics.schemaVersion, 3);
+  assert.equal(read.diagnostics.schemaVersion, 4);
   assert.equal(readFileSync(ledgerPath(dir), 'utf8'), body, 'a future ledger is never modified');
 });
 
-test('fresh commits write v2 directly with an empty table and no migration event', async t => {
+test('fresh commits write v3 directly with empty tables and no migration event', async t => {
   const dir = fixture(t);
   const store = freshStore(dir);
   const result = await store.transact(REPO_KEY, envelope(), () => ({
@@ -330,10 +334,13 @@ test('fresh commits write v2 directly with an empty table and no migration event
   }));
   assert.equal(result.ok, true);
   const onDisk = JSON.parse(readFileSync(ledgerPath(dir), 'utf8'));
-  assert.equal(onDisk.schemaVersion, 2);
+  assert.equal(onDisk.schemaVersion, 3);
   assert.deepEqual(onDisk.memberships, []);
+  assert.deepEqual(onDisk.assignments, []);
+  assert.deepEqual(onDisk.candidates, []);
+  assert.deepEqual(onDisk.handbacks, []);
   const read = store.read(REPO_KEY);
-  assert.equal(read.persistedSchemaVersion, 2);
+  assert.equal(read.persistedSchemaVersion, 3);
   // No schema-migrated event on a fresh ledger: the first segment covers
   // exactly the decide's own event.
   assert.deepEqual(result.receipt.eventSeqs, [1, 1]);
@@ -370,12 +377,13 @@ test('E-P2C-2 (i) reject-then-success: the rejection keeps v1 with no segment; t
   }));
   assert.equal(ok.ok, true);
   const afterSuccess = JSON.parse(readFileSync(ledgerPath(dir), 'utf8'));
-  assert.equal(afterSuccess.schemaVersion, 2, 'the first successful commit migrates');
+  assert.equal(afterSuccess.schemaVersion, 3, 'the first successful commit migrates');
   assert.deepEqual(afterSuccess.memberships, []);
+  assert.deepEqual(afterSuccess.assignments, []);
   // The chain carries schema-migrated before the decide's own event.
   const read = store.read(REPO_KEY);
   assert.equal(read.state, 'ok');
-  assert.equal(read.persistedSchemaVersion, 2);
+  assert.equal(read.persistedSchemaVersion, 3);
   const segment = readFileSync(join(eventsDir(dir), '1-2.jsonl'), 'utf8');
   const kinds = segment.trim().split('\n').map(line => JSON.parse(line).kind);
   assert.deepEqual(kinds, ['schema-migrated', 'test.event']);
@@ -392,11 +400,11 @@ test('E-P2C-2 (ii) success-first: migrate immediately; a later rejection adds no
   }));
   assert.equal(ok.ok, true);
   const afterSuccess = JSON.parse(readFileSync(ledgerPath(dir), 'utf8'));
-  assert.equal(afterSuccess.schemaVersion, 2);
+  assert.equal(afterSuccess.schemaVersion, 3);
   const rejected = await store.transact(REPO_KEY, envelope({ requestId: 'rej-1' }), decideReject());
   assert.equal(rejected.ok, false);
   const afterRejection = JSON.parse(readFileSync(ledgerPath(dir), 'utf8'));
-  assert.equal(afterRejection.schemaVersion, 2, 'already migrated — the rejection changes nothing');
+  assert.equal(afterRejection.schemaVersion, 3, 'already migrated — the rejection changes nothing');
   assert.equal(afterRejection.requests.length, 3);
   const read = store.read(REPO_KEY);
   const last = read.ledger.requests.at(-1);

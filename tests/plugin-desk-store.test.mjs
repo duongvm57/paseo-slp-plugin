@@ -322,17 +322,17 @@ test('read: invalid JSON, wrong header, schema-invalid, and oversized ledger are
   assert.equal(result.diagnostics.code, 'oversized');
 });
 
-test('read: schemaVersion 3 is future, never corrupt and never overwritten', t => {
+test('read: schemaVersion 4 is future, never corrupt and never overwritten', t => {
   const dir = fixture(t);
   const root = join(dir, 'stable');
   const store = freshStore(root);
   mkdirSync(repoDir(root), { recursive: true });
-  const body = JSON.stringify({ format: 'paseo-slp/enforcement', schemaVersion: 3, anything: 'goes' });
+  const body = JSON.stringify({ format: 'paseo-slp/enforcement', schemaVersion: 4, anything: 'goes' });
   writeFileSync(ledgerPath(root), body);
   const result = store.read(REPO_KEY);
   assert.equal(result.state, 'future');
   assert.equal(result.diagnostics.code, 'future-version');
-  assert.equal(result.diagnostics.schemaVersion, 3);
+  assert.equal(result.diagnostics.schemaVersion, 4);
   assert.equal(readFileSync(ledgerPath(root), 'utf8'), body, 'future ledger must not be modified');
 });
 
@@ -569,7 +569,7 @@ test('commit: first commit writes ledger, segment, chain head — and a zero-eve
 
   const ledger = readLedgerFile(root);
   assert.equal(ledger.format, 'paseo-slp/enforcement');
-  assert.equal(ledger.schemaVersion, 2);
+  assert.equal(ledger.schemaVersion, 3);
   assert.equal(ledger.revision, 2);
   assert.equal(ledger.lastEventSeq, 1);
   assert.equal(typeof ledger.lastEventSha256, 'string');

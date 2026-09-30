@@ -74,10 +74,25 @@ export const LEDGER_LIMITS = {
   ttlSweepPerCommit: 60,
   hookGitProbeMs: 2000,
   hookDeskTransactMs: 5000,
+  // P3-a — the structured handback surface. Table row caps bound growth;
+  // field caps bound a single row; the submit-time observed capture runs
+  // bounded by the same 60s/32MiB budget VERIFY_LIMITS pins for probes.
+  assignments: 1024,
+  assignmentSeats: 128,
+  candidates: 4096,
+  handbacks: 4096,
+  handbackRecordBytes: 262144,
+  handbackGaps: 16,
+  authorityRefLen: 1024,
+  objectiveLen: 2048,
+  snapshotIncomplete: 256,
+  captureTimeoutMs: 60000,
+  captureMaxBytes: 33554432,
+  captureDetailLen: 512,
 } as const;
 
 const LEDGER_FORMAT = "paseo-slp/enforcement";
-const LEDGER_SCHEMA_VERSION = 2;
+const LEDGER_SCHEMA_VERSION = 3;
 /** The one repoKey algorithm label — schema literal and namespace refinement
  *  both read it from here; nothing else may restate it. */
 export const REPO_KEY_ALGORITHM = "sha256(hostId|gitCommonDir)@1";
@@ -273,13 +288,13 @@ const MembershipSchema = z
     membershipId: z.string().uuid(),
     state: z.enum(MEMBERSHIP_STATES),
     bindingHandleSha256: Sha,
-    provider: z.string().min(1).max(LEDGER_LIMITS.idLen),
+    provider: z.string().min(1).max(WIRE_LIMITS.providerLen),
     family: Family,
     role: z.enum(ROLES),
-    createCwd: z.string().min(1).max(LEDGER_LIMITS.pathLen).refine(isAbsolutePath),
+    createCwd: z.string().min(1).max(WIRE_LIMITS.createCwdLen).refine(isAbsolutePath),
     openGeneration: z.literal(1),
     agentId: z.string().min(1).max(WIRE_LIMITS.agentId).nullable(),
-    workspaceId: z.string().min(1).max(LEDGER_LIMITS.idLen).nullable(),
+    workspaceId: z.string().min(1).max(WIRE_LIMITS.workspaceIdLen).nullable(),
     createdAt: Time,
     hostConfirmedAt: Time.nullable(),
     registeredAt: Time.nullable(),
@@ -287,6 +302,124 @@ const MembershipSchema = z
     revokeReason: z.enum(REVOKE_REASONS).nullable(),
   })
   .strict();
+
+/** A Git object id — 40-hex full sha or the 64-hex sha256 form, mirroring
+ *  src/report-records.mjs GIT_HEAD_PATTERN. */
+const GitHead = z.string().regex(/^[0-9a-f]{40}$|^[0-9a-f]{64}$/);
+
+/** P3-a — one seat binding inside an assignment row. The seat's agentId is
+ *  the durable identity (a membership rebind keeps the seat attached);
+ *  membershipId records the row that was live at attach time. */
+const AssignmentSeatSchema = z
+  .object({
+    agentId: z.string().min(1).max(WIRE_LIMITS.agentId),
+    membershipId: z.string().uuid(),
+  })
+  .strict();
+
+/** P3-a — a durable assignment binding. Minimal by contract: no scopes, no
+ *  reservation/transfer, no parent linkage (those are P4). `authorityRef`
+ *  is a verbatim pointer to the grant that created the row — stored, never
+ *  dereferenced. `ownerAgentId` is denormalized so the owner check survives
+ *  a membership rebind of the owning lead. Rows carry no timestamps —
+ *  commit time lives on the hash-chained events. */
+const AssignmentSchema = z
+  .object({
+    assignmentId: BoundedId,
+    /** The register request's id — lets a replayed register rebuild its
+     *  response from the durable row. */
+    requestId: BoundedId,
+    authorityRef: z.string().min(1).max(LEDGER_LIMITS.authorityRefLen),
+    objective: z.string().min(1).max(LEDGER_LIMITS.objectiveLen).nullable(),
+    ownerMembershipId: z.string().uuid(),
+    ownerAgentId: z.string().min(1).max(WIRE_LIMITS.agentId),
+    workspaceId: z.string().min(1).max(WIRE_LIMITS.workspaceIdLen).nullable(),
+    state: z.enum(["open", "closed"]),
+    seats: z.array(AssignmentSeatSchema).max(LEDGER_LIMITS.assignmentSeats),
+  })
+  .strict();
+
+/** P3-a — a plugin-observed candidate measurement. Rows exist only for a
+ *  successful capture; a failed capture lands in the handback's `observed`
+ *  block and `gaps`, never as a phantom candidate. `repository` is the
+ *  measured root the server chose (the seat's membership createCwd). */
+const CandidateSchema = z
+  .object({
+    candidateId: BoundedId,
+    assignmentId: BoundedId,
+    kind: z.literal("observed"),
+    seatAgentId: z.string().min(1).max(WIRE_LIMITS.agentId),
+    seatMembershipId: z.string().uuid(),
+    repository: z.string().min(1).max(LEDGER_LIMITS.pathLen).refine(isAbsolutePath),
+    snapshotSha256: Sha,
+    head: GitHead.nullable(),
+    incomplete: z.array(z.string().min(1).max(LEDGER_LIMITS.pathLen)).max(LEDGER_LIMITS.snapshotIncomplete),
+    measuredAt: Time,
+  })
+  .strict();
+
+/** P3-a — the observed-capture outcome stored beside the claim. `pending`
+ *  is the declared-but-unmeasured window between the submit commit and the
+ *  observe commit (a crash leaves it resumable, never torn); `ok` carries
+ *  the created candidate; `failed` carries the bounded reason the capture
+ *  could not produce one. */
+const HandbackObservedSchema = z
+  .object({
+    status: z.enum(["pending", "ok", "failed"]),
+    candidateId: BoundedId.nullable(),
+    repository: z.string().min(1).max(LEDGER_LIMITS.pathLen).refine(isAbsolutePath),
+    measuredAt: Time.nullable(),
+    error: z.string().min(1).max(LEDGER_LIMITS.captureDetailLen).nullable(),
+  })
+  .strict()
+  .superRefine((observed, ctx) => {
+    if (observed.status === "pending" && (observed.candidateId !== null || observed.measuredAt !== null || observed.error !== null)) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "pending observation carries no outcome fields" });
+    }
+    if (observed.status === "ok" && (observed.candidateId === null || observed.measuredAt === null || observed.error !== null)) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "ok observation must carry candidateId, measuredAt and error:null" });
+    }
+    if (observed.status === "failed" && (observed.candidateId !== null || observed.measuredAt === null || observed.error === null)) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "failed observation carries error, measuredAt and candidateId:null" });
+    }
+  });
+
+/** P3-a — an immutable handback revision. `record` is the seat's claim
+ *  verbatim (provenance claimed); `observed` is the plugin's own
+ *  measurement — the two never merge, and a `handback.observe` commit may
+ *  only rewrite `observed`/`gaps`, never the claim fields. `requestId` is
+ *  stored so a replayed submit can rebuild its response from the durable
+ *  row. The revision stream is per (assignmentId, agentId). */
+const HandbackSchema = z
+  .object({
+    handbackId: BoundedId,
+    assignmentId: BoundedId,
+    agentId: z.string().min(1).max(WIRE_LIMITS.agentId),
+    seatMembershipId: z.string().uuid(),
+    requestId: BoundedId,
+    revision: z.number().int().min(1),
+    /** The seat's recordV1 claim, verbatim. */
+    record: JsonObject,
+    recordSha256: Sha,
+    claimedCandidateId: BoundedId.nullable(),
+    observed: HandbackObservedSchema,
+    gaps: z.array(z.string().min(1).max(WIRE_LIMITS.gapLen)).max(LEDGER_LIMITS.handbackGaps),
+  })
+  .strict()
+  .superRefine((row, ctx) => {
+    try {
+      const bytes = Buffer.byteLength(canonicalJson(row.record), "utf8");
+      if (bytes > LEDGER_LIMITS.handbackRecordBytes) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["record"],
+          message: `record exceeds ${LEDGER_LIMITS.handbackRecordBytes} canonical bytes`,
+        });
+      }
+    } catch {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["record"], message: "record is not canonicalizable JSON" });
+    }
+  });
 
 const LedgerBodyFields = {
   format: z.literal(LEDGER_FORMAT),
@@ -305,24 +438,48 @@ const LedgerSchemaV1 = z
   .object({ ...LedgerBodyFields, schemaVersion: z.literal(1) })
   .strict();
 
-/** v2 — adds `memberships` (C2). Every other field is untouched. */
+/** v2 — the P2-c shape: body fields plus `memberships`. Kept so `read` can
+ *  migrate it in-memory (MIGRATIONS[2]); never written again. */
+const LedgerSchemaV2 = z
+  .object({
+    ...LedgerBodyFields,
+    schemaVersion: z.literal(2),
+    memberships: z.array(MembershipSchema).max(LEDGER_LIMITS.memberships),
+  })
+  .strict();
+
+/** v3 — adds the P3-a handback surface: `assignments`, `candidates`,
+ *  `handbacks`. Every other field is untouched. */
 const LedgerSchema = z
   .object({
     ...LedgerBodyFields,
     schemaVersion: z.literal(LEDGER_SCHEMA_VERSION),
     memberships: z.array(MembershipSchema).max(LEDGER_LIMITS.memberships),
+    assignments: z.array(AssignmentSchema).max(LEDGER_LIMITS.assignments),
+    candidates: z.array(CandidateSchema).max(LEDGER_LIMITS.candidates),
+    handbacks: z.array(HandbackSchema).max(LEDGER_LIMITS.handbacks),
   })
   .strict();
 
+type LedgerValueV2 = z.infer<typeof LedgerSchemaV2>;
+
 /** Additive ledger migrations keyed by the on-disk schemaVersion. Pure: the
  *  input is never mutated; the output reuses the frozen input's records
- *  verbatim. v1 → v2 adds the empty memberships table (C2); requests and
- *  events are untouched. */
+ *  verbatim. v1 → v2 adds the empty memberships table (C2); v2 → v3 adds
+ *  the empty P3-a tables (assignments/candidates/handbacks). Requests and
+ *  events are untouched by either hop; read() chains both for a v1 file. */
 export const MIGRATIONS = {
-  1: (ledger: z.infer<typeof LedgerSchemaV1>): LedgerValue => ({
+  1: (ledger: z.infer<typeof LedgerSchemaV1>): LedgerValueV2 => ({
+    ...ledger,
+    schemaVersion: 2,
+    memberships: [],
+  }),
+  2: (ledger: LedgerValueV2): LedgerValue => ({
     ...ledger,
     schemaVersion: LEDGER_SCHEMA_VERSION,
-    memberships: [],
+    assignments: [],
+    candidates: [],
+    handbacks: [],
   }),
 } as const;
 
@@ -345,6 +502,9 @@ const DecideEventSchema = z.object({ kind: z.string().min(1).max(LEDGER_LIMITS.e
 
 export type LedgerValue = z.infer<typeof LedgerSchema>;
 export type MembershipValue = z.infer<typeof MembershipSchema>;
+export type AssignmentValue = z.infer<typeof AssignmentSchema>;
+export type CandidateValue = z.infer<typeof CandidateSchema>;
+export type HandbackValue = z.infer<typeof HandbackSchema>;
 export type RequestRecordValue = z.infer<typeof RequestRecordSchema>;
 export type EventValue = z.infer<typeof EventSchema>;
 export type DeskStoreEnvelope = z.infer<typeof EnvelopeSchema>;
@@ -356,7 +516,7 @@ export type DeskStoreEnvelope = z.infer<typeof EnvelopeSchema>;
  *  repo-key-invalid | repo-mismatch). */
 export type DeskStoreRead =
   | { state: "absent" }
-  | { state: "ok"; ledger: LedgerValue; persistedSchemaVersion: 1 | 2 }
+  | { state: "ok"; ledger: LedgerValue; persistedSchemaVersion: 1 | 2 | 3 }
   | { state: "corrupt" | "future" | "unsafe"; diagnostics: { code: string; schemaVersion: number | null } };
 
 export type TransactReceipt = {
@@ -372,10 +532,15 @@ type DecideOutcome =
       ok: true;
       events: { kind: string; payload: Record<string, unknown> }[];
       /** §2.2 decide → state channel: when present, the FULL replacement
-       *  memberships table. When absent, the snapshot's table carries over
-       *  verbatim (P2-a behavior). Schema- and refinement-checked by the
-       *  store; seat semantics stay in the decide. */
+       *  table for that collection. When absent, the snapshot's table
+       *  carries over verbatim (P2-a behavior). Schema- and
+       *  refinement-checked by the store; seat semantics stay in the
+       *  decide. The P3-a channels (assignments/candidates/handbacks)
+       *  obey exactly the same rule. */
       memberships?: MembershipValue[];
+      assignments?: AssignmentValue[];
+      candidates?: CandidateValue[];
+      handbacks?: HandbackValue[];
     }
   | DeskRejectionValue;
 export type DecideFunction = (ledger: Readonly<LedgerValue>, command: Record<string, unknown>) => DecideOutcome;
@@ -511,6 +676,7 @@ export function createDeskStore(deps: DeskStoreDeps): DeskStore {
     });
     const handles = new Set<string>();
     const liveAgents = new Set<string>();
+    const membershipIds = new Set<string>();
     for (const row of ledger.memberships) {
       const unboundNulls =
         row.agentId === null &&
@@ -529,9 +695,98 @@ export function createDeskStore(deps: DeskStoreDeps): DeskStore {
       if (row.registeredAt !== null && row.hostConfirmedAt === null) return corrupt();
       if (handles.has(row.bindingHandleSha256)) return corrupt();
       handles.add(row.bindingHandleSha256);
+      // membershipId is the join key every P3-a table resolves through —
+      // a duplicate makes the Map below pick one of two identities.
+      if (membershipIds.has(row.membershipId)) return corrupt();
+      membershipIds.add(row.membershipId);
       if (row.agentId !== null && row.state !== "revoked") {
         if (liveAgents.has(row.agentId)) return corrupt();
         liveAgents.add(row.agentId);
+      }
+    }
+    // P3-a table refinements: unique ids, referential integrity into the
+    // tables above, per-assignment seat uniqueness and a unique
+    // (assignmentId, agentId, revision) handback stream. Beyond existence,
+    // every identity link the decide relies on is cross-checked — owner and
+    // seat memberships must carry the same agentId the referencing row
+    // records (the owner's role must be lead, matching the register guard),
+    // a handback/candidate row's seat identity must be attached to its own
+    // assignment, and a referenced candidate must belong to the same
+    // assignment. These are identity checks only — a closed assignment or a
+    // revoked membership keeps its agentId, so valid history stays valid.
+    const membershipsById = new Map(ledger.memberships.map(row => [row.membershipId, row]));
+    const assignmentsById = new Map<string, AssignmentValue>();
+    // The register response resolver looks its row up by the durable
+    // (ownerAgentId, requestId) pair — the envelope layer already pins one
+    // request per (actorKey, scope, requestId), so a duplicate pair here is
+    // corruption, not a race.
+    const ownerRequestKeys = new Set<string>();
+    for (const row of ledger.assignments) {
+      if (assignmentsById.has(row.assignmentId)) return corrupt();
+      assignmentsById.set(row.assignmentId, row);
+      const ownerRequestKey = JSON.stringify([row.ownerAgentId, row.requestId]);
+      if (ownerRequestKeys.has(ownerRequestKey)) return corrupt();
+      ownerRequestKeys.add(ownerRequestKey);
+      const owner = membershipsById.get(row.ownerMembershipId);
+      if (owner === undefined || owner.agentId !== row.ownerAgentId || owner.role !== "lead") return corrupt();
+      const seatMemberships = new Set<string>();
+      const seatAgents = new Set<string>();
+      for (const seat of row.seats) {
+        if (seatMemberships.has(seat.membershipId) || seatAgents.has(seat.agentId)) return corrupt();
+        const seatRow = membershipsById.get(seat.membershipId);
+        if (seatRow === undefined || seatRow.agentId !== seat.agentId) return corrupt();
+        seatMemberships.add(seat.membershipId);
+        seatAgents.add(seat.agentId);
+      }
+    }
+    const candidatesById = new Map<string, CandidateValue>();
+    for (const row of ledger.candidates) {
+      if (candidatesById.has(row.candidateId)) return corrupt();
+      candidatesById.set(row.candidateId, row);
+      const assignment = assignmentsById.get(row.assignmentId);
+      if (assignment === undefined) return corrupt();
+      const seatRow = membershipsById.get(row.seatMembershipId);
+      if (seatRow === undefined || seatRow.agentId !== row.seatAgentId) return corrupt();
+      if (!assignment.seats.some(seat => seat.agentId === row.seatAgentId)) return corrupt();
+    }
+    const handbackIds = new Set<string>();
+    const handbackRevisions = new Set<string>();
+    // The submit response resolver looks its row up by the durable
+    // (assignmentId, agentId, requestId) triple — unambiguous by the same
+    // request-key invariant as ownerRequestKeys above.
+    const submitKeys = new Set<string>();
+    for (const row of ledger.handbacks) {
+      if (handbackIds.has(row.handbackId)) return corrupt();
+      handbackIds.add(row.handbackId);
+      const assignment = assignmentsById.get(row.assignmentId);
+      if (assignment === undefined) return corrupt();
+      const seatRow = membershipsById.get(row.seatMembershipId);
+      if (seatRow === undefined || seatRow.agentId !== row.agentId) return corrupt();
+      if (!assignment.seats.some(seat => seat.agentId === row.agentId)) return corrupt();
+      // Tuple keys are JSON-array encoded — a bare string concatenation
+      // aliases distinct tuples (["x1",2] vs ["x",12] both hit "x12").
+      const stream = JSON.stringify([row.assignmentId, row.agentId, row.revision]);
+      if (handbackRevisions.has(stream)) return corrupt();
+      handbackRevisions.add(stream);
+      const submitKey = JSON.stringify([row.assignmentId, row.agentId, row.requestId]);
+      if (submitKeys.has(submitKey)) return corrupt();
+      submitKeys.add(submitKey);
+      // The stored sha is the integrity check of the verbatim claim —
+      // a mismatch is corrupt, never silently re-hashed or repaired.
+      if (canonicalSha256(row.record) !== row.recordSha256) return corrupt();
+      if (row.claimedCandidateId !== null) {
+        const claimed = candidatesById.get(row.claimedCandidateId);
+        if (claimed === undefined || claimed.assignmentId !== row.assignmentId) return corrupt();
+      }
+      if (row.observed.candidateId !== null) {
+        const observed = candidatesById.get(row.observed.candidateId);
+        if (
+          observed === undefined ||
+          observed.assignmentId !== row.assignmentId ||
+          observed.seatMembershipId !== row.seatMembershipId
+        ) {
+          return corrupt();
+        }
       }
     }
     return null;
@@ -641,25 +896,33 @@ export function createDeskStore(deps: DeskStoreDeps): DeskStore {
       if (schemaVersion > LEDGER_SCHEMA_VERSION) {
         return { state: "future", diagnostics: { code: "future-version", schemaVersion } };
       }
-      // v1 ledgers migrate in-memory (MIGRATIONS[1]) and read as ok with
-      // persistedSchemaVersion 1; the on-disk bytes are never touched by
-      // read — the bump happens in the next transact's commit.
+      // Older ledgers migrate in-memory through the MIGRATIONS chain and
+      // read as ok with their persistedSchemaVersion; the on-disk bytes are
+      // never touched by read — the bump happens in the next transact's
+      // commit.
       let ledger: LedgerValue;
-      let persistedSchemaVersion: 1 | 2;
+      let persistedSchemaVersion: 1 | 2 | 3;
       if (schemaVersion === 1) {
         const v1 = LedgerSchemaV1.safeParse(json);
         if (!v1.success) {
           return { state: "corrupt", diagnostics: { code: "schema-invalid", schemaVersion } };
         }
-        ledger = MIGRATIONS[1](v1.data);
+        ledger = MIGRATIONS[2](MIGRATIONS[1](v1.data));
         persistedSchemaVersion = 1;
+      } else if (schemaVersion === 2) {
+        const v2 = LedgerSchemaV2.safeParse(json);
+        if (!v2.success) {
+          return { state: "corrupt", diagnostics: { code: "schema-invalid", schemaVersion } };
+        }
+        ledger = MIGRATIONS[2](v2.data);
+        persistedSchemaVersion = 2;
       } else {
         const parsed = LedgerSchema.safeParse(json);
         if (!parsed.success) {
           return { state: "corrupt", diagnostics: { code: "schema-invalid", schemaVersion } };
         }
         ledger = parsed.data;
-        persistedSchemaVersion = 2;
+        persistedSchemaVersion = 3;
       }
       const refinement = checkRefinements(ledger, repoKey);
       if (refinement !== null) return refinement;
@@ -833,6 +1096,9 @@ export function createDeskStore(deps: DeskStoreDeps): DeskStore {
       lastEventSha256: null,
       requests: [],
       memberships: [],
+      assignments: [],
+      candidates: [],
+      handbacks: [],
     };
   }
 
@@ -884,10 +1150,13 @@ export function createDeskStore(deps: DeskStoreDeps): DeskStore {
         );
       }
       const ledger = state.state === "absent" ? freshLedger(envelope.repo, repoKey) : state.ledger;
-      // A v1 ledger read under this lock migrates in-memory; this commit is
-      // the first write after the bump, so it records schemaVersion 2 plus
-      // the schema-migrated event (contract §2).
-      const migratedFrom = state.state === "ok" && state.persistedSchemaVersion === 1 ? 1 : null;
+      // An older-version ledger read under this lock migrates in-memory;
+      // this commit is the first write after the bump, so it records the
+      // current schemaVersion plus the schema-migrated event (contract §2).
+      const migratedFrom =
+        state.state === "ok" && state.persistedSchemaVersion < LEDGER_SCHEMA_VERSION
+          ? state.persistedSchemaVersion
+          : null;
       if (state.state === "ok") {
         if (ledger.repo.hostId !== envelope.repo.hostId || ledger.repo.gitCommonDir !== envelope.repo.gitCommonDir) {
           return invalidRecord("envelope repo does not match the ledger's repo binding", "transact against the repo the ledger is bound to");
@@ -953,39 +1222,90 @@ export function createDeskStore(deps: DeskStoreDeps): DeskStore {
         return invalidRecord("decide must return an events array", "return {ok:true, events:[...]}");
       }
       // E-P2C-2 — the migration event rides the first SUCCESSFUL commit
-      // after an in-memory bump. A rejection on a v1 ledger commits into
-      // the v1 shape (no memberships, no event); the next successful
-      // commit migrates.
+      // after an in-memory bump. A rejection on an older-version ledger
+      // commits into the persisted shape (no new tables, no event); the
+      // next successful commit migrates.
       const events =
-        migratedFrom === 1 && decided.ok === true
-          ? [{ kind: "schema-migrated", payload: { from: 1, to: LEDGER_SCHEMA_VERSION } }, ...decidedEvents]
+        migratedFrom !== null && decided.ok === true
+          ? [{ kind: "schema-migrated", payload: { from: migratedFrom, to: LEDGER_SCHEMA_VERSION } }, ...decidedEvents]
           : decidedEvents;
       const eventsCheck = checkDecideEvents(events);
       if ("rejection" in eventsCheck) return eventsCheck.rejection;
 
-      // §2.2 — the decide → state channel, checked after decide and before
-      // the segment write, schema-level only: the replacement table must
-      // parse strict and the candidate ledger must pass the same
-      // refinements read() applies. A violation is a consumer error —
-      // INVALID_RECORD, nothing recorded (the decide-threw branch of P2-a
-      // step 5).
+      // §2.2 — the decide → state channels, checked after decide and before
+      // the segment write, schema-level only: each replacement table must
+      // parse strict and the candidate ledger (all channels applied) must
+      // pass the same refinements read() applies. A violation is a
+      // consumer error — INVALID_RECORD, nothing recorded (the
+      // decide-threw branch of P2-a step 5).
       let nextMemberships = ledger.memberships;
-      if (decided.ok === true && decided.memberships !== undefined) {
-        const parsedMemberships = z.array(MembershipSchema).max(LEDGER_LIMITS.memberships).safeParse(decided.memberships);
-        if (!parsedMemberships.success) {
-          return invalidRecord(
-            `decide returned invalid memberships: ${firstIssue(parsedMemberships.error)}`,
-            "fix the decide function to return a schema-valid memberships table",
-          );
+      let nextAssignments = ledger.assignments;
+      let nextCandidates = ledger.candidates;
+      let nextHandbacks = ledger.handbacks;
+      if (decided.ok === true) {
+        const proposed: string[] = [];
+        if (decided.memberships !== undefined) {
+          proposed.push("memberships");
+          const parsed = z.array(MembershipSchema).max(LEDGER_LIMITS.memberships).safeParse(decided.memberships);
+          if (!parsed.success) {
+            return invalidRecord(
+              `decide returned invalid memberships: ${firstIssue(parsed.error)}`,
+              "fix the decide function to return a schema-valid memberships table",
+            );
+          }
+          nextMemberships = parsed.data;
         }
-        const candidateInvalid = checkRefinements({ ...ledger, memberships: parsedMemberships.data }, repoKey);
-        if (candidateInvalid !== null) {
-          return invalidRecord(
-            "decide returned invalid memberships (refinement failed)",
-            "fix the decide function to return a table that satisfies the ledger refinements",
-          );
+        if (decided.assignments !== undefined) {
+          proposed.push("assignments");
+          const parsed = z.array(AssignmentSchema).max(LEDGER_LIMITS.assignments).safeParse(decided.assignments);
+          if (!parsed.success) {
+            return invalidRecord(
+              `decide returned invalid assignments: ${firstIssue(parsed.error)}`,
+              "fix the decide function to return a schema-valid assignments table",
+            );
+          }
+          nextAssignments = parsed.data;
         }
-        nextMemberships = parsedMemberships.data;
+        if (decided.candidates !== undefined) {
+          proposed.push("candidates");
+          const parsed = z.array(CandidateSchema).max(LEDGER_LIMITS.candidates).safeParse(decided.candidates);
+          if (!parsed.success) {
+            return invalidRecord(
+              `decide returned invalid candidates: ${firstIssue(parsed.error)}`,
+              "fix the decide function to return a schema-valid candidates table",
+            );
+          }
+          nextCandidates = parsed.data;
+        }
+        if (decided.handbacks !== undefined) {
+          proposed.push("handbacks");
+          const parsed = z.array(HandbackSchema).max(LEDGER_LIMITS.handbacks).safeParse(decided.handbacks);
+          if (!parsed.success) {
+            return invalidRecord(
+              `decide returned invalid handbacks: ${firstIssue(parsed.error)}`,
+              "fix the decide function to return a schema-valid handbacks table",
+            );
+          }
+          nextHandbacks = parsed.data;
+        }
+        if (proposed.length > 0) {
+          const candidateInvalid = checkRefinements(
+            {
+              ...ledger,
+              memberships: nextMemberships,
+              assignments: nextAssignments,
+              candidates: nextCandidates,
+              handbacks: nextHandbacks,
+            },
+            repoKey,
+          );
+          if (candidateInvalid !== null) {
+            return invalidRecord(
+              `decide returned invalid ${proposed.length === 1 ? proposed[0] : "state tables"} (refinement failed)`,
+              "fix the decide function to return tables that satisfy the ledger refinements",
+            );
+          }
+        }
       }
 
       const receiptId = uuid();
@@ -996,10 +1316,13 @@ export function createDeskStore(deps: DeskStoreDeps): DeskStore {
       let lastEventSeq = ledger.lastEventSeq;
       let lastEventSha256 = ledger.lastEventSha256;
 
+      // Build the chain in memory first: the serialized-byte check below
+      // must fire before ANY durable write, so the event segment only lands
+      // after the candidate ledger is proven to fit LEDGER_LIMITS.ledgerBytes.
+      // Seqs continue lastEventSeq, prevSha256 links to the prior event's
+      // digest (or the recorded tip).
+      const built: EventValue[] = [];
       if (decided.ok === true && events.length > 0) {
-        // Build the chain: seqs continue lastEventSeq, prevSha256 links to
-        // the prior event's digest (or the recorded tip).
-        const built: EventValue[] = [];
         let prev = ledger.lastEventSha256;
         for (const event of events) {
           const seq = lastEventSeq + 1;
@@ -1020,6 +1343,79 @@ export function createDeskStore(deps: DeskStoreDeps): DeskStore {
         }
         lastEventSha256 = prev;
         eventSeqs = [built[0]!.seq, built[built.length - 1]!.seq];
+      }
+
+      const record: RequestRecordValue = {
+        actorKey: envelope.actorKey,
+        assignmentId: envelope.assignmentId,
+        requestId: envelope.requestId,
+        bodySha256,
+        canonicalization: CANONICALIZATION,
+        receiptId,
+        revision,
+        outcome: decided.ok === true ? "committed" : "rejected",
+        eventSeqs,
+        rejection: rejectionForRecord,
+      };
+      const candidate: LedgerValue = {
+        ...ledger,
+        revision,
+        updatedAt: stamp,
+        lastEventSeq,
+        lastEventSha256,
+        requests: [...ledger.requests, record],
+        memberships: nextMemberships,
+        assignments: nextAssignments,
+        candidates: nextCandidates,
+        handbacks: nextHandbacks,
+      };
+      // The pre-commit refinement pass is the same one read() applies — a
+      // ledger that would read as unsafe/corrupt is never written.
+      const invalid = checkRefinements(candidate, repoKey);
+      if (invalid !== null) {
+        throw new OperationConflict("IO_FAILURE", "refusing to commit a ledger that would not read back cleanly");
+      }
+      // E-P2C-2 — a rejection on an older-version ledger keeps the on-disk
+      // shape at that version: the migrated tables are dropped and the
+      // version literal stays at the persisted value, so the bump (with
+      // its schema-migrated event) happens on the first successful commit
+      // instead.
+      let nextBytes: string;
+      if (migratedFrom !== null && decided.ok === false) {
+        const { assignments: _a, candidates: _c, handbacks: _h, ...rest } = candidate;
+        let persistedShape: unknown;
+        let persistedParses: boolean;
+        if (migratedFrom === 1) {
+          const { memberships: _m, ...v1Body } = rest;
+          persistedShape = { ...v1Body, schemaVersion: 1 };
+          persistedParses = LedgerSchemaV1.safeParse(persistedShape).success;
+        } else {
+          persistedShape = { ...rest, schemaVersion: 2 };
+          persistedParses = LedgerSchemaV2.safeParse(persistedShape).success;
+        }
+        if (!persistedParses) {
+          throw new OperationConflict("IO_FAILURE", "refusing to commit a ledger that would not read back cleanly");
+        }
+        nextBytes = JSON.stringify(persistedShape, null, 2) + "\n";
+      } else {
+        if (!LedgerSchema.safeParse(candidate).success) {
+          throw new OperationConflict("IO_FAILURE", "refusing to commit a ledger that would not read back cleanly");
+        }
+        nextBytes = JSON.stringify(candidate, null, 2) + "\n";
+      }
+      // The serialized-byte cap is the durable bound: read() classifies a
+      // ledger file above LEDGER_LIMITS.ledgerBytes as corrupt, so a commit
+      // that would push past it is refused BEFORE any durable write — an
+      // oversized file would silently drop every acknowledged mutation. The
+      // rejection is unrecorded (a record is itself part of the bytes).
+      const nextSize = Buffer.byteLength(nextBytes, "utf8");
+      if (nextSize > LEDGER_LIMITS.ledgerBytes) {
+        return invalidRecord(
+          `the committed ledger would be ${nextSize} bytes — over the ${LEDGER_LIMITS.ledgerBytes}-byte cap`,
+          "maintenance compaction required before more desk mutations",
+        );
+      }
+      if (eventSeqs !== null) {
         const evDir = repoPaths(repoKey).eventsDir;
         ensurePrivateDirectory(evDir, platform);
         const segmentPath = join(evDir, `${eventSeqs[0]}-${eventSeqs[1]}.jsonl`);
@@ -1049,52 +1445,6 @@ export function createDeskStore(deps: DeskStoreDeps): DeskStore {
           if (error instanceof OperationConflict) throw error;
           throw new OperationConflict("IO_FAILURE", `event segment write failed: ${summarize(error)}`);
         }
-      }
-
-      const record: RequestRecordValue = {
-        actorKey: envelope.actorKey,
-        assignmentId: envelope.assignmentId,
-        requestId: envelope.requestId,
-        bodySha256,
-        canonicalization: CANONICALIZATION,
-        receiptId,
-        revision,
-        outcome: decided.ok === true ? "committed" : "rejected",
-        eventSeqs,
-        rejection: rejectionForRecord,
-      };
-      const candidate: LedgerValue = {
-        ...ledger,
-        revision,
-        updatedAt: stamp,
-        lastEventSeq,
-        lastEventSha256,
-        requests: [...ledger.requests, record],
-        memberships: nextMemberships,
-      };
-      // The pre-commit refinement pass is the same one read() applies — a
-      // ledger that would read as unsafe/corrupt is never written.
-      const invalid = checkRefinements(candidate, repoKey);
-      if (invalid !== null) {
-        throw new OperationConflict("IO_FAILURE", "refusing to commit a ledger that would not read back cleanly");
-      }
-      // E-P2C-2 — a rejection on a v1 ledger keeps the on-disk v1 shape:
-      // the empty migrated memberships table is dropped and the version
-      // literal stays 1, so the bump (with its schema-migrated event)
-      // happens on the first successful commit instead.
-      let nextBytes: string;
-      if (migratedFrom === 1 && decided.ok === false) {
-        const { memberships: _dropped, ...v1Body } = candidate;
-        const v1Next = { ...v1Body, schemaVersion: 1 };
-        if (!LedgerSchemaV1.safeParse(v1Next).success) {
-          throw new OperationConflict("IO_FAILURE", "refusing to commit a ledger that would not read back cleanly");
-        }
-        nextBytes = JSON.stringify(v1Next, null, 2) + "\n";
-      } else {
-        if (!LedgerSchema.safeParse(candidate).success) {
-          throw new OperationConflict("IO_FAILURE", "refusing to commit a ledger that would not read back cleanly");
-        }
-        nextBytes = JSON.stringify(candidate, null, 2) + "\n";
       }
       const commitPaths = repoPaths(repoKey);
       atomicWrite(commitPaths.ledgerPath, nextBytes, commitPaths.repoDir);

@@ -137,6 +137,31 @@ export const WIRE_LIMITS = {
   deskBridgeToolName: 64,
   deskBridgeToolDescription: 256,
   deskBridgeLimitations: 8,
+  // Desk mutations (P3-a): request ids and entity ids are bounded opaque
+  // strings; authorityRef is a verbatim pointer the desk stores but never
+  // dereferences; recordV1 rides inside the 256KiB frame cap and the
+  // durable row re-caps it at LEDGER_LIMITS.handbackRecordBytes. Status
+  // projections shed rows beyond the per-view caps into limitations.
+  deskRequestId: 128,
+  deskEntityId: 128,
+  deskAuthorityRef: 1024,
+  deskObjective: 2048,
+  deskStatusAssignments: 64,
+  deskStatusSeats: 32,
+  deskStatusHandbacks: 64,
+  deskStatusGaps: 16,
+  /** Seat/membership field bounds shared durable↔wire: the durable
+   *  MembershipSchema consumes the same keys, so a ledger-valid row can
+   *  never fail the status schema — identity fields are never truncated.
+   *  Values equal the durable maxima the fields had under LEDGER_LIMITS. */
+  providerLen: 128,
+  workspaceIdLen: 128,
+  createCwdLen: 4096,
+  roleLen: 32,
+  /** Handback gap strings — the durable HandbackSchema reads this same
+   *  key, so a ledger-valid row's gaps always parse under the submit
+   *  result schema (the producer returns them verbatim; F-STD-4). */
+  gapLen: 256,
 } as const;
 
 // ---------------------------------------------------------------------------
@@ -452,6 +477,109 @@ export const DeskBridgeToolEntry = z.object({
   description: z.string().min(1).max(WIRE_LIMITS.deskBridgeToolDescription),
 }).strict();
 
+// ---------------------------------------------------------------------------
+// Desk mutation tools (P3-a) — strict input schemas for the bridge catalog.
+// Actor identity is never an input field: the server derives it from the
+// bound membership. `requestId` is the seat-chosen idempotency key part.
+// ---------------------------------------------------------------------------
+
+const DeskRequestId = z.string().min(1).max(WIRE_LIMITS.deskRequestId);
+const DeskEntityId = z.string().min(1).max(WIRE_LIMITS.deskEntityId);
+const DeskRecordJson = z.record(z.string(), z.unknown());
+
+/** slp_handback_submit — a bound seat's claimed report record. `recordV1`
+ *  is the JSON record object itself (never prose or a fenced block);
+ *  `candidateId` names a durable candidate row of the same assignment or
+ *  is null for a report-only handback. */
+export const DeskHandbackSubmitInput = z.object({
+  requestId: DeskRequestId,
+  assignmentId: DeskEntityId,
+  recordV1: DeskRecordJson,
+  candidateId: DeskEntityId.nullable(),
+}).strict();
+
+/** slp_assignment_register — lead-only: create a durable assignment
+ *  binding. `authorityRef` is a verbatim pointer to the grant, stored and
+ *  never dereferenced. `objective` is optional descriptive text. */
+export const DeskAssignmentRegisterInput = z.object({
+  requestId: DeskRequestId,
+  authorityRef: z.string().min(1).max(WIRE_LIMITS.deskAuthorityRef),
+  objective: z.string().min(1).max(WIRE_LIMITS.deskObjective).nullable(),
+}).strict();
+
+/** slp_assignment_attach — lead owner binds a live seat to an open
+ *  assignment; idempotent on an already-bound seat. */
+export const DeskAssignmentAttachInput = z.object({
+  requestId: DeskRequestId,
+  assignmentId: DeskEntityId,
+  agentId: z.string().min(1).max(WIRE_LIMITS.agentId),
+}).strict();
+
+/** slp_assignment_close — lead owner closes an assignment; submissions
+ *  against a closed assignment reject. */
+export const DeskAssignmentCloseInput = z.object({
+  requestId: DeskRequestId,
+  assignmentId: DeskEntityId,
+}).strict();
+
+/** The mutation response shapes the tools answer. `revision` is the
+ *  handback revision (submit) — 0 when the tool's outcome has no revision
+ *  stream. Rejections keep the shared DeskRejection shape. */
+export const DeskHandbackSubmitResult = z.object({
+  ok: z.literal(true),
+  revision: z.number().int().min(1),
+  receiptId: z.string().min(1).max(WIRE_LIMITS.deskEntityId),
+  gaps: z.array(z.string().min(1).max(WIRE_LIMITS.gapLen)).max(WIRE_LIMITS.deskStatusGaps),
+  handbackId: DeskEntityId,
+  observedCandidateId: DeskEntityId.nullable(),
+}).strict();
+
+export const DeskAssignmentResult = z.object({
+  ok: z.literal(true),
+  receiptId: z.string().min(1).max(WIRE_LIMITS.deskEntityId),
+  assignmentId: DeskEntityId,
+  state: z.enum(["open", "closed"]),
+  seat: z
+    .object({
+      agentId: z.string().min(1).max(WIRE_LIMITS.agentId),
+      membershipId: z.string().min(1).max(WIRE_LIMITS.membershipId),
+    })
+    .strict()
+    .optional(),
+}).strict();
+
+export type DeskHandbackSubmitInputValue = z.infer<typeof DeskHandbackSubmitInput>;
+export type DeskAssignmentRegisterInputValue = z.infer<typeof DeskAssignmentRegisterInput>;
+export type DeskAssignmentAttachInputValue = z.infer<typeof DeskAssignmentAttachInput>;
+export type DeskAssignmentCloseInputValue = z.infer<typeof DeskAssignmentCloseInput>;
+export type DeskHandbackSubmitResultValue = z.infer<typeof DeskHandbackSubmitResult>;
+export type DeskAssignmentResultValue = z.infer<typeof DeskAssignmentResult>;
+
+/** One handback revision as projected into slp_status — identifiers and
+ *  counts only; the claimed record's bytes stay in the ledger (a status
+ *  view never re-serves record payloads). */
+export const DeskStatusHandback = z.object({
+  handbackId: DeskEntityId,
+  agentId: z.string().min(1).max(WIRE_LIMITS.agentId),
+  revision: z.number().int().min(1),
+  recordSha256: Sha,
+  claimedCandidateId: DeskEntityId.nullable(),
+  observedStatus: z.enum(["pending", "ok", "failed"]),
+  observedCandidateId: DeskEntityId.nullable(),
+  gapsCount: z.number().int().min(0),
+}).strict();
+
+/** One assignment as projected into slp_status — caller-scoped: a lead's
+ *  owned assignments carry every handback; a bound seat sees only its own
+ *  rows on assignments it is attached to. */
+export const DeskStatusAssignment = z.object({
+  assignmentId: DeskEntityId,
+  state: z.enum(["open", "closed"]),
+  ownerAgentId: z.string().min(1).max(WIRE_LIMITS.agentId),
+  seats: z.array(z.string().min(1).max(WIRE_LIMITS.agentId)).max(WIRE_LIMITS.deskStatusSeats),
+  handbacks: z.array(DeskStatusHandback).max(WIRE_LIMITS.deskStatusHandbacks),
+}).strict();
+
 /** The seat-facing status view slp_status answers — the caller's own
  *  membership row plus desk availability; same `acceptance` guard literal
  *  as every other read view. */
@@ -463,10 +591,10 @@ export const DeskSeatStatus = z.object({
     agentId: z.string().min(1).max(WIRE_LIMITS.agentId),
     state: SeatBindingState,
     family: Family,
-    role: z.string().min(1).max(32),
-    provider: z.string().min(1).max(64),
-    workspaceId: z.string().min(1).max(128).nullable(),
-    createCwd: z.string().min(1).max(4096),
+    role: z.string().min(1).max(WIRE_LIMITS.roleLen),
+    provider: z.string().min(1).max(WIRE_LIMITS.providerLen),
+    workspaceId: z.string().min(1).max(WIRE_LIMITS.workspaceIdLen).nullable(),
+    createCwd: z.string().min(1).max(WIRE_LIMITS.createCwdLen),
     openGeneration: z.number().int().nonnegative(),
     createdAt: Time,
     hostConfirmedAt: Time.nullable(),
@@ -478,6 +606,10 @@ export const DeskSeatStatus = z.object({
     state: z.enum(["available", "recovery-required", "degraded"]),
     protocol: z.literal(DESK_BRIDGE_PROTOCOL),
   }).strict(),
+  /** P3-a — the caller-scoped assignment/handback projection. A lead sees
+   *  its owned assignments with every handback; any other bound seat sees
+   *  only its own rows on assignments it is attached to. */
+  assignments: z.array(DeskStatusAssignment).max(WIRE_LIMITS.deskStatusAssignments),
   limitations: z.array(z.string().min(1).max(WIRE_LIMITS.limitationLen)).max(WIRE_LIMITS.deskBridgeLimitations),
   acceptance: z.literal("not-established-by-this-view"),
 }).strict();

@@ -30,10 +30,11 @@ import {
   deskRepoPaths,
   repoKeyFor,
 } from '../plugin/server/desk-store.ts';
-import { createDeskBridge } from '../plugin/server/desk-bridge.ts';
+import { createDeskBridge, DESK_TOOL_CATALOG } from '../plugin/server/desk-bridge.ts';
 import { sha256Hex } from '../plugin/server/config-view.ts';
 import {
   DESK_BRIDGE_PROTOCOL,
+  DeskBridgeToolEntry,
   DeskSeatStatus,
   WIRE_LIMITS,
 } from '../plugin/shared/enforcement.ts';
@@ -525,7 +526,7 @@ test('an unbound-open membership cannot bind through the bridge', async t => {
  *  stays closed without it. */
 async function boundSeat(t, over = {}) {
   const paseoRef = { current: livePaseo('agent' in over ? over.agent : LIVE_AGENT) };
-  const f = await started(t, { paseoRef });
+  const f = await started(t, { ...over, paseoRef });
   f.bridge.noteDispatch(f.paseoRef.current);
   const git = gitRepo(t);
   const handle = over.handle ?? 'handle-1';
@@ -537,17 +538,50 @@ async function boundSeat(t, over = {}) {
   return { f, git, repo: repoOf(git), handle, row, repoKey, conn, reader, paseoRef };
 }
 
-test('tools/list exposes exactly slp_status — hidden and excluded tools absent', async t => {
+test('tools/list exposes the visible catalog — hidden and excluded tools absent', async t => {
   const { reader, conn } = await boundSeat(t);
   const reply = await rpc(reader, conn, { jsonrpc: '2.0', id: 1, method: 'tools/list' });
   const names = reply.result.tools.map(tool => tool.name);
-  assert.deepEqual(names, ['slp_status']);
+  assert.deepEqual(names, [
+    'slp_status',
+    'slp_handback_submit',
+    'slp_assignment_register',
+    'slp_assignment_attach',
+    'slp_assignment_close',
+  ]);
   // The catalog row carries a JSON Schema derived from the zod input.
   assert.equal(reply.result.tools[0].inputSchema.type, 'object');
-  // slp_recover_lock / slp_handback_submit are never catalog entries.
-  for (const forbidden of ['slp_recover_lock', 'slp_handback_submit', 'slp_desk_internal']) {
+  // slp_recover_lock / slp_desk_internal / P3-b+ tools are never catalog entries.
+  for (const forbidden of ['slp_recover_lock', 'slp_desk_internal', 'slp_settlement_record', 'slp_review_open', 'slp_decision_record', 'slp_check_run']) {
     assert.ok(!names.includes(forbidden));
   }
+  // Every emitted row obeys the centralized wire caps.
+  for (const tool of reply.result.tools) {
+    assert.ok(tool.name.length <= WIRE_LIMITS.deskBridgeToolName, tool.name);
+    assert.ok(
+      tool.description.length <= WIRE_LIMITS.deskBridgeToolDescription,
+      `${tool.name}: ${tool.description.length} chars over ${WIRE_LIMITS.deskBridgeToolDescription}`,
+    );
+  }
+});
+
+// Every catalog row — visible and hidden alike — must satisfy the shared
+// DeskBridgeToolEntry caps; the wire test above only sees the visible half.
+test('the whole desk tool catalog satisfies DeskBridgeToolEntry (all rows, centralized caps)', () => {
+  assert.ok(DESK_TOOL_CATALOG.length > 0);
+  const visible = [];
+  for (const row of DESK_TOOL_CATALOG) {
+    DeskBridgeToolEntry.parse(row);
+    if (row.visible) visible.push(row.name);
+  }
+  // Sanity: the catalog still enumerates the full P3-a surface.
+  assert.deepEqual(visible.sort(), [
+    'slp_assignment_attach',
+    'slp_assignment_close',
+    'slp_assignment_register',
+    'slp_handback_submit',
+    'slp_status',
+  ]);
 });
 
 test('initialize + ping answer; an unknown method is a typed JSON-RPC error', async t => {
@@ -582,6 +616,7 @@ test('slp_status answers the seat-scoped view and nothing more', async t => {
   assert.equal(view.desk.repoKey, repoKey);
   assert.equal(view.desk.state, 'available');
   assert.equal(view.desk.protocol, DESK_BRIDGE_PROTOCOL);
+  assert.deepEqual(view.assignments, []);
   assert.deepEqual(view.limitations, []);
   assert.equal(view.acceptance, 'not-established-by-this-view');
 });
@@ -718,7 +753,113 @@ test('read-only status still answers under recovery-required with the limitation
   assert.equal(view.desk.state, 'recovery-required');
   assert.deepEqual(view.limitations, [
     'desk lock orphaned or unreadable — operator recovery required before desk mutations',
+    'assignments view withheld — the desk ledger cannot be read',
   ]);
+});
+
+test('read-only status still answers when the ledger itself is unreadable (degraded)', async t => {
+  const { reader, conn, f, repoKey, row } = await boundSeat(t);
+  // Corrupt the bound repo's ledger after the handshake — the seat's health
+  // reporter must still answer from the handshake-bound row, marking the
+  // desk degraded instead of rejecting outright.
+  writeFileSync(deskRepoPaths(f.stableRoot, repoKey).ledgerPath, '{corrupt\n');
+  const reply = await rpc(reader, conn, {
+    jsonrpc: '2.0',
+    id: 1,
+    method: 'tools/call',
+    params: { name: 'slp_status', arguments: {} },
+  });
+  assert.notEqual(reply.result.isError, true, JSON.stringify(reply.result));
+  const view = DeskSeatStatus.parse(JSON.parse(reply.result.content[0].text));
+  assert.equal(view.desk.state, 'degraded');
+  // The seat block is the handshake-bound row — snapshot fidelity, not a
+  // fabricated fresh read.
+  assert.equal(view.seat.membershipId, row.membershipId);
+  assert.equal(view.seat.agentId, 'agent-1');
+  assert.equal(view.seat.state, 'host-confirmed');
+  assert.deepEqual(view.assignments, []);
+  assert.deepEqual(view.limitations, [
+    'desk ledger is not readable — seat view is best-effort',
+    'assignments view withheld — the desk ledger cannot be read',
+  ]);
+  // The degraded path broke no guard: a mutation on the unreadable desk is
+  // still refused before any run.
+  const mutation = await rpc(reader, conn, {
+    jsonrpc: '2.0',
+    id: 2,
+    method: 'tools/call',
+    params: {
+      name: 'slp_handback_submit',
+      arguments: {
+        requestId: 'r-degraded',
+        assignmentId: 'asg-1',
+        recordV1: { version: 1, kind: 'handback' },
+        candidateId: null,
+      },
+    },
+  });
+  const rejection = JSON.parse(mutation.result.content[0].text);
+  assert.equal(mutation.result.isError, true);
+  assert.equal(rejection.code, 'STATE_UNREADABLE');
+});
+
+test('slp_status stays schema-valid when several projection caps are hit at once', async t => {
+  const { reader, conn, f, repo, repoKey, row } = await boundSeat(t, {
+    row: { role: 'lead', agentId: 'agent-lead' },
+  });
+  // 70 owned assignments × 33 attached seats: the assignments cap (64) and
+  // the per-assignment seats cap (32) both bind — the limitation aggregate
+  // must stay inside WIRE_LIMITS.deskBridgeLimitations with elision stated.
+  const seatRows = Array.from({ length: 33 }, (_, i) =>
+    memberRow(`seat-${i}`, { agentId: `seat-${i}` }));
+  const assignments = Array.from({ length: 70 }, (_, i) => ({
+    assignmentId: `asg-cap-${i}`,
+    requestId: `req-asg-cap-${i}`,
+    authorityRef: 'grant:cap',
+    objective: null,
+    ownerMembershipId: row.membershipId,
+    ownerAgentId: 'agent-lead',
+    workspaceId: 'wks-1',
+    state: 'open',
+    seats: seatRows.map(m => ({ agentId: m.agentId, membershipId: m.membershipId })),
+  }));
+  const seeded = await seedStore(f).transact(
+    repoKey,
+    {
+      repo,
+      actorKey: 'desk:hook',
+      assignmentId: 'unassigned',
+      requestId: randomUUID(),
+      command: { kind: 'seed' },
+    },
+    ledger => ({
+      ok: true,
+      events: [],
+      memberships: [...ledger.memberships, ...seatRows],
+      assignments,
+    }),
+  );
+  assert.ok(seeded.ok, `multi-cap seed failed: ${JSON.stringify(seeded)}`);
+  const reply = await rpc(reader, conn, {
+    jsonrpc: '2.0',
+    id: 1,
+    method: 'tools/call',
+    params: { name: 'slp_status', arguments: {} },
+  });
+  assert.notEqual(reply.result.isError, true, JSON.stringify(reply.result));
+  // The parse itself is the finding: an over-cap aggregate must never make
+  // the status view fail its own schema (EXECUTION_UNKNOWN).
+  const view = DeskSeatStatus.parse(JSON.parse(reply.result.content[0].text));
+  assert.equal(view.desk.state, 'available');
+  assert.equal(view.assignments.length, WIRE_LIMITS.deskStatusAssignments);
+  assert.ok(view.assignments.every(a => a.seats.length <= WIRE_LIMITS.deskStatusSeats));
+  assert.ok(view.limitations.length <= WIRE_LIMITS.deskBridgeLimitations);
+  for (const line of view.limitations) {
+    assert.ok(line.length <= WIRE_LIMITS.limitationLen, line);
+  }
+  // Elision is disclosed as counting markers, not silently dropped.
+  assert.ok(view.limitations.some(l => l.includes('6 assignment(s) not shown')), JSON.stringify(view.limitations));
+  assert.ok(view.limitations.some(l => l.includes('seat lists truncated')), JSON.stringify(view.limitations));
 });
 
 // ---------------------------------------------------------------------------
@@ -1049,4 +1190,144 @@ test('F9: a byte-invalid frame after binding is a typed error; the session conti
   assert.equal(error.error.data.slpCode, 'INVALID_RECORD');
   const pong = await rpc(reader, conn, { jsonrpc: '2.0', id: 10, method: 'ping' });
   assert.deepEqual(pong.result, {});
+});
+
+// ---------------------------------------------------------------------------
+// r2 — thrown IO is a bounded outcome everywhere the ledger is read, and
+// durable-length seat fields stay inside the wire schema.
+// ---------------------------------------------------------------------------
+
+/** A store wrapper whose read() faults once `ctl` says so — seeded bytes
+ *  stay intact, only the read path faults. `calls` counts reads so a
+ *  status call can be proven single-observation. */
+const throwingStore = ctl => root => {
+  const real = createDeskStore({ stableRoot: root });
+  return {
+    ...real,
+    read: key => {
+      ctl.calls += 1;
+      if (ctl.throws || (ctl.throwAfter !== undefined && ctl.calls > ctl.throwAfter)) {
+        throw new Error('io fault — injected');
+      }
+      return real.read(key);
+    },
+  };
+};
+
+test('a thrown ledger read during hello rejects typed — the handshake never hangs', async t => {
+  const ctl = { throws: true, calls: 0 };
+  const f = await started(t, { createStore: throwingStore(ctl) });
+  assert.equal(f.outcome, 'listening');
+  const git = gitRepo(t);
+  // Seed through a real store instance — the bridge's own store faults.
+  await seedMembership(seedStore(f), repoOf(git), memberRow('handle-1'));
+  const { conn, ack } = await handshake(f.paths.socketPath, HELLO('handle-1'));
+  t.after(() => conn.destroy());
+  assert.equal(ack.ok, false);
+  assert.equal(ack.error.code, 'STATE_UNREADABLE');
+});
+
+test('a thrown ledger read after binding: status degrades from one observation, mutation fails closed', async t => {
+  const ctl = { throws: false, calls: 0 };
+  const { reader, conn, row } = await boundSeat(t, { createStore: throwingStore(ctl) });
+  ctl.calls = 0;
+  ctl.throws = true;
+  const reply = await rpc(reader, conn, {
+    jsonrpc: '2.0',
+    id: 1,
+    method: 'tools/call',
+    params: { name: 'slp_status', arguments: {} },
+  });
+  // A bounded typed result — never a hung frame.
+  assert.notEqual(reply.result.isError, true, JSON.stringify(reply.result));
+  const view = DeskSeatStatus.parse(JSON.parse(reply.result.content[0].text));
+  assert.equal(view.desk.state, 'degraded');
+  // The handshake-bound row answers — nothing fabricated from a live read.
+  assert.equal(view.seat.membershipId, row.membershipId);
+  assert.equal(view.seat.agentId, 'agent-1');
+  assert.deepEqual(view.assignments, []);
+  assert.deepEqual(view.limitations, [
+    'desk ledger is not readable — seat view is best-effort',
+    'assignments view withheld — the desk ledger cannot be read',
+  ]);
+  // Identity, availability and projection derive from ONE observation —
+  // a second read could disagree with the first inside a single call.
+  assert.equal(ctl.calls, 1, 'status must observe the ledger exactly once');
+  const mutation = await rpc(reader, conn, {
+    jsonrpc: '2.0',
+    id: 2,
+    method: 'tools/call',
+    params: {
+      name: 'slp_handback_submit',
+      arguments: {
+        requestId: 'r-throw',
+        assignmentId: 'asg-1',
+        recordV1: { version: 1, kind: 'handback' },
+        candidateId: null,
+      },
+    },
+  });
+  const rejection = JSON.parse(mutation.result.content[0].text);
+  assert.equal(mutation.result.isError, true);
+  assert.equal(rejection.code, 'STATE_UNREADABLE');
+});
+
+test('a read fault between identity and availability answers RECOVERY_REQUIRED', async t => {
+  const ctl = { throws: false, calls: 0 };
+  const { reader, conn } = await boundSeat(t, { createStore: throwingStore(ctl) });
+  // The mutation dispatch reads twice: freshRow (identity) succeeds, the
+  // availability probe's own read faults → degraded → typed refusal.
+  ctl.calls = 0;
+  ctl.throwAfter = 1;
+  const mutation = await rpc(reader, conn, {
+    jsonrpc: '2.0',
+    id: 1,
+    method: 'tools/call',
+    params: {
+      name: 'slp_assignment_register',
+      arguments: { requestId: 'r-seq', authorityRef: 'grant:x', objective: null },
+    },
+  });
+  const rejection = JSON.parse(mutation.result.content[0].text);
+  assert.equal(mutation.result.isError, true);
+  assert.equal(rejection.code, 'RECOVERY_REQUIRED');
+  assert.equal(ctl.calls, 2, 'freshRow read + availability read — no more');
+});
+
+test('a ledger deleted mid-session answers STALE_EPOCH — absent stays distinct from unreadable', async t => {
+  const { reader, conn, f, repoKey } = await boundSeat(t);
+  rmSync(deskRepoPaths(f.stableRoot, repoKey).ledgerPath);
+  const reply = await rpc(reader, conn, {
+    jsonrpc: '2.0',
+    id: 1,
+    method: 'tools/call',
+    params: { name: 'slp_status', arguments: {} },
+  });
+  const rejection = JSON.parse(reply.result.content[0].text);
+  assert.equal(reply.result.isError, true);
+  assert.equal(rejection.code, 'STALE_EPOCH');
+});
+
+test('seat fields at the durable maxima stay inside the status wire schema — no truncation', async t => {
+  const provider = 'p'.repeat(WIRE_LIMITS.providerLen);
+  const workspaceId = 'w'.repeat(WIRE_LIMITS.workspaceIdLen);
+  const createCwd = `/${'d'.repeat(64)}`;
+  const { reader, conn, row } = await boundSeat(t, {
+    agent: { provider, workspaceId, archivedAt: null },
+    row: { provider, workspaceId, createCwd },
+  });
+  const reply = await rpc(reader, conn, {
+    jsonrpc: '2.0',
+    id: 1,
+    method: 'tools/call',
+    params: { name: 'slp_status', arguments: {} },
+  });
+  // Under the old wire-64 provider cap this answer was EXECUTION_UNKNOWN —
+  // a ledger-valid row failed the response schema.
+  assert.notEqual(reply.result.isError, true, JSON.stringify(reply.result));
+  const view = DeskSeatStatus.parse(JSON.parse(reply.result.content[0].text));
+  assert.equal(view.seat.provider, provider);
+  assert.equal(view.seat.workspaceId, workspaceId);
+  assert.equal(view.seat.createCwd, createCwd);
+  assert.equal(view.seat.membershipId, row.membershipId);
 });
