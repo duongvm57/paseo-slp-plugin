@@ -13,7 +13,7 @@ test('contract text pins: peer locators, review gate shape, bounded settle, hear
   const monitoring = read('src/references/monitoring.md').replace(/\s+/gu, ' ');
 
   assert.ok(contract.includes('Peer locators contain `common.md` and `roles/peer.md`, plus `work-tracking.md` only when managed session entry enables beads.'));
-  assert.ok(contract.includes('a required gate takes the shape the effective workspace protocol declares — parallel seats on split axes by default — and declared seats that cannot be supplied make it BLOCKED rather than skipped or merged.'));
+  assert.ok(contract.includes('a required gate follows the rule the effective workspace protocol declares — a fixed shape or a bounded selection rule, parallel seats on split axes by default — and seats the declared rule requires that cannot be supplied make it BLOCKED rather than skipped or merged.'));
   assert.ok(monitoring.includes('settle each bounded task after Delivery completes and no correction or re-review remains open'));
   assert.ok(monitoring.includes('Each heartbeat owner deletes its recorded task heartbeat and records the receipt.'));
   assert.ok(monitoring.includes('bounded fallback for gaps in event coverage'));
