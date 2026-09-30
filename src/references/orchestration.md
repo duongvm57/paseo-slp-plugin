@@ -46,8 +46,8 @@ granted. When a review gate is required, structure it per
 references/review-gates.md and the effective protocol's declared rule — a
 fixed seat/axis shape, or a bounded selection rule under which the Lead
 chooses the minimum sufficient seats; the default is parallel seats on
-split axes, and a single reviewer remains a degenerate gate unless the
-declared rule yields one seat. The protocol sets the rule by recorded
+split axes, and a single-seat gate is valid only where the declared rule
+yields one seat. The protocol sets the rule by recorded
 decision; inability to supply a required gate is BLOCKED, not permission to
 skip it.
 

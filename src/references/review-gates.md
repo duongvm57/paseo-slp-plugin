@@ -11,8 +11,8 @@ risk, another seat only for a distinct unresolved risk, a
 separation-of-concerns need or a difficult council — a selection rule
 carries no default reviewer count. Absent a declaration the package default
 applies: parallel Peer seats on split Spec and Standards axes so no axis
-can mask another. A single reviewer is a degenerate gate — valid where the
-declared rule yields one seat, for the change classes the protocol lists
+can mask another. A single-seat gate is valid where the declared rule
+yields one independent seat, for the change classes the protocol lists
 explicitly (for example docs-only edits that touch no semantics,
 generated-payload regeneration, typo or metadata fixes), or as a declared
 one-seat shape; a required gate over doctrine, delegation, packaging,
