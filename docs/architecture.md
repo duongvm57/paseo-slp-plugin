@@ -148,8 +148,9 @@ Six rules fall out of the role model and shape everything below:
   seats briefed neutrally against an exact candidate — the split-axis
   gate (a spec reviewer and a standards reviewer in parallel) is the
   package default for work that needs review, the workspace protocol
-  owns the shape, and a required gate never falls below its declared
-  seats.
+  owns the rule — a fixed shape or a bounded selection rule under which
+  the Lead chooses minimum sufficient seats — and a required gate never
+  bypasses its declared rule.
 - **Workspace isolation is explicit.** One workspace ID is not
   filesystem isolation. The minimum safe rule is one writer per moving
   scope; same-team seats share the assignment workspace by default, and

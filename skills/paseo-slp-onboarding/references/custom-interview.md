@@ -15,11 +15,13 @@ the relevant artifact and restate each decision.
    chosen work. Lead retains decisions and verification; dispositions are not
    model assignments or a mandatory pipeline.
 
-Installed authority, parentage and ownership invariants remain. A required gate
-defaults to independent Spec + Standards seats; the protocol owns the shape.
-Template choices (including requiring review for every recipe and the two-seat
-gate) are defaults; any Human change must be explicit in Overrides with
-decider/date, and single-seat classes must satisfy installed review-gate rules.
+Installed authority, parentage and ownership invariants remain. A required
+gate defaults to independent Spec + Standards seats absent a protocol rule;
+the protocol may instead declare a fixed shape or a bounded selection rule
+letting the Lead choose the minimum sufficient seats per task. Template
+choices (including the shipped review-trigger list) are defaults; any Human
+change must be explicit in Overrides with decider/date, and classes
+exempted from review triggers must satisfy installed review-gate rules.
 Keep defaults until changed. Extra cross-family review is optional; its
 unavailability does not block or replace the declared gate.
 

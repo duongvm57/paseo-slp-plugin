@@ -62,7 +62,7 @@ supply it. Cost and model budget come from explicit assignment boundaries.
 Lead chooses per task from the outcome and evidence, not a ticket label or the
 length of a description. Recipes are starting shapes, not role conveyors: add a
 seat only for a distinct question or artifact and skip a phase whose evidence
-exists — except the review gate, which no recipe skips.
+exists — except the review triggers, which no recipe waives.
 
 | The outcome is… | Start with |
 |---|---|
@@ -97,19 +97,35 @@ implementation.
 
 ## Review gate
 
-This protocol requires an independent review gate for every recipe's code,
-behavior, doctrine or decision artifact, before acceptance or execution.
-Declared shape: parallel Spec and Standards seats — split-axis seats, never one merged seat —
-on the frozen candidate, in sessions separate from the writer and
-structured by the installed review-gate rules. The protocol owns the gate's
-shape: redefining its seats or axes in either direction — stricter or down to
-one seat — is a Human protocol decision recorded under Overrides, and without
-one the declared shape stands. Reviewer seats are checkers, not implementation
-owners, so they never take a task out of Lean. This template lists no single-seat
-change classes; adding one is a Human protocol decision recorded under
-Overrides. Seat titles name the seat inside taskLabel —
-`Peer — Reviewer — <task> / Spec` and `Peer — Reviewer — <task> / Standard`,
-unabbreviated — never an "axis" suffix; seats already running keep their titles.
+Independent review is trigger-based, not per-recipe: a fired trigger
+requires an independent review gate —
+
+- auth, permission, money, PII, data-integrity or lifecycle/ownership risk;
+- hard-to-reverse architecture or contract;
+- material behavior crossing module boundaries;
+- acceptance the established checks cannot sufficiently prove, or uncertain
+  writer evidence;
+- an explicit Human or assignment request.
+
+With no trigger the default flow is owner → candidate + proof → Lead
+verdict. The trigger list itself is a Human protocol decision recorded
+under Overrides.
+
+When review triggers, the Lead selects the minimum sufficient independent
+mandate(s) for the material risks: one reviewer is sufficient when one
+independent lens covers the decision-changing risk; add another independent
+seat only for a distinct unresolved risk, a separation-of-concerns need or
+a difficult council — there is no default reviewer count. Seats run on the
+frozen candidate in sessions separate from the writer and are structured by
+the installed review-gate rules; Lead adjudicates every finding. Reviewer
+seats are checkers, not implementation owners, so they never take a task
+out of Lean. This protocol lists no change classes exempt from its review
+triggers; adding one is a Human protocol decision recorded under Overrides.
+Seat titles name the seat inside taskLabel —
+`Peer — Reviewer — <task> / <lens>`, for example
+`Peer — Reviewer — <task> / Spec` or `Peer — Reviewer — <task> / Standard`,
+unabbreviated — never an "axis" suffix; seats already running keep their
+titles.
 
 ## Correction, verdict and delivery
 
@@ -117,14 +133,14 @@ Every recipe ends with this procedure:
 
 1. Lead freezes the owner's paused candidate, verifies it — re-runs the
    established checks and pins the snapshot before and after the gate — and runs
-   the review gate on it.
+   the review gate on it when a trigger fires.
 2. Findings return to the same owner of that artifact — the Engineer, Migrator
    or report owner — as a correction assignment inside the same task. The
    owner's next stable, paused candidate repeats step 1 with the same seats
    under installed session continuity. Findings repeating one class follow the
    installed correction-loop escalation instead of another point fix.
 3. Lead issues ACCEPT, CHANGES_REQUESTED or BLOCKED with candidate identity,
-   proof, both axis results side by side and any unresolved risk/resource, on
+   proof, the seat results side by side and any unresolved risk/resource, on
    the required handback routes.
 4. After ACCEPT, the actor holding the delivery grant delivers as the Repository
    profile's Delivery row states and records the receipt. The task completes
@@ -136,7 +152,7 @@ Lean is the tiny procedure. A task qualifies only when scope and verification
 are clear, the change is easy to reverse and it changes no authority,
 delegation, lifecycle or integrity rules; Lead records the reason in one
 sentence. Lean saves preparation — one implementation owner, no plan, brief,
-formation or report files — never the review gate.
+formation or report files — never a triggered review gate.
 
 1. Lead supplies one short inline brief: outcome and acceptance, owned/excluded
    scope, authority, base, established checks and report recipient. Record the
@@ -207,7 +223,7 @@ choose from.
 | Frame | Lead | Question, sufficiency criteria, experiment scope, Human-held decisions |
 | Gather | One Researcher, Scout or Investigator Peer matched to the question — the report owner | Sources, observations, rejected hypotheses, unknowns |
 | Recommend, when asked | The report owner, or an Architect | Alternatives, trade-offs, recommendation, counterargument, reversal conditions |
-| Close | Correction, verdict and delivery; Spec checks question and coverage, Standards checks method and evidence; the report owner revises or lowers certainty | Accepted conclusion, or BLOCKED naming what is missing; decisions beyond mandate go to the Human |
+| Close | Correction, verdict and delivery; the selected review seats check e.g. question/coverage and method/evidence; the report owner revises or lowers certainty | Accepted conclusion, or BLOCKED naming what is missing; decisions beyond mandate go to the Human |
 
 Finding a cause grants no write to fix it; an experiment needs its own write
 scope, and implementation is a new assignment into Recipe A, B or C.

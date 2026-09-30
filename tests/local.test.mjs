@@ -115,7 +115,7 @@ test('installed common protocol supports combined configuration without losing g
   assert.match(base, /All four recipes remain available by default/);
   assert.match(base, /tracker does not\nrequire a separate Task Lead/);
   assert.match(base, /requires an independent review gate/);
-  assert.match(base, /parallel Spec and Standards seats/);
+  assert.match(base, /minimum sufficient independent\s+mandate/);
   const transition = base.split('## Recipe C')[1].split('## Recipe D')[0];
   assert.ok(transition.indexOf('| Gate |') < transition.indexOf('| Execute |'));
   assert.match(transition, /outcome verdict/);
@@ -541,11 +541,11 @@ test('decision-doctrine lines reach the standalone bundles that need them and ne
     assert.ok(!peer.includes(readFileSync(join(installed, 'src/references', ref), 'utf8')), `Peer must not load ${ref} bytes`);
   }
   // The shipped protocol template carries the same doctrine: read-on-landing,
-  // split-axis gate wording, task-scoped rework continuity, create_agent-only seats and the
+  // trigger-based gate wording, task-scoped rework continuity, create_agent-only seats and the
   // shared-workspace placement default with the owner-map/receipt record.
   const template = readFileSync(join(installed, 'src/templates/workspace-protocol.md'), 'utf8');
   assert.match(template, /when the assignment lands/);
-  assert.match(template, /split-axis seats, never one merged seat/);
+  assert.match(template, /a fired trigger\s+requires an independent review gate/);
   assert.match(template, /same Engineer and\s+independent review seats available for correction or re-review/);
   assert.match(template, /bounded task\s+settles after Delivery completes and no correction or re-review remains open/);
   assert.doesNotMatch(template, /batch archive/);
@@ -563,12 +563,14 @@ test('decision-doctrine lines reach the standalone bundles that need them and ne
   assert.match(monitoring, /never by cwd/, 'seat enumeration is not cwd-scoped');
   assert.match(monitoring, /empty list_agents result does not prove/, 'empty list is not nonexistence');
   assert.match(monitoring, /refs\/heads\/<lane>/, 'lane branches carry lane commits');
-  // M2: the gate shape is protocol-owned — the package default is the
-  // split-axis Spec/Standards gate; the single-seat exception stays
-  // class-listed and Lead-recorded, and a required gate never merges ad hoc.
+  // M2: the gate rule is protocol-owned — a fixed shape or a bounded
+  // selection rule with the split-axis Spec/Standards package default; the
+  // single-seat exception stays class-listed and Lead-recorded, and a
+  // required gate never merges ad hoc.
   const gates = readFileSync(join(installed, 'src/references/review-gates.md'), 'utf8');
-  assert.match(gates, /shape the effective workspace protocol\s+declares/, 'gate shape is protocol-declared');
+  assert.match(gates, /rule the effective workspace protocol\s+declares/, 'gate rule is protocol-declared');
+  assert.match(gates, /bounded selection rule/, 'protocol may delegate seat choice via a selection rule');
   assert.match(gates, /change classes the\s+protocol\s+lists\s+explicitly/, 'single-seat exception is class-listed');
-  assert.match(gates, /never skipped or merged ad hoc/, 'a required gate never merges ad hoc');
+  assert.match(gates, /never\s+skipped or merged ad hoc/, 'a required gate never merges ad hoc');
   assert.match(gates, /Lead decides it and\s+records/, 'exception authority and record are pinned');
 });
