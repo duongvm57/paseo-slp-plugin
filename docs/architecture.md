@@ -147,8 +147,9 @@ Six rules fall out of the role model and shape everything below:
   from the author's context inherits its framing. Reviewers are fresh
   seats briefed neutrally against an exact candidate — the split-axis
   gate (a spec reviewer and a standards reviewer in parallel) is the
-  default for work that needs review, and a required gate never
-  collapses into one seat.
+  package default for work that needs review, the workspace protocol
+  owns the shape, and a required gate never falls below its declared
+  seats.
 - **Workspace isolation is explicit.** One workspace ID is not
   filesystem isolation. The minimum safe rule is one writer per moving
   scope; same-team seats share the assignment workspace by default, and

@@ -26,7 +26,7 @@ Local installation/transport checks do not constitute workflow acceptance.
 | src/references/anti-patterns.md | All 20 guide §9 hypotheses with evidence, questions and bounded responses; reached on audit/drift triggers. |
 | src/references/provider-routing.md | Supervisor/Lead profile selection, Peer pool selection, validation and handoff; conditional pointer to Jev routing procedure. |
 | src/references/jev-routing.md | Conditional Jev routing procedure: load only for `shadow`, `armed` or `error`; `error` blocks the dependent branch. |
-| src/references/review-gates.md | Review gate structure: parallel axis-split seats (Spec vs Standards; cross-family seat optional, never required), Lead-owned verification distinct from review seats, smell baseline, neutral briefs, non-merged aggregation and the repeated-class correction-loop escalation. |
+| src/references/review-gates.md | Review gate structure: protocol-declared seats and axes (package default parallel Spec vs Standards; cross-family seat optional, never required), Lead-owned verification distinct from review seats, smell baseline, neutral briefs, non-merged aggregation and the repeated-class correction-loop escalation. |
 | src/references/work-tracking.md | Conditional beads (`bd`) work-graph doctrine — self-gates on the session-entry `Work tracker: beads (enabled in SLP settings)` pointer: probe first, unavailable/uninitialized is a recorded gap never a block, evidence-not-control-plane boundaries, the one-writer-per-scope table (Supervisor roots / Lead children / a seat's own issue), `BEADS_ACTOR`/`--actor` attribution, and recovery/handback rules. SLP never installs, initializes or configures beads. |
 | src/report-records.mjs | Pure report-block extraction and v1 validation, candidate/evidence consistency diagnostics, and referenced output reads rooted at the verifier's `--repo` when supplied, otherwise record-declared candidate roots. |
 | src/routing.mjs | Resolve the repository catalog, falling back to the plugin-owned user-scope pool at `<paseoHome>/slp-runtime/state/peer-pool.json` when absent; bind a Lead-selected option with fresh hash and availability checks. `optionExclusions` is the single eligibility predicate — closed-vocabulary tokens (`disabled`, `availability:<state>`, `role-not-listed`) shared by enforcement and Jev candidate generation. `validateCatalog` stays shape-only apart from normalizing the legacy `optionIds` quota-fallback list in place on read (≤1 → `optionId`, >1 fails closed — wave 6) and refusing the Jev decline sentinel as an option id — a shape-level collision; the semantic layer reports a reserved standard-seat id whose tokens diverge from the package set as a Token conflict on every read, and `catalogBinding` refuses to bind one. `catalogBinding` verifies a supplied Jev receipt offline — including the vocabulary version it was issued under — and requires one when the daemon arms `jev.capabilities.routing`. |
@@ -178,9 +178,10 @@ install unit, so locator sets never declare it.
 Protocol defaults select tactics; global roles no longer impose a single Engineer
 or prohibit heartbeat for every assignment. Assignment supplies Peer disposition,
 read/write authority and output; independent review uses sessions separate from
-implementation and exact candidates; a required gate is parallel seats on split
-axes — never one merged seat — and seats that cannot be supplied make it
-BLOCKED rather than skipped. Within one assignment, Lead normally reuses
+implementation and exact candidates; a required gate takes the shape the
+effective workspace protocol declares — parallel seats on split axes by default
+— and declared seats that cannot be supplied make it BLOCKED rather than
+skipped or merged. Within one assignment, Lead normally reuses
 the Engineer for corrections and the same independent review seats for re-review on the new
 stable candidate. New independent seats and recovery remain explicit choices.
 Lead builds relevant project context from repository evidence and maintains a
@@ -455,7 +456,8 @@ protocol owns the ceremony: the shipped template supplies one Peer Engineer, an 
 brief/formation, in-session proof, independent review and Lead artifact inspection/verdict.
 The template requires review even for Tiny work; this is a template default,
 not a new global requirement for every custom protocol. A required review gate
-still uses separate Spec and Standards seats under the installed review policy.
+takes the shape its protocol declares — separate Spec and Standards seats under
+the package default.
 Growing scope/risk requires Lead to reassess the workflow before affected work. Missing or
 older protocols grant no implicit exemption; record the gap and propose a change.
 Where authority permits the task still runs through one Peer Engineer — only the

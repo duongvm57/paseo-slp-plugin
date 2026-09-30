@@ -8,12 +8,12 @@ import { scenarios } from '../e2e/scenarios.mjs';
 const root = fileURLToPath(new URL('..', import.meta.url));
 const read = path => readFileSync(join(root, path), 'utf8');
 
-test('contract text pins: peer locators, review floor, bounded settle, heartbeat cleanup', () => {
+test('contract text pins: peer locators, review gate shape, bounded settle, heartbeat cleanup', () => {
   const contract = read('docs/contract.md').replace(/\s+/gu, ' ');
   const monitoring = read('src/references/monitoring.md').replace(/\s+/gu, ' ');
 
   assert.ok(contract.includes('Peer locators contain `common.md` and `roles/peer.md`, plus `work-tracking.md` only when managed session entry enables beads.'));
-  assert.ok(contract.includes('a required gate is parallel seats on split axes — never one merged seat — and seats that cannot be supplied make it BLOCKED rather than skipped.'));
+  assert.ok(contract.includes('a required gate takes the shape the effective workspace protocol declares — parallel seats on split axes by default — and declared seats that cannot be supplied make it BLOCKED rather than skipped or merged.'));
   assert.ok(monitoring.includes('settle each bounded task after Delivery completes and no correction or re-review remains open'));
   assert.ok(monitoring.includes('Each heartbeat owner deletes its recorded task heartbeat and records the receipt.'));
   assert.ok(monitoring.includes('bounded fallback for gaps in event coverage'));

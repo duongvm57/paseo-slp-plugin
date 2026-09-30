@@ -25,7 +25,8 @@ or assigned label is not evidence of parentage. Record unavailable host evidence
 as a visibility gap. An ambiguous create reserves its scope until reconciled;
 never retry while the original request may still create a child.
 
-A required review gate defaults to parallel seats on split axes (Spec and
+A required review gate takes the shape the effective workspace protocol
+declares — absent a declaration, parallel seats on split axes (Spec and
 Standards): a summary like "Engineer → Reviewer" does not license merging
 the axes into one seat. A task too small to require review is a separate
 judgment from loosening a required gate. Required seats that cannot be
