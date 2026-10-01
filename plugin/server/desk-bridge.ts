@@ -38,7 +38,7 @@ import {
   unlinkSync,
   writeSync,
 } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import type { PluginBeforeRequests, PluginHookContext } from "@getpaseo/plugin/server";
 import {
@@ -70,9 +70,12 @@ import {
   DeskErrorCode as DeskErrorCodeSchema,
   DeskHandbackSubmitInput,
   DeskSeatStatus,
+  DeskSettlementExportInput,
+  DeskSettlementRecordInput,
   WIRE_LIMITS,
   type DeskRejectionValue,
   type DeskSeatStatusValue,
+  type DeskSettlementRecordInputValue,
 } from "../shared/enforcement.ts";
 import { auditCapabilities, CAPABILITY_IDS } from "./capabilities.ts";
 import {
@@ -85,6 +88,13 @@ import {
   type DeskRunnerDeps,
   type ObservedCaptureValue,
 } from "./desk-handback.ts";
+import {
+  runSettlementExport,
+  runSettlementRecord,
+  seatSettlementsView,
+  type ExportVerifier,
+  type SettlementRunnerDeps,
+} from "./desk-settlement.ts";
 
 type AgentCreateRequest = PluginBeforeRequests["agent.create"];
 type SessionOpenRequest = PluginBeforeRequests["agent.session_open"];
@@ -103,6 +113,8 @@ const HANDBACK_SUBMIT_TOOL = "slp_handback_submit";
 const ASSIGNMENT_REGISTER_TOOL = "slp_assignment_register";
 const ASSIGNMENT_ATTACH_TOOL = "slp_assignment_attach";
 const ASSIGNMENT_CLOSE_TOOL = "slp_assignment_close";
+const SETTLEMENT_RECORD_TOOL = "slp_settlement_record";
+const SETTLEMENT_EXPORT_TOOL = "slp_settlement_export";
 
 /** The bridge's own limitation literals — the seat-facing read view's
  *  bounded flag strings (kept in one table, same discipline as
@@ -162,6 +174,23 @@ export const DESK_TOOL_CATALOG = [
       "Input: {requestId, assignmentId}. Response: {ok, receiptId, assignmentId, state}.",
   },
   {
+    name: SETTLEMENT_RECORD_TOOL,
+    visible: true,
+    mutation: true,
+    description:
+      "Receiving-owner only: record an immutable settlement mirror revision for a bound seat. " +
+      "Input: {requestId, assignmentId, seatAgentId, seatTitle, at, pointers, refs, resources, timeline}. " +
+      "Response: {ok, settlementId, revision, receiptId, status, gaps}.",
+  },
+  {
+    name: SETTLEMENT_EXPORT_TOOL,
+    visible: true,
+    mutation: false,
+    description:
+      "Owner or settled seat: re-derive the committed revision's v1 slp-record for manual sink placement. " +
+      "Input: {settlementId}. Read-only, no side effects.",
+  },
+  {
     name: HIDDEN_TOOL,
     visible: false,
     mutation: false,
@@ -219,6 +248,10 @@ export interface DeskBridgeDeps {
     repository: string;
     now: () => Date;
   }) => Promise<ObservedCaptureValue>;
+  /** P3-b transcript-export artifact seam — tests substitute a structural
+   *  double; the default resolves the claim under the durable repo
+   *  binding's worktree root and proves existence + sha256/bytes. */
+  verifyExport?: ExportVerifier;
 }
 
 export type DeskBridgeState =
@@ -270,6 +303,51 @@ interface LockHolder {
   startedAt?: string;
 }
 
+/** The production artifact seam for settlement transcript exports (P3-b
+ *  R1). The allowed evidence domain is the bound repository's worktree —
+ *  `realpath(dirname(repo.gitCommonDir))`, derived server-side from the
+ *  durable repo binding, never from the caller's claim. An artifact must
+ *  resolve strictly inside that root and match the claimed sha256/bytes
+ *  before it can ground `completed`; `absent`/`outside-root`/`mismatch`
+ *  disprove the claim, `unavailable` means the seam itself could not
+ *  prove anything. */
+export function makeExportVerifier(realpath: (path: string) => string): ExportVerifier {
+  return async (claim, repo) => {
+    let root: string;
+    try {
+      root = dirname(realpath(repo.gitCommonDir));
+    } catch {
+      return { status: "unavailable", detail: "repository-worktree-root-unresolvable" };
+    }
+    let candidate: string;
+    try {
+      candidate = realpath(resolve(root, claim.path));
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      return code === "ENOENT" || code === "ENOTDIR"
+        ? { status: "absent", detail: null }
+        : { status: "unavailable", detail: `export-path-unresolvable:${code ?? "error"}` };
+    }
+    const rel = relative(root, candidate);
+    if (rel === "" || rel.startsWith("..") || isAbsolute(rel)) {
+      return { status: "outside-root", detail: null };
+    }
+    let bytes: Buffer;
+    try {
+      bytes = readFileSync(candidate);
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      return code === "ENOENT" || code === "ENOTDIR"
+        ? { status: "absent", detail: null }
+        : { status: "unavailable", detail: `export-read-failed:${code ?? "error"}` };
+    }
+    if (bytes.length !== claim.bytes || sha256Hex(bytes) !== claim.sha256) {
+      return { status: "mismatch", detail: null };
+    }
+    return { status: "verified", detail: null };
+  };
+}
+
 export function createDeskBridge(deps: DeskBridgeDeps) {
   const platform = deps.platform ?? process.platform;
   const uuid = deps.uuid ?? (() => randomUUID());
@@ -280,6 +358,7 @@ export function createDeskBridge(deps: DeskBridgeDeps) {
   const createStore = deps.createStore ?? (stableRoot => createDeskStore({ stableRoot }));
   const audit = deps.audit ?? auditCapabilities;
   const capture = deps.capture ?? captureSeatSnapshot;
+  const verifyExport = deps.verifyExport ?? makeExportVerifier(realpath);
   const instanceNonce = uuid();
   /** The connected-SDK slot — every hook/handler context that reaches the
    *  plugin stashes it here so dispatch guards can verify live identity
@@ -802,13 +881,15 @@ export function createDeskBridge(deps: DeskBridgeDeps) {
   }
 
   /** Runner deps shared by the mutation tools — the store and bound-runtime
-   *  capture wiring live in the bridge scope. */
-  const runnerDeps = (): DeskRunnerDeps => ({
+   *  capture wiring live in the bridge scope; the P3-b export seam joins
+   *  the same assembly so every record call verifies through one path. */
+  const runnerDeps = (): DeskRunnerDeps & SettlementRunnerDeps => ({
     store: store as DeskRunnerDeps["store"],
     capture,
     uuid,
     now,
     binding: binding === null ? null : { runtimePath: binding.runtimePath, nodePath: binding.nodePath },
+    verifyExport,
   });
 
   const TOOL_IMPLS: Record<string, { input: z.ZodType; run: ToolDef["run"] }> = {
@@ -831,8 +912,21 @@ export function createDeskBridge(deps: DeskBridgeDeps) {
             seats: WIRE_LIMITS.deskStatusSeats,
             handbacks: WIRE_LIMITS.deskStatusHandbacks,
           });
-          assignments = projection.assignments;
+          // P3-b — the settlement mirror joins the same observation, scoped
+          // like the handback list: the owner sees every row on its owned
+          // assignment; a seat sees only the revisions that settle its own
+          // seat.
+          const settlementProjection = seatSettlementsView(seatRead.ledger, row, {
+            settlements: WIRE_LIMITS.deskStatusSettlements,
+          });
+          assignments = projection.assignments.map(a => ({
+            ...a,
+            settlements: settlementProjection.byAssignment.get(a.assignmentId) ?? [],
+          }));
           limitations.push(...projection.limitations);
+          if (settlementProjection.truncated > 0) {
+            limitations.push(`${settlementProjection.truncated} assignment(s) have settlement lists truncated at ${WIRE_LIMITS.deskStatusSettlements}`);
+          }
         } else if (availability !== "available") {
           // The projection is withheld, not faked — a desk that cannot be
           // read cannot serve a trustworthy seat view; the limitation
@@ -907,6 +1001,26 @@ export function createDeskBridge(deps: DeskBridgeDeps) {
         return runAssignmentClose(
           { repoKey: bound.repoKey, row },
           input as { requestId: string; assignmentId: string },
+          runnerDeps(),
+        );
+      },
+    },
+    [SETTLEMENT_RECORD_TOOL]: {
+      input: DeskSettlementRecordInput,
+      async run({ row, bound, input }) {
+        return runSettlementRecord(
+          { repoKey: bound.repoKey, row },
+          input as DeskSettlementRecordInputValue,
+          runnerDeps(),
+        );
+      },
+    },
+    [SETTLEMENT_EXPORT_TOOL]: {
+      input: DeskSettlementExportInput,
+      async run({ row, bound, input }) {
+        return runSettlementExport(
+          { repoKey: bound.repoKey, row },
+          input as { settlementId: string },
           runnerDeps(),
         );
       },

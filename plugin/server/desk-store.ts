@@ -43,9 +43,11 @@ import { z } from "zod";
 import { Family, OperationConflict, Sha, Time } from "../shared/contracts.ts";
 import {
   DeskRejection,
+  SETTLEMENT_RESOURCE_DISPOSITIONS,
   WIRE_LIMITS,
   type DeskRejectionValue,
 } from "../shared/enforcement.ts";
+import { SETTLEMENT_VIA } from "./desk-records.ts";
 import { ROLES } from "../shared/families.ts";
 import { canonicalJson, canonicalSha256, sha256Hex } from "./config-view.ts";
 import {
@@ -89,10 +91,16 @@ export const LEDGER_LIMITS = {
   captureTimeoutMs: 60000,
   captureMaxBytes: 33554432,
   captureDetailLen: 512,
+  // P3-b — the settlement mirror table. Row/field caps are NOT restated
+  // here: the durable SettlementSchema reads the WIRE_LIMITS.desk*
+  // keys directly so durable, wire and producer bounds share one source
+  // (the F-STD-4 rule — a replayed durable row can never fail the wire
+  // schema it is served under).
+  settlements: 4096,
 } as const;
 
 const LEDGER_FORMAT = "paseo-slp/enforcement";
-const LEDGER_SCHEMA_VERSION = 3;
+const LEDGER_SCHEMA_VERSION = 4;
 /** The one repoKey algorithm label — schema literal and namespace refinement
  *  both read it from here; nothing else may restate it. */
 export const REPO_KEY_ALGORITHM = "sha256(hostId|gitCommonDir)@1";
@@ -421,6 +429,89 @@ const HandbackSchema = z
     }
   });
 
+/** P3-b — a resource disposition entry inside a settlement row. `ref` is a
+ *  claimed pointer (issue, handle, path, receipt — the desk never resolves
+ *  it); `disposition` is the owner's attestation. `unknown` records a
+ *  resource whose fate could not be attested — it never silently means
+ *  released. */
+const SettlementResourceSchema = z
+  .object({
+    ref: z.string().min(1).max(WIRE_LIMITS.deskSettlementPointer),
+    disposition: z.enum(SETTLEMENT_RESOURCE_DISPOSITIONS),
+  })
+  .strict();
+
+/** P3-b — the settlement timeline block, durable shape. `via` reads the
+ *  closed SETTLEMENT_VIA enum from desk-records (the authoritative v1
+ *  vocabulary); every other field shares its cap with the wire schema so a
+ *  committed row always re-exports schema-valid. */
+const SettlementTimelineSchema = z
+  .object({
+    nativeHandle: z.string().min(1).max(WIRE_LIMITS.deskTimelineField).nullable(),
+    sessionId: z.string().min(1).max(WIRE_LIMITS.deskTimelineField).nullable(),
+    via: z.enum(SETTLEMENT_VIA),
+    export: z
+      .object({
+        path: z.string().min(1).max(WIRE_LIMITS.deskExportPath),
+        sha256: Sha,
+        bytes: z.number().int().min(0),
+      })
+      .strict()
+      .nullable(),
+    gap: z.string().min(1).max(WIRE_LIMITS.gapLen).nullable(),
+  })
+  .strict();
+
+/** P3-b — an immutable settlement revision. The mirror is evidence storage,
+ *  never the official sink: `deliveryRef`/`reworkClosureRef`/`sinkRef`/
+ *  `decisionRef` and `resources[].ref` are claimed pointers the desk stores
+ *  verbatim and never dereferences (`decisionRef` in particular names an
+ *  external decision the desk cannot resolve — P4 machinery does not
+ *  exist). `ownerAgentId`/`seatAgentId`/`seatProvider` are denormalized so
+ *  the row keeps the original identities across membership rebinds;
+ *  `status`/`gaps` are the decide-computed disposition at commit time —
+ *  later revisions append, they never rewrite. `requestId` is stored so a
+ *  replayed record rebuilds its response from the durable row.
+ *  `exportVerification` (P3-b R1) is the durable verdict of the
+ *  server-side artifact seam over `timeline.export`: `verified` means the
+ *  claimed artifact proved itself under the bound repository root,
+ *  `unavailable` means the seam could not prove it — such a claim stays
+ *  claimed-only and the row can never read completed. `null` iff no
+ *  export was claimed. Disproven claims (absent/outside-root/mismatch)
+ *  never persist — decide rejects them before a row exists. */
+const SettlementSchema = z
+  .object({
+    settlementId: BoundedId,
+    assignmentId: BoundedId,
+    requestId: BoundedId,
+    revision: z.number().int().min(1),
+    ownerMembershipId: z.string().uuid(),
+    ownerAgentId: z.string().min(1).max(WIRE_LIMITS.agentId),
+    seatAgentId: z.string().min(1).max(WIRE_LIMITS.agentId),
+    seatMembershipId: z.string().uuid(),
+    seatProvider: z.string().min(1).max(WIRE_LIMITS.providerLen),
+    seatTitle: z.string().min(1).max(WIRE_LIMITS.deskSettlementTitle),
+    at: Time,
+    deliveryRef: z.string().min(1).max(WIRE_LIMITS.deskSettlementPointer).nullable(),
+    reworkClosureRef: z.string().min(1).max(WIRE_LIMITS.deskSettlementPointer).nullable(),
+    sinkRef: z.string().min(1).max(WIRE_LIMITS.deskSettlementPointer).nullable(),
+    decisionRef: z.string().min(1).max(WIRE_LIMITS.deskSettlementPointer).nullable(),
+    handbackRefs: z.array(BoundedId).max(WIRE_LIMITS.deskSettlementRefs),
+    candidateRefs: z.array(BoundedId).max(WIRE_LIMITS.deskSettlementRefs),
+    resources: z.array(SettlementResourceSchema).max(WIRE_LIMITS.deskSettlementResources),
+    timeline: SettlementTimelineSchema,
+    exportVerification: z
+      .object({
+        status: z.enum(["verified", "unavailable"]),
+        detail: z.string().min(1).max(WIRE_LIMITS.gapLen).nullable(),
+      })
+      .strict()
+      .nullable(),
+    status: z.enum(["completed", "partial", "blocked"]),
+    gaps: z.array(z.string().min(1).max(WIRE_LIMITS.gapLen)).max(WIRE_LIMITS.deskStatusGaps),
+  })
+  .strict();
+
 const LedgerBodyFields = {
   format: z.literal(LEDGER_FORMAT),
   repo: RepoSchema,
@@ -448,8 +539,22 @@ const LedgerSchemaV2 = z
   })
   .strict();
 
-/** v3 — adds the P3-a handback surface: `assignments`, `candidates`,
- *  `handbacks`. Every other field is untouched. */
+/** v3 — the P3-a shape: body, memberships and the handback surface
+ *  (assignments/candidates/handbacks). Kept so `read` can migrate it
+ *  in-memory (MIGRATIONS[3]); never written again. */
+const LedgerSchemaV3 = z
+  .object({
+    ...LedgerBodyFields,
+    schemaVersion: z.literal(3),
+    memberships: z.array(MembershipSchema).max(LEDGER_LIMITS.memberships),
+    assignments: z.array(AssignmentSchema).max(LEDGER_LIMITS.assignments),
+    candidates: z.array(CandidateSchema).max(LEDGER_LIMITS.candidates),
+    handbacks: z.array(HandbackSchema).max(LEDGER_LIMITS.handbacks),
+  })
+  .strict();
+
+/** v4 — adds the P3-b settlement mirror: `settlements`. Every other field
+ *  is untouched. */
 const LedgerSchema = z
   .object({
     ...LedgerBodyFields,
@@ -458,28 +563,36 @@ const LedgerSchema = z
     assignments: z.array(AssignmentSchema).max(LEDGER_LIMITS.assignments),
     candidates: z.array(CandidateSchema).max(LEDGER_LIMITS.candidates),
     handbacks: z.array(HandbackSchema).max(LEDGER_LIMITS.handbacks),
+    settlements: z.array(SettlementSchema).max(LEDGER_LIMITS.settlements),
   })
   .strict();
 
 type LedgerValueV2 = z.infer<typeof LedgerSchemaV2>;
+type LedgerValueV3 = z.infer<typeof LedgerSchemaV3>;
 
 /** Additive ledger migrations keyed by the on-disk schemaVersion. Pure: the
  *  input is never mutated; the output reuses the frozen input's records
  *  verbatim. v1 → v2 adds the empty memberships table (C2); v2 → v3 adds
- *  the empty P3-a tables (assignments/candidates/handbacks). Requests and
- *  events are untouched by either hop; read() chains both for a v1 file. */
+ *  the empty P3-a tables (assignments/candidates/handbacks); v3 → v4 adds
+ *  the empty settlements table. Requests and events are untouched by every
+ *  hop; read() chains the whole chain for an older file. */
 export const MIGRATIONS = {
   1: (ledger: z.infer<typeof LedgerSchemaV1>): LedgerValueV2 => ({
     ...ledger,
     schemaVersion: 2,
     memberships: [],
   }),
-  2: (ledger: LedgerValueV2): LedgerValue => ({
+  2: (ledger: LedgerValueV2): LedgerValueV3 => ({
     ...ledger,
-    schemaVersion: LEDGER_SCHEMA_VERSION,
+    schemaVersion: 3,
     assignments: [],
     candidates: [],
     handbacks: [],
+  }),
+  3: (ledger: LedgerValueV3): LedgerValue => ({
+    ...ledger,
+    schemaVersion: LEDGER_SCHEMA_VERSION,
+    settlements: [],
   }),
 } as const;
 
@@ -505,6 +618,7 @@ export type MembershipValue = z.infer<typeof MembershipSchema>;
 export type AssignmentValue = z.infer<typeof AssignmentSchema>;
 export type CandidateValue = z.infer<typeof CandidateSchema>;
 export type HandbackValue = z.infer<typeof HandbackSchema>;
+export type SettlementValue = z.infer<typeof SettlementSchema>;
 export type RequestRecordValue = z.infer<typeof RequestRecordSchema>;
 export type EventValue = z.infer<typeof EventSchema>;
 export type DeskStoreEnvelope = z.infer<typeof EnvelopeSchema>;
@@ -516,7 +630,7 @@ export type DeskStoreEnvelope = z.infer<typeof EnvelopeSchema>;
  *  repo-key-invalid | repo-mismatch). */
 export type DeskStoreRead =
   | { state: "absent" }
-  | { state: "ok"; ledger: LedgerValue; persistedSchemaVersion: 1 | 2 | 3 }
+  | { state: "ok"; ledger: LedgerValue; persistedSchemaVersion: 1 | 2 | 3 | 4 }
   | { state: "corrupt" | "future" | "unsafe"; diagnostics: { code: string; schemaVersion: number | null } };
 
 export type TransactReceipt = {
@@ -541,6 +655,9 @@ type DecideOutcome =
       assignments?: AssignmentValue[];
       candidates?: CandidateValue[];
       handbacks?: HandbackValue[];
+      /** P3-b — the settlement mirror table; identical channel rule: full
+       *  replacement table, schema- and refinement-checked by the store. */
+      settlements?: SettlementValue[];
     }
   | DeskRejectionValue;
 export type DecideFunction = (ledger: Readonly<LedgerValue>, command: Record<string, unknown>) => DecideOutcome;
@@ -789,6 +906,70 @@ export function createDeskStore(deps: DeskStoreDeps): DeskStore {
         }
       }
     }
+    // P3-b settlement refinements — the same fail-closed discipline:
+    // unique ids, a unique revision stream per (assignmentId, seatAgentId),
+    // a unique request key per (assignmentId, ownerAgentId), and every
+    // identity link cross-checked. The owner must resolve to a live-role
+    // lead membership matching the assignment's durable owner; the settled
+    // seat must be a seat of that assignment whose membership carries the
+    // same agentId and provider. Internal refs must resolve to THIS
+    // seat's rows on THIS assignment — a foreign handback or candidate is
+    // corruption, never a valid provenance link. `decisionRef` is claimed
+    // provenance only: it is stored, never resolved here.
+    const settlementIds = new Set<string>();
+    const settlementStreams = new Set<string>();
+    const settlementRequests = new Set<string>();
+    for (const row of ledger.settlements) {
+      if (settlementIds.has(row.settlementId)) return corrupt();
+      settlementIds.add(row.settlementId);
+      const stream = JSON.stringify([row.assignmentId, row.seatAgentId, row.revision]);
+      if (settlementStreams.has(stream)) return corrupt();
+      settlementStreams.add(stream);
+      const requestKey = JSON.stringify([row.assignmentId, row.ownerAgentId, row.requestId]);
+      if (settlementRequests.has(requestKey)) return corrupt();
+      settlementRequests.add(requestKey);
+      const assignment = assignmentsById.get(row.assignmentId);
+      if (assignment === undefined) return corrupt();
+      const owner = membershipsById.get(row.ownerMembershipId);
+      if (owner === undefined || owner.agentId !== row.ownerAgentId || owner.role !== "lead") return corrupt();
+      if (assignment.ownerAgentId !== row.ownerAgentId) return corrupt();
+      const seat = assignment.seats.find(s => s.agentId === row.seatAgentId);
+      if (seat === undefined || seat.membershipId !== row.seatMembershipId) return corrupt();
+      const seatRow = membershipsById.get(row.seatMembershipId);
+      if (seatRow === undefined || seatRow.agentId !== row.seatAgentId || seatRow.provider !== row.seatProvider) {
+        return corrupt();
+      }
+      for (const ref of row.handbackRefs) {
+        const hb = ledger.handbacks.find(h => h.handbackId === ref);
+        if (hb === undefined || hb.assignmentId !== row.assignmentId || hb.agentId !== row.seatAgentId) {
+          return corrupt();
+        }
+      }
+      for (const ref of row.candidateRefs) {
+        const cand = candidatesById.get(ref);
+        if (cand === undefined || cand.assignmentId !== row.assignmentId || cand.seatAgentId !== row.seatAgentId) {
+          return corrupt();
+        }
+      }
+      // The transcript-export seam verdict couples with the claim: a null
+      // export records no verdict; a claimed export must carry the seam's
+      // persisted outcome. An `unavailable` verdict means the artifact
+      // could not be proven — the row can never read completed and the
+      // durable gap must name it; a `verified` row carrying the
+      // unverified gap marker is equally inconsistent.
+      if (row.timeline.export === null) {
+        if (row.exportVerification !== null) return corrupt();
+      } else {
+        if (row.exportVerification === null) return corrupt();
+        if (row.exportVerification.status === "unavailable") {
+          if (row.status === "completed" || !row.gaps.includes("transcript-export-unverified")) {
+            return corrupt();
+          }
+        } else if (row.gaps.includes("transcript-export-unverified")) {
+          return corrupt();
+        }
+      }
+    }
     return null;
   }
 
@@ -901,28 +1082,35 @@ export function createDeskStore(deps: DeskStoreDeps): DeskStore {
       // never touched by read — the bump happens in the next transact's
       // commit.
       let ledger: LedgerValue;
-      let persistedSchemaVersion: 1 | 2 | 3;
+      let persistedSchemaVersion: 1 | 2 | 3 | 4;
       if (schemaVersion === 1) {
         const v1 = LedgerSchemaV1.safeParse(json);
         if (!v1.success) {
           return { state: "corrupt", diagnostics: { code: "schema-invalid", schemaVersion } };
         }
-        ledger = MIGRATIONS[2](MIGRATIONS[1](v1.data));
+        ledger = MIGRATIONS[3](MIGRATIONS[2](MIGRATIONS[1](v1.data)));
         persistedSchemaVersion = 1;
       } else if (schemaVersion === 2) {
         const v2 = LedgerSchemaV2.safeParse(json);
         if (!v2.success) {
           return { state: "corrupt", diagnostics: { code: "schema-invalid", schemaVersion } };
         }
-        ledger = MIGRATIONS[2](v2.data);
+        ledger = MIGRATIONS[3](MIGRATIONS[2](v2.data));
         persistedSchemaVersion = 2;
+      } else if (schemaVersion === 3) {
+        const v3 = LedgerSchemaV3.safeParse(json);
+        if (!v3.success) {
+          return { state: "corrupt", diagnostics: { code: "schema-invalid", schemaVersion } };
+        }
+        ledger = MIGRATIONS[3](v3.data);
+        persistedSchemaVersion = 3;
       } else {
         const parsed = LedgerSchema.safeParse(json);
         if (!parsed.success) {
           return { state: "corrupt", diagnostics: { code: "schema-invalid", schemaVersion } };
         }
         ledger = parsed.data;
-        persistedSchemaVersion = 3;
+        persistedSchemaVersion = 4;
       }
       const refinement = checkRefinements(ledger, repoKey);
       if (refinement !== null) return refinement;
@@ -1099,6 +1287,7 @@ export function createDeskStore(deps: DeskStoreDeps): DeskStore {
       assignments: [],
       candidates: [],
       handbacks: [],
+      settlements: [],
     };
   }
 
@@ -1242,6 +1431,7 @@ export function createDeskStore(deps: DeskStoreDeps): DeskStore {
       let nextAssignments = ledger.assignments;
       let nextCandidates = ledger.candidates;
       let nextHandbacks = ledger.handbacks;
+      let nextSettlements = ledger.settlements;
       if (decided.ok === true) {
         const proposed: string[] = [];
         if (decided.memberships !== undefined) {
@@ -1288,6 +1478,17 @@ export function createDeskStore(deps: DeskStoreDeps): DeskStore {
           }
           nextHandbacks = parsed.data;
         }
+        if (decided.settlements !== undefined) {
+          proposed.push("settlements");
+          const parsed = z.array(SettlementSchema).max(LEDGER_LIMITS.settlements).safeParse(decided.settlements);
+          if (!parsed.success) {
+            return invalidRecord(
+              `decide returned invalid settlements: ${firstIssue(parsed.error)}`,
+              "fix the decide function to return a schema-valid settlements table",
+            );
+          }
+          nextSettlements = parsed.data;
+        }
         if (proposed.length > 0) {
           const candidateInvalid = checkRefinements(
             {
@@ -1296,6 +1497,7 @@ export function createDeskStore(deps: DeskStoreDeps): DeskStore {
               assignments: nextAssignments,
               candidates: nextCandidates,
               handbacks: nextHandbacks,
+              settlements: nextSettlements,
             },
             repoKey,
           );
@@ -1368,6 +1570,7 @@ export function createDeskStore(deps: DeskStoreDeps): DeskStore {
         assignments: nextAssignments,
         candidates: nextCandidates,
         handbacks: nextHandbacks,
+        settlements: nextSettlements,
       };
       // The pre-commit refinement pass is the same one read() applies — a
       // ledger that would read as unsafe/corrupt is never written.
@@ -1382,16 +1585,24 @@ export function createDeskStore(deps: DeskStoreDeps): DeskStore {
       // instead.
       let nextBytes: string;
       if (migratedFrom !== null && decided.ok === false) {
-        const { assignments: _a, candidates: _c, handbacks: _h, ...rest } = candidate;
+        // `rest` keeps assignments/candidates/handbacks — the v3 shape needs
+        // them; older shapes strip them again below along with memberships.
+        const { settlements: _s, ...rest } = candidate;
         let persistedShape: unknown;
         let persistedParses: boolean;
         if (migratedFrom === 1) {
-          const { memberships: _m, ...v1Body } = rest;
+          const { memberships: _m, assignments: _a, candidates: _c, handbacks: _h, ...v1Body } = rest;
           persistedShape = { ...v1Body, schemaVersion: 1 };
           persistedParses = LedgerSchemaV1.safeParse(persistedShape).success;
-        } else {
-          persistedShape = { ...rest, schemaVersion: 2 };
+        } else if (migratedFrom === 2) {
+          const { assignments: _a, candidates: _c, handbacks: _h, ...v2Body } = rest;
+          persistedShape = { ...v2Body, schemaVersion: 2 };
           persistedParses = LedgerSchemaV2.safeParse(persistedShape).success;
+        } else {
+          // migratedFrom === 3: drop only the P3-b table; the v3 shape keeps
+          // its assignments/candidates/handbacks verbatim.
+          persistedShape = { ...rest, schemaVersion: 3 };
+          persistedParses = LedgerSchemaV3.safeParse(persistedShape).success;
         }
         if (!persistedParses) {
           throw new OperationConflict("IO_FAILURE", "refusing to commit a ledger that would not read back cleanly");

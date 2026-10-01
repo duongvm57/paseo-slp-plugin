@@ -162,6 +162,20 @@ export const WIRE_LIMITS = {
    *  key, so a ledger-valid row's gaps always parse under the submit
    *  result schema (the producer returns them verbatim; F-STD-4). */
   gapLen: 256,
+  // Desk settlement mirror (P3-b): pointer refs are claimed provenance
+  // pointers (delivery evidence, rework closure, sink, external decision)
+  // bounded like authorityRef and stored verbatim — the desk never
+  // dereferences them. Refs/resources are bounded collections; the
+  // durable SettlementSchema reads the SAME keys so a ledger-valid row
+  // can never exceed what a wire input or result schema accepts.
+  deskSettlementPointer: 1024,
+  deskSettlementRefs: 64,
+  deskSettlementResources: 32,
+  deskSettlementTitle: 256,
+  deskTimelineField: 1024,
+  deskExportPath: 1024,
+  /** Per-assignment settlements cap inside the status projection. */
+  deskStatusSettlements: 32,
 } as const;
 
 // ---------------------------------------------------------------------------
@@ -555,6 +569,148 @@ export type DeskAssignmentCloseInputValue = z.infer<typeof DeskAssignmentCloseIn
 export type DeskHandbackSubmitResultValue = z.infer<typeof DeskHandbackSubmitResult>;
 export type DeskAssignmentResultValue = z.infer<typeof DeskAssignmentResult>;
 
+// ---------------------------------------------------------------------------
+// Desk settlement tools (P3-b) — the durable settlement mirror. The desk is
+// evidence storage, not the official sink: `slp_settlement_record` commits an
+// immutable owner attestation revision; `slp_settlement_export` re-derives the
+// v1 `slp-record` (kind "settlement") so the receiving owner can place it in
+// an authorized sink itself. Actor identity stays server-derived; every
+// pointer field is claimed provenance the desk stores verbatim and never
+// dereferences.
+// ---------------------------------------------------------------------------
+
+/** The closed resource-disposition vocabulary a settlement records — the
+ *  shared module owns it so the durable SettlementSchema and the wire
+ *  input can never drift apart. `unknown` is the honest disposition for a
+ *  resource whose fate the owner cannot attest; it never becomes
+ *  `released` by omission. */
+export const SETTLEMENT_RESOURCE_DISPOSITIONS = ["released", "retained", "unknown"] as const;
+
+/** The closed settlement-status vocabulary — `completed` is reachable only
+ *  through the decide's prerequisite check; it is never inferred from
+ *  assignment state, idle signals or an accepted handback. */
+export const SettlementStatus = z.enum(["completed", "partial", "blocked"]);
+export type SettlementStatusValue = z.infer<typeof SettlementStatus>;
+
+const DeskSettlementPointer = z.string().min(1).max(WIRE_LIMITS.deskSettlementPointer);
+
+/** The transcript-export pointer a settlement timeline may carry — the
+ *  v1 record's repository-relative export triple (path/sha256/bytes). */
+export const DeskSettlementExport = z.object({
+  path: z.string().min(1).max(WIRE_LIMITS.deskExportPath),
+  sha256: Sha,
+  bytes: z.number().int().min(0),
+}).strict();
+
+/** The settlement timeline block. `via` rides the wire as a bounded string:
+ *  the closed SETTLEMENT_VIA vocabulary lives in desk-records.ts, which is
+ *  server-internal — shared code cannot import it, so the decide enforces
+ *  the enum (the same split as recordV1: wire validates shape, decide
+ *  validates semantics). */
+export const DeskSettlementTimeline = z.object({
+  nativeHandle: z.string().min(1).max(WIRE_LIMITS.deskTimelineField).nullable(),
+  sessionId: z.string().min(1).max(WIRE_LIMITS.deskTimelineField).nullable(),
+  via: z.string().min(1).max(WIRE_LIMITS.capabilityId),
+  export: DeskSettlementExport.nullable(),
+  gap: z.string().min(1).max(WIRE_LIMITS.gapLen).nullable(),
+}).strict();
+
+export const DeskSettlementResource = z.object({
+  ref: DeskSettlementPointer,
+  disposition: z.enum(SETTLEMENT_RESOURCE_DISPOSITIONS),
+}).strict();
+
+/** slp_settlement_record — the receiving owner's settlement attestation.
+ *  `seatAgentId` names the seat whose report this settles; `seatTitle` and
+ *  `at` are owner-claimed export fields (who/what-when is the attestation,
+ *  identity is server-derived). `deliveryRef`/`reworkClosureRef`/`sinkRef`
+ *  carry the exact evidence pointers the owner attests; `decisionRef` is an
+ *  external reference (P4 machinery does not exist — it is claimed, never
+ *  resolved). `handbackRefs`/`candidateRefs` name durable rows of THIS
+ *  assignment and THIS seat. */
+export const DeskSettlementRecordInput = z.object({
+  requestId: DeskRequestId,
+  assignmentId: DeskEntityId,
+  seatAgentId: z.string().min(1).max(WIRE_LIMITS.agentId),
+  seatTitle: z.string().min(1).max(WIRE_LIMITS.deskSettlementTitle),
+  at: z.string().min(1).max(64),
+  deliveryRef: DeskSettlementPointer.nullable(),
+  reworkClosureRef: DeskSettlementPointer.nullable(),
+  sinkRef: DeskSettlementPointer.nullable(),
+  decisionRef: DeskSettlementPointer.nullable(),
+  handbackRefs: z.array(DeskEntityId).max(WIRE_LIMITS.deskSettlementRefs),
+  candidateRefs: z.array(DeskEntityId).max(WIRE_LIMITS.deskSettlementRefs),
+  resources: z.array(DeskSettlementResource).max(WIRE_LIMITS.deskSettlementResources),
+  timeline: DeskSettlementTimeline,
+}).strict();
+
+/** slp_settlement_export — re-emit the derived v1 record of a committed
+ *  settlement revision; read-only, scoped to the owner or the settled
+ *  seat. */
+export const DeskSettlementExportInput = z.object({
+  settlementId: DeskEntityId,
+}).strict();
+
+/** The emitted v1 settlement record — identical to the fields the durable
+ *  row was committed under (the decide validated it against report-records
+ *  v1 semantics before the commit landed). */
+export const DeskSettlementRecordV1 = z.object({
+  version: z.literal(1),
+  kind: z.literal("settlement"),
+  task: DeskSettlementPointer.nullable(),
+  seat: z.object({
+    provider: z.string().min(1).max(WIRE_LIMITS.providerLen),
+    title: z.string().min(1).max(WIRE_LIMITS.deskSettlementTitle),
+    agentId: z.string().min(1).max(WIRE_LIMITS.agentId).nullable(),
+  }).strict(),
+  timeline: DeskSettlementTimeline,
+  recordedBy: z.string().min(1).max(WIRE_LIMITS.agentId),
+  at: z.string().min(1).max(64),
+}).strict();
+
+/** The durable verdict of the server-side transcript-export artifact seam
+ *  (P3-b R1): a claimed `timeline.export` pointer must prove existence and
+ *  content under the desk's bound repository root before it can ground
+ *  `completed`. `verified` = the artifact matched; `unavailable` = the
+ *  seam could not prove it — the claim stays recorded as claimed-only and
+ *  the revision can never read completed. Disproven claims never persist:
+ *  decide rejects them before a row is committed. `null` when no export
+ *  was claimed. */
+export const DeskSettlementExportVerification = z
+  .object({
+    status: z.enum(["verified", "unavailable"]),
+    detail: z.string().min(1).max(WIRE_LIMITS.gapLen).nullable(),
+  })
+  .strict()
+  .nullable();
+
+export const DeskSettlementRecordResult = z.object({
+  ok: z.literal(true),
+  settlementId: DeskEntityId,
+  revision: z.number().int().min(1),
+  receiptId: z.string().min(1).max(WIRE_LIMITS.deskEntityId),
+  status: SettlementStatus,
+  gaps: z.array(z.string().min(1).max(WIRE_LIMITS.gapLen)).max(WIRE_LIMITS.deskStatusGaps),
+  exportVerification: DeskSettlementExportVerification,
+}).strict();
+
+export const DeskSettlementExportResult = z.object({
+  ok: z.literal(true),
+  settlementId: DeskEntityId,
+  assignmentId: DeskEntityId,
+  seatAgentId: z.string().min(1).max(WIRE_LIMITS.agentId),
+  revision: z.number().int().min(1),
+  status: SettlementStatus,
+  gaps: z.array(z.string().min(1).max(WIRE_LIMITS.gapLen)).max(WIRE_LIMITS.deskStatusGaps),
+  record: DeskSettlementRecordV1,
+  exportVerification: DeskSettlementExportVerification,
+}).strict();
+
+export type DeskSettlementRecordInputValue = z.infer<typeof DeskSettlementRecordInput>;
+export type DeskSettlementExportInputValue = z.infer<typeof DeskSettlementExportInput>;
+export type DeskSettlementRecordResultValue = z.infer<typeof DeskSettlementRecordResult>;
+export type DeskSettlementExportResultValue = z.infer<typeof DeskSettlementExportResult>;
+
 /** One handback revision as projected into slp_status — identifiers and
  *  counts only; the claimed record's bytes stay in the ledger (a status
  *  view never re-serves record payloads). */
@@ -569,15 +725,33 @@ export const DeskStatusHandback = z.object({
   gapsCount: z.number().int().min(0),
 }).strict();
 
+/** One settlement revision as projected into slp_status (P3-b) —
+ *  identifiers and counts only, same rule as DeskStatusHandback: the
+ *  mirror row's pointers stay in the ledger, never re-served in a view. */
+export const DeskStatusSettlement = z.object({
+  settlementId: DeskEntityId,
+  seatAgentId: z.string().min(1).max(WIRE_LIMITS.agentId),
+  revision: z.number().int().min(1),
+  status: SettlementStatus,
+  gapsCount: z.number().int().min(0),
+  /** Whether the row's claimed transcript export verified under the bound
+   *  repository root at commit time — false when no export was claimed or
+   *  the seam could not prove it. */
+  exportVerified: z.boolean(),
+}).strict();
+
 /** One assignment as projected into slp_status — caller-scoped: a lead's
  *  owned assignments carry every handback; a bound seat sees only its own
- *  rows on assignments it is attached to. */
+ *  rows on assignments it is attached to. `settlements` follows the same
+ *  scoping: the owner sees every settlement on an owned assignment; a seat
+ *  sees only the rows that settle its own seat. */
 export const DeskStatusAssignment = z.object({
   assignmentId: DeskEntityId,
   state: z.enum(["open", "closed"]),
   ownerAgentId: z.string().min(1).max(WIRE_LIMITS.agentId),
   seats: z.array(z.string().min(1).max(WIRE_LIMITS.agentId)).max(WIRE_LIMITS.deskStatusSeats),
   handbacks: z.array(DeskStatusHandback).max(WIRE_LIMITS.deskStatusHandbacks),
+  settlements: z.array(DeskStatusSettlement).max(WIRE_LIMITS.deskStatusSettlements),
 }).strict();
 
 /** The seat-facing status view slp_status answers — the caller's own

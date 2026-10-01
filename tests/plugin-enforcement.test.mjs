@@ -1391,7 +1391,7 @@ test('P2-e: absent/corrupt/future/unsafe ledgers and read exceptions — one L-S
   writeFileSync(join(repos, repoKeyAt(1), 'ledger.json'), 'not json{');
   // future: header-valid, schemaVersion ahead.
   mkdirSync(join(repos, repoKeyAt(2)), { recursive: true });
-  writeFileSync(join(repos, repoKeyAt(2), 'ledger.json'), JSON.stringify({ format: 'paseo-slp/enforcement', schemaVersion: 3 }));
+  writeFileSync(join(repos, repoKeyAt(2), 'ledger.json'), JSON.stringify({ format: 'paseo-slp/enforcement', schemaVersion: 5 }));
   // unsafe: ledger.json is a directory (not a regular file).
   mkdirSync(join(repos, repoKeyAt(3), 'ledger.json'), { recursive: true });
   // read throws: injected store seam maps a chosen key to IO_FAILURE.

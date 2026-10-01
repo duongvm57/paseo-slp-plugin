@@ -315,18 +315,18 @@ const ledgerOf = (f, repoKey) => {
 // catalog + strict input
 // ---------------------------------------------------------------------------
 
-test('slp_handback_submit is a visible mutation; P3-b+/hidden entries stay absent or typed-rejected', async t => {
+test('slp_handback_submit is a visible mutation; P4+/hidden entries stay absent or typed-rejected', async t => {
   const { peerConn } = await boundPair(t);
   const list = await rpc(peerConn.reader, peerConn.conn, { jsonrpc: '2.0', id: 'l1', method: 'tools/list' });
   const tools = list.result.tools;
   const submit = tools.find(tool => tool.name === 'slp_handback_submit');
   assert.ok(submit, 'handback submit is visible');
   const names = tools.map(tool => tool.name);
-  for (const forbidden of ['slp_recover_lock', 'slp_desk_internal', 'slp_settlement_record', 'slp_review_open']) {
+  for (const forbidden of ['slp_recover_lock', 'slp_desk_internal', 'slp_review_open', 'slp_decision_record']) {
     assert.ok(!names.includes(forbidden), `${forbidden} absent`);
   }
-  // An excluded P3-b tool is a typed rejection, not a silent no-op.
-  const absent = await call(peerConn.reader, peerConn.conn, 'slp_settlement_record', {});
+  // An excluded tool is a typed rejection, not a silent no-op.
+  const absent = await call(peerConn.reader, peerConn.conn, 'slp_decision_record', {});
   assert.equal(absent.body.code, 'INVALID_RECORD');
 });
 
@@ -763,7 +763,10 @@ test('seatAssignmentsView: a saturated projection stays inside the limitation ca
       registeredAt: FIXED_AT,
     },
     desk: { repoKey: 'a'.repeat(64), state: 'available', protocol: DESK_BRIDGE_PROTOCOL },
-    assignments: projection.assignments,
+    // seatAssignmentsView projects the handback half; the bridge merges the
+    // settlement projection onto each row — an empty settlements array is
+    // what that merge emits for a seat-less fixture.
+    assignments: projection.assignments.map(assignment => ({ ...assignment, settlements: [] })),
     limitations: projection.limitations,
     acceptance: 'not-established-by-this-view',
   };
