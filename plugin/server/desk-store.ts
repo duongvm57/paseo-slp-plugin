@@ -42,13 +42,22 @@ import { join } from "node:path";
 import { z } from "zod";
 import { Family, OperationConflict, Sha, Time } from "../shared/contracts.ts";
 import {
+  CHECK_CLASSES,
+  CHECK_RUN_STATUSES,
   DeskRejection,
+  ROLLOUT_CHECK_GATED_COMMANDS,
+  ROLLOUT_COHORT_GATED_COMMANDS,
+  ROLLOUT_REVIEW_GATED_COMMANDS,
+  ROLLOUT_COMMANDS,
+  ROLLOUT_STATES,
   SCOPE_REVIEW_AXES,
   SCOPE_REVIEW_GATED_COMMANDS,
   SCOPE_STATES,
   SETTLEMENT_RESOURCE_DISPOSITIONS,
   WIRE_LIMITS,
+  rolloutTransitionEdge,
   scopeTransitionEdge,
+  type CheckRunStatusValue,
   type DeskRejectionValue,
   type ScopeStateValue,
 } from "../shared/enforcement.ts";
@@ -108,10 +117,25 @@ export const LEDGER_LIMITS = {
   scopes: 2048,
   scopeReviews: 4096,
   scopeTransitions: 8192,
+  // P5 — the check-runner/rollout tables; identical F-STD-4 rule, their
+  // row/field caps read WIRE_LIMITS.deskCheck*/deskRollout* directly.
+  // `checkTimeoutMs`/`checkOutputBytes` are the absolute ceilings a
+  // definition's limits may only narrow; `cohortMembers` bounds the canary
+  // membership snapshot; `checkRunAttempts` is the structural ceiling on
+  // per-(rollout,checkId,candidate) retries — a definition's maxRetries
+  // narrows it further, never widens it.
+  checkDefinitions: 2048,
+  checkRuns: 8192,
+  checkRunAttempts: 2,
+  rollouts: 1024,
+  rolloutTransitions: 8192,
+  checkTimeoutMs: 60000,
+  checkOutputBytes: 1048576,
+  cohortMembers: 32,
 } as const;
 
 const LEDGER_FORMAT = "paseo-slp/enforcement";
-const LEDGER_SCHEMA_VERSION = 5;
+const LEDGER_SCHEMA_VERSION = 6;
 /** The one repoKey algorithm label — schema literal and namespace refinement
  *  both read it from here; nothing else may restate it. */
 export const REPO_KEY_ALGORITHM = "sha256(hostId|gitCommonDir)@1";
@@ -624,6 +648,216 @@ const ScopeTransitionSchema = z
   })
   .strict();
 
+// ---------------------------------------------------------------------------
+// P5 — independent check runner, canary cohort and rollout state. Four
+// append-only tables: immutable check-definition revisions
+// (`checkDefinitions`), immutable run results (`checkRuns`), immutable
+// rollout declaration revisions (`rollouts`) and the accepted rollout
+// transition stream (`rolloutTransitions`). The state-machine vocabulary
+// and the allowlisted class names live in shared/enforcement.ts; the runner
+// seam itself lives in desk-check-runner.ts.
+// ---------------------------------------------------------------------------
+
+/** P5 — one immutable check-definition revision. The row binds
+ *  (assignmentId, scopeId, checkId, ownerAgentId) plus the assignment's
+ *  structural revision at declare time. `checkClass` is a closed
+ *  allowlisted name — never argv; `limits` may only narrow the LEDGER
+ *  ceilings; `requiredEvidence`/`refs` are bounded claimed provenance. */
+const CheckDefinitionSchema = z
+  .object({
+    checkId: BoundedId,
+    assignmentId: BoundedId,
+    scopeId: BoundedId,
+    requestId: BoundedId,
+    revision: z.number().int().min(1),
+    priorRevision: z.number().int().min(1).nullable(),
+    ownerMembershipId: z.string().uuid(),
+    ownerAgentId: z.string().min(1).max(WIRE_LIMITS.agentId),
+    assignmentRevision: z.number().int().min(1),
+    checkClass: z.enum(CHECK_CLASSES),
+    label: z.string().min(1).max(WIRE_LIMITS.deskScopeLabel),
+    definitionSha256: Sha,
+    limits: z
+      .object({
+        timeoutMs: z.number().int().min(1).max(LEDGER_LIMITS.checkTimeoutMs),
+        maxOutputBytes: z.number().int().min(1).max(LEDGER_LIMITS.checkOutputBytes),
+        maxRetries: z.number().int().min(0).max(1),
+      })
+      .strict(),
+    requiredEvidence: z
+      .array(z.string().min(1).max(WIRE_LIMITS.deskCheckPointer))
+      .max(WIRE_LIMITS.deskCheckEvidence),
+    refs: z.array(z.string().min(1).max(WIRE_LIMITS.deskCheckPointer)).max(WIRE_LIMITS.deskScopeRefs),
+  })
+  .strict();
+
+/** P5 — one immutable check run result. The row binds
+ *  (assignmentId, rolloutId, checkId) to the definition revision+digest it
+ *  executed under and to the rollout's candidate pin; `environment` is the
+ *  server-measured fingerprint. `attempt`/`retryOf` form the per
+ *  (assignmentId, rolloutId, checkId, candidateSnapshot) retry stream (structural cap
+ *  LEDGER_LIMITS.checkRunAttempts). `gap` is the durable capability-gap
+ *  record — non-null iff status is `blocked`; a blocked run never
+ *  executed, so its execution fields stay null/false. `outputTail` is the
+ *  bounded raw tail, `outputSha256` the digest of the full captured
+ *  output, `outputPointer`/`evidenceRef` claimed provenance only. */
+const CheckRunSchema = z
+  .object({
+    runId: BoundedId,
+    assignmentId: BoundedId,
+    rolloutId: BoundedId,
+    checkId: BoundedId,
+    requestId: BoundedId,
+    rolloutRevision: z.number().int().min(1),
+    definitionRevision: z.number().int().min(1),
+    definitionSha256: Sha,
+    candidateSnapshot: Sha,
+    candidateHead: z.string().regex(/^[0-9a-f]{40}$|^[0-9a-f]{64}$/).nullable(),
+    environment: z
+      .object({
+        node: z.string().min(1).max(64),
+        platform: z.string().min(1).max(64),
+      })
+      .strict(),
+    status: z.enum(CHECK_RUN_STATUSES),
+    attempt: z.number().int().min(1).max(LEDGER_LIMITS.checkRunAttempts),
+    retryOf: BoundedId.nullable(),
+    actorAgentId: z.string().min(1).max(WIRE_LIMITS.agentId),
+    actorSeatId: z.string().uuid(),
+    exitCode: z.number().int().nullable(),
+    timedOut: z.boolean(),
+    durationMs: z.number().int().min(0).nullable(),
+    outputSha256: Sha.nullable(),
+    outputTail: z.string().max(WIRE_LIMITS.deskCheckOutputTail).nullable(),
+    outputTruncated: z.boolean(),
+    outputPointer: z.string().min(1).max(WIRE_LIMITS.deskCheckPointer).nullable(),
+    evidenceRef: z.string().min(1).max(WIRE_LIMITS.deskCheckPointer).nullable(),
+    gap: z
+      .object({
+        capability: z.string().min(1).max(128),
+        detail: z.string().min(1).max(WIRE_LIMITS.gapLen),
+      })
+      .strict()
+      .nullable(),
+  })
+  .strict()
+  .superRefine((row, ctx) => {
+    if (row.status === "blocked") {
+      if (row.gap === null) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["gap"], message: "a blocked run carries the durable capability-gap record" });
+      }
+      if (row.exitCode !== null || row.durationMs !== null || row.outputSha256 !== null || row.outputTail !== null || row.timedOut) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: "a blocked run never executed — execution fields stay empty" });
+      }
+    } else if (row.gap !== null) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["gap"], message: "only a blocked run carries a capability gap" });
+    }
+    if (row.attempt === 1 && row.retryOf !== null) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["retryOf"], message: "attempt 1 has no predecessor" });
+    }
+    if (row.attempt > 1 && row.retryOf === null) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["retryOf"], message: "a retry names the run it retries" });
+    }
+  });
+
+/** P5 — one immutable rollout declaration revision. Binds
+ *  (assignmentId, scopeId, rolloutId, ownerAgentId, candidateSnapshot) —
+ *  the candidate must resolve to a durable observed candidate of the
+ *  assignment at declare time; `requiredChecks` pins the
+ *  (checkId, definitionDigest) pairs the checks-passed/promote gates
+ *  measure against. `refs` are claimed provenance only. */
+const RolloutSchema = z
+  .object({
+    rolloutId: BoundedId,
+    assignmentId: BoundedId,
+    scopeId: BoundedId,
+    requestId: BoundedId,
+    revision: z.number().int().min(1),
+    priorRevision: z.number().int().min(1).nullable(),
+    ownerMembershipId: z.string().uuid(),
+    ownerAgentId: z.string().min(1).max(WIRE_LIMITS.agentId),
+    assignmentRevision: z.number().int().min(1),
+    label: z.string().min(1).max(WIRE_LIMITS.deskScopeLabel),
+    declarationSha256: Sha,
+    candidateSnapshot: Sha,
+    candidateHead: z.string().regex(/^[0-9a-f]{40}$|^[0-9a-f]{64}$/).nullable(),
+    requiredChecks: z
+      .array(
+        z.object({
+          checkId: BoundedId,
+          definitionDigest: Sha,
+        }).strict(),
+      )
+      .max(WIRE_LIMITS.deskRolloutRequiredChecks),
+    refs: z.array(z.string().min(1).max(WIRE_LIMITS.deskCheckPointer)).max(WIRE_LIMITS.deskScopeRefs),
+  })
+  .strict();
+
+/** P5 — one accepted rollout transition. `revision` streams per
+ *  (assignmentId, rolloutId); `from`/`to`/`command` must form a legal edge
+ *  of ROLLOUT_TRANSITIONS against the previous row's `to`. `rolloutRevision`
+ *  pins the latest declaration revision at commit. `cohort` is set only on
+ *  start-canary — the bounded membership snapshot the canary binds; the
+ *  digest recomputes from `members` so a forged roster is corrupt.
+ *  `targetSnapshot`/`targetHead` ride `rollback` only and resolve to an
+ *  observed candidate of the assignment. `dischargedChecks` records the
+ *  (checkId, runId) evidence a check-gated transition consumed;
+ *  `cohortDigestAtGate` records the recomputed membership digest a
+ *  cohort-gated transition observed. `evidenceRefs` are claimed
+ *  provenance pointers, stored verbatim. */
+const RolloutTransitionSchema = z
+  .object({
+    transitionId: BoundedId,
+    assignmentId: BoundedId,
+    rolloutId: BoundedId,
+    requestId: BoundedId,
+    revision: z.number().int().min(1),
+    command: z.enum(["declare", ...ROLLOUT_COMMANDS]),
+    from: z.enum(ROLLOUT_STATES).nullable(),
+    to: z.enum(ROLLOUT_STATES),
+    rolloutRevision: z.number().int().min(1),
+    actorAgentId: z.string().min(1).max(WIRE_LIMITS.agentId),
+    cohort: z
+      .object({
+        members: z.array(z.string().min(1).max(WIRE_LIMITS.agentId)).max(LEDGER_LIMITS.cohortMembers),
+        digest: Sha,
+        assignmentRevision: z.number().int().min(1),
+      })
+      .strict()
+      .nullable(),
+    targetSnapshot: Sha.nullable(),
+    targetHead: z.string().regex(/^[0-9a-f]{40}$|^[0-9a-f]{64}$/).nullable(),
+    evidenceRefs: z.array(z.string().min(1).max(WIRE_LIMITS.deskCheckPointer)).max(WIRE_LIMITS.deskCheckEvidence),
+    dischargedChecks: z
+      .array(
+        z.object({
+          checkId: BoundedId,
+          runId: BoundedId,
+        }).strict(),
+      )
+      .max(WIRE_LIMITS.deskRolloutRequiredChecks),
+    /** P5 — on review-gated commands (promote) this records the
+     *  (axis, reviewId) evidence the scope's approved round discharged —
+     *  every required axis once, each review row bound to the rollout's
+     *  scope and candidate pin. Additive field: pre-correction v6 rows
+     *  load with the empty default. */
+    dischargedReviews: z
+      .array(
+        z.object({
+          axis: z.enum(SCOPE_REVIEW_AXES),
+          reviewId: BoundedId,
+        }).strict(),
+      )
+      .max(SCOPE_REVIEW_AXES.length)
+      .default([]),
+    /** P5 — on cohort-gated commands (canary-passed, promote) this records
+     *  the membership digest the decide recomputed at gate time; it must
+     *  equal the digest the stream's start-canary row pinned, which makes
+     *  cohort stability replayable from durable state alone. */
+    cohortDigestAtGate: Sha.nullable(),
+  })
+  .strict();
+
 const LedgerBodyFields = {
   format: z.literal(LEDGER_FORMAT),
   repo: RepoSchema,
@@ -679,8 +913,26 @@ const LedgerSchemaV4 = z
   })
   .strict();
 
-/** v5 — adds the P4 scope machinery: `scopes`, `scopeReviews`,
- *  `scopeTransitions`. Every other field is untouched. */
+/** v5 — the P4 shape: v4 plus `scopes`, `scopeReviews`, `scopeTransitions`.
+ *  Kept so `read` can migrate it in-memory (MIGRATIONS[5]); never written
+ *  again. */
+const LedgerSchemaV5 = z
+  .object({
+    ...LedgerBodyFields,
+    schemaVersion: z.literal(5),
+    memberships: z.array(MembershipSchema).max(LEDGER_LIMITS.memberships),
+    assignments: z.array(AssignmentSchema).max(LEDGER_LIMITS.assignments),
+    candidates: z.array(CandidateSchema).max(LEDGER_LIMITS.candidates),
+    handbacks: z.array(HandbackSchema).max(LEDGER_LIMITS.handbacks),
+    settlements: z.array(SettlementSchema).max(LEDGER_LIMITS.settlements),
+    scopes: z.array(ScopeSchema).max(LEDGER_LIMITS.scopes),
+    scopeReviews: z.array(ScopeReviewSchema).max(LEDGER_LIMITS.scopeReviews),
+    scopeTransitions: z.array(ScopeTransitionSchema).max(LEDGER_LIMITS.scopeTransitions),
+  })
+  .strict();
+
+/** v6 — adds the P5 rollout machinery: `checkDefinitions`, `checkRuns`,
+ *  `rollouts`, `rolloutTransitions`. Every other field is untouched. */
 const LedgerSchema = z
   .object({
     ...LedgerBodyFields,
@@ -693,20 +945,26 @@ const LedgerSchema = z
     scopes: z.array(ScopeSchema).max(LEDGER_LIMITS.scopes),
     scopeReviews: z.array(ScopeReviewSchema).max(LEDGER_LIMITS.scopeReviews),
     scopeTransitions: z.array(ScopeTransitionSchema).max(LEDGER_LIMITS.scopeTransitions),
+    checkDefinitions: z.array(CheckDefinitionSchema).max(LEDGER_LIMITS.checkDefinitions),
+    checkRuns: z.array(CheckRunSchema).max(LEDGER_LIMITS.checkRuns),
+    rollouts: z.array(RolloutSchema).max(LEDGER_LIMITS.rollouts),
+    rolloutTransitions: z.array(RolloutTransitionSchema).max(LEDGER_LIMITS.rolloutTransitions),
   })
   .strict();
 
 type LedgerValueV2 = z.infer<typeof LedgerSchemaV2>;
 type LedgerValueV3 = z.infer<typeof LedgerSchemaV3>;
 type LedgerValueV4 = z.infer<typeof LedgerSchemaV4>;
+type LedgerValueV5 = z.infer<typeof LedgerSchemaV5>;
 
 /** Additive ledger migrations keyed by the on-disk schemaVersion. Pure: the
  *  input is never mutated; the output reuses the frozen input's records
  *  verbatim. v1 → v2 adds the empty memberships table (C2); v2 → v3 adds
  *  the empty P3-a tables (assignments/candidates/handbacks); v3 → v4 adds
- *  the empty settlements table; v4 → v5 adds the empty P4 scope tables.
- *  Requests and events are untouched by every hop; read() chains the whole
- *  chain for an older file. */
+ *  the empty settlements table; v4 → v5 adds the empty P4 scope tables;
+ *  v5 → v6 adds the empty P5 check-runner/rollout tables. Requests and
+ *  events are untouched by every hop; read() chains the whole chain for an
+ *  older file. */
 export const MIGRATIONS = {
   1: (ledger: z.infer<typeof LedgerSchemaV1>): LedgerValueV2 => ({
     ...ledger,
@@ -725,12 +983,20 @@ export const MIGRATIONS = {
     schemaVersion: 4,
     settlements: [],
   }),
-  4: (ledger: LedgerValueV4): LedgerValue => ({
+  4: (ledger: LedgerValueV4): LedgerValueV5 => ({
     ...ledger,
-    schemaVersion: LEDGER_SCHEMA_VERSION,
+    schemaVersion: 5,
     scopes: [],
     scopeReviews: [],
     scopeTransitions: [],
+  }),
+  5: (ledger: LedgerValueV5): LedgerValue => ({
+    ...ledger,
+    schemaVersion: LEDGER_SCHEMA_VERSION,
+    checkDefinitions: [],
+    checkRuns: [],
+    rollouts: [],
+    rolloutTransitions: [],
   }),
 } as const;
 
@@ -760,9 +1026,50 @@ export type SettlementValue = z.infer<typeof SettlementSchema>;
 export type ScopeValue = z.infer<typeof ScopeSchema>;
 export type ScopeReviewValue = z.infer<typeof ScopeReviewSchema>;
 export type ScopeTransitionValue = z.infer<typeof ScopeTransitionSchema>;
+export type CheckDefinitionValue = z.infer<typeof CheckDefinitionSchema>;
+export type CheckRunValue = z.infer<typeof CheckRunSchema>;
+export type RolloutValue = z.infer<typeof RolloutSchema>;
+export type RolloutTransitionValue = z.infer<typeof RolloutTransitionSchema>;
 export type RequestRecordValue = z.infer<typeof RequestRecordSchema>;
 export type EventValue = z.infer<typeof EventSchema>;
 export type DeskStoreEnvelope = z.infer<typeof EnvelopeSchema>;
+
+/** P4/P5 shared — the scope review round that currently stands approved:
+ *  the (scopeRevision, candidateSnapshot, candidateHead) pin plus the
+ *  (axis, reviewId) discharge set of the round whose machine state sits at
+ *  `approved` or `advanced`. A fresh submit-for-review supersedes a
+ *  standing approval — the gate sees only the approval in force, and a
+ *  rejected/closed/in-flight round yields null. The promote gate and the
+ *  durable refinement walk the same stream with this one derivation. */
+export function approvedScopeRound(
+  stream: ScopeTransitionValue[],
+): {
+  scopeRevision: number;
+  candidateSnapshot: string;
+  candidateHead: string | null;
+  discharged: ScopeTransitionValue["discharged"];
+} | null {
+  let pin: { scopeRevision: number; candidateSnapshot: string; candidateHead: string | null } | null = null;
+  let observed: ScopeTransitionValue["discharged"] | null = null;
+  let approved: { scopeRevision: number; candidateSnapshot: string; candidateHead: string | null; discharged: ScopeTransitionValue["discharged"] } | null = null;
+  let state: ScopeTransitionValue["to"] | null = null;
+  for (const row of stream) {
+    if (row.command === "submit-for-review") {
+      pin = { scopeRevision: row.scopeRevision, candidateSnapshot: row.candidateSnapshot as string, candidateHead: row.candidateHead };
+      observed = null;
+    }
+    // The gate transition carries the round's discharged set; approve is
+    // reachable only through it, so the standing approval's evidence is
+    // always the matching review-observed row's.
+    if (row.command === "review-observed") observed = row.discharged;
+    if (row.to === "approved" && pin !== null && observed !== null) {
+      approved = { ...pin, discharged: observed };
+    }
+    state = row.to;
+  }
+  if (state !== "approved" && state !== "advanced") return null;
+  return approved;
+}
 
 /** Read outcomes — `diagnostics.code` is a closed vocabulary, never a free
  *  string: corrupt (invalid-json | header-invalid | schema-invalid |
@@ -771,7 +1078,7 @@ export type DeskStoreEnvelope = z.infer<typeof EnvelopeSchema>;
  *  repo-key-invalid | repo-mismatch). */
 export type DeskStoreRead =
   | { state: "absent" }
-  | { state: "ok"; ledger: LedgerValue; persistedSchemaVersion: 1 | 2 | 3 | 4 | 5 }
+  | { state: "ok"; ledger: LedgerValue; persistedSchemaVersion: 1 | 2 | 3 | 4 | 5 | 6 }
   | { state: "corrupt" | "future" | "unsafe"; diagnostics: { code: string; schemaVersion: number | null } };
 
 export type TransactReceipt = {
@@ -803,6 +1110,11 @@ export type DecideOutcome =
       scopes?: ScopeValue[];
       scopeReviews?: ScopeReviewValue[];
       scopeTransitions?: ScopeTransitionValue[];
+      /** P5 — the check-runner/rollout tables; identical channel rule. */
+      checkDefinitions?: CheckDefinitionValue[];
+      checkRuns?: CheckRunValue[];
+      rollouts?: RolloutValue[];
+      rolloutTransitions?: RolloutTransitionValue[];
     }
   | DeskRejectionValue;
 export type DecideFunction = (ledger: Readonly<LedgerValue>, command: Record<string, unknown>) => DecideOutcome;
@@ -1304,6 +1616,349 @@ export function createDeskStore(deps: DeskStoreDeps): DeskStore {
         previousTo = row.to;
       }
     }
+    // P5 check-definition refinements — the same fail-closed discipline as
+    // scopes: unique (assignmentId, checkId, revision) streams forming a
+    // contiguous 1..N lineage, a unique request key per
+    // (assignmentId, ownerAgentId), owner resolves to the assignment's
+    // lead membership, the scope must exist on that assignment, and the
+    // pinned assignmentRevision may only lag, never lead. `checkClass`
+    // is already enum-bound by schema; `refs`/`requiredEvidence` stay
+    // claimed provenance.
+    const checkDefStreams = new Map<string, CheckDefinitionValue[]>();
+    const checkDefRequestKeys = new Set<string>();
+    for (const row of ledger.checkDefinitions) {
+      const streamKey = JSON.stringify([row.assignmentId, row.checkId]);
+      const stream = checkDefStreams.get(streamKey) ?? [];
+      if (stream.some(prev => prev.revision === row.revision)) return corrupt();
+      stream.push(row);
+      checkDefStreams.set(streamKey, stream);
+      const requestKey = JSON.stringify([row.assignmentId, row.ownerAgentId, row.requestId]);
+      if (checkDefRequestKeys.has(requestKey)) return corrupt();
+      checkDefRequestKeys.add(requestKey);
+      const assignment = assignmentsById.get(row.assignmentId);
+      if (assignment === undefined) return corrupt();
+      const owner = membershipsById.get(row.ownerMembershipId);
+      if (owner === undefined || owner.agentId !== row.ownerAgentId || owner.role !== "lead") return corrupt();
+      if (assignment.ownerAgentId !== row.ownerAgentId) return corrupt();
+      if (scopeStreams.get(JSON.stringify([row.assignmentId, row.scopeId])) === undefined) return corrupt();
+      if (row.assignmentRevision < 1 || row.assignmentRevision > assignmentStructuralRevision(assignment)) {
+        return corrupt();
+      }
+    }
+    for (const stream of checkDefStreams.values()) {
+      const revisions = new Set(stream.map(row => row.revision));
+      if (revisions.size !== stream.length || Math.max(...revisions) !== stream.length) return corrupt();
+      for (const row of stream) {
+        if (row.revision === 1) {
+          if (row.priorRevision !== null) return corrupt();
+        } else if (row.priorRevision !== row.revision - 1) {
+          return corrupt();
+        }
+      }
+    }
+    // P5 rollout declaration refinements — identical lineage/owner/scope
+    // discipline, plus: the pinned candidate must resolve to an observed
+    // candidate of this assignment, and every required check must name a
+    // check definition ON THIS scope whose stored definitionSha256 equals
+    // the pinned digest — a required entry that resolves to a different
+    // scope or a phantom digest is corruption.
+    const rolloutStreams = new Map<string, RolloutValue[]>();
+    const rolloutRequestKeys = new Set<string>();
+    for (const row of ledger.rollouts) {
+      const streamKey = JSON.stringify([row.assignmentId, row.rolloutId]);
+      const stream = rolloutStreams.get(streamKey) ?? [];
+      if (stream.some(prev => prev.revision === row.revision)) return corrupt();
+      stream.push(row);
+      rolloutStreams.set(streamKey, stream);
+      const requestKey = JSON.stringify([row.assignmentId, row.ownerAgentId, row.requestId]);
+      if (rolloutRequestKeys.has(requestKey)) return corrupt();
+      rolloutRequestKeys.add(requestKey);
+      const assignment = assignmentsById.get(row.assignmentId);
+      if (assignment === undefined) return corrupt();
+      const owner = membershipsById.get(row.ownerMembershipId);
+      if (owner === undefined || owner.agentId !== row.ownerAgentId || owner.role !== "lead") return corrupt();
+      if (assignment.ownerAgentId !== row.ownerAgentId) return corrupt();
+      if (scopeStreams.get(JSON.stringify([row.assignmentId, row.scopeId])) === undefined) return corrupt();
+      if (row.assignmentRevision < 1 || row.assignmentRevision > assignmentStructuralRevision(assignment)) {
+        return corrupt();
+      }
+      const candidate = ledger.candidates.find(
+        c => c.snapshotSha256 === row.candidateSnapshot && c.assignmentId === row.assignmentId,
+      );
+      if (candidate === undefined) return corrupt();
+      const requiredIds = new Set<string>();
+      for (const required of row.requiredChecks) {
+        if (requiredIds.has(required.checkId)) return corrupt();
+        requiredIds.add(required.checkId);
+        const defs = checkDefStreams.get(JSON.stringify([row.assignmentId, required.checkId]));
+        const def = defs?.find(
+          d => d.scopeId === row.scopeId && d.definitionSha256 === required.definitionDigest,
+        );
+        if (def === undefined) return corrupt();
+      }
+    }
+    for (const stream of rolloutStreams.values()) {
+      const revisions = new Set(stream.map(row => row.revision));
+      if (revisions.size !== stream.length || Math.max(...revisions) !== stream.length) return corrupt();
+      for (const row of stream) {
+        if (row.revision === 1) {
+          if (row.priorRevision !== null) return corrupt();
+        } else if (row.priorRevision !== row.revision - 1) {
+          return corrupt();
+        }
+      }
+    }
+    // P5 check-run refinements: unique runIds, a unique request key per
+    // (assignmentId, actorAgentId), and every identity link cross-checked —
+    // the run's (checkId, definitionRevision) must resolve to a definition
+    // row whose stored digest matches, its (rolloutId, rolloutRevision)
+    // must resolve to a declaration whose candidateSnapshot the run pins
+    // verbatim, and the actor must be the rollout's owner resolved through
+    // the actor membership. Retry streams are keyed by
+    // (assignmentId, rolloutId, checkId, candidateSnapshot): contiguous
+    // 1..N capped by
+    // the definition's maxRetries, every attempt>1 naming its predecessor.
+    const runIds = new Set<string>();
+    const runRequestKeys = new Set<string>();
+    const runRetryStreams = new Map<string, CheckRunValue[]>();
+    const runsById = new Map<string, CheckRunValue>();
+    for (const row of ledger.checkRuns) {
+      if (runIds.has(row.runId)) return corrupt();
+      runIds.add(row.runId);
+      runsById.set(row.runId, row);
+      const requestKey = JSON.stringify([row.assignmentId, row.actorAgentId, row.requestId]);
+      if (runRequestKeys.has(requestKey)) return corrupt();
+      runRequestKeys.add(requestKey);
+      const assignment = assignmentsById.get(row.assignmentId);
+      if (assignment === undefined) return corrupt();
+      const defs = checkDefStreams.get(JSON.stringify([row.assignmentId, row.checkId]));
+      const def = defs?.find(d => d.revision === row.definitionRevision);
+      if (def === undefined || def.definitionSha256 !== row.definitionSha256) return corrupt();
+      const decls = rolloutStreams.get(JSON.stringify([row.assignmentId, row.rolloutId]));
+      const decl = decls?.find(d => d.revision === row.rolloutRevision);
+      if (decl === undefined) return corrupt();
+      if (row.candidateSnapshot !== decl.candidateSnapshot || row.candidateHead !== decl.candidateHead) {
+        return corrupt();
+      }
+      if (decl.scopeId !== def.scopeId) return corrupt();
+      if (row.actorAgentId !== decl.ownerAgentId) return corrupt();
+      const actorRow = membershipsById.get(row.actorSeatId);
+      if (actorRow === undefined || actorRow.agentId !== row.actorAgentId) return corrupt();
+      // A passed run on a definition that requires evidence must carry the
+      // evidence pointer — a bare claim is corruption.
+      if (row.status === "passed" && def.requiredEvidence.length > 0 && row.evidenceRef === null) {
+        return corrupt();
+      }
+      const streamKey = JSON.stringify([row.assignmentId, row.rolloutId, row.checkId, row.candidateSnapshot]);
+      const stream = runRetryStreams.get(streamKey) ?? [];
+      if (stream.some(prev => prev.attempt === row.attempt)) return corrupt();
+      stream.push(row);
+      runRetryStreams.set(streamKey, stream);
+    }
+    for (const stream of runRetryStreams.values()) {
+      stream.sort((a, b) => a.attempt - b.attempt);
+      // A retry stream runs one definition: mixing pinned revisions is
+      // corruption (an amended check is a fresh stream under a new
+      // candidate pin or an explicit re-run).
+      const first = stream[0]!;
+      for (const row of stream) {
+        if (row.definitionRevision !== first.definitionRevision || row.definitionSha256 !== first.definitionSha256) {
+          return corrupt();
+        }
+      }
+      const defs = checkDefStreams.get(JSON.stringify([first.assignmentId, first.checkId]));
+      const def = defs?.find(d => d.revision === first.definitionRevision);
+      if (def === undefined) return corrupt();
+      if (stream.length > 1 + def.limits.maxRetries) return corrupt();
+      for (const [index, row] of stream.entries()) {
+        if (row.attempt !== index + 1) return corrupt();
+        if (index === 0) {
+          if (row.retryOf !== null) return corrupt();
+        } else if (row.retryOf !== stream[index - 1]!.runId) {
+          return corrupt();
+        }
+      }
+    }
+    // rolloutTransitions: unique ids, a unique contiguous 1..N revision
+    // stream per (assignmentId, rolloutId), a unique request key per
+    // (assignmentId, actorAgentId), actor bound to the durable rollout
+    // owner, and the chain must walk the shared ROLLOUT_TRANSITIONS
+    // legality table exactly — the first edge is (none → declared) by
+    // `declare`, every later row continues from its predecessor's `to`.
+    // The cohort pinned by start-canary and the check evidence discharged
+    // by gated commands are re-resolved here, so a forged roster, a
+    // phantom gate pass or a drifted-cohort commit is corruption.
+    const rolloutTransitionIds = new Set<string>();
+    const rolloutTransitionRequestKeys = new Set<string>();
+    const rolloutTransitionsByRollout = new Map<string, RolloutTransitionValue[]>();
+    for (const row of ledger.rolloutTransitions) {
+      if (rolloutTransitionIds.has(row.transitionId)) return corrupt();
+      rolloutTransitionIds.add(row.transitionId);
+      const streamKey = JSON.stringify([row.assignmentId, row.rolloutId]);
+      const stream = rolloutTransitionsByRollout.get(streamKey) ?? [];
+      stream.push(row);
+      rolloutTransitionsByRollout.set(streamKey, stream);
+      const requestKey = JSON.stringify([row.assignmentId, row.actorAgentId, row.requestId]);
+      if (rolloutTransitionRequestKeys.has(requestKey)) return corrupt();
+      rolloutTransitionRequestKeys.add(requestKey);
+      const assignment = assignmentsById.get(row.assignmentId);
+      if (assignment === undefined) return corrupt();
+      const declStream = rolloutStreams.get(streamKey);
+      if (declStream === undefined) return corrupt();
+      const decl = declStream.find(d => d.revision === row.rolloutRevision);
+      if (decl === undefined) return corrupt();
+      if (row.actorAgentId !== decl.ownerAgentId) return corrupt();
+      // Cohort/target/digest fields ride exactly the commands that pin
+      // them — a stray payload is corruption.
+      if (row.command === "start-canary") {
+        if (row.cohort === null) return corrupt();
+      } else if (row.cohort !== null) {
+        return corrupt();
+      }
+      if (row.command === "rollback") {
+        if (row.targetSnapshot === null) return corrupt();
+        const target = ledger.candidates.find(
+          c => c.snapshotSha256 === row.targetSnapshot && c.assignmentId === row.assignmentId,
+        );
+        if (target === undefined) return corrupt();
+      } else if (row.targetSnapshot !== null || row.targetHead !== null) {
+        return corrupt();
+      }
+      const cohortGated = (ROLLOUT_COHORT_GATED_COMMANDS as readonly string[]).includes(row.command);
+      if (cohortGated !== (row.cohortDigestAtGate !== null)) return corrupt();
+      if (row.cohort !== null) {
+        // The roster re-digests to its own stored digest and may only name
+        // the assignment's durable roster (owner + current seats — the
+        // same current-row rule the scope-review refinement applies).
+        const digest = canonicalSha256({ members: row.cohort.members, assignmentRevision: row.cohort.assignmentRevision });
+        if (digest !== row.cohort.digest) return corrupt();
+        const sorted = [...row.cohort.members].sort();
+        if (row.cohort.members.length !== new Set(row.cohort.members).size) return corrupt();
+        if (row.cohort.members.some((m, i) => m !== sorted[i])) return corrupt();
+        if (row.cohort.assignmentRevision < 1 || row.cohort.assignmentRevision > assignmentStructuralRevision(assignment)) {
+          return corrupt();
+        }
+        for (const member of row.cohort.members) {
+          if (member !== assignment.ownerAgentId && !assignment.seats.some(seat => seat.agentId === member)) {
+            return corrupt();
+          }
+        }
+      }
+    }
+    for (const stream of rolloutTransitionsByRollout.values()) {
+      stream.sort((a, b) => a.revision - b.revision);
+      const set = new Set(stream.map(row => row.revision));
+      if (set.size !== stream.length || stream[stream.length - 1]!.revision !== stream.length) {
+        return corrupt();
+      }
+      const declStream = rolloutStreams.get(JSON.stringify([stream[0]!.assignmentId, stream[0]!.rolloutId]))!;
+      let previousTo: string | null = null;
+      let cohortDigest: string | null = null;
+      for (const row of stream) {
+        if (row.revision === 1) {
+          if (row.command !== "declare" || row.from !== null || row.to !== "declared") return corrupt();
+        } else {
+          if (row.command === "declare") return corrupt();
+          if (row.from !== previousTo) return corrupt();
+          if (row.from === null) return corrupt();
+          const edge = rolloutTransitionEdge(row.from as Parameters<typeof rolloutTransitionEdge>[0], row.command);
+          if (edge === undefined || edge.to !== row.to) return corrupt();
+        }
+        if (row.command === "start-canary") {
+          cohortDigest = row.cohort!.digest;
+        }
+        const checkGated = (ROLLOUT_CHECK_GATED_COMMANDS as readonly string[]).includes(row.command);
+        if (!checkGated) {
+          if (row.dischargedChecks.length > 0) return corrupt();
+        } else {
+          // The discharged set must exactly cover the required checks of
+          // the declaration revision this transition pins: one passed run
+          // per required checkId, bound to that rollout and to the
+          // declaration's candidate pin.
+          const decl = declStream.find(d => d.revision === row.rolloutRevision)!;
+          const seen = new Set<string>();
+          for (const entry of row.dischargedChecks) {
+            if (seen.has(entry.checkId)) return corrupt();
+            seen.add(entry.checkId);
+            const run = runsById.get(entry.runId);
+            if (
+              run === undefined ||
+              run.assignmentId !== row.assignmentId ||
+              run.rolloutId !== row.rolloutId ||
+              run.checkId !== entry.checkId ||
+              run.status !== "passed" ||
+              run.candidateSnapshot !== decl.candidateSnapshot
+            ) {
+              return corrupt();
+            }
+          }
+          for (const required of decl.requiredChecks) {
+            if (!seen.has(required.checkId)) return corrupt();
+          }
+          if (seen.size !== decl.requiredChecks.length) return corrupt();
+        }
+        const reviewGated = (ROLLOUT_REVIEW_GATED_COMMANDS as readonly string[]).includes(row.command);
+        if (!reviewGated) {
+          if (row.dischargedReviews.length > 0) return corrupt();
+        } else {
+          // The review discharge must be the exact set the scope's
+          // approved round consumed: every required axis once, each
+          // review row bound to the rollout's scope, and the review rows'
+          // shared round pin (scopeRevision, candidateSnapshot) must be
+          // the pin of an approve edge on that scope's stream — a forged,
+          // foreign-candidate or unapproved discharge is corruption.
+          const decl = declStream.find(d => d.revision === row.rolloutRevision)!;
+          const seenAxes = new Set<string>();
+          const pinKeys = new Set<string>();
+          for (const entry of row.dischargedReviews) {
+            if (seenAxes.has(entry.axis)) return corrupt();
+            seenAxes.add(entry.axis);
+            const review = reviewsById.get(entry.reviewId);
+            if (
+              review === undefined ||
+              review.assignmentId !== row.assignmentId ||
+              review.scopeId !== decl.scopeId ||
+              review.axis !== entry.axis ||
+              review.candidateSnapshot !== decl.candidateSnapshot
+            ) {
+              return corrupt();
+            }
+            pinKeys.add(JSON.stringify([review.scopeRevision, review.candidateSnapshot]));
+          }
+          for (const axis of SCOPE_REVIEW_AXES) {
+            if (!seenAxes.has(axis)) return corrupt();
+          }
+          if (pinKeys.size !== 1) return corrupt();
+          const scopeStream = transitionsByScope.get(JSON.stringify([row.assignmentId, decl.scopeId]));
+          if (scopeStream === undefined) return corrupt();
+          const dischargedKey = (list: { axis: string; reviewId: string }[]) =>
+            canonicalSha256([...list].sort((a, b) => a.axis.localeCompare(b.axis)).map(e => [e.axis, e.reviewId]));
+          let scopePin: { scopeRevision: number; candidateSnapshot: string } | null = null;
+          let observedKey: string | null = null;
+          let approvalMatched = false;
+          for (const srow of scopeStream) {
+            if (srow.command === "submit-for-review") {
+              scopePin = { scopeRevision: srow.scopeRevision, candidateSnapshot: srow.candidateSnapshot as string };
+              observedKey = null;
+            }
+            if (srow.command === "review-observed") observedKey = dischargedKey(srow.discharged);
+            if (
+              srow.to === "approved" &&
+              scopePin !== null &&
+              pinKeys.has(JSON.stringify([scopePin.scopeRevision, scopePin.candidateSnapshot])) &&
+              observedKey === dischargedKey(row.dischargedReviews)
+            ) {
+              approvalMatched = true;
+            }
+          }
+          if (!approvalMatched) return corrupt();
+        }
+        if (row.cohortDigestAtGate !== null && row.cohortDigestAtGate !== cohortDigest) {
+          return corrupt();
+        }
+        previousTo = row.to;
+      }
+    }
     return null;
   }
 
@@ -1416,42 +2071,49 @@ export function createDeskStore(deps: DeskStoreDeps): DeskStore {
       // never touched by read — the bump happens in the next transact's
       // commit.
       let ledger: LedgerValue;
-      let persistedSchemaVersion: 1 | 2 | 3 | 4 | 5;
+      let persistedSchemaVersion: 1 | 2 | 3 | 4 | 5 | 6;
       if (schemaVersion === 1) {
         const v1 = LedgerSchemaV1.safeParse(json);
         if (!v1.success) {
           return { state: "corrupt", diagnostics: { code: "schema-invalid", schemaVersion } };
         }
-        ledger = MIGRATIONS[4](MIGRATIONS[3](MIGRATIONS[2](MIGRATIONS[1](v1.data))));
+        ledger = MIGRATIONS[5](MIGRATIONS[4](MIGRATIONS[3](MIGRATIONS[2](MIGRATIONS[1](v1.data)))));
         persistedSchemaVersion = 1;
       } else if (schemaVersion === 2) {
         const v2 = LedgerSchemaV2.safeParse(json);
         if (!v2.success) {
           return { state: "corrupt", diagnostics: { code: "schema-invalid", schemaVersion } };
         }
-        ledger = MIGRATIONS[4](MIGRATIONS[3](MIGRATIONS[2](v2.data)));
+        ledger = MIGRATIONS[5](MIGRATIONS[4](MIGRATIONS[3](MIGRATIONS[2](v2.data))));
         persistedSchemaVersion = 2;
       } else if (schemaVersion === 3) {
         const v3 = LedgerSchemaV3.safeParse(json);
         if (!v3.success) {
           return { state: "corrupt", diagnostics: { code: "schema-invalid", schemaVersion } };
         }
-        ledger = MIGRATIONS[4](MIGRATIONS[3](v3.data));
+        ledger = MIGRATIONS[5](MIGRATIONS[4](MIGRATIONS[3](v3.data)));
         persistedSchemaVersion = 3;
       } else if (schemaVersion === 4) {
         const v4 = LedgerSchemaV4.safeParse(json);
         if (!v4.success) {
           return { state: "corrupt", diagnostics: { code: "schema-invalid", schemaVersion } };
         }
-        ledger = MIGRATIONS[4](v4.data);
+        ledger = MIGRATIONS[5](MIGRATIONS[4](v4.data));
         persistedSchemaVersion = 4;
+      } else if (schemaVersion === 5) {
+        const v5 = LedgerSchemaV5.safeParse(json);
+        if (!v5.success) {
+          return { state: "corrupt", diagnostics: { code: "schema-invalid", schemaVersion } };
+        }
+        ledger = MIGRATIONS[5](v5.data);
+        persistedSchemaVersion = 5;
       } else {
         const parsed = LedgerSchema.safeParse(json);
         if (!parsed.success) {
           return { state: "corrupt", diagnostics: { code: "schema-invalid", schemaVersion } };
         }
         ledger = parsed.data;
-        persistedSchemaVersion = 5;
+        persistedSchemaVersion = 6;
       }
       const refinement = checkRefinements(ledger, repoKey);
       if (refinement !== null) return refinement;
@@ -1632,6 +2294,10 @@ export function createDeskStore(deps: DeskStoreDeps): DeskStore {
       scopes: [],
       scopeReviews: [],
       scopeTransitions: [],
+      checkDefinitions: [],
+      checkRuns: [],
+      rollouts: [],
+      rolloutTransitions: [],
     };
   }
 
@@ -1779,6 +2445,10 @@ export function createDeskStore(deps: DeskStoreDeps): DeskStore {
       let nextScopes = ledger.scopes;
       let nextScopeReviews = ledger.scopeReviews;
       let nextScopeTransitions = ledger.scopeTransitions;
+      let nextCheckDefinitions = ledger.checkDefinitions;
+      let nextCheckRuns = ledger.checkRuns;
+      let nextRollouts = ledger.rollouts;
+      let nextRolloutTransitions = ledger.rolloutTransitions;
       if (decided.ok === true) {
         const proposed: string[] = [];
         if (decided.memberships !== undefined) {
@@ -1869,6 +2539,50 @@ export function createDeskStore(deps: DeskStoreDeps): DeskStore {
           }
           nextScopeTransitions = parsed.data;
         }
+        if (decided.checkDefinitions !== undefined) {
+          proposed.push("checkDefinitions");
+          const parsed = z.array(CheckDefinitionSchema).max(LEDGER_LIMITS.checkDefinitions).safeParse(decided.checkDefinitions);
+          if (!parsed.success) {
+            return invalidRecord(
+              `decide returned invalid checkDefinitions: ${firstIssue(parsed.error)}`,
+              "fix the decide function to return a schema-valid checkDefinitions table",
+            );
+          }
+          nextCheckDefinitions = parsed.data;
+        }
+        if (decided.checkRuns !== undefined) {
+          proposed.push("checkRuns");
+          const parsed = z.array(CheckRunSchema).max(LEDGER_LIMITS.checkRuns).safeParse(decided.checkRuns);
+          if (!parsed.success) {
+            return invalidRecord(
+              `decide returned invalid checkRuns: ${firstIssue(parsed.error)}`,
+              "fix the decide function to return a schema-valid checkRuns table",
+            );
+          }
+          nextCheckRuns = parsed.data;
+        }
+        if (decided.rollouts !== undefined) {
+          proposed.push("rollouts");
+          const parsed = z.array(RolloutSchema).max(LEDGER_LIMITS.rollouts).safeParse(decided.rollouts);
+          if (!parsed.success) {
+            return invalidRecord(
+              `decide returned invalid rollouts: ${firstIssue(parsed.error)}`,
+              "fix the decide function to return a schema-valid rollouts table",
+            );
+          }
+          nextRollouts = parsed.data;
+        }
+        if (decided.rolloutTransitions !== undefined) {
+          proposed.push("rolloutTransitions");
+          const parsed = z.array(RolloutTransitionSchema).max(LEDGER_LIMITS.rolloutTransitions).safeParse(decided.rolloutTransitions);
+          if (!parsed.success) {
+            return invalidRecord(
+              `decide returned invalid rolloutTransitions: ${firstIssue(parsed.error)}`,
+              "fix the decide function to return a schema-valid rolloutTransitions table",
+            );
+          }
+          nextRolloutTransitions = parsed.data;
+        }
         if (proposed.length > 0) {
           const candidateInvalid = checkRefinements(
             {
@@ -1881,6 +2595,10 @@ export function createDeskStore(deps: DeskStoreDeps): DeskStore {
               scopes: nextScopes,
               scopeReviews: nextScopeReviews,
               scopeTransitions: nextScopeTransitions,
+              checkDefinitions: nextCheckDefinitions,
+              checkRuns: nextCheckRuns,
+              rollouts: nextRollouts,
+              rolloutTransitions: nextRolloutTransitions,
             },
             repoKey,
           );
@@ -1957,6 +2675,10 @@ export function createDeskStore(deps: DeskStoreDeps): DeskStore {
         scopes: nextScopes,
         scopeReviews: nextScopeReviews,
         scopeTransitions: nextScopeTransitions,
+        checkDefinitions: nextCheckDefinitions,
+        checkRuns: nextCheckRuns,
+        rollouts: nextRollouts,
+        rolloutTransitions: nextRolloutTransitions,
       };
       // The pre-commit refinement pass is the same one read() applies — a
       // ledger that would read as unsafe/corrupt is never written.
@@ -1971,31 +2693,44 @@ export function createDeskStore(deps: DeskStoreDeps): DeskStore {
       // instead.
       let nextBytes: string;
       if (migratedFrom !== null && decided.ok === false) {
-        // Every migrated shape strips the newest tables first: the P4
-        // tables come off for any source version, then the P3-b table for
-        // sources older than v4, then the P3-a tables (and memberships)
-        // for v1/v2 bodies.
-        const { scopes: _sc, scopeReviews: _sr, scopeTransitions: _st, ...v4Body } = candidate;
+        // Every migrated shape strips the newest tables first: the P5
+        // tables come off for any source version, then the P4 tables for
+        // sources older than v5, then the P3-b table for sources older
+        // than v4, then the P3-a tables (and memberships) for v1/v2
+        // bodies.
+        const {
+          checkDefinitions: _cd,
+          checkRuns: _cr,
+          rollouts: _r,
+          rolloutTransitions: _rt,
+          ...v5Body
+        } = candidate;
         let persistedShape: unknown;
         let persistedParses: boolean;
-        if (migratedFrom === 4) {
-          persistedShape = { ...v4Body, schemaVersion: 4 };
-          persistedParses = LedgerSchemaV4.safeParse(persistedShape).success;
+        if (migratedFrom === 5) {
+          persistedShape = { ...v5Body, schemaVersion: 5 };
+          persistedParses = LedgerSchemaV5.safeParse(persistedShape).success;
         } else {
-          const { settlements: _s, ...rest } = v4Body;
-          if (migratedFrom === 1) {
-            const { memberships: _m, assignments: _a, candidates: _c, handbacks: _h, ...v1Body } = rest;
-            persistedShape = { ...v1Body, schemaVersion: 1 };
-            persistedParses = LedgerSchemaV1.safeParse(persistedShape).success;
-          } else if (migratedFrom === 2) {
-            const { assignments: _a, candidates: _c, handbacks: _h, ...v2Body } = rest;
-            persistedShape = { ...v2Body, schemaVersion: 2 };
-            persistedParses = LedgerSchemaV2.safeParse(persistedShape).success;
+          const { scopes: _sc, scopeReviews: _sr, scopeTransitions: _st, ...v4Body } = v5Body;
+          if (migratedFrom === 4) {
+            persistedShape = { ...v4Body, schemaVersion: 4 };
+            persistedParses = LedgerSchemaV4.safeParse(persistedShape).success;
           } else {
-            // migratedFrom === 3: drop only the P3-b table; the v3 shape keeps
-            // its assignments/candidates/handbacks verbatim.
-            persistedShape = { ...rest, schemaVersion: 3 };
-            persistedParses = LedgerSchemaV3.safeParse(persistedShape).success;
+            const { settlements: _s, ...rest } = v4Body;
+            if (migratedFrom === 1) {
+              const { memberships: _m, assignments: _a, candidates: _c, handbacks: _h, ...v1Body } = rest;
+              persistedShape = { ...v1Body, schemaVersion: 1 };
+              persistedParses = LedgerSchemaV1.safeParse(persistedShape).success;
+            } else if (migratedFrom === 2) {
+              const { assignments: _a, candidates: _c, handbacks: _h, ...v2Body } = rest;
+              persistedShape = { ...v2Body, schemaVersion: 2 };
+              persistedParses = LedgerSchemaV2.safeParse(persistedShape).success;
+            } else {
+              // migratedFrom === 3: drop only the P3-b table; the v3 shape keeps
+              // its assignments/candidates/handbacks verbatim.
+              persistedShape = { ...rest, schemaVersion: 3 };
+              persistedParses = LedgerSchemaV3.safeParse(persistedShape).success;
+            }
           }
         }
         if (!persistedParses) {

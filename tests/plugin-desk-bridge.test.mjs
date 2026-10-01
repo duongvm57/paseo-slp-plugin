@@ -553,11 +553,16 @@ test('tools/list exposes the visible catalog — hidden and excluded tools absen
     'slp_scope_declare',
     'slp_scope_transition',
     'slp_scope_review',
+    'slp_check_declare',
+    'slp_check_run',
+    'slp_rollout_declare',
+    'slp_rollout_transition',
   ]);
   // The catalog row carries a JSON Schema derived from the zod input.
   assert.equal(reply.result.tools[0].inputSchema.type, 'object');
-  // slp_recover_lock / slp_desk_internal / P4/P5 tools are never catalog entries.
-  for (const forbidden of ['slp_recover_lock', 'slp_desk_internal', 'slp_review_open', 'slp_decision_record', 'slp_check_run']) {
+  // slp_recover_lock / slp_desk_internal and non-desk verbs are never
+  // catalog entries.
+  for (const forbidden of ['slp_recover_lock', 'slp_desk_internal', 'slp_review_open', 'slp_decision_record', 'slp_deploy']) {
     assert.ok(!names.includes(forbidden));
   }
   // Every emitted row obeys the centralized wire caps.
@@ -579,12 +584,16 @@ test('the whole desk tool catalog satisfies DeskBridgeToolEntry (all rows, centr
     DeskBridgeToolEntry.parse(row);
     if (row.visible) visible.push(row.name);
   }
-  // Sanity: the catalog enumerates the full P3-a + P3-b + P4 visible surface.
+  // Sanity: the catalog enumerates the full P3-a + P3-b + P4 + P5 visible surface.
   assert.deepEqual(visible.sort(), [
     'slp_assignment_attach',
     'slp_assignment_close',
     'slp_assignment_register',
+    'slp_check_declare',
+    'slp_check_run',
     'slp_handback_submit',
+    'slp_rollout_declare',
+    'slp_rollout_transition',
     'slp_scope_declare',
     'slp_scope_review',
     'slp_scope_transition',

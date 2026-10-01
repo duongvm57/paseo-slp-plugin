@@ -369,13 +369,13 @@ async function settledFixture(t, over = {}) {
 // catalog + strict input
 // ---------------------------------------------------------------------------
 
-test('P3-b tools are visible mutations/reads; P4/P5 entries stay absent', async t => {
+test('P3-b tools are visible mutations/reads; hidden and never-declared entries stay absent', async t => {
   const { peerConn } = await boundTrio(t);
   const list = await rpc(peerConn.reader, peerConn.conn, { jsonrpc: '2.0', id: 'l1', method: 'tools/list' });
   const names = list.result.tools.map(tool => tool.name);
   assert.ok(names.includes('slp_settlement_record'), 'settlement record is visible');
   assert.ok(names.includes('slp_settlement_export'), 'settlement export is visible');
-  for (const forbidden of ['slp_review_open', 'slp_review_submit', 'slp_decision_record', 'slp_check_run', 'slp_recover_lock', 'slp_desk_internal']) {
+  for (const forbidden of ['slp_review_open', 'slp_review_submit', 'slp_decision_record', 'slp_recover_lock', 'slp_desk_internal', 'slp_deploy']) {
     assert.ok(!names.includes(forbidden), `${forbidden} absent`);
   }
 });

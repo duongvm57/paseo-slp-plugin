@@ -189,6 +189,21 @@ export const WIRE_LIMITS = {
    *  per-scope review-row cap the projection carries. */
   deskStatusScopes: 32,
   deskStatusScopeReviews: 32,
+  // Desk check-runner / rollout machinery (P5): check definitions are
+  // allowlisted named classes bound server-side; a run pins the rollout's
+  // candidate plus a bounded captured output tail and claimed pointers the
+  // desk stores verbatim and never dereferences. The durable
+  // CheckDefinition/CheckRun/Rollout/RolloutTransition schemas read the
+  // SAME keys so a ledger-valid row can never exceed what a wire input or
+  // result schema accepts (the F-STD-4 rule).
+  deskCheckPointer: 1024,
+  deskCheckOutputTail: 4096,
+  deskCheckEvidence: 16,
+  deskRolloutRequiredChecks: 16,
+  /** Per-assignment rollout/check caps inside the status projection. */
+  deskStatusRollouts: 32,
+  deskStatusCheckRuns: 32,
+  deskStatusCheckDefs: 32,
 } as const;
 
 // ---------------------------------------------------------------------------
@@ -417,6 +432,15 @@ export const DeskErrorCode = z.enum([
   // frame as a machine-readable code, never just a message string.
   "REQUEST_TOO_LARGE",
   "RESPONSE_TOO_LARGE",
+  // P5 — the rollout machine's typed refusals: an illegal edge or an
+  // undeclared rollout (ROLLOUT_CONFLICT), a promote/checks-passed gate
+  // missing a required passing run (CHECK_INCOMPLETE), a canary/promote
+  // measured against a moved membership roster (COHORT_DRIFT), and a run
+  // past its definition's retry budget (RETRY_EXHAUSTED).
+  "ROLLOUT_CONFLICT",
+  "CHECK_INCOMPLETE",
+  "COHORT_DRIFT",
+  "RETRY_EXHAUSTED",
   // A path component under the verified stable root is a symlink or not a
   // real directory — the host filesystem itself failed integrity.
   "RUNTIME_INTEGRITY",
@@ -920,6 +944,290 @@ export type DeskScopeDeclareResultValue = z.infer<typeof DeskScopeDeclareResult>
 export type DeskScopeTransitionResultValue = z.infer<typeof DeskScopeTransitionResult>;
 export type DeskScopeReviewResultValue = z.infer<typeof DeskScopeReviewResult>;
 
+// ---------------------------------------------------------------------------
+// P5 — independent check runner, canary cohort and rollout state. Contract
+// R1 §P1–P5: check definitions are durable, assignment+scope-bound and
+// server-registered from an allowlist of NAMED classes — a caller never
+// supplies argv; the runner seam is local and repo-scoped, produces
+// immutable checkRuns, never spawns/cancels/reparents agents; the canary
+// cohort is a bounded assignment-membership snapshot whose drift holds the
+// rollout; every machine move is an explicit actor command; rollback pins
+// a known-good observed candidate and is append-only. Nothing here is a
+// deployment, a live effect or an acceptance.
+// ---------------------------------------------------------------------------
+
+/** The allowlisted check classes — the registry the desk accepts. Adding a
+ *  class is a contract change; the executor bodies live in
+ *  server/desk-check-runner.ts behind the same names. */
+export const CHECK_CLASSES = [
+  "ledger-integrity",
+  "repo-payload-check",
+  "repo-git-head",
+] as const;
+export type CheckClassValue = (typeof CHECK_CLASSES)[number];
+export const CheckClass = z.enum(CHECK_CLASSES);
+
+/** A committed check run's outcome. `blocked` is the durable capability-gap
+ *  result (the class never executed); `error` is an execution fault
+ *  (spawn/timeout/byte-cap/invalid output); `failed` is a completed check
+ *  whose condition did not hold. Only `passed` discharges a required
+ *  check. */
+export const CHECK_RUN_STATUSES = ["passed", "failed", "blocked", "error"] as const;
+export type CheckRunStatusValue = (typeof CHECK_RUN_STATUSES)[number];
+export const CheckRunStatus = z.enum(CHECK_RUN_STATUSES);
+
+/** The closed rollout state vocabulary (contract P5 R1 §P4). `closed`,
+ *  `promoted`, `held` and `rolled-back` are terminal desk dispositions,
+ *  never acceptance or deployment — the desk records the decision, nothing
+ *  else acts on it. */
+export const ROLLOUT_STATES = [
+  "declared",
+  "checks-running",
+  "checks-passed",
+  "checks-failed",
+  "canary-ready",
+  "canary-running",
+  "canary-passed",
+  "canary-failed",
+  "held",
+  "promoted",
+  "rolled-back",
+  "closed",
+] as const;
+export type RolloutStateValue = (typeof ROLLOUT_STATES)[number];
+export const RolloutState = z.enum(ROLLOUT_STATES);
+
+/** The transition commands the owner may issue (the wire enum). `declare`
+ *  is not a transition command: a rollout declaration opens the stream
+ *  with the (none → declared) edge. */
+export const ROLLOUT_COMMANDS = [
+  "start-checks",
+  "checks-passed",
+  "checks-failed",
+  "canary-ready",
+  "start-canary",
+  "canary-passed",
+  "canary-failed",
+  "hold",
+  "rollback",
+  "promote",
+  "close",
+] as const;
+export type RolloutCommandValue = (typeof ROLLOUT_COMMANDS)[number];
+export const RolloutCommand = z.enum(ROLLOUT_COMMANDS);
+
+/** The explicit state-machine table — the single legality authority shared
+ *  by the decide and the store refinement (same discipline as
+ *  SCOPE_TRANSITIONS). Failed/holdable states always keep `hold` and
+ *  `rollback` reachable; `promote` exists only out of canary-passed and is
+ *  separately gated; `close` exists only after a terminal disposition
+ *  (promoted/held/rolled-back) — an early close is not an edge at all. A
+ *  held rollout resolves forward only through rollback or close. */
+export const ROLLOUT_TRANSITIONS = [
+  { from: "declared", command: "start-checks", to: "checks-running" },
+  { from: "checks-running", command: "checks-passed", to: "checks-passed" },
+  { from: "checks-running", command: "checks-failed", to: "checks-failed" },
+  { from: "checks-running", command: "hold", to: "held" },
+  { from: "checks-passed", command: "canary-ready", to: "canary-ready" },
+  { from: "checks-passed", command: "hold", to: "held" },
+  { from: "checks-failed", command: "hold", to: "held" },
+  { from: "checks-failed", command: "rollback", to: "rolled-back" },
+  { from: "canary-ready", command: "start-canary", to: "canary-running" },
+  { from: "canary-ready", command: "hold", to: "held" },
+  { from: "canary-ready", command: "rollback", to: "rolled-back" },
+  { from: "canary-running", command: "canary-passed", to: "canary-passed" },
+  { from: "canary-running", command: "canary-failed", to: "canary-failed" },
+  { from: "canary-running", command: "hold", to: "held" },
+  { from: "canary-passed", command: "promote", to: "promoted" },
+  { from: "canary-passed", command: "hold", to: "held" },
+  { from: "canary-passed", command: "rollback", to: "rolled-back" },
+  { from: "canary-failed", command: "hold", to: "held" },
+  { from: "canary-failed", command: "rollback", to: "rolled-back" },
+  { from: "held", command: "rollback", to: "rolled-back" },
+  { from: "held", command: "close", to: "closed" },
+  { from: "promoted", command: "close", to: "closed" },
+  { from: "rolled-back", command: "close", to: "closed" },
+] as const satisfies readonly { from: RolloutStateValue; command: RolloutCommandValue; to: RolloutStateValue }[];
+
+export type RolloutTransitionEdge = (typeof ROLLOUT_TRANSITIONS)[number];
+
+/** Commands gated on the required-check evidence: every requiredCheck of
+ *  the pinned rollout revision must hold a `passed` run bound to the
+ *  rollout's (candidateSnapshot, definitionDigest) pins. */
+export const ROLLOUT_CHECK_GATED_COMMANDS = ["checks-passed", "promote"] as const;
+export type RolloutCheckGatedCommand = (typeof ROLLOUT_CHECK_GATED_COMMANDS)[number];
+
+/** Commands gated on the canary cohort: the membership snapshot bound by
+ *  start-canary must still describe the assignment's current roster —
+ *  drift typed-rejects (the owner then holds or rolls back explicitly;
+ *  the cohort never auto-expands). */
+export const ROLLOUT_COHORT_GATED_COMMANDS = ["canary-passed", "promote"] as const;
+export type RolloutCohortGatedCommand = (typeof ROLLOUT_COHORT_GATED_COMMANDS)[number];
+
+/** Commands gated on the scope's approved independent review: promote
+ *  commits only when the rollout's scope stands approved under a round
+ *  whose pin binds the declaration's exact candidate and the scope's
+ *  latest revision — the required Spec/Standards observations the round
+ *  discharged are the durable evidence. An observed check pass or a
+ *  promoted state alone is not review evidence. */
+export const ROLLOUT_REVIEW_GATED_COMMANDS = ["promote"] as const;
+export type RolloutReviewGatedCommand = (typeof ROLLOUT_REVIEW_GATED_COMMANDS)[number];
+
+/** Legality lookup — one seam. Returns the edge or undefined. */
+export function rolloutTransitionEdge(
+  from: RolloutStateValue,
+  command: RolloutCommandValue,
+): RolloutTransitionEdge | undefined {
+  return ROLLOUT_TRANSITIONS.find(edge => edge.from === from && edge.command === command);
+}
+
+const DeskCheckPointer = z.string().min(1).max(WIRE_LIMITS.deskCheckPointer);
+
+/** The per-run execution limits a definition may tighten — the server
+ *  clamps to the same ceiling the durable schema enforces; a definition
+ *  can only narrow them (LEDGER_LIMITS.checkTimeoutMs/checkOutputBytes
+ *  are the absolute bounds, `maxRetries` never exceeds the contract's
+ *  one-retry rule). */
+export const DeskCheckLimits = z
+  .object({
+    timeoutMs: z.number().int().min(1).max(60000),
+    maxOutputBytes: z.number().int().min(1).max(1048576),
+    maxRetries: z.number().int().min(0).max(1),
+  })
+  .strict();
+export type DeskCheckLimitsValue = z.infer<typeof DeskCheckLimits>;
+
+/** slp_check_declare — the receiving owner/lead's check definition (P5).
+ *  `checkId` is the opaque caller-chosen name inside the assignment;
+ *  redeclaring appends an immutable revision with explicit lineage.
+ *  `definitionSha256` attests the definition body the caller holds;
+ *  `requiredEvidence` names the evidence kinds a satisfying run must
+ *  carry; `refs` are claimed provenance only. */
+export const DeskCheckDeclareInput = z.object({
+  requestId: DeskRequestId,
+  assignmentId: DeskEntityId,
+  scopeId: DeskEntityId,
+  checkId: DeskEntityId,
+  checkClass: CheckClass,
+  label: z.string().min(1).max(WIRE_LIMITS.deskScopeLabel),
+  definitionSha256: Sha,
+  limits: DeskCheckLimits,
+  requiredEvidence: z.array(DeskCheckPointer).max(WIRE_LIMITS.deskCheckEvidence),
+  refs: z.array(DeskCheckPointer).max(WIRE_LIMITS.deskScopeRefs),
+}).strict();
+
+/** slp_check_run — a bound seat's request to execute one allowlisted check
+ *  against the rollout's pinned candidate while the rollout is in
+ *  checks-running. The server resolves the definition's latest revision
+ *  (`definitionRevision` pins it — superseded is REVISION_CONFLICT),
+ *  derives the candidate/environment pins itself, executes the named class
+ *  through the bounded seam and commits one immutable result row. The
+ *  caller carries no argv, no path and no result. `evidenceRef` is a
+ *  claimed pointer stored as provenance only. */
+export const DeskCheckRunInput = z.object({
+  requestId: DeskRequestId,
+  assignmentId: DeskEntityId,
+  rolloutId: DeskEntityId,
+  checkId: DeskEntityId,
+  definitionRevision: z.number().int().min(1),
+  evidenceRef: DeskCheckPointer.nullable(),
+}).strict();
+
+/** slp_rollout_declare — the receiving owner/lead's rollout declaration
+ *  (P5). Binds `(assignmentId, scopeId, rolloutId, candidateSnapshot)` plus
+ *  the required-check pins `{checkId, definitionDigest}` resolved against
+ *  declared definitions of the same scope at declare time. */
+export const DeskRolloutRequiredCheck = z.object({
+  checkId: DeskEntityId,
+  definitionDigest: Sha,
+}).strict();
+
+export const DeskRolloutDeclareInput = z.object({
+  requestId: DeskRequestId,
+  assignmentId: DeskEntityId,
+  scopeId: DeskEntityId,
+  rolloutId: DeskEntityId,
+  label: z.string().min(1).max(WIRE_LIMITS.deskScopeLabel),
+  declarationSha256: Sha,
+  candidateSnapshot: Sha,
+  candidateHead: z.string().regex(/^[0-9a-f]{40}$|^[0-9a-f]{64}$/).nullable(),
+  requiredChecks: z.array(DeskRolloutRequiredCheck).max(WIRE_LIMITS.deskRolloutRequiredChecks),
+  refs: z.array(DeskCheckPointer).max(WIRE_LIMITS.deskScopeRefs),
+}).strict();
+
+/** slp_rollout_transition — owner-only state-machine move. `rolloutRevision`
+ *  pins the latest declaration revision (a superseded pin is
+ *  REVISION_CONFLICT). `targetSnapshot` rides `rollback` only and must name
+ *  a durable observed candidate of this assignment — the known-good pin is
+ *  evidence, resolved server-side. `evidenceRefs` are claimed pointers. */
+export const DeskRolloutTransitionInput = z.object({
+  requestId: DeskRequestId,
+  assignmentId: DeskEntityId,
+  rolloutId: DeskEntityId,
+  transition: RolloutCommand,
+  rolloutRevision: z.number().int().min(1),
+  targetSnapshot: Sha.nullable(),
+  evidenceRefs: z.array(DeskCheckPointer).max(WIRE_LIMITS.deskCheckEvidence),
+}).strict();
+
+export const DeskCheckDeclareResult = z.object({
+  ok: z.literal(true),
+  checkId: DeskEntityId,
+  revision: z.number().int().min(1),
+  receiptId: z.string().min(1).max(WIRE_LIMITS.deskEntityId),
+}).strict();
+
+export const DeskCheckRunResult = z.object({
+  ok: z.literal(true),
+  runId: DeskEntityId,
+  rolloutId: DeskEntityId,
+  checkId: DeskEntityId,
+  status: CheckRunStatus,
+  attempt: z.number().int().min(1),
+  receiptId: z.string().min(1).max(WIRE_LIMITS.deskEntityId),
+}).strict();
+
+export const DeskRolloutDeclareResult = z.object({
+  ok: z.literal(true),
+  rolloutId: DeskEntityId,
+  revision: z.number().int().min(1),
+  receiptId: z.string().min(1).max(WIRE_LIMITS.deskEntityId),
+}).strict();
+
+/** The (checkId, runId) pairs a check-gated transition committed with —
+ *  the durable evidence the gate consumed. */
+export const DeskRolloutDischargedCheck = z.object({
+  checkId: DeskEntityId,
+  runId: DeskEntityId,
+}).strict();
+
+/** The (axis, reviewId) pairs a review-gated transition committed with —
+ *  the durable scope-review evidence the promote gate consumed. */
+export const DeskRolloutDischargedReview = z.object({
+  axis: ScopeReviewAxis,
+  reviewId: DeskEntityId,
+}).strict();
+
+export const DeskRolloutTransitionResult = z.object({
+  ok: z.literal(true),
+  transitionId: DeskEntityId,
+  rolloutId: DeskEntityId,
+  revision: z.number().int().min(1),
+  state: RolloutState,
+  receiptId: z.string().min(1).max(WIRE_LIMITS.deskEntityId),
+  dischargedChecks: z.array(DeskRolloutDischargedCheck).max(WIRE_LIMITS.deskRolloutRequiredChecks),
+  dischargedReviews: z.array(DeskRolloutDischargedReview).max(SCOPE_REVIEW_AXES.length),
+}).strict();
+
+export type DeskCheckDeclareInputValue = z.infer<typeof DeskCheckDeclareInput>;
+export type DeskCheckRunInputValue = z.infer<typeof DeskCheckRunInput>;
+export type DeskRolloutDeclareInputValue = z.infer<typeof DeskRolloutDeclareInput>;
+export type DeskRolloutTransitionInputValue = z.infer<typeof DeskRolloutTransitionInput>;
+export type DeskCheckDeclareResultValue = z.infer<typeof DeskCheckDeclareResult>;
+export type DeskCheckRunResultValue = z.infer<typeof DeskCheckRunResult>;
+export type DeskRolloutDeclareResultValue = z.infer<typeof DeskRolloutDeclareResult>;
+export type DeskRolloutTransitionResultValue = z.infer<typeof DeskRolloutTransitionResult>;
+
 /** One review revision as projected into slp_status — identifiers, axis
  *  and verdict only; the claimed findingsRef stays in the ledger. */
 export const DeskStatusScopeReview = z.object({
@@ -982,6 +1290,45 @@ export const DeskStatusSettlement = z.object({
   exportVerified: z.boolean(),
 }).strict();
 
+/** One check definition as projected into slp_status (P5) — identifiers,
+ *  class and revision only; claimed refs stay in the ledger. */
+export const DeskStatusCheckDef = z.object({
+  checkId: DeskEntityId,
+  scopeId: DeskEntityId,
+  checkClass: CheckClass,
+  revision: z.number().int().min(1),
+  maxRetries: z.number().int().min(0),
+}).strict();
+
+/** One committed run as projected into slp_status — identifiers, status,
+ *  attempt and executor only; output tail/pointer and evidenceRef stay in
+ *  the ledger (a status view never re-serves claimed or raw output). */
+export const DeskStatusCheckRun = z.object({
+  runId: DeskEntityId,
+  checkId: DeskEntityId,
+  status: CheckRunStatus,
+  attempt: z.number().int().min(1),
+  actorAgentId: z.string().min(1).max(WIRE_LIMITS.agentId),
+}).strict();
+
+/** One rollout as projected into slp_status (P5) — identity, derived
+ *  machine state, the candidate + cohort pins, required/discharged check
+ *  ids and a bounded run list. Claimed refs/evidenceRefs/output stay in
+ *  the ledger. */
+export const DeskStatusRollout = z.object({
+  rolloutId: DeskEntityId,
+  scopeId: DeskEntityId,
+  revision: z.number().int().min(1),
+  state: RolloutState,
+  candidateSnapshot: Sha,
+  cohortDigest: Sha.nullable(),
+  cohortSize: z.number().int().min(0).nullable(),
+  requiredChecks: z.array(DeskEntityId).max(WIRE_LIMITS.deskRolloutRequiredChecks),
+  dischargedChecks: z.array(DeskEntityId).max(WIRE_LIMITS.deskRolloutRequiredChecks),
+  transitionCount: z.number().int().min(0),
+  runs: z.array(DeskStatusCheckRun).max(WIRE_LIMITS.deskStatusCheckRuns),
+}).strict();
+
 /** One assignment as projected into slp_status — caller-scoped: a lead's
  *  owned assignments carry every handback; a bound seat sees only its own
  *  rows on assignments it is attached to. `settlements` follows the same
@@ -998,6 +1345,12 @@ export const DeskStatusAssignment = z.object({
    *  on an owned assignment; a bound seat sees scopes on assignments it is
    *  attached to (any attached seat is a potential bound reviewer). */
   scopes: z.array(DeskStatusScope).max(WIRE_LIMITS.deskStatusScopes),
+  /** P5 — the caller-scoped rollout machinery: check definitions and
+   *  rollouts follow the same visibility rule as scopes (owner sees all;
+   *  a bound seat sees rows on scopes it is bound to or may review).
+   *  Runs inside a rollout row carry identifiers and status only. */
+  checkDefinitions: z.array(DeskStatusCheckDef).max(WIRE_LIMITS.deskStatusCheckDefs),
+  rollouts: z.array(DeskStatusRollout).max(WIRE_LIMITS.deskStatusRollouts),
 }).strict();
 
 /** The seat-facing status view slp_status answers — the caller's own

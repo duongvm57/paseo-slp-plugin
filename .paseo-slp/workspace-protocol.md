@@ -1,159 +1,116 @@
 ---
-version: '8'
+version: '10'
 owner: 'duongvm (Human)'
 applies_to: 'paseo-slp source repository'
-last_reviewed: '2026-09-29'
+last_reviewed: '2026-09-30'
 package_version: '0.4.0'
 template_sha256: 'c5b6db392e3d9646d931cda658c3364fe64287caf1f9717ad323681f2e860ad1'
 template_source: 'source checkout; unreleased working candidate'
 routing_intent: 'pinned'
 supervisor_notebook: '.paseo-slp/notebook.md (owner: Supervisor)'
 decided_by: 'duongvm (Human)'
-decided_at: '2026-09-22'
+decided_at: '2026-09-30'
 ---
 
 # Workspace Protocol
 
-Orchestration tactics for this repository. Installed role policy holds the
-invariants; the assignment holds scope and authority.
+Repo-specific tactics choose WHEN / WHY / WHO; the assignment supplies outcome,
+scope, authority and required proof. Installed role policy owns role invariants.
+The repository Harness owns execution mechanics; use repository and task
+instructions for commands, E2E and delivery. SLP is a replaceable methodology,
+not a product or task-engine contract.
 
-## Choose a recipe
+## Tactic
 
-Lead records recipe, reason and reclassification trigger in one sentence per
-task. Recipes chain and nest within one mandate; a new recipe grants no new
-scope. Add a seat only for a distinct artifact or question.
-
-| Outcome | Recipe |
-|---|---|
-| Clear, reversible change with clear checks; no authority, delegation, lifecycle or integrity change | Lean |
-| Open acceptance or contract, or coordinated parts | Feature |
-| Hard-to-reverse state/data change, rollout or recovery | Transition, for that phase |
-| An answer, a cause or a choice among options | Investigation |
-
-Uncertain premise → bounded investigation first. New interface, state,
-ownership, routing/delegation semantics, lifecycle, migration or security →
-Architect before implementation. Council: two lenses, one challenge/response
-round per proposition, Lead decides; add a lens only for an unresolved
-decision-changing question.
-
-## Lean
-
-The tiny procedure: one Peer Engineer; brief and formation stay inline.
-
-1. Lead briefs outcome/acceptance, owned/excluded scope, authority, base,
-   checks, recipient and formation (operation, parent, workspace/cwd).
-2. Delegate through agent-scoped create_agent with verified placement and
-   notifyOnFinish.
-3. Engineer loops edit → check → fix within grant to a stable candidate,
-   returns diff, candidate identity, checks with outputs and exit codes, risks
-   and resources, then pauses writes.
-4. Lead inspects, then runs Gate.
-
-A second implementation owner, a design seat or a transition phase leaves
-Lean; reviewer seats keep it.
-
-## Other recipes
-
-- **Feature:** Lead sets acceptance and exclusions; Architect settles new
-  contracts with alternatives, failure semantics and reversal conditions.
-  Slices get owner, base and predecessor and run the Lean loop; one
-  integration writer holds merge authority. Gate the integrated candidate;
-  slice approvals do not transfer.
-- **Transition:** Lead/Architect set reconciliation invariants; Migrator
-  prepares runbook, rehearsal and recovery. Gate the frozen preparation.
-  Execution needs its own phase grant (Human for production) and a matching
-  environment, window, backup and candidate; halt on a failed invariant. The
-  outcome verdict comes from reconciled post-state.
-- **Investigation:** Lead frames question, sufficiency and experiment scope;
-  one report owner returns evidence, rejected hypotheses and limits.
-  "Insufficient evidence" is a valid conclusion; a found cause becomes a new
-  assignment.
+- Human may assign a bounded outcome directly to Lead. Supervisor is optional for
+  governance, steering and continuity; it is not Lead's technical superior. Lead
+  routes work and issues the binding verdict within assignment authority.
+- Lead chooses the minimum sufficient topology. Peer is one profile; Lead assigns
+  a runtime mandate for outcome, scope, authority and proof. Mandate labels imply
+  no persistent local role templates, topology or workflow. Lead does not
+  pre-solve implementation; Peer keeps independent judgment and may return a
+  provisional plan.
+- Direct bounded work may go to one Engineer. Add an Architect when material
+  uncertainty remains about a system boundary, ownership, lifecycle, migration,
+  cross-module dependency or hard-to-reverse contract. Architecture is a conditional
+  route, not a required Feature phase.
+- Independent review follows material risk, uncertain proof, a hard-to-reverse
+  decision or an explicit assignment. When a gate applies, use separate Spec and
+  Standards seats under installed role policy. Do not add a cross-family seat by
+  default. For this repository, review triggers include role authority/delegation,
+  runtime binding/transport, installation/upgrade/rollback, or package behavior
+  whose proof is uncertain. Seat count creates no authority; reviewers report
+  evidence and Lead adjudicates findings and issues the verdict.
+- An uncertain premise or contract goes to investigation or
+  `REOPEN_REQUEST`; a missing owner or prerequisite to `DEPENDENCY_REQUEST`; missing
+  authority or capability to `BLOCKED`. Resume dependent writes after Lead resolves
+  the request.
+- Proof and regression scope follow acceptance and material blast radius, not
+  changed files alone. Executable tests verify settled behavior; they must not
+  decide unresolved contracts. Settle material API/object/persistence/ownership/
+  lifecycle/dependency questions before encoding them in executable tests. Test
+  pass is evidence for Lead, not a verdict. Reuse valid candidate-bound evidence;
+  full-chain checks need a proof question or repository gate.
+- Corrections target the accepted finding and affected surface. Re-review the full
+  candidate when a new material risk appears, evidence is invalidated or the
+  contract/acceptance changes. Repeated same-class findings call for root-mechanism
+  analysis, not an unbounded point-fix loop.
+- After the initial review, each assignment has at most **two correction/re-check
+  rounds**; full re-review counts toward this budget. Lead records rounds used and
+  issues a verdict as soon as proof is sufficient. Changing candidate, seat,
+  session or reopening the assignment does not reset the budget. At exhaustion,
+  stop the loop and report findings, proof and options to Human; only Human may
+  grant a specific number of additional rounds. Exhaustion is not ACCEPT.
+- A disputed material proposition gets at most one challenge and one response,
+  then a Lead ruling or escalation beyond authority. Council or root-mechanism
+  analysis does not grant another correction/review round beyond the budget.
+- Parallelize independent, merge-safe scopes when dependencies and capacity allow.
+  One moving write scope has one writer and integration has one owner. Sequence or
+  worktree choice is a Lead tactic, not an SLP requirement.
+- Handoff before context loss affects judgment: transfer assignment/authority,
+  decisions, candidate/proof, findings, dependencies, next action and resources.
+  The receiving session confirms ownership before the old session is archived.
+  Keep an idle session only for assigned rework with an expiry. Monitoring needs
+  an assignment, owner and stop condition.
 
 ## Gate
 
-Every recipe's code, behavior, doctrine or decision artifact passes
-independent Spec + Standards seats; no single-seat classes.
+Independent review is risk- or assignment-triggered as above. This source repo
+keeps its two-axis gate whenever review is required; this is a repository/package
+policy, not a universal SLP topology. Mutation evidence has an additional binding
+rule from `AGENTS.md`:
 
-1. Pause writers. Lead reruns the relevant checks and pins the candidate
-   before and after review; both seats review that candidate.
-2. Findings return to the artifact owner; re-review keeps the same seats. A
-   changed candidate is gated again.
-3. Lead records ACCEPT / CHANGES_REQUESTED / BLOCKED with candidate, proof,
-   both axis results and remaining risks/resources.
-4. The delivery-grant holder delivers with a receipt.
+- **R1:** every mutation log, including the acceptance owner's replay, contains
+  verbatim `sha256sum <test file>` output captured immediately before mutation,
+  plus product-file hashes before/after and candidate identity. A declared meta
+  hash alone is insufficient.
+- **R2:** the replayed, pinned log is the evidence of record; the Engineer's log
+  supports it. A mismatch among log, meta and handback candidate voids the claim.
 
-Test oracles in a gated candidate meet four duties; the engineer supplies
-the evidence, the reviewer falsifies it, and Lead replays a mutant before
-accepting. These duties are evidence judgment, not machine checks — no test
-runner can verify them, which is why they live in protocol rather than
-harness.
+Mutation evidence must show a real assertion on the driven input and fixture,
+that removing the guarded behavior makes the test fail, and that spies/hooks are
+installed before the scenario without a filter that hides relevant behavior.
+Include the temporary mutation, red log and confirmed revert when demonstrating
+mutation sensitivity. These duties apply when mutation evidence is used; they do
+not turn mutation testing into a check for every task.
 
-- Non-empty: a real assert on the driven input and fixture. An assert on a
-  different fixture than the one driven, or none at all, fails.
-- Mutation-sensitive: removing the guarded behavior turns the test red. The
-  engineer attaches the temporary patch, the red log naming the behavior,
-  and a confirmed revert; without them the finding stays open.
-- Observation window: spies and hooks install before the scenario starts,
-  and no prefix or subset filter may blind them to what they must catch.
-- Pinned evidence: every mutation log carries the test file sha256 at
-  mutant time, the product file sha before and after, and the candidate
-  snapshot; the test sha must equal the handback candidate's, and an
-  unpinned log is no evidence.
-
-Seat taskLabels: `Peer — Reviewer — <task> / Spec` and `Peer — Reviewer —
-<task> / Standard`; running seats keep their titles. Accepted seats stay idle
-for correction or re-review in that bounded task. Settle its team after Delivery
-completes and no correction or re-review remains open; settlement does not itself
-archive, kill or reparent sessions.
-
-## Team formation
-
-Seats share the assignment's workspace; concurrent writers get separate
-worktrees and non-overlapping scopes, and overlaps serialize. A dependent task
-starts once its prerequisite is accepted on its base. Reviewer seats count
-toward capacity. Record the team → parent → workspace → worktree map and
-creation receipts in the owner's timeline.
-
-## Routing and skills
-
-Catalog hints: Scout → lightweight-recon; Architect and Spec → deep-reasoning;
-runtime/UI Engineer and Standards → standard-coding; Proof Auditor →
-independent-second-opinion; an unbound hint takes an eligible alternative.
-Host Verifier needs explicit install/live-check authority. Doctrine tasks name
-writing-for-agents; test-authoring names a test-design skill when available.
-
-## Verification
-
-Checks are the `package.json` scripts. Routing/delegation, plugin
-mirrors/contracts, shipped doctrine, this protocol, packaging/payload and
-release work gate on full test output; a qualifying tiny edit still stays
-Lean. Dry-run doctrine changes on the scenarios they affect.
-
-Run tests with a fresh temporary PASEO_HOME and isolated SLP_* variables, then
-remove it; ambient host state fakes failures. prepare/prepare-handoff run the
-installed CLI; the checkout's `bin/slp.mjs` is the candidate under test.
+Mutation evidence does not itself establish acceptance. Lead decides whether the
+candidate and proof satisfy the assignment and records ACCEPT, CHANGES_REQUESTED
+or BLOCKED with remaining risks/resources. Delivery follows the grant; repository
+release actions remain Human authority.
 
 ## Repository configuration
 
-| Field | Value |
+| Scope | Decision |
 |---|---|
-| Additional must_ask | Release actions reserved in AGENTS.md |
 | Lead topology | One Lead; split only for authority or capacity under a Human formation mandate |
-| quotaFallback | Off |
+| Release | Release actions reserved in `AGENTS.md`; Human authority |
 | Work state | Lead timeline; durable notes under `.local-checks/` |
-| Delivery and completion point | Artifact and evidence for Human acceptance unless the assignment states otherwise |
+| Delivery/completion | Artifact and evidence for Human acceptance unless the assignment specifies otherwise |
 
-## References
+## Repository references
 
 | Topic | Path | Read when |
 |---|---|---|
 | Skill layout | `.paseo-slp/references/skill-layout.md` | Adding, moving or assigning a skill |
-| Upstream baseline | `.paseo-slp/references/upstream-baseline.md` | Running paseo-slp-upstream-sync |
-
-## Overrides
-
-| Section | Change | Decided by / date |
-|---|---|---|
-| Gate | test-oracle duties | duongvm (Human) / 2026-09-29 |
-
-Other sections condense the template without changing its meaning.
+| Upstream baseline | `.paseo-slp/references/upstream-baseline.md` | Running `paseo-slp-upstream-sync` |

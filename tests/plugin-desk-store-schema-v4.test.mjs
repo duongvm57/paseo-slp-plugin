@@ -237,7 +237,7 @@ test('migration: the first commit on a v3 ledger writes v5 + schema-migrated, ta
   }));
   assert.equal(result.ok, true);
   const onDisk = JSON.parse(readFileSync(ledgerPath(dir), 'utf8'));
-  assert.equal(onDisk.schemaVersion, 5);
+  assert.equal(onDisk.schemaVersion, 6);
   assert.deepEqual(onDisk.settlements, []);
   assert.deepEqual(onDisk.scopes, []);
   assert.deepEqual(onDisk.scopeReviews, []);
@@ -249,7 +249,7 @@ test('migration: the first commit on a v3 ledger writes v5 + schema-migrated, ta
   const kinds = segment.trim().split('\n').map(line => JSON.parse(line).kind);
   assert.deepEqual(kinds, ['schema-migrated', 'test.event']);
   const migrated = JSON.parse(segment.trim().split('\n')[0]);
-  assert.deepEqual(migrated.payload, { from: 3, to: 5 });
+  assert.deepEqual(migrated.payload, { from: 3, to: 6 });
 });
 
 test('migration: MIGRATIONS[3] is pure and total — input untouched, output adds the empty table', t => {
@@ -294,13 +294,13 @@ test('migration: a v2 ledger chains v2→v3→v4→v5 on read and on commit', as
   }));
   assert.equal(result.ok, true);
   const onDisk = JSON.parse(readFileSync(ledgerPath(dir), 'utf8'));
-  assert.equal(onDisk.schemaVersion, 5);
+  assert.equal(onDisk.schemaVersion, 6);
   assert.deepEqual(onDisk.settlements, []);
   assert.deepEqual(onDisk.scopes, []);
   const segment = readFileSync(join(eventsDir(dir), '1-2.jsonl'), 'utf8');
   const migrated = JSON.parse(segment.trim().split('\n')[0]);
   assert.equal(migrated.kind, 'schema-migrated');
-  assert.deepEqual(migrated.payload, { from: 2, to: 5 });
+  assert.deepEqual(migrated.payload, { from: 2, to: 6 });
 });
 
 test('migration: a v1 ledger chains v1→v2→v3→v4→v5 on read and on commit', async t => {
@@ -323,16 +323,16 @@ test('migration: a v1 ledger chains v1→v2→v3→v4→v5 on read and on commit
   }));
   assert.equal(result.ok, true);
   const onDisk = JSON.parse(readFileSync(ledgerPath(dir), 'utf8'));
-  assert.equal(onDisk.schemaVersion, 5);
+  assert.equal(onDisk.schemaVersion, 6);
   const segment = readFileSync(join(eventsDir(dir), '1-2.jsonl'), 'utf8');
   const migrated = JSON.parse(segment.trim().split('\n')[0]);
-  assert.deepEqual(migrated.payload, { from: 1, to: 5 });
+  assert.deepEqual(migrated.payload, { from: 1, to: 6 });
 });
 
 test('migration: a future-version ledger still fails closed', t => {
   const dir = fixture(t);
   mkdirSync(repoDir(dir), { recursive: true });
-  writeFileSync(ledgerPath(dir), JSON.stringify({ ...v3Ledger(), schemaVersion: 6 }));
+  writeFileSync(ledgerPath(dir), JSON.stringify({ ...v3Ledger(), schemaVersion: 7 }));
   const store = freshStore(dir);
   const read = store.read(REPO_KEY);
   assert.equal(read.state, 'future');
@@ -360,7 +360,7 @@ test('migration: a rejection on a v3 ledger commits the v3 shape — bump waits 
   }));
   assert.equal(ok.ok, true);
   const migrated = JSON.parse(readFileSync(ledgerPath(dir), 'utf8'));
-  assert.equal(migrated.schemaVersion, 5);
+  assert.equal(migrated.schemaVersion, 6);
   assert.deepEqual(migrated.settlements, []);
   assert.deepEqual(migrated.scopes, []);
 });

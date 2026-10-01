@@ -67,8 +67,12 @@ import {
   DeskBridgeHello,
   DeskBridgeToolCall,
   DeskBridgeToolEntry,
+  DeskCheckDeclareInput,
+  DeskCheckRunInput,
   DeskErrorCode as DeskErrorCodeSchema,
   DeskHandbackSubmitInput,
+  DeskRolloutDeclareInput,
+  DeskRolloutTransitionInput,
   DeskScopeDeclareInput,
   DeskScopeReviewInput,
   DeskScopeTransitionInput,
@@ -105,6 +109,17 @@ import {
   seatScopesView,
   type ScopeRunnerDeps,
 } from "./desk-scope.ts";
+import {
+  runCheckDeclare,
+  runCheckRun,
+  type CheckRunnerDeps,
+} from "./desk-check-runner.ts";
+import {
+  runRolloutDeclare,
+  runRolloutTransition,
+  seatRolloutsView,
+  type RolloutRunnerDeps,
+} from "./desk-rollout.ts";
 
 type AgentCreateRequest = PluginBeforeRequests["agent.create"];
 type SessionOpenRequest = PluginBeforeRequests["agent.session_open"];
@@ -128,6 +143,10 @@ const SETTLEMENT_EXPORT_TOOL = "slp_settlement_export";
 const SCOPE_DECLARE_TOOL = "slp_scope_declare";
 const SCOPE_TRANSITION_TOOL = "slp_scope_transition";
 const SCOPE_REVIEW_TOOL = "slp_scope_review";
+const CHECK_DECLARE_TOOL = "slp_check_declare";
+const CHECK_RUN_TOOL = "slp_check_run";
+const ROLLOUT_DECLARE_TOOL = "slp_rollout_declare";
+const ROLLOUT_TRANSITION_TOOL = "slp_rollout_transition";
 
 /** The bridge's own limitation literals — the seat-facing read view's
  *  bounded flag strings (kept in one table, same discipline as
@@ -231,6 +250,42 @@ export const DESK_TOOL_CATALOG = [
       "Response: {ok, reviewId, receiptId}.",
   },
   {
+    name: CHECK_DECLARE_TOOL,
+    visible: true,
+    mutation: true,
+    description:
+      "Owner/lead only: declare an allowlisted check definition on an assignment scope (P5). " +
+      "Input: {requestId, assignmentId, scopeId, checkId, checkClass, label, definitionSha256, limits, requiredEvidence, refs}. " +
+      "Response: {ok, checkId, revision, receiptId}.",
+  },
+  {
+    name: CHECK_RUN_TOOL,
+    visible: true,
+    mutation: true,
+    description:
+      "Owner/lead only: run an allowlisted check on the rollout's pinned candidate (P5). " +
+      "Input: {requestId, assignmentId, rolloutId, checkId, definitionRevision, evidenceRef|null}. " +
+      "Response: {ok, runId, status, attempt, receiptId}.",
+  },
+  {
+    name: ROLLOUT_DECLARE_TOOL,
+    visible: true,
+    mutation: true,
+    description:
+      "Owner/lead only: declare a rollout pinned to scope + candidate (P5). " +
+      "Input: {requestId, assignmentId, scopeId, rolloutId, label, declarationSha256, candidateSnapshot, candidateHead, requiredChecks, refs}. " +
+      "Response: {ok, rolloutId, revision, receiptId}.",
+  },
+  {
+    name: ROLLOUT_TRANSITION_TOOL,
+    visible: true,
+    mutation: true,
+    description:
+      "Owner/lead only: one explicit move along the shared rollout machine (P5). " +
+      "Input: {requestId, assignmentId, rolloutId, transition, rolloutRevision, targetSnapshot, evidenceRefs}. " +
+      "Response: {ok, transitionId, state, receiptId, dischargedChecks}.",
+  },
+  {
     name: HIDDEN_TOOL,
     visible: false,
     mutation: false,
@@ -292,6 +347,12 @@ export interface DeskBridgeDeps {
    *  double; the default resolves the claim under the durable repo
    *  binding's worktree root and proves existence + sha256/bytes. */
   verifyExport?: ExportVerifier;
+  /** P5 check-runner seams — tests substitute deterministic doubles; the
+   *  defaults spawn fixed-argv bounded children under the definition's
+   *  limits and probe the host's real capabilities. */
+  checkExec?: CheckRunnerDeps["exec"];
+  checkProbe?: CheckRunnerDeps["probe"];
+  checkEnvironment?: CheckRunnerDeps["environment"];
 }
 
 export type DeskBridgeState =
@@ -923,13 +984,16 @@ export function createDeskBridge(deps: DeskBridgeDeps) {
   /** Runner deps shared by the mutation tools — the store and bound-runtime
    *  capture wiring live in the bridge scope; the P3-b export seam joins
    *  the same assembly so every record call verifies through one path. */
-  const runnerDeps = (): DeskRunnerDeps & SettlementRunnerDeps & ScopeRunnerDeps => ({
+  const runnerDeps = (): DeskRunnerDeps & SettlementRunnerDeps & ScopeRunnerDeps & CheckRunnerDeps & RolloutRunnerDeps => ({
     store: store as DeskRunnerDeps["store"],
     capture,
     uuid,
     now,
     binding: binding === null ? null : { runtimePath: binding.runtimePath, nodePath: binding.nodePath },
     verifyExport,
+    exec: deps.checkExec,
+    probe: deps.checkProbe,
+    environment: deps.checkEnvironment,
   });
 
   const TOOL_IMPLS: Record<string, { input: z.ZodType; run: ToolDef["run"] }> = {
@@ -967,10 +1031,22 @@ export function createDeskBridge(deps: DeskBridgeDeps) {
             scopes: WIRE_LIMITS.deskStatusScopes,
             reviews: WIRE_LIMITS.deskStatusScopeReviews,
           });
+          // P5 — the check-runner/rollout machinery joins the same
+          // observation: the owner sees every definition/rollout; a bound
+          // seat sees the rows of scopes it is bound to or may review.
+          // Cohort pins and run identifiers surface; output and claimed
+          // refs never leave the ledger.
+          const rolloutProjection = seatRolloutsView(seatRead.ledger, row, {
+            rollouts: WIRE_LIMITS.deskStatusRollouts,
+            runs: WIRE_LIMITS.deskStatusCheckRuns,
+            checkDefs: WIRE_LIMITS.deskStatusCheckDefs,
+          });
           assignments = projection.assignments.map(a => ({
             ...a,
             settlements: settlementProjection.byAssignment.get(a.assignmentId) ?? [],
             scopes: scopeProjection.byAssignment.get(a.assignmentId) ?? [],
+            checkDefinitions: rolloutProjection.defsByAssignment.get(a.assignmentId) ?? [],
+            rollouts: rolloutProjection.rolloutsByAssignment.get(a.assignmentId) ?? [],
           }));
           limitations.push(...projection.limitations);
           if (settlementProjection.truncated > 0) {
@@ -981,6 +1057,15 @@ export function createDeskBridge(deps: DeskBridgeDeps) {
           }
           if (scopeProjection.reviewsTruncated > 0) {
             limitations.push(`${scopeProjection.reviewsTruncated} scope(s) have review lists truncated at ${WIRE_LIMITS.deskStatusScopeReviews}`);
+          }
+          if (rolloutProjection.defsTruncated > 0) {
+            limitations.push(`${rolloutProjection.defsTruncated} assignment(s) have check-definition lists truncated at ${WIRE_LIMITS.deskStatusCheckDefs}`);
+          }
+          if (rolloutProjection.truncated > 0) {
+            limitations.push(`${rolloutProjection.truncated} assignment(s) have rollout lists truncated at ${WIRE_LIMITS.deskStatusRollouts}`);
+          }
+          if (rolloutProjection.runsTruncated > 0) {
+            limitations.push(`${rolloutProjection.runsTruncated} rollout(s) have run lists truncated at ${WIRE_LIMITS.deskStatusCheckRuns}`);
           }
         } else if (availability !== "available") {
           // The projection is withheld, not faked — a desk that cannot be
@@ -1130,6 +1215,83 @@ export function createDeskBridge(deps: DeskBridgeDeps) {
             axis: string;
             verdict: string;
             findingsRef: string | null;
+          },
+          runnerDeps(),
+        );
+      },
+    },
+    [CHECK_DECLARE_TOOL]: {
+      input: DeskCheckDeclareInput,
+      async run({ row, bound, input }) {
+        return runCheckDeclare(
+          { repoKey: bound.repoKey, row },
+          input as {
+            requestId: string;
+            assignmentId: string;
+            scopeId: string;
+            checkId: string;
+            checkClass: "ledger-integrity" | "repo-payload-check" | "repo-git-head";
+            label: string;
+            definitionSha256: string;
+            limits: { timeoutMs: number; maxOutputBytes: number; maxRetries: number };
+            requiredEvidence: string[];
+            refs: string[];
+          },
+          runnerDeps(),
+        );
+      },
+    },
+    [CHECK_RUN_TOOL]: {
+      input: DeskCheckRunInput,
+      async run({ row, bound, input }) {
+        return runCheckRun(
+          { repoKey: bound.repoKey, row },
+          input as {
+            requestId: string;
+            assignmentId: string;
+            rolloutId: string;
+            checkId: string;
+            definitionRevision: number;
+            evidenceRef: string | null;
+          },
+          runnerDeps(),
+        );
+      },
+    },
+    [ROLLOUT_DECLARE_TOOL]: {
+      input: DeskRolloutDeclareInput,
+      async run({ row, bound, input }) {
+        return runRolloutDeclare(
+          { repoKey: bound.repoKey, row },
+          input as {
+            requestId: string;
+            assignmentId: string;
+            scopeId: string;
+            rolloutId: string;
+            label: string;
+            declarationSha256: string;
+            candidateSnapshot: string;
+            candidateHead: string | null;
+            requiredChecks: { checkId: string; definitionDigest: string }[];
+            refs: string[];
+          },
+          runnerDeps(),
+        );
+      },
+    },
+    [ROLLOUT_TRANSITION_TOOL]: {
+      input: DeskRolloutTransitionInput,
+      async run({ row, bound, input }) {
+        return runRolloutTransition(
+          { repoKey: bound.repoKey, row },
+          input as {
+            requestId: string;
+            assignmentId: string;
+            rolloutId: string;
+            transition: string;
+            rolloutRevision: number;
+            targetSnapshot: string | null;
+            evidenceRefs: string[];
           },
           runnerDeps(),
         );

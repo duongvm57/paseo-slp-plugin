@@ -766,7 +766,7 @@ test('seatAssignmentsView: a saturated projection stays inside the limitation ca
     // seatAssignmentsView projects the handback half; the bridge merges the
     // settlement and scope projections onto each row — empty arrays are what
     // that merge emits for a scope-less fixture.
-    assignments: projection.assignments.map(assignment => ({ ...assignment, settlements: [], scopes: [] })),
+    assignments: projection.assignments.map(assignment => ({ ...assignment, settlements: [], scopes: [], checkDefinitions: [], rollouts: [] })),
     limitations: projection.limitations,
     acceptance: 'not-established-by-this-view',
   };
