@@ -189,7 +189,7 @@ test('migration: the first commit on a v2 ledger writes v3 + schema-migrated, ta
   }));
   assert.equal(result.ok, true);
   const onDisk = JSON.parse(readFileSync(ledgerPath(dir), 'utf8'));
-  assert.equal(onDisk.schemaVersion, 4);
+  assert.equal(onDisk.schemaVersion, 5);
   assert.deepEqual(onDisk.assignments, []);
   assert.deepEqual(onDisk.candidates, []);
   assert.deepEqual(onDisk.handbacks, []);
@@ -200,7 +200,7 @@ test('migration: the first commit on a v2 ledger writes v3 + schema-migrated, ta
   const kinds = segment.trim().split('\n').map(line => JSON.parse(line).kind);
   assert.deepEqual(kinds, ['schema-migrated', 'test.event']);
   const migrated = JSON.parse(segment.trim().split('\n')[0]);
-  assert.deepEqual(migrated.payload, { from: 2, to: 4 });
+  assert.deepEqual(migrated.payload, { from: 2, to: 5 });
 });
 
 test('migration: MIGRATIONS[2] is pure and total — input untouched, output adds three empty tables', t => {
@@ -234,13 +234,13 @@ test('migration: a v1 ledger chains v1→v2→v3 on read and on commit', async t
   }));
   assert.equal(result.ok, true);
   const onDisk = JSON.parse(readFileSync(ledgerPath(dir), 'utf8'));
-  assert.equal(onDisk.schemaVersion, 4);
+  assert.equal(onDisk.schemaVersion, 5);
   assert.deepEqual(onDisk.assignments, []);
   assert.deepEqual(onDisk.settlements, []);
   const segment = readFileSync(join(eventsDir(dir), '1-2.jsonl'), 'utf8');
   const migrated = JSON.parse(segment.trim().split('\n')[0]);
   assert.equal(migrated.kind, 'schema-migrated');
-  assert.deepEqual(migrated.payload, { from: 1, to: 4 });
+  assert.deepEqual(migrated.payload, { from: 1, to: 5 });
 });
 
 // ---------------------------------------------------------------------------
@@ -450,7 +450,7 @@ test('migration: a rejection on a v2 ledger commits the v2 shape — bump waits 
   }));
   assert.equal(ok.ok, true);
   const migrated = JSON.parse(readFileSync(ledgerPath(dir), 'utf8'));
-  assert.equal(migrated.schemaVersion, 4);
+  assert.equal(migrated.schemaVersion, 5);
   assert.deepEqual(migrated.assignments, []);
   assert.deepEqual(migrated.settlements, []);
 });

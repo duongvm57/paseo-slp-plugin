@@ -1,5 +1,5 @@
 // tests/plugin-desk-store-schema-v4.test.mjs — P3-b store-level coverage
-// (contract P3-b §B8): the additive v3→v4 migration, the chained v1/v2
+// (contract P3-b §B8): the additive v3→v4→v5 migration, the chained v1/v2
 // bumps, byte-preservation of pre-existing tables, the new decide →
 // `settlements` state channel and its refinements. A synthetic decide
 // drives the channel — command semantics live in
@@ -214,6 +214,9 @@ test('migration: a valid v3 ledger reads ok with persistedSchemaVersion 3', t =>
   assert.equal(read.state, 'ok');
   assert.equal(read.persistedSchemaVersion, 3);
   assert.deepEqual(read.ledger.settlements, []);
+  assert.deepEqual(read.ledger.scopes, []);
+  assert.deepEqual(read.ledger.scopeReviews, []);
+  assert.deepEqual(read.ledger.scopeTransitions, []);
   assert.deepEqual(read.ledger.handbacks, v3.handbacks, 'handbacks migrate verbatim');
   assert.deepEqual(read.ledger.assignments, v3.assignments, 'assignments migrate verbatim');
   assert.deepEqual(read.ledger.candidates, v3.candidates, 'candidates migrate verbatim');
@@ -222,7 +225,7 @@ test('migration: a valid v3 ledger reads ok with persistedSchemaVersion 3', t =>
   assert.equal(readFileSync(ledgerPath(dir), 'utf8'), JSON.stringify(v3), 'read never rewrites the file');
 });
 
-test('migration: the first commit on a v3 ledger writes v4 + schema-migrated, tables byte-preserved', async t => {
+test('migration: the first commit on a v3 ledger writes v5 + schema-migrated, tables byte-preserved', async t => {
   const dir = fixture(t);
   mkdirSync(repoDir(dir), { recursive: true });
   const v3 = v3Ledger();
@@ -234,8 +237,11 @@ test('migration: the first commit on a v3 ledger writes v4 + schema-migrated, ta
   }));
   assert.equal(result.ok, true);
   const onDisk = JSON.parse(readFileSync(ledgerPath(dir), 'utf8'));
-  assert.equal(onDisk.schemaVersion, 4);
+  assert.equal(onDisk.schemaVersion, 5);
   assert.deepEqual(onDisk.settlements, []);
+  assert.deepEqual(onDisk.scopes, []);
+  assert.deepEqual(onDisk.scopeReviews, []);
+  assert.deepEqual(onDisk.scopeTransitions, []);
   assert.deepEqual(onDisk.assignments, []);
   assert.deepEqual(onDisk.memberships, v3.memberships, 'memberships bytes preserved');
   assert.deepEqual(onDisk.requests.slice(0, -1), v3.requests, 'requests bytes preserved');
@@ -243,7 +249,7 @@ test('migration: the first commit on a v3 ledger writes v4 + schema-migrated, ta
   const kinds = segment.trim().split('\n').map(line => JSON.parse(line).kind);
   assert.deepEqual(kinds, ['schema-migrated', 'test.event']);
   const migrated = JSON.parse(segment.trim().split('\n')[0]);
-  assert.deepEqual(migrated.payload, { from: 3, to: 4 });
+  assert.deepEqual(migrated.payload, { from: 3, to: 5 });
 });
 
 test('migration: MIGRATIONS[3] is pure and total — input untouched, output adds the empty table', t => {
@@ -257,7 +263,19 @@ test('migration: MIGRATIONS[3] is pure and total — input untouched, output add
   assert.equal(JSON.stringify(v3), snapshot, 'the input object is never mutated');
 });
 
-test('migration: a v2 ledger chains v2→v3→v4 on read and on commit', async t => {
+test('migration: MIGRATIONS[4] is pure and total — the v4 shape gains the three P4 tables', t => {
+  const v4 = { ...v3Ledger(), schemaVersion: 4, settlements: [] };
+  const snapshot = JSON.stringify(v4);
+  const migrated = MIGRATIONS[4](v4);
+  assert.equal(migrated.schemaVersion, 5);
+  assert.deepEqual(migrated.scopes, []);
+  assert.deepEqual(migrated.scopeReviews, []);
+  assert.deepEqual(migrated.scopeTransitions, []);
+  assert.deepEqual(migrated.settlements, []);
+  assert.equal(JSON.stringify(v4), snapshot, 'the input object is never mutated');
+});
+
+test('migration: a v2 ledger chains v2→v3→v4→v5 on read and on commit', async t => {
   const dir = fixture(t);
   mkdirSync(repoDir(dir), { recursive: true });
   const v2 = { ...v3Ledger(), schemaVersion: 2 };
@@ -276,15 +294,16 @@ test('migration: a v2 ledger chains v2→v3→v4 on read and on commit', async t
   }));
   assert.equal(result.ok, true);
   const onDisk = JSON.parse(readFileSync(ledgerPath(dir), 'utf8'));
-  assert.equal(onDisk.schemaVersion, 4);
+  assert.equal(onDisk.schemaVersion, 5);
   assert.deepEqual(onDisk.settlements, []);
+  assert.deepEqual(onDisk.scopes, []);
   const segment = readFileSync(join(eventsDir(dir), '1-2.jsonl'), 'utf8');
   const migrated = JSON.parse(segment.trim().split('\n')[0]);
   assert.equal(migrated.kind, 'schema-migrated');
-  assert.deepEqual(migrated.payload, { from: 2, to: 4 });
+  assert.deepEqual(migrated.payload, { from: 2, to: 5 });
 });
 
-test('migration: a v1 ledger chains v1→v2→v3→v4 on read and on commit', async t => {
+test('migration: a v1 ledger chains v1→v2→v3→v4→v5 on read and on commit', async t => {
   const dir = fixture(t);
   mkdirSync(repoDir(dir), { recursive: true });
   const v1 = { ...v3Ledger(), schemaVersion: 1 };
@@ -304,16 +323,16 @@ test('migration: a v1 ledger chains v1→v2→v3→v4 on read and on commit', as
   }));
   assert.equal(result.ok, true);
   const onDisk = JSON.parse(readFileSync(ledgerPath(dir), 'utf8'));
-  assert.equal(onDisk.schemaVersion, 4);
+  assert.equal(onDisk.schemaVersion, 5);
   const segment = readFileSync(join(eventsDir(dir), '1-2.jsonl'), 'utf8');
   const migrated = JSON.parse(segment.trim().split('\n')[0]);
-  assert.deepEqual(migrated.payload, { from: 1, to: 4 });
+  assert.deepEqual(migrated.payload, { from: 1, to: 5 });
 });
 
 test('migration: a future-version ledger still fails closed', t => {
   const dir = fixture(t);
   mkdirSync(repoDir(dir), { recursive: true });
-  writeFileSync(ledgerPath(dir), JSON.stringify({ ...v3Ledger(), schemaVersion: 5 }));
+  writeFileSync(ledgerPath(dir), JSON.stringify({ ...v3Ledger(), schemaVersion: 6 }));
   const store = freshStore(dir);
   const read = store.read(REPO_KEY);
   assert.equal(read.state, 'future');
@@ -341,8 +360,9 @@ test('migration: a rejection on a v3 ledger commits the v3 shape — bump waits 
   }));
   assert.equal(ok.ok, true);
   const migrated = JSON.parse(readFileSync(ledgerPath(dir), 'utf8'));
-  assert.equal(migrated.schemaVersion, 4);
+  assert.equal(migrated.schemaVersion, 5);
   assert.deepEqual(migrated.settlements, []);
+  assert.deepEqual(migrated.scopes, []);
 });
 
 // ---------------------------------------------------------------------------

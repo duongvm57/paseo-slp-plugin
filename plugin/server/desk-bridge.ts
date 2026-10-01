@@ -69,6 +69,9 @@ import {
   DeskBridgeToolEntry,
   DeskErrorCode as DeskErrorCodeSchema,
   DeskHandbackSubmitInput,
+  DeskScopeDeclareInput,
+  DeskScopeReviewInput,
+  DeskScopeTransitionInput,
   DeskSeatStatus,
   DeskSettlementExportInput,
   DeskSettlementRecordInput,
@@ -95,6 +98,13 @@ import {
   type ExportVerifier,
   type SettlementRunnerDeps,
 } from "./desk-settlement.ts";
+import {
+  runScopeDeclare,
+  runScopeReview,
+  runScopeTransition,
+  seatScopesView,
+  type ScopeRunnerDeps,
+} from "./desk-scope.ts";
 
 type AgentCreateRequest = PluginBeforeRequests["agent.create"];
 type SessionOpenRequest = PluginBeforeRequests["agent.session_open"];
@@ -115,6 +125,9 @@ const ASSIGNMENT_ATTACH_TOOL = "slp_assignment_attach";
 const ASSIGNMENT_CLOSE_TOOL = "slp_assignment_close";
 const SETTLEMENT_RECORD_TOOL = "slp_settlement_record";
 const SETTLEMENT_EXPORT_TOOL = "slp_settlement_export";
+const SCOPE_DECLARE_TOOL = "slp_scope_declare";
+const SCOPE_TRANSITION_TOOL = "slp_scope_transition";
+const SCOPE_REVIEW_TOOL = "slp_scope_review";
 
 /** The bridge's own limitation literals — the seat-facing read view's
  *  bounded flag strings (kept in one table, same discipline as
@@ -189,6 +202,33 @@ export const DESK_TOOL_CATALOG = [
     description:
       "Owner or settled seat: re-derive the committed revision's v1 slp-record for manual sink placement. " +
       "Input: {settlementId}. Read-only, no side effects.",
+  },
+  {
+    name: SCOPE_DECLARE_TOOL,
+    visible: true,
+    mutation: true,
+    description:
+      "Owner/lead only: declare an assignment-bound scope (P4). " +
+      "Input: {requestId, assignmentId, scopeId, label, declarationSha256, refs, seatAgentId|null}. " +
+      "Redeclare appends an immutable revision. Response: {ok, scopeId, revision, receiptId}.",
+  },
+  {
+    name: SCOPE_TRANSITION_TOOL,
+    visible: true,
+    mutation: true,
+    description:
+      "Owner/lead only: move a scope along the shared state machine (P4). " +
+      "Input: {requestId, assignmentId, scopeId, transition, scopeRevision, candidateSnapshot|null, candidateHead|null}. " +
+      "Response: {ok, transitionId, state, receiptId, discharged}.",
+  },
+  {
+    name: SCOPE_REVIEW_TOOL,
+    visible: true,
+    mutation: true,
+    description:
+      "Bound reviewer seat only (never owner or bound seat): record a review axis bound to the round pin. " +
+      "Input: {requestId, assignmentId, scopeId, scopeRevision, candidateSnapshot, axis, verdict, findingsRef|null}. " +
+      "Response: {ok, reviewId, receiptId}.",
   },
   {
     name: HIDDEN_TOOL,
@@ -883,7 +923,7 @@ export function createDeskBridge(deps: DeskBridgeDeps) {
   /** Runner deps shared by the mutation tools — the store and bound-runtime
    *  capture wiring live in the bridge scope; the P3-b export seam joins
    *  the same assembly so every record call verifies through one path. */
-  const runnerDeps = (): DeskRunnerDeps & SettlementRunnerDeps => ({
+  const runnerDeps = (): DeskRunnerDeps & SettlementRunnerDeps & ScopeRunnerDeps => ({
     store: store as DeskRunnerDeps["store"],
     capture,
     uuid,
@@ -919,13 +959,28 @@ export function createDeskBridge(deps: DeskBridgeDeps) {
           const settlementProjection = seatSettlementsView(seatRead.ledger, row, {
             settlements: WIRE_LIMITS.deskStatusSettlements,
           });
+          // P4 — the scope machinery joins the same observation: the owner
+          // sees every scope; a bound seat sees the scopes it is bound to or
+          // may review, with the active round pin so it can bind its
+          // observation. Claimed refs/findingsRef never leave the ledger.
+          const scopeProjection = seatScopesView(seatRead.ledger, row, {
+            scopes: WIRE_LIMITS.deskStatusScopes,
+            reviews: WIRE_LIMITS.deskStatusScopeReviews,
+          });
           assignments = projection.assignments.map(a => ({
             ...a,
             settlements: settlementProjection.byAssignment.get(a.assignmentId) ?? [],
+            scopes: scopeProjection.byAssignment.get(a.assignmentId) ?? [],
           }));
           limitations.push(...projection.limitations);
           if (settlementProjection.truncated > 0) {
             limitations.push(`${settlementProjection.truncated} assignment(s) have settlement lists truncated at ${WIRE_LIMITS.deskStatusSettlements}`);
+          }
+          if (scopeProjection.truncated > 0) {
+            limitations.push(`${scopeProjection.truncated} assignment(s) have scope lists truncated at ${WIRE_LIMITS.deskStatusScopes}`);
+          }
+          if (scopeProjection.reviewsTruncated > 0) {
+            limitations.push(`${scopeProjection.reviewsTruncated} scope(s) have review lists truncated at ${WIRE_LIMITS.deskStatusScopeReviews}`);
           }
         } else if (availability !== "available") {
           // The projection is withheld, not faked — a desk that cannot be
@@ -1021,6 +1076,61 @@ export function createDeskBridge(deps: DeskBridgeDeps) {
         return runSettlementExport(
           { repoKey: bound.repoKey, row },
           input as { settlementId: string },
+          runnerDeps(),
+        );
+      },
+    },
+    [SCOPE_DECLARE_TOOL]: {
+      input: DeskScopeDeclareInput,
+      async run({ row, bound, input }) {
+        return runScopeDeclare(
+          { repoKey: bound.repoKey, row },
+          input as {
+            requestId: string;
+            assignmentId: string;
+            scopeId: string;
+            label: string;
+            declarationSha256: string;
+            refs: string[];
+            seatAgentId: string | null;
+          },
+          runnerDeps(),
+        );
+      },
+    },
+    [SCOPE_TRANSITION_TOOL]: {
+      input: DeskScopeTransitionInput,
+      async run({ row, bound, input }) {
+        return runScopeTransition(
+          { repoKey: bound.repoKey, row },
+          input as {
+            requestId: string;
+            assignmentId: string;
+            scopeId: string;
+            transition: string;
+            scopeRevision: number;
+            candidateSnapshot: string | null;
+            candidateHead: string | null;
+          },
+          runnerDeps(),
+        );
+      },
+    },
+    [SCOPE_REVIEW_TOOL]: {
+      input: DeskScopeReviewInput,
+      async run({ row, bound, input }) {
+        return runScopeReview(
+          { repoKey: bound.repoKey, row },
+          input as {
+            requestId: string;
+            assignmentId: string;
+            scopeId: string;
+            scopeRevision: number;
+            candidateSnapshot: string;
+            axis: string;
+            verdict: string;
+            findingsRef: string | null;
+          },
           runnerDeps(),
         );
       },

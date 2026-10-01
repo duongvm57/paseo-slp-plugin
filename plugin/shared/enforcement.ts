@@ -176,6 +176,19 @@ export const WIRE_LIMITS = {
   deskExportPath: 1024,
   /** Per-assignment settlements cap inside the status projection. */
   deskStatusSettlements: 32,
+  // Desk scope/review machinery (P4): a scope declaration is an opaque
+  // bounded id plus a canonical label, a declaration digest the caller
+  // attests and bounded claimed refs — never a filesystem path set or
+  // filesystem authority. The durable scope/review/transition schemas read
+  // the SAME keys so a ledger-valid row can never exceed what a wire
+  // input or result schema accepts (the F-STD-4 rule).
+  deskScopeLabel: 256,
+  deskScopeRefs: 32,
+  deskScopePointer: 1024,
+  /** Per-assignment scopes cap inside the status projection, plus the
+   *  per-scope review-row cap the projection carries. */
+  deskStatusScopes: 32,
+  deskStatusScopeReviews: 32,
 } as const;
 
 // ---------------------------------------------------------------------------
@@ -711,6 +724,235 @@ export type DeskSettlementExportInputValue = z.infer<typeof DeskSettlementExport
 export type DeskSettlementRecordResultValue = z.infer<typeof DeskSettlementRecordResult>;
 export type DeskSettlementExportResultValue = z.infer<typeof DeskSettlementExportResult>;
 
+// ---------------------------------------------------------------------------
+// Desk scope/review machinery (P4) — durable scope ownership and the
+// required-review transition gate. A scope declaration is durable assignment
+// data bound to (assignmentId, scopeId, ownerAgentId, assignmentRevision),
+// created only by the assignment's receiving owner/lead; its representation
+// is an opaque scopeId plus a bounded label/digest/refs — never a filesystem
+// path set, never filesystem authority. Three durable tables carry the
+// semantics: declaration revisions (immutable, explicit lineage), review
+// observations (seat/axis/candidate-bound) and the append-only transition
+// stream. Claimed refs stay provenance — they never discharge a required
+// review axis.
+// ---------------------------------------------------------------------------
+
+/** The closed scope state vocabulary (contract P4 R2 §P4). `closed` is a
+ *  terminal desk state, never an acceptance: acceptance is a review
+ *  disposition, not a transition outcome. */
+export const SCOPE_STATES = [
+  "declared",
+  "claimed",
+  "submitted-for-review",
+  "review-observed",
+  "approved",
+  "rejected",
+  "advanced",
+  "closed",
+] as const;
+export type ScopeStateValue = (typeof SCOPE_STATES)[number];
+export const ScopeState = z.enum(SCOPE_STATES);
+
+/** The transition commands the owner may issue (the wire enum). `declare`
+ *  is not a transition command: a declaration revision is created by
+ *  slp_scope_declare, which also opens the stream with the (none →
+ *  declared) edge. Amendments append declaration revisions, never
+ *  transitions. */
+export const SCOPE_COMMANDS = [
+  "claim",
+  "submit-for-review",
+  "review-observed",
+  "approve",
+  "reject",
+  "advance",
+  "close",
+] as const;
+export type ScopeCommandValue = (typeof SCOPE_COMMANDS)[number];
+export const ScopeCommand = z.enum(SCOPE_COMMANDS);
+
+/** The closed review-axis vocabulary — the protocol's required Spec +
+ *  Standards split. Required axes are SERVER-derived (transition type +
+ *  the bound declaration): no caller field may shrink the gate. */
+export const SCOPE_REVIEW_AXES = ["spec", "standards"] as const;
+export type ScopeReviewAxisValue = (typeof SCOPE_REVIEW_AXES)[number];
+export const ScopeReviewAxis = z.enum(SCOPE_REVIEW_AXES);
+
+/** A review observation's verdict. A verdict never mutates scope state by
+ *  itself — only an owner transition command moves the machine. */
+export const SCOPE_REVIEW_VERDICTS = ["approve", "reject", "findings"] as const;
+export type ScopeReviewVerdictValue = (typeof SCOPE_REVIEW_VERDICTS)[number];
+export const ScopeReviewVerdict = z.enum(SCOPE_REVIEW_VERDICTS);
+
+/** The explicit state-machine table — the single legality authority shared
+ *  by the decide and the store refinement so no silent edge can exist.
+ *  `close` exists only on states that carry a review round — closing before
+ *  a round exists is not an edge at all (early close typed-rejects, never
+ *  commits; B4). A resubmit edge lets the owner pin a fresh candidate for
+ *  the next round from submitted-for-review, rejected or advanced. */
+export const SCOPE_TRANSITIONS = [
+  { from: "declared", command: "claim", to: "claimed" },
+  { from: "claimed", command: "submit-for-review", to: "submitted-for-review" },
+  { from: "submitted-for-review", command: "submit-for-review", to: "submitted-for-review" },
+  { from: "submitted-for-review", command: "review-observed", to: "review-observed" },
+  { from: "submitted-for-review", command: "reject", to: "rejected" },
+  { from: "submitted-for-review", command: "close", to: "closed" },
+  { from: "review-observed", command: "approve", to: "approved" },
+  { from: "review-observed", command: "reject", to: "rejected" },
+  { from: "approved", command: "advance", to: "advanced" },
+  { from: "approved", command: "close", to: "closed" },
+  { from: "rejected", command: "advance", to: "advanced" },
+  { from: "rejected", command: "submit-for-review", to: "submitted-for-review" },
+  { from: "rejected", command: "close", to: "closed" },
+  { from: "advanced", command: "submit-for-review", to: "submitted-for-review" },
+] as const satisfies readonly { from: ScopeStateValue; command: ScopeCommandValue; to: ScopeStateValue }[];
+
+export type ScopeTransitionEdge = (typeof SCOPE_TRANSITIONS)[number];
+
+/** The review-required transition commands (contract B4): these may commit
+ *  only while a candidate round is active and every required axis carries a
+ *  durable observation bound exactly to the round's (scopeRevision,
+ *  candidateSnapshot). `close`/`advance` are gated by B4 verbatim — an
+ *  early `close` is not even an edge: closing before a round exists typed-
+ *  rejects with no durable commit. `review-observed` is itself the gate
+ *  transition; `approve` needs no separate gate — it is only reachable
+ *  through a committed review-observed, which already discharged every
+ *  axis of the round. */
+export const SCOPE_REVIEW_GATED_COMMANDS = ["review-observed", "advance", "close"] as const;
+export type ScopeReviewGatedCommand = (typeof SCOPE_REVIEW_GATED_COMMANDS)[number];
+
+/** Legality lookup — one seam. Returns the edge or undefined. */
+export function scopeTransitionEdge(
+  from: ScopeStateValue,
+  command: ScopeCommandValue,
+): ScopeTransitionEdge | undefined {
+  return SCOPE_TRANSITIONS.find(edge => edge.from === from && edge.command === command);
+}
+
+const DeskScopePointer = z.string().min(1).max(WIRE_LIMITS.deskScopePointer);
+
+/** slp_scope_declare — the receiving owner/lead's scope declaration (P4).
+ *  `scopeId` is the opaque caller-chosen scope name inside the assignment;
+ *  redeclaring the same scopeId appends a new immutable declaration
+ *  revision with server-derived lineage — declarations are never edited in
+ *  place. `declarationSha256` attests the declaration body the caller
+ *  holds; `refs` are claimed provenance pointers only. `seatAgentId` binds
+ *  the scope to one attached seat of the assignment, or null for a
+ *  scope owned by no particular seat. */
+export const DeskScopeDeclareInput = z.object({
+  requestId: DeskRequestId,
+  assignmentId: DeskEntityId,
+  scopeId: DeskEntityId,
+  label: z.string().min(1).max(WIRE_LIMITS.deskScopeLabel),
+  declarationSha256: Sha,
+  refs: z.array(DeskScopePointer).max(WIRE_LIMITS.deskScopeRefs),
+  seatAgentId: z.string().min(1).max(WIRE_LIMITS.agentId).nullable(),
+}).strict();
+
+/** slp_scope_transition — owner-only state-machine move. `scopeRevision`
+ *  is the caller-pinned declaration revision the transition operates under;
+ *  it must equal the scope's latest declaration revision (a superseded pin
+ *  is REVISION_CONFLICT, not a silent rebind). `candidateSnapshot`
+ *  (+ optional `candidateHead`) is carried only by submit-for-review — it
+ *  pins the review round and must resolve to a durable observed candidate
+ *  of this assignment. */
+export const DeskScopeTransitionInput = z.object({
+  requestId: DeskRequestId,
+  assignmentId: DeskEntityId,
+  scopeId: DeskEntityId,
+  transition: ScopeCommand,
+  scopeRevision: z.number().int().min(1),
+  candidateSnapshot: Sha.nullable(),
+  candidateHead: z.string().regex(/^[0-9a-f]{40}$|^[0-9a-f]{64}$/).nullable(),
+}).strict();
+
+/** slp_scope_review — a bound reviewer seat's observation. The review must
+ *  hit the active round's exact pin: `scopeRevision`/`candidateSnapshot`
+ *  that differ from the round pin are REVISION_CONFLICT / CANDIDATE_DRIFT,
+ *  never a quiet rebind. `findingsRef` is claimed provenance only. */
+export const DeskScopeReviewInput = z.object({
+  requestId: DeskRequestId,
+  assignmentId: DeskEntityId,
+  scopeId: DeskEntityId,
+  scopeRevision: z.number().int().min(1),
+  candidateSnapshot: Sha,
+  axis: ScopeReviewAxis,
+  verdict: ScopeReviewVerdict,
+  findingsRef: DeskScopePointer.nullable(),
+}).strict();
+
+/** The (axis, reviewId) discharge a gated transition committed with — the
+ *  durable evidence of which observation satisfied which required axis. */
+export const DeskScopeDischarge = z.object({
+  axis: ScopeReviewAxis,
+  reviewId: DeskEntityId,
+}).strict();
+
+export const DeskScopeDeclareResult = z.object({
+  ok: z.literal(true),
+  scopeId: DeskEntityId,
+  revision: z.number().int().min(1),
+  receiptId: z.string().min(1).max(WIRE_LIMITS.deskEntityId),
+}).strict();
+
+export const DeskScopeTransitionResult = z.object({
+  ok: z.literal(true),
+  transitionId: DeskEntityId,
+  scopeId: DeskEntityId,
+  revision: z.number().int().min(1),
+  state: ScopeState,
+  receiptId: z.string().min(1).max(WIRE_LIMITS.deskEntityId),
+  discharged: z.array(DeskScopeDischarge).max(SCOPE_REVIEW_AXES.length),
+}).strict();
+
+export const DeskScopeReviewResult = z.object({
+  ok: z.literal(true),
+  reviewId: DeskEntityId,
+  scopeId: DeskEntityId,
+  axis: ScopeReviewAxis,
+  revision: z.number().int().min(1),
+  receiptId: z.string().min(1).max(WIRE_LIMITS.deskEntityId),
+}).strict();
+
+export type DeskScopeDeclareInputValue = z.infer<typeof DeskScopeDeclareInput>;
+export type DeskScopeTransitionInputValue = z.infer<typeof DeskScopeTransitionInput>;
+export type DeskScopeReviewInputValue = z.infer<typeof DeskScopeReviewInput>;
+export type DeskScopeDeclareResultValue = z.infer<typeof DeskScopeDeclareResult>;
+export type DeskScopeTransitionResultValue = z.infer<typeof DeskScopeTransitionResult>;
+export type DeskScopeReviewResultValue = z.infer<typeof DeskScopeReviewResult>;
+
+/** One review revision as projected into slp_status — identifiers, axis
+ *  and verdict only; the claimed findingsRef stays in the ledger. */
+export const DeskStatusScopeReview = z.object({
+  reviewId: DeskEntityId,
+  axis: ScopeReviewAxis,
+  verdict: ScopeReviewVerdict,
+  scopeRevision: z.number().int().min(1),
+  reviewerAgentId: z.string().min(1).max(WIRE_LIMITS.agentId),
+  revision: z.number().int().min(1),
+}).strict();
+
+/** One scope as projected into slp_status (P4) — the declaration identity,
+ *  the derived machine state and the active review round's pin plus its
+ *  required/discharged axes. Claimed refs and the findingsRef stay in the
+ *  ledger — a status view never re-serves claimed provenance. */
+export const DeskStatusScope = z.object({
+  scopeId: DeskEntityId,
+  revision: z.number().int().min(1),
+  label: z.string().min(1).max(WIRE_LIMITS.deskScopeLabel),
+  declarationSha256: Sha,
+  seatAgentId: z.string().min(1).max(WIRE_LIMITS.agentId).nullable(),
+  state: ScopeState,
+  /** The active review round's pin — null when no submit-for-review round
+   *  is open (declared/claimed) or after it resolved. Reviewers read this
+   *  pin to bind their observation. */
+  activeScopeRevision: z.number().int().min(1).nullable(),
+  activeCandidateSnapshot: Sha.nullable(),
+  requiredAxes: z.array(ScopeReviewAxis).max(SCOPE_REVIEW_AXES.length),
+  dischargedAxes: z.array(ScopeReviewAxis).max(SCOPE_REVIEW_AXES.length),
+  transitionCount: z.number().int().min(0),
+  reviews: z.array(DeskStatusScopeReview).max(WIRE_LIMITS.deskStatusScopeReviews),
+}).strict();
+
 /** One handback revision as projected into slp_status — identifiers and
  *  counts only; the claimed record's bytes stay in the ledger (a status
  *  view never re-serves record payloads). */
@@ -752,6 +994,10 @@ export const DeskStatusAssignment = z.object({
   seats: z.array(z.string().min(1).max(WIRE_LIMITS.agentId)).max(WIRE_LIMITS.deskStatusSeats),
   handbacks: z.array(DeskStatusHandback).max(WIRE_LIMITS.deskStatusHandbacks),
   settlements: z.array(DeskStatusSettlement).max(WIRE_LIMITS.deskStatusSettlements),
+  /** P4 — the caller-scoped scope projection: the owner sees every scope
+   *  on an owned assignment; a bound seat sees scopes on assignments it is
+   *  attached to (any attached seat is a potential bound reviewer). */
+  scopes: z.array(DeskStatusScope).max(WIRE_LIMITS.deskStatusScopes),
 }).strict();
 
 /** The seat-facing status view slp_status answers — the caller's own

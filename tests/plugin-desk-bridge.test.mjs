@@ -550,6 +550,9 @@ test('tools/list exposes the visible catalog — hidden and excluded tools absen
     'slp_assignment_close',
     'slp_settlement_record',
     'slp_settlement_export',
+    'slp_scope_declare',
+    'slp_scope_transition',
+    'slp_scope_review',
   ]);
   // The catalog row carries a JSON Schema derived from the zod input.
   assert.equal(reply.result.tools[0].inputSchema.type, 'object');
@@ -576,12 +579,15 @@ test('the whole desk tool catalog satisfies DeskBridgeToolEntry (all rows, centr
     DeskBridgeToolEntry.parse(row);
     if (row.visible) visible.push(row.name);
   }
-  // Sanity: the catalog enumerates the full P3-a + P3-b visible surface.
+  // Sanity: the catalog enumerates the full P3-a + P3-b + P4 visible surface.
   assert.deepEqual(visible.sort(), [
     'slp_assignment_attach',
     'slp_assignment_close',
     'slp_assignment_register',
     'slp_handback_submit',
+    'slp_scope_declare',
+    'slp_scope_review',
+    'slp_scope_transition',
     'slp_settlement_export',
     'slp_settlement_record',
     'slp_status',

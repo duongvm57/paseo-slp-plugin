@@ -43,9 +43,14 @@ import { z } from "zod";
 import { Family, OperationConflict, Sha, Time } from "../shared/contracts.ts";
 import {
   DeskRejection,
+  SCOPE_REVIEW_AXES,
+  SCOPE_REVIEW_GATED_COMMANDS,
+  SCOPE_STATES,
   SETTLEMENT_RESOURCE_DISPOSITIONS,
   WIRE_LIMITS,
+  scopeTransitionEdge,
   type DeskRejectionValue,
+  type ScopeStateValue,
 } from "../shared/enforcement.ts";
 import { SETTLEMENT_VIA } from "./desk-records.ts";
 import { ROLES } from "../shared/families.ts";
@@ -97,10 +102,16 @@ export const LEDGER_LIMITS = {
   // (the F-STD-4 rule — a replayed durable row can never fail the wire
   // schema it is served under).
   settlements: 4096,
+  // P4 — the scope/review/transition tables; identical F-STD-4 rule,
+  // their row/field caps read WIRE_LIMITS.deskScope*/deskStatusScope*
+  // directly.
+  scopes: 2048,
+  scopeReviews: 4096,
+  scopeTransitions: 8192,
 } as const;
 
 const LEDGER_FORMAT = "paseo-slp/enforcement";
-const LEDGER_SCHEMA_VERSION = 4;
+const LEDGER_SCHEMA_VERSION = 5;
 /** The one repoKey algorithm label — schema literal and namespace refinement
  *  both read it from here; nothing else may restate it. */
 export const REPO_KEY_ALGORITHM = "sha256(hostId|gitCommonDir)@1";
@@ -512,6 +523,107 @@ const SettlementSchema = z
   })
   .strict();
 
+// ---------------------------------------------------------------------------
+// P4 — scope ownership and required-review transitions. Three append-only
+// tables: immutable declaration revisions (`scopes`), reviewer observations
+// (`scopeReviews`) and the accepted transition stream (`scopeTransitions`).
+// Claimed refs are stored verbatim and never dereferenced; the state-machine
+// vocabulary lives in shared/enforcement.ts so wire, decide and the
+// refinement layer share one legality source.
+// ---------------------------------------------------------------------------
+
+/** P4 — the structural revision of an assignment row: register is 1, every
+ *  effective seat attach adds one, close adds one. Derivable from durable
+ *  content only — a v4-migrated row yields the same value its history
+ *  implies, so scope rows pinned at declare stay checkable. */
+export function assignmentStructuralRevision(assignment: {
+  state: "open" | "closed";
+  seats: unknown[];
+}): number {
+  return 1 + assignment.seats.length + (assignment.state === "closed" ? 1 : 0);
+}
+
+/** P4 — one immutable scope declaration revision. The row binds
+ *  (assignmentId, scopeId, ownerAgentId) plus the assignment's structural
+ *  revision at declare time; `priorRevision` is the explicit lineage link
+ *  (null on revision 1). `declarationSha256` attests the declaration body
+ *  the caller holds; `refs` are claimed provenance only — a scope grants
+ *  no filesystem authority. Rows carry no timestamps: commit time lives on
+ *  the hash-chained events. */
+const ScopeSchema = z
+  .object({
+    assignmentId: BoundedId,
+    scopeId: BoundedId,
+    requestId: BoundedId,
+    revision: z.number().int().min(1),
+    priorRevision: z.number().int().min(1).nullable(),
+    ownerMembershipId: z.string().uuid(),
+    ownerAgentId: z.string().min(1).max(WIRE_LIMITS.agentId),
+    assignmentRevision: z.number().int().min(1),
+    seatAgentId: z.string().min(1).max(WIRE_LIMITS.agentId).nullable(),
+    label: z.string().min(1).max(WIRE_LIMITS.deskScopeLabel),
+    declarationSha256: Sha,
+    refs: z.array(z.string().min(1).max(WIRE_LIMITS.deskScopePointer)).max(WIRE_LIMITS.deskScopeRefs),
+  })
+  .strict();
+
+/** P4 — one immutable reviewer observation revision, bound to
+ *  (assignmentId, scopeId, scopeRevision, candidateSnapshot, axis,
+ *  reviewerAgentId, reviewerSeatId). An observation is durable evidence,
+ *  never a state change: only an owner transition command moves the
+ *  machine. `revision` streams per (scopeId, axis, reviewerAgentId);
+ *  `findingsRef` is claimed provenance, never discharge proof. */
+const ScopeReviewSchema = z
+  .object({
+    reviewId: BoundedId,
+    assignmentId: BoundedId,
+    scopeId: BoundedId,
+    requestId: BoundedId,
+    revision: z.number().int().min(1),
+    scopeRevision: z.number().int().min(1),
+    candidateSnapshot: Sha,
+    axis: z.enum(SCOPE_REVIEW_AXES),
+    verdict: z.enum(["approve", "reject", "findings"]),
+    reviewerAgentId: z.string().min(1).max(WIRE_LIMITS.agentId),
+    reviewerSeatId: z.string().uuid(),
+    findingsRef: z.string().min(1).max(WIRE_LIMITS.deskScopePointer).nullable(),
+  })
+  .strict();
+
+/** P4 — one accepted transition of the scope state machine. `revision`
+ *  streams per (assignmentId, scopeId); `from`/`to`/`command` must form a
+ *  legal edge of SCOPE_TRANSITIONS against the previous row's `to`.
+ *  `scopeRevision` pins the declaration revision the transition operated
+ *  under (always the latest at commit). `candidateSnapshot`/`candidateHead`
+ *  are the round pin — set only on submit-for-review rows. `discharged`
+ *  records the (axis, reviewId) pairs the review gate consumed; it is
+ *  empty on ungated transitions. `actorAgentId` is the server-derived
+ *  owner identity. */
+const ScopeTransitionSchema = z
+  .object({
+    transitionId: BoundedId,
+    assignmentId: BoundedId,
+    scopeId: BoundedId,
+    requestId: BoundedId,
+    revision: z.number().int().min(1),
+    command: z.enum(["declare", "claim", "submit-for-review", "review-observed", "approve", "reject", "advance", "close"]),
+    from: z.enum(SCOPE_STATES).nullable(),
+    to: z.enum(SCOPE_STATES),
+    scopeRevision: z.number().int().min(1),
+    candidateSnapshot: Sha.nullable(),
+    candidateHead: z.string().regex(/^[0-9a-f]{40}$|^[0-9a-f]{64}$/).nullable(),
+    discharged: z
+      .array(
+        z.object({
+          axis: z.enum(SCOPE_REVIEW_AXES),
+          reviewId: BoundedId,
+        }).strict(),
+      )
+      .max(SCOPE_REVIEW_AXES.length),
+    actorAgentId: z.string().min(1).max(WIRE_LIMITS.agentId),
+  })
+  .strict();
+
 const LedgerBodyFields = {
   format: z.literal(LEDGER_FORMAT),
   repo: RepoSchema,
@@ -553,8 +665,22 @@ const LedgerSchemaV3 = z
   })
   .strict();
 
-/** v4 — adds the P3-b settlement mirror: `settlements`. Every other field
- *  is untouched. */
+/** v4 — the P3-b shape: v3 plus the `settlements` mirror. Kept so `read`
+ *  can migrate it in-memory (MIGRATIONS[4]); never written again. */
+const LedgerSchemaV4 = z
+  .object({
+    ...LedgerBodyFields,
+    schemaVersion: z.literal(4),
+    memberships: z.array(MembershipSchema).max(LEDGER_LIMITS.memberships),
+    assignments: z.array(AssignmentSchema).max(LEDGER_LIMITS.assignments),
+    candidates: z.array(CandidateSchema).max(LEDGER_LIMITS.candidates),
+    handbacks: z.array(HandbackSchema).max(LEDGER_LIMITS.handbacks),
+    settlements: z.array(SettlementSchema).max(LEDGER_LIMITS.settlements),
+  })
+  .strict();
+
+/** v5 — adds the P4 scope machinery: `scopes`, `scopeReviews`,
+ *  `scopeTransitions`. Every other field is untouched. */
 const LedgerSchema = z
   .object({
     ...LedgerBodyFields,
@@ -564,18 +690,23 @@ const LedgerSchema = z
     candidates: z.array(CandidateSchema).max(LEDGER_LIMITS.candidates),
     handbacks: z.array(HandbackSchema).max(LEDGER_LIMITS.handbacks),
     settlements: z.array(SettlementSchema).max(LEDGER_LIMITS.settlements),
+    scopes: z.array(ScopeSchema).max(LEDGER_LIMITS.scopes),
+    scopeReviews: z.array(ScopeReviewSchema).max(LEDGER_LIMITS.scopeReviews),
+    scopeTransitions: z.array(ScopeTransitionSchema).max(LEDGER_LIMITS.scopeTransitions),
   })
   .strict();
 
 type LedgerValueV2 = z.infer<typeof LedgerSchemaV2>;
 type LedgerValueV3 = z.infer<typeof LedgerSchemaV3>;
+type LedgerValueV4 = z.infer<typeof LedgerSchemaV4>;
 
 /** Additive ledger migrations keyed by the on-disk schemaVersion. Pure: the
  *  input is never mutated; the output reuses the frozen input's records
  *  verbatim. v1 → v2 adds the empty memberships table (C2); v2 → v3 adds
  *  the empty P3-a tables (assignments/candidates/handbacks); v3 → v4 adds
- *  the empty settlements table. Requests and events are untouched by every
- *  hop; read() chains the whole chain for an older file. */
+ *  the empty settlements table; v4 → v5 adds the empty P4 scope tables.
+ *  Requests and events are untouched by every hop; read() chains the whole
+ *  chain for an older file. */
 export const MIGRATIONS = {
   1: (ledger: z.infer<typeof LedgerSchemaV1>): LedgerValueV2 => ({
     ...ledger,
@@ -589,10 +720,17 @@ export const MIGRATIONS = {
     candidates: [],
     handbacks: [],
   }),
-  3: (ledger: LedgerValueV3): LedgerValue => ({
+  3: (ledger: LedgerValueV3): LedgerValueV4 => ({
+    ...ledger,
+    schemaVersion: 4,
+    settlements: [],
+  }),
+  4: (ledger: LedgerValueV4): LedgerValue => ({
     ...ledger,
     schemaVersion: LEDGER_SCHEMA_VERSION,
-    settlements: [],
+    scopes: [],
+    scopeReviews: [],
+    scopeTransitions: [],
   }),
 } as const;
 
@@ -619,6 +757,9 @@ export type AssignmentValue = z.infer<typeof AssignmentSchema>;
 export type CandidateValue = z.infer<typeof CandidateSchema>;
 export type HandbackValue = z.infer<typeof HandbackSchema>;
 export type SettlementValue = z.infer<typeof SettlementSchema>;
+export type ScopeValue = z.infer<typeof ScopeSchema>;
+export type ScopeReviewValue = z.infer<typeof ScopeReviewSchema>;
+export type ScopeTransitionValue = z.infer<typeof ScopeTransitionSchema>;
 export type RequestRecordValue = z.infer<typeof RequestRecordSchema>;
 export type EventValue = z.infer<typeof EventSchema>;
 export type DeskStoreEnvelope = z.infer<typeof EnvelopeSchema>;
@@ -630,7 +771,7 @@ export type DeskStoreEnvelope = z.infer<typeof EnvelopeSchema>;
  *  repo-key-invalid | repo-mismatch). */
 export type DeskStoreRead =
   | { state: "absent" }
-  | { state: "ok"; ledger: LedgerValue; persistedSchemaVersion: 1 | 2 | 3 | 4 }
+  | { state: "ok"; ledger: LedgerValue; persistedSchemaVersion: 1 | 2 | 3 | 4 | 5 }
   | { state: "corrupt" | "future" | "unsafe"; diagnostics: { code: string; schemaVersion: number | null } };
 
 export type TransactReceipt = {
@@ -641,7 +782,7 @@ export type TransactReceipt = {
 };
 export type TransactResult = { ok: true; receipt: TransactReceipt } | DeskRejectionValue;
 
-type DecideOutcome =
+export type DecideOutcome =
   | {
       ok: true;
       events: { kind: string; payload: Record<string, unknown> }[];
@@ -658,6 +799,10 @@ type DecideOutcome =
       /** P3-b — the settlement mirror table; identical channel rule: full
        *  replacement table, schema- and refinement-checked by the store. */
       settlements?: SettlementValue[];
+      /** P4 — the scope machinery tables; identical channel rule. */
+      scopes?: ScopeValue[];
+      scopeReviews?: ScopeReviewValue[];
+      scopeTransitions?: ScopeTransitionValue[];
     }
   | DeskRejectionValue;
 export type DecideFunction = (ledger: Readonly<LedgerValue>, command: Record<string, unknown>) => DecideOutcome;
@@ -970,6 +1115,195 @@ export function createDeskStore(deps: DeskStoreDeps): DeskStore {
         }
       }
     }
+    // P4 scope refinements — the same fail-closed discipline. Declaration
+    // rows: unique (assignmentId, scopeId, revision) streams that form a
+    // contiguous 1..N lineage, a unique request key per
+    // (assignmentId, ownerAgentId), owner resolves to a lead membership
+    // carrying the row's agentId and matching the assignment's durable
+    // owner, an optional bound seat must be attached to that assignment,
+    // and the pinned assignmentRevision can never exceed the assignment's
+    // current structural revision (it was pinned at declare time, so it
+    // may only lag, never lead). `refs` stay claimed provenance.
+    const scopeStreams = new Map<string, ScopeValue[]>();
+    const scopeRequestKeys = new Set<string>();
+    for (const row of ledger.scopes) {
+      const streamKey = JSON.stringify([row.assignmentId, row.scopeId]);
+      const stream = scopeStreams.get(streamKey) ?? [];
+      if (stream.some(prev => prev.revision === row.revision)) return corrupt();
+      stream.push(row);
+      scopeStreams.set(streamKey, stream);
+      const requestKey = JSON.stringify([row.assignmentId, row.ownerAgentId, row.requestId]);
+      if (scopeRequestKeys.has(requestKey)) return corrupt();
+      scopeRequestKeys.add(requestKey);
+      const assignment = assignmentsById.get(row.assignmentId);
+      if (assignment === undefined) return corrupt();
+      const owner = membershipsById.get(row.ownerMembershipId);
+      if (owner === undefined || owner.agentId !== row.ownerAgentId || owner.role !== "lead") return corrupt();
+      if (assignment.ownerAgentId !== row.ownerAgentId) return corrupt();
+      if (row.seatAgentId !== null && !assignment.seats.some(seat => seat.agentId === row.seatAgentId)) {
+        return corrupt();
+      }
+      if (
+        row.assignmentRevision < 1 ||
+        row.assignmentRevision > assignmentStructuralRevision(assignment)
+      ) {
+        return corrupt();
+      }
+    }
+    // Declaration lineage: each stream is contiguous 1..N and every
+    // amendment names its immediate predecessor — a skipped or forked
+    // lineage is corruption.
+    for (const stream of scopeStreams.values()) {
+      const revisions = new Set(stream.map(row => row.revision));
+      if (revisions.size !== stream.length || Math.max(...revisions) !== stream.length) return corrupt();
+      for (const row of stream) {
+        if (row.revision === 1) {
+          if (row.priorRevision !== null) return corrupt();
+        } else if (row.priorRevision !== row.revision - 1) {
+          return corrupt();
+        }
+      }
+    }
+    // scopeReviews: unique ids, a unique revision stream per
+    // (assignmentId, scopeId, axis, reviewerAgentId) forming a contiguous
+    // 1..N, a unique request key per (assignmentId, reviewerAgentId), and
+    // every identity link cross-checked: the reviewer must be a seat of
+    // the assignment whose membership carries the same agentId
+    // (reviewerSeatId), the reviewer may never be the assignment owner or
+    // the scope's bound seat (self-review is corruption), the pinned
+    // scopeRevision must be a real declaration revision of that scope, and
+    // a pinned candidate must resolve to an observed candidate of THIS
+    // assignment — matching the scope's bound seat when one is declared.
+    const reviewIds = new Set<string>();
+    const reviewStreams = new Map<string, number[]>();
+    const reviewRequestKeys = new Set<string>();
+    const reviewsById = new Map<string, ScopeReviewValue>();
+    for (const row of ledger.scopeReviews) {
+      if (reviewIds.has(row.reviewId)) return corrupt();
+      reviewIds.add(row.reviewId);
+      reviewsById.set(row.reviewId, row);
+      const streamKey = JSON.stringify([row.assignmentId, row.scopeId, row.axis, row.reviewerAgentId]);
+      const revisions = reviewStreams.get(streamKey) ?? [];
+      revisions.push(row.revision);
+      reviewStreams.set(streamKey, revisions);
+      const requestKey = JSON.stringify([row.assignmentId, row.reviewerAgentId, row.requestId]);
+      if (reviewRequestKeys.has(requestKey)) return corrupt();
+      reviewRequestKeys.add(requestKey);
+      const assignment = assignmentsById.get(row.assignmentId);
+      if (assignment === undefined) return corrupt();
+      if (assignment.ownerAgentId === row.reviewerAgentId) return corrupt();
+      const seat = assignment.seats.find(s => s.agentId === row.reviewerAgentId);
+      if (seat === undefined || seat.membershipId !== row.reviewerSeatId) return corrupt();
+      const seatRow = membershipsById.get(row.reviewerSeatId);
+      if (seatRow === undefined || seatRow.agentId !== row.reviewerAgentId) return corrupt();
+      const stream = scopeStreams.get(JSON.stringify([row.assignmentId, row.scopeId]));
+      if (stream === undefined) return corrupt();
+      const declaration = stream.find(s => s.revision === row.scopeRevision);
+      if (declaration === undefined) return corrupt();
+      const latestDeclaration = stream.reduce((max, s) => (s.revision > max.revision ? s : max));
+      if (latestDeclaration.seatAgentId !== null && latestDeclaration.seatAgentId === row.reviewerAgentId) {
+        return corrupt();
+      }
+      const candidate = ledger.candidates.find(
+        c => c.snapshotSha256 === row.candidateSnapshot && c.assignmentId === row.assignmentId,
+      );
+      if (candidate === undefined) return corrupt();
+      if (latestDeclaration.seatAgentId !== null && candidate.seatAgentId !== latestDeclaration.seatAgentId) {
+        return corrupt();
+      }
+    }
+    for (const revisions of reviewStreams.values()) {
+      const set = new Set(revisions);
+      if (set.size !== revisions.length || Math.max(...revisions) !== revisions.length) return corrupt();
+    }
+    // scopeTransitions: unique ids, a unique contiguous 1..N revision
+    // stream per (assignmentId, scopeId), a unique request key per
+    // (assignmentId, actorAgentId), actor bound to the durable owner, and
+    // the chain must walk the shared SCOPE_TRANSITIONS legality table
+    // exactly — the first edge is (none → declared) by `declare`, every
+    // later row continues from its predecessor's `to`. The round pin the
+    // latest submit-for-review established tracks through the walk; a
+    // gated command's `discharged` must name real review rows bound to
+    // exactly that pin (scopeRevision and candidateSnapshot of the ROUND,
+    // which the gate transition's own scopeRevision may already have
+    // passed when a mid-round amendment landed).
+    const transitionIds = new Set<string>();
+    const transitionRequestKeys = new Set<string>();
+    const transitionsByScope = new Map<string, ScopeTransitionValue[]>();
+    for (const row of ledger.scopeTransitions) {
+      if (transitionIds.has(row.transitionId)) return corrupt();
+      transitionIds.add(row.transitionId);
+      const streamKey = JSON.stringify([row.assignmentId, row.scopeId]);
+      const stream = transitionsByScope.get(streamKey) ?? [];
+      stream.push(row);
+      transitionsByScope.set(streamKey, stream);
+      const requestKey = JSON.stringify([row.assignmentId, row.actorAgentId, row.requestId]);
+      if (transitionRequestKeys.has(requestKey)) return corrupt();
+      transitionRequestKeys.add(requestKey);
+      const assignment = assignmentsById.get(row.assignmentId);
+      if (assignment === undefined) return corrupt();
+      if (assignment.ownerAgentId !== row.actorAgentId) return corrupt();
+      const declStream = scopeStreams.get(streamKey);
+      if (declStream === undefined) return corrupt();
+      if (!declStream.some(s => s.revision === row.scopeRevision)) return corrupt();
+      if (row.command !== "submit-for-review") {
+        if (row.candidateSnapshot !== null || row.candidateHead !== null) return corrupt();
+      } else if (row.candidateSnapshot === null) {
+        return corrupt();
+      }
+    }
+    for (const stream of transitionsByScope.values()) {
+      stream.sort((a, b) => a.revision - b.revision);
+      const set = new Set(stream.map(row => row.revision));
+      if (set.size !== stream.length || stream[stream.length - 1]!.revision !== stream.length) {
+        return corrupt();
+      }
+      let previousTo: ScopeStateValue | null = null;
+      let roundPin: { scopeRevision: number; candidateSnapshot: string } | null = null;
+      for (const row of stream) {
+        if (row.revision === 1) {
+          if (row.command !== "declare" || row.from !== null || row.to !== "declared") return corrupt();
+        } else {
+          if (row.command === "declare") return corrupt();
+          if (row.from !== previousTo) return corrupt();
+          if (row.from === null || scopeTransitionEdge(row.from, row.command) === undefined) return corrupt();
+          if (scopeTransitionEdge(row.from, row.command)!.to !== row.to) return corrupt();
+        }
+        if (row.command === "submit-for-review") {
+          roundPin = { scopeRevision: row.scopeRevision, candidateSnapshot: row.candidateSnapshot as string };
+        }
+        const gated = (SCOPE_REVIEW_GATED_COMMANDS as readonly string[]).includes(row.command);
+        if (!gated) {
+          if (row.discharged.length > 0) return corrupt();
+        } else if (roundPin === null) {
+          // No gated command is legal before a round exists — the edge
+          // table carries no pre-round gated edge at all (early close is
+          // not an edge since B4). Any such row is corruption.
+          return corrupt();
+        } else {
+          const axes = new Set<string>();
+          for (const entry of row.discharged) {
+            if (axes.has(entry.axis)) return corrupt();
+            axes.add(entry.axis);
+            const review = reviewsById.get(entry.reviewId);
+            if (
+              review === undefined ||
+              review.assignmentId !== row.assignmentId ||
+              review.scopeId !== row.scopeId ||
+              review.axis !== entry.axis ||
+              review.scopeRevision !== roundPin.scopeRevision ||
+              review.candidateSnapshot !== roundPin.candidateSnapshot
+            ) {
+              return corrupt();
+            }
+          }
+          for (const axis of SCOPE_REVIEW_AXES) {
+            if (!axes.has(axis)) return corrupt();
+          }
+        }
+        previousTo = row.to;
+      }
+    }
     return null;
   }
 
@@ -1082,35 +1416,42 @@ export function createDeskStore(deps: DeskStoreDeps): DeskStore {
       // never touched by read — the bump happens in the next transact's
       // commit.
       let ledger: LedgerValue;
-      let persistedSchemaVersion: 1 | 2 | 3 | 4;
+      let persistedSchemaVersion: 1 | 2 | 3 | 4 | 5;
       if (schemaVersion === 1) {
         const v1 = LedgerSchemaV1.safeParse(json);
         if (!v1.success) {
           return { state: "corrupt", diagnostics: { code: "schema-invalid", schemaVersion } };
         }
-        ledger = MIGRATIONS[3](MIGRATIONS[2](MIGRATIONS[1](v1.data)));
+        ledger = MIGRATIONS[4](MIGRATIONS[3](MIGRATIONS[2](MIGRATIONS[1](v1.data))));
         persistedSchemaVersion = 1;
       } else if (schemaVersion === 2) {
         const v2 = LedgerSchemaV2.safeParse(json);
         if (!v2.success) {
           return { state: "corrupt", diagnostics: { code: "schema-invalid", schemaVersion } };
         }
-        ledger = MIGRATIONS[3](MIGRATIONS[2](v2.data));
+        ledger = MIGRATIONS[4](MIGRATIONS[3](MIGRATIONS[2](v2.data)));
         persistedSchemaVersion = 2;
       } else if (schemaVersion === 3) {
         const v3 = LedgerSchemaV3.safeParse(json);
         if (!v3.success) {
           return { state: "corrupt", diagnostics: { code: "schema-invalid", schemaVersion } };
         }
-        ledger = MIGRATIONS[3](v3.data);
+        ledger = MIGRATIONS[4](MIGRATIONS[3](v3.data));
         persistedSchemaVersion = 3;
+      } else if (schemaVersion === 4) {
+        const v4 = LedgerSchemaV4.safeParse(json);
+        if (!v4.success) {
+          return { state: "corrupt", diagnostics: { code: "schema-invalid", schemaVersion } };
+        }
+        ledger = MIGRATIONS[4](v4.data);
+        persistedSchemaVersion = 4;
       } else {
         const parsed = LedgerSchema.safeParse(json);
         if (!parsed.success) {
           return { state: "corrupt", diagnostics: { code: "schema-invalid", schemaVersion } };
         }
         ledger = parsed.data;
-        persistedSchemaVersion = 4;
+        persistedSchemaVersion = 5;
       }
       const refinement = checkRefinements(ledger, repoKey);
       if (refinement !== null) return refinement;
@@ -1288,6 +1629,9 @@ export function createDeskStore(deps: DeskStoreDeps): DeskStore {
       candidates: [],
       handbacks: [],
       settlements: [],
+      scopes: [],
+      scopeReviews: [],
+      scopeTransitions: [],
     };
   }
 
@@ -1432,6 +1776,9 @@ export function createDeskStore(deps: DeskStoreDeps): DeskStore {
       let nextCandidates = ledger.candidates;
       let nextHandbacks = ledger.handbacks;
       let nextSettlements = ledger.settlements;
+      let nextScopes = ledger.scopes;
+      let nextScopeReviews = ledger.scopeReviews;
+      let nextScopeTransitions = ledger.scopeTransitions;
       if (decided.ok === true) {
         const proposed: string[] = [];
         if (decided.memberships !== undefined) {
@@ -1489,6 +1836,39 @@ export function createDeskStore(deps: DeskStoreDeps): DeskStore {
           }
           nextSettlements = parsed.data;
         }
+        if (decided.scopes !== undefined) {
+          proposed.push("scopes");
+          const parsed = z.array(ScopeSchema).max(LEDGER_LIMITS.scopes).safeParse(decided.scopes);
+          if (!parsed.success) {
+            return invalidRecord(
+              `decide returned invalid scopes: ${firstIssue(parsed.error)}`,
+              "fix the decide function to return a schema-valid scopes table",
+            );
+          }
+          nextScopes = parsed.data;
+        }
+        if (decided.scopeReviews !== undefined) {
+          proposed.push("scopeReviews");
+          const parsed = z.array(ScopeReviewSchema).max(LEDGER_LIMITS.scopeReviews).safeParse(decided.scopeReviews);
+          if (!parsed.success) {
+            return invalidRecord(
+              `decide returned invalid scopeReviews: ${firstIssue(parsed.error)}`,
+              "fix the decide function to return a schema-valid scopeReviews table",
+            );
+          }
+          nextScopeReviews = parsed.data;
+        }
+        if (decided.scopeTransitions !== undefined) {
+          proposed.push("scopeTransitions");
+          const parsed = z.array(ScopeTransitionSchema).max(LEDGER_LIMITS.scopeTransitions).safeParse(decided.scopeTransitions);
+          if (!parsed.success) {
+            return invalidRecord(
+              `decide returned invalid scopeTransitions: ${firstIssue(parsed.error)}`,
+              "fix the decide function to return a schema-valid scopeTransitions table",
+            );
+          }
+          nextScopeTransitions = parsed.data;
+        }
         if (proposed.length > 0) {
           const candidateInvalid = checkRefinements(
             {
@@ -1498,6 +1878,9 @@ export function createDeskStore(deps: DeskStoreDeps): DeskStore {
               candidates: nextCandidates,
               handbacks: nextHandbacks,
               settlements: nextSettlements,
+              scopes: nextScopes,
+              scopeReviews: nextScopeReviews,
+              scopeTransitions: nextScopeTransitions,
             },
             repoKey,
           );
@@ -1571,6 +1954,9 @@ export function createDeskStore(deps: DeskStoreDeps): DeskStore {
         candidates: nextCandidates,
         handbacks: nextHandbacks,
         settlements: nextSettlements,
+        scopes: nextScopes,
+        scopeReviews: nextScopeReviews,
+        scopeTransitions: nextScopeTransitions,
       };
       // The pre-commit refinement pass is the same one read() applies — a
       // ledger that would read as unsafe/corrupt is never written.
@@ -1585,24 +1971,32 @@ export function createDeskStore(deps: DeskStoreDeps): DeskStore {
       // instead.
       let nextBytes: string;
       if (migratedFrom !== null && decided.ok === false) {
-        // `rest` keeps assignments/candidates/handbacks — the v3 shape needs
-        // them; older shapes strip them again below along with memberships.
-        const { settlements: _s, ...rest } = candidate;
+        // Every migrated shape strips the newest tables first: the P4
+        // tables come off for any source version, then the P3-b table for
+        // sources older than v4, then the P3-a tables (and memberships)
+        // for v1/v2 bodies.
+        const { scopes: _sc, scopeReviews: _sr, scopeTransitions: _st, ...v4Body } = candidate;
         let persistedShape: unknown;
         let persistedParses: boolean;
-        if (migratedFrom === 1) {
-          const { memberships: _m, assignments: _a, candidates: _c, handbacks: _h, ...v1Body } = rest;
-          persistedShape = { ...v1Body, schemaVersion: 1 };
-          persistedParses = LedgerSchemaV1.safeParse(persistedShape).success;
-        } else if (migratedFrom === 2) {
-          const { assignments: _a, candidates: _c, handbacks: _h, ...v2Body } = rest;
-          persistedShape = { ...v2Body, schemaVersion: 2 };
-          persistedParses = LedgerSchemaV2.safeParse(persistedShape).success;
+        if (migratedFrom === 4) {
+          persistedShape = { ...v4Body, schemaVersion: 4 };
+          persistedParses = LedgerSchemaV4.safeParse(persistedShape).success;
         } else {
-          // migratedFrom === 3: drop only the P3-b table; the v3 shape keeps
-          // its assignments/candidates/handbacks verbatim.
-          persistedShape = { ...rest, schemaVersion: 3 };
-          persistedParses = LedgerSchemaV3.safeParse(persistedShape).success;
+          const { settlements: _s, ...rest } = v4Body;
+          if (migratedFrom === 1) {
+            const { memberships: _m, assignments: _a, candidates: _c, handbacks: _h, ...v1Body } = rest;
+            persistedShape = { ...v1Body, schemaVersion: 1 };
+            persistedParses = LedgerSchemaV1.safeParse(persistedShape).success;
+          } else if (migratedFrom === 2) {
+            const { assignments: _a, candidates: _c, handbacks: _h, ...v2Body } = rest;
+            persistedShape = { ...v2Body, schemaVersion: 2 };
+            persistedParses = LedgerSchemaV2.safeParse(persistedShape).success;
+          } else {
+            // migratedFrom === 3: drop only the P3-b table; the v3 shape keeps
+            // its assignments/candidates/handbacks verbatim.
+            persistedShape = { ...rest, schemaVersion: 3 };
+            persistedParses = LedgerSchemaV3.safeParse(persistedShape).success;
+          }
         }
         if (!persistedParses) {
           throw new OperationConflict("IO_FAILURE", "refusing to commit a ledger that would not read back cleanly");
