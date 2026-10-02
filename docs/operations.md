@@ -9,7 +9,8 @@ The [README](../README.md) is the short tour; command details live in
 
 - Paseo `>=0.8.0` with `pluginsEnabled: true` in the daemon's
   `config.json`.
-- Node 22.18+ or 23.6+ on the daemon host (the plugin resolves a stable ordinary Node —
+- A POSIX daemon host (Linux/macOS) with Node 22.x from 22.18, or Node 23.6+
+  (the plugin resolves a stable ordinary Node —
   not the Electron binary — at activation).
 - The Codex/Pi/Devin/Claude CLIs matching the provider families you want to
   use, plus each family's credentials on the daemon host.
@@ -68,9 +69,11 @@ Activation:
 - Writes launch shims under `slp-runtime/launchers/<launchset-sha256>/` —
   the stable paths the providers reference, so runtime swaps never break
   running sessions.
-- Patches `config.json` with the twelve providers
+- Patches `config.json` with up to twelve providers
   `slp-{codex,pi,devin,claude}-{supervisor,lead,peer}`, the two saved
   profiles **SLP Supervisor** and **SLP Lead**, and enables MCP injection.
+  Saved role routing generates only the chosen Supervisor/Lead providers
+  and all four Peer providers; absent routing keeps all twelve.
 - Records a receipt in `slp-runtime/state/receipt.json` — the journal of
   every operation, used for drift detection and recovery.
 
@@ -97,7 +100,10 @@ availability and conflicts before changing anything.
 Setup is one-time; per task only steps 4–5 repeat.
 
 1. Install and activate the plugin ([Installation sources](#installation-sources), [Activation](#activation)).
-2. Optional, once: on the SLP surface, the **Communication language** card
+2. Set explicit Supervisor/Lead models in **SLP → Role profiles**, save and
+   apply them with the activation action ([Agent profiles](#agent-profiles)).
+   Prepare suitable enabled options in the shared **Peer pool**, or choose a
+   repo-pinned pool during onboarding. Optional, once: the **Communication language** card
    sets the language managed seats use for everything they write to each
    other — prompts, reports, handbacks, briefs between agents and the
    notebook. Direct replies to you
@@ -189,8 +195,9 @@ paseo plugin reload paseo-slp
 
 Reactivating rebinds the current candidate and rebuilds its launchers. Running
 sessions keep their provider process until they finish; launch shim paths stay
-stable across candidates. Rebinding is idempotent: activating the same
-candidate twice is a `no-op`.
+stable across candidates. Rebinding is idempotent: a repeat activation is a
+`no-op` when the candidate, configuration and resolved Node/provider
+executables (paths, versions and availability) are unchanged.
 
 Family binaries follow verified stable CLI aliases from the daemon's PATH.
 Codex, Pi, Devin and Claude updates behind those aliases reach future managed
@@ -204,7 +211,7 @@ Human-controlled; discovering a new model does not select it automatically.
 ## Deactivation and removal
 
 **Deactivate** (Settings → SLP screen, or the `deactivate` RPC) detaches the
-pack: it removes the twelve providers and two profiles and restores the MCP
+pack: it removes its managed providers and two profiles and restores the MCP
 injection flag to its pre-activation value, while preserving everything else
 in `config.json`. Runtime files, launchers and the receipt are **retained**
 under `slp-runtime/` so in-flight sessions keep working — deactivation never
@@ -255,11 +262,13 @@ first, then walk me through it step by step.
 
 To set per-role model and reasoning:
 
-1. Open **Settings → the host running the work → Agents → Agent profiles**.
-2. Edit **SLP Supervisor** or **SLP Lead**.
-3. Pick the matching `slp-codex-{role}`, `slp-pi-{role}`, `slp-devin-{role}`
-   or `slp-claude-{role}` provider, then choose **Model**, **Thinking**, **Mode**
-   where the provider offers them, plus features, then **Save**.
+1. Activate the plugin first, then open **SLP → Role profiles**.
+2. For **Supervisor** and **Lead**, choose the family, an explicit **Model**,
+   **Thinking**, **Mode** and features where the provider offers them.
+3. Choose **Save**, then run the activation action again (**Re-verify binding**
+   or **Rebind**) to apply the saved routing. Save changes the routing file;
+   it does not activate or rewrite the live profiles. The card reports when
+   stored choices differ from the live binding.
 4. When creating a session directly, pick the saved profile in the model
    picker. For Peers, use onboarding to set up the repo pool; the Lead picks
    a suitable option from the pool and passes that provider/model/settings
@@ -271,8 +280,12 @@ use `list_profiles`, `list_models` and `inspect_provider` for discovery; the
 profile's `thinkingOptionId` is passed through as
 `settings.thinkingOptionId` when creating the agent.
 
-Editing a profile affects the next selection/launch; it does not update a
-running session. For a live session, Paseo offers `update_agent` to change
+Set explicit models before delegation; fresh profiles have no model, and Devin
+bindings require `swe-2`. Applying role choices affects future launches; it
+does not update a running session. Paseo's **Settings → the host running the
+work → Agents → Agent profiles** also exposes the live profiles; the Manager's
+stored role routing drives the next activation. For a live session, Paseo
+offers `update_agent` to change
 model/thinking within the same provider when supported. The profile keeps its
 own default for future sessions. See
 [Paseo agent profiles](https://paseo.sh/docs/agent-profiles.md).
@@ -489,7 +502,7 @@ Human disables the capability in the Manager card and Lead judgment resumes.
 
 Supervision is a second opt-in capability, configured in the
 **Supervision** section inside the SLP Manager's **Jev** tab
-(`<daemonHome>/slp-runtime/state/supervision.json`, schema 2, 0600, sha256
+(`<daemonHome>/slp-runtime/state/supervision.json`, file schema 3, 0600, sha256
 CAS). It is off by default — configuring Jev alone never enables
 observation. The card has one **Supervision** switch (the Jev
 `supervision` capability; turning it on shows what is sent and what it

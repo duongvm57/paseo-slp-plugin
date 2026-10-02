@@ -13,14 +13,13 @@
 You open one **SLP Supervisor** session in Paseo and give it an objective. It observes or creates a
 **Lead** for the work; the Lead splits the work into bounded outcomes and gives each to a **Peer**
 that it picks from your Peer pool. Every seat is an ordinary Paseo agent. The plugin gives each one
-its role contract, delegation rules and policy locators at session entry, so you never paste a role
-prompt, and you keep talking to the Supervisor in the same chat.
+its role contract, delegation rules and policy locators at session entry, separate from your task
+prompt. You keep talking to the Supervisor in the same chat. You can also start directly with an
+**SLP Lead**; the Supervisor is an optional observer of the workflow.
 
-![Paseo SLP role model: the Human owns intent and final acceptance; the Supervisor observes the Lead's workflow without joining execution; the Lead delegates bounded outcomes to independent Peers that return evidence, challenges, dependency requests or blocked work](docs/images/slp-role-model.svg)
+![Paseo SLP at a glance: the Human owns intent and final acceptance; the Lead delegates bounded outcomes to independent Peers; an optional Supervisor observes workflow and relays decisions; the plugin supplies role instructions and checked preparation](docs/images/slp-overview.svg)
 
 ## How a task goes
-
-![A task, end to end: you give the Supervisor an objective; it observes or creates a Lead and stays out of execution; the Lead frames the work and delegates one bounded outcome to each Peer; Peers return evidence, challenges or blocked work; the Lead integrates behind a review gate; the Supervisor checks the handback and reports to you](docs/images/slp-task-flow.svg)
 
 1. **You set the objective.** Start a new agent with the **SLP Supervisor** profile and say what you
    want, e.g. `Fix the checkout total rounding bug. Report back with verdict and the checks you ran.`
@@ -56,11 +55,16 @@ The design rationale is in [docs/architecture.md](docs/architecture.md).
 
 | It does                                                                                     | It refuses                                                                        | It never                                                         |
 | ------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
-| Registers 12 `slp-<family>-<role>` providers and the **SLP Supervisor** / **SLP Lead** profiles | To overwrite a provider or profile it does not own (`COLLISION`)                  | Creates an agent on install or activation                        |
-| Injects each seat's role bundle at session entry, hidden from the agent tab                 | To guess when the config drifted outside its journal (`RECOVERY_REQUIRED`)        | Runs a scheduler or agent database; Paseo stays the control plane |
-| Keeps a Peer pool that the Lead picks each Peer's runtime from                               | A Peer launch that does not come from a pool option                               | Writes your repository's routing catalog                          |
-| Validates launch arguments offline (`prepare`), with named failures                          | Provider records that were edited after `list_providers` returned them            | Runs a monitoring daemon; `monitor` is a scan you invoke          |
+| Registers up to 12 `slp-<family>-<role>` providers and the **SLP Supervisor** / **SLP Lead** profiles | To overwrite a provider or profile it does not own (`COLLISION`)             | Creates an agent on install or activation                        |
+| Loads each seat's role instructions at session entry, separate from the task prompt         | To guess when the config drifted outside its journal (`RECOVERY_REQUIRED`)        | Runs a scheduler or agent database; Paseo stays the control plane |
+| Keeps a Peer pool that the Lead picks each Peer's runtime from                               | A Peer binding outside the pool during `prepare`                                 | Writes your repository's routing catalog                          |
+| Validates launch arguments offline (`prepare`), with named failures                          | Unverified or incompatible provider inventory supplied to `prepare`              | Runs a monitoring daemon; `monitor` is a scan you invoke          |
 | Offers opt-in Jev routing, communication supervision and a beads work tracker                | A Jev routing receipt that fails offline verification (hash, model, catalog)      | Installs or initializes beads                                     |
+
+Saved role choices narrow the Supervisor/Lead providers; all four Peer providers remain
+pool-driven. Provider entries for unavailable CLIs are disabled. The pool check above belongs to
+`prepare`. Role rules guide agents, while managed launch and desk checks cover their own
+interfaces; repository and shell permissions still come from Paseo and the provider.
 
 ## The roles
 
@@ -79,9 +83,12 @@ different providers, models and effort levels.
 You need:
 
 - Paseo `>=0.8.0`, with `pluginsEnabled: true` and an effective `mcp.enabled: true`
-- Node.js 22.18+ or 23.6+ on the daemon host (native TypeScript stripping)
+- a POSIX daemon host (Linux/macOS), with Node.js 22.x from 22.18, or Node.js 23.6+
+  (native TypeScript stripping)
 - the CLI of each provider family you use (Codex, Pi, Devin, Claude), signed in on the daemon host;
   Pi needs repeatable `--append-system-prompt` support
+
+Enable the installed family you want to use in Paseo's agent settings before the first activation.
 
 ```bash
 paseo plugin install duongvm57/paseo-slp-plugin:plugin                # follow the default branch
@@ -95,10 +102,13 @@ you activate it.
 ## First run
 
 1. **Activate.** Open **SLP** in Paseo's sidebar (or *Open SLP manager* from the command palette),
-   check the daemon home it shows and choose **Activate**. **Inspect** is read-only if you want to
-   look first.
-2. **Pick models.** Under **Settings → your host → Agents → Agent profiles**, edit **SLP Supervisor** and
-   **SLP Lead**: provider, model, thinking, mode.
+   choose **Inspect**, confirm **Daemon home confirmed** and **Exclusive configuration window**,
+   then choose **Activate**. Keep other configuration writers out while it runs.
+2. **Pick role models.** In **SLP → Role profiles**, choose a provider and an explicit model for
+   **Supervisor** and **Lead**, plus mode, thinking and features where offered. Choose **Save**,
+   then run the activation action again (**Re-verify binding** or **Rebind**) to apply the choices.
+   Saving alone does not apply them. Models must be set before delegation; Devin uses `swe-2`
+   models. Changes affect future launches, not sessions already running.
 3. **Onboard a repository.** Install the onboarding skill, then ask any agent in that repo to
    *onboard / set up SLP*. It proposes `.paseo-slp/workspace-protocol.md` and the Peer pool, and
    shows the full diff before writing.
@@ -107,7 +117,12 @@ you activate it.
    npx skills add duongvm57/paseo-slp-plugin --skill paseo-slp-onboarding
    ```
 
-4. **Hand over a task.** Choose **New agent** in the repo's workspace, then the **SLP Supervisor**
+4. **Make the Peer pool ready.** If the repo inherits the shared pool, use **SLP → Peer pool** to
+   add suitable options with provider, model and available settings, enable them and **Save**.
+   If onboarding pins `.paseo-slp/slp-routing.json`, configure that file's options during
+   onboarding. The Manager edits the shared pool; a repo pin takes precedence, and an empty or
+   invalid pin does not fall back to it.
+5. **Hand over a task.** Choose **New agent** in the repo's workspace, then the **SLP Supervisor**
    profile, and give it the title `Supervisor — <task>` and an objective. Then keep chatting there.
 
 A few optional lines make an objective more robust:
@@ -124,15 +139,19 @@ walk me through it step by step."*
 
 ## Optional capabilities
 
-Everything below is **off by default** and configured on the SLP manager.
+These capabilities are **off by default**. Configure them explicitly in the SLP manager;
+quota fallback belongs to the selected Peer pool, including a repo-pinned pool.
 
 | Capability                                                                  | What it adds                                                                                          |
 | --------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
-| [Communication language](docs/operations.md#getting-started)                | One language for everything seats write to each other; replies to you still follow your language      |
+| [Communication language](docs/operations.md#getting-started)                | Instructs managed seats to use one language with each other; replies to you follow your language       |
 | [Peer quota fallback](docs/operations.md#peer-quota-fallback)               | One designated pool option the Lead may retry on once when a Peer runs out of quota                   |
 | [Jev-assisted routing](docs/operations.md#jev-assisted-routing-optional)    | A calibrated routing receipt from Jev (TypeSafe System One): shadow mode records it, armed mode binds it |
-| [Communication supervision](docs/operations.md#communication-supervision-optional) | Assesses each Peer handback and the Lead's handling of it; records findings, optionally alerts a Supervisor |
+| [Communication supervision](docs/operations.md#communication-supervision-optional) | Assesses captured Peer handbacks and Lead handling for configured Leads; records findings and optionally alerts a Supervisor |
 | [Work tracker](docs/operations.md#work-tracker-optional)                    | A beads (`bd`) work graph seats can query instead of rebuilding task state from chat                  |
+
+Jev-powered routing and supervision send the configured inputs or captured communications to
+your chosen Jev service. Review that service and its costs before enabling them.
 
 ## Updating and removal
 
@@ -142,26 +161,40 @@ paseo plugin update paseo-slp --ref <tag>   # pinned: choose the new ref explici
 paseo plugin reload paseo-slp               # directory install: after the checkout changes
 ```
 
+After an update or reload, open the SLP manager and run **Rebind** when it offers the new runtime.
+Running sessions keep their existing process and role instructions; new launches use the new
+binding. Managed session opens still require the plugin to be running.
+
 To remove it, choose **Deactivate** on the SLP manager first (this removes the providers and
 profiles and keeps the runtime files for sessions still running), then run
 `paseo plugin remove paseo-slp`. Details are in [docs/operations.md](docs/operations.md#upgrading).
 
 ## Development
 
+From a source checkout, install dependencies with `npm ci`, then run the local checks:
+
 ```bash
-PASEO_HOME="$(mktemp -d)" npm test   # isolate from your live daemon, as CI does
+env -i HOME="$HOME" PATH="$PATH" PASEO_HOME="$(mktemp -d)" npm test  # clear inherited SLP runtime variables
 npm run typecheck
-npm run check:plugin-payload         # regenerate after changing plugin runtime, src/ policy, bin/ or skills/
+npm run check                     # inspect the install-unit identity
+npm run check:plugin-payload       # verify the generated payload is current
 ```
+
+After changing install-unit sources (`package.json`, `install.sh`, `bin/`, `skills/`, `src/`,
+`plugin/server/runtime/` or `plugin/shared/runtime/`), run `npm run generate:plugin-payload`,
+then repeat the payload check. Local checks establish source behavior and payload freshness.
 
 To dogfood live from a source checkout, ask an open session to *run the package's full E2E*. See
 [docs/development.md](docs/development.md).
+
+The localized README diagrams share one source: `scripts/generate-readme-diagrams.mjs`.
+After editing it, run `node scripts/generate-readme-diagrams.mjs`; use `--check` to verify the SVGs.
 
 ## Docs
 
 | Read                                             | When you want                                                                   |
 | ------------------------------------------------ | ------------------------------------------------------------------------------- |
-| [docs/architecture.md](docs/architecture.md)     | The role model, what the plugin adds to Paseo, the hidden channel, delegation   |
+| [docs/architecture.md](docs/architecture.md)     | The role model, what the plugin adds to Paseo, role delivery and delegation   |
 | [docs/operations.md](docs/operations.md)         | Activation, upgrades, profiles, repository setup, the Peer pool, optional capabilities |
 | [docs/cli.md](docs/cli.md)                       | The offline `slp.mjs` commands: `prepare`, `routes`, `route-decide`, `monitor` and the rest |
 | [docs/contract.md](docs/contract.md)             | What every file owns, before you change it                                      |
@@ -169,6 +202,9 @@ To dogfood live from a source checkout, ask an open session to *run the package'
 | [AGENTS.md](AGENTS.md)                           | The rules contributors and agents follow in this repository                     |
 
 Specs and investigations live under [docs/spec/](docs/spec/) and [docs/reports/](docs/reports/).
+Earlier operating lessons are recorded in [Protocol experience (Vietnamese)](docs/protocol-experience.vi.md).
+
+<!-- Keep installation requirements, setup steps and examples synchronized with README.vi.md. -->
 
 ## License
 

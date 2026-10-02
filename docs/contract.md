@@ -100,8 +100,9 @@ and dependency locks are supporting artifacts, not additional runtime owners.
 | plugin/server/jev.ts | Jev state/key RPCs and single-shot supervision requests. Strict plugin Zod config validation, CAS, auth-probe policy and stop cancellation stay here; disk/key observations and locations come from runtime/jev-state, provider/credential rules from the shared runtime. |
 | plugin/server/runtime/jev-state.ts | Jev config/key namespace, uncached raw config/hash observations, stat-only key presence and private regular-file checks before secure key reads. CLI retains historical OFF/unknown-key tolerance; plugin persisted/RPC schemas remain strict. Each adapter owns its diagnostics and capability policy. |
 | plugin/shared/runtime/desk-contract.ts, plugin/shared/runtime/node-version.mjs | Plain recovery-result vocabulary and diagnostic bounds; bootstrap-safe supported Node range/check shared by resolver, shim and CLI. Shared runtime has no Node imports or types. |
-| plugin/server/runtime/cli/ | Standalone CLI runtime: command parsing, installer/identity, verifier/snapshot, policy rendering, routing, agent observations and role transport. Source is colocated with plugin-owned core, but remains an adapter tier; core cannot import CLI modules. `src/` contains only policy/template assets. `bin/` bootstraps and development-only `scripts/` call this runtime directly. |
+| plugin/server/runtime/cli/ | Standalone CLI runtime: command parsing, installer/identity, verifier/snapshot, policy rendering, routing, agent observations and role transport. Source is colocated with plugin-owned core, but remains an adapter tier; core cannot import CLI modules. `src/` contains only policy/template assets. `bin/` bootstraps and development-only runtime scripts call this runtime directly. |
 | scripts/generate-plugin-payload.mjs, scripts/runtime-graph.mjs | `installUnitPaths()` owns the exact source-byte install unit, including only the two selected plugin runtime subtrees. Legacy identities allow absent runtime roots. The generator encodes bytes/modes and rejects missing, external and reverse-tier dependencies, including erased type imports; graph analysis is development-only. |
+| scripts/generate-readme-diagrams.mjs, docs/images/slp-overview*.svg | Documentation-only SVG source and generated English/Vietnamese README overviews. One layout owns role placement, theme colors and localized labels; `--check` compares the generated assets without writing. Outside the runtime install unit. |
 | plugin/server/desk-recovery.ts, plugin/server/runtime/cli/desk-recovery.ts | P2-e operator-only desk lock recovery: one closed 17-result algorithm exposed by the provenance-gated `enforcement-recover-lock` RPC and the operator-home `desk-recover` CLI. Orphan unlink requires holder parse, ESRCH, unchanged byte re-read, fsynced pre-unlink audit and directory fsync. `recover.lock` serializes recoverers and is never auto-removed; `internal-error` is the only exception sink. No `--force`, `expected`, hook or transact recovery path. Both adapters use `runtime/desk-recovery.ts`; the sync/async driver and surface regression corpus covers the closed results and race schedules. |
 | plugin/server/desk-command.ts | Pure command invariants shared by handback, settlement, scope, check and rollout: deterministic tuple-derived ids, live registered membership, lead role and owned open assignment guards. Features retain their command schemas, state machines and rejection diagnostics. |
 | plugin/server/desk-runner.ts | Shared store dependency, bound caller context, fresh ledger reads and strict repo envelope projection. Capture, export verification and check execution dependencies belong to the feature runners that use them. |
@@ -142,8 +143,10 @@ version-pinned bindings migrate on the next authorized activation; the SLP
 picker refreshes the host catalog before presenting models.
 
 Three roles remain Supervisor, Lead and Peer. Only two saved profiles are managed:
-slp-supervisor and slp-lead. The twelve providers remain slp-codex-{role},
-slp-pi-{role}, slp-devin-{role} and slp-claude-{role}; Peer chooses runtime from
+slp-supervisor and slp-lead. Up to twelve providers use slp-codex-{role},
+slp-pi-{role}, slp-devin-{role} and slp-claude-{role}. Plugin activation with
+saved role routing generates the chosen Supervisor/Lead providers and all
+four Peer providers; absent routing keeps all twelve. Peer chooses runtime from
 the project pool, not a saved profile. Devin bindings accept swe-2 models only.
 Peer disposition belongs to the assignment, independent of pool option choice.
 Standalone installation refuses collisions with owned provider and Supervisor/Lead
