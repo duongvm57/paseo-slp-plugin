@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# Stop and remove the task-owned serve container. Refuses to touch a
+# container that lacks this harness's ownership label.
+set -euo pipefail
+
+name=paseo-slp-container-serve
+if ! docker ps -a --format '{{.Names}}' --filter "name=^${name}$" | grep -q .; then
+  echo "no serve container named ${name}"
+  exit 0
+fi
+if [ "$(docker inspect -f '{{index .Config.Labels "slp.mech-docker"}}' "$name" 2>/dev/null)" != "serve" ]; then
+  echo "ERROR: ${name} is not owned by this harness; refusing to remove" >&2
+  exit 1
+fi
+docker rm -f "$name"
