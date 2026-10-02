@@ -1,3 +1,4 @@
+import { supportsNodeVersion, SUPPORTED_NODE_RANGE } from "../shared/runtime/node-version.mjs";
 // §6: Node and family-binary resolution for the manager plugin.
 //
 // Resolution order (Node): explicit nodePath -> prior verified receipt path ->
@@ -26,12 +27,12 @@ import type {
   ResolvedNode,
 } from "../shared/contracts.ts";
 
-import { FAMILY_IDS } from "../shared/families.ts";
+import { FAMILY_IDS } from "../shared/runtime/families.ts";
 
 // The family set derives from the shared registry (families.ts) — the export
 // keeps its historical name so existing imports keep working.
 export const FAMILIES: readonly FamilyName[] = FAMILY_IDS;
-const MIN_NODE_MAJOR = 22;
+
 const PROBE_TIMEOUT_MS = 5000;
 const PROBE_MAX_BUFFER = 64 * 1024;
 /** Bound on recorded version strings: probe output is already capped by
@@ -191,9 +192,8 @@ async function probeNode(real: string, ctx: Ctx): Promise<ResolvedNode> {
     throw new Error(`probe report node version exceeds ${MAX_VERSION_LENGTH} characters`);
   }
   if (report.electron != null) throw new Error("executable reports an Electron runtime");
-  const major = Number.parseInt(report.node.split(".")[0] ?? "", 10);
-  if (!(major >= MIN_NODE_MAJOR)) {
-    throw new Error(`Node ${report.node} is below required major ${MIN_NODE_MAJOR}`);
+  if (!supportsNodeVersion(report.node)) {
+    throw new Error(`Node ${report.node} does not satisfy required range ${SUPPORTED_NODE_RANGE}`);
   }
   if (typeof report.execPath !== "string" || !isAbsolute(report.execPath)) {
     throw new Error("probe report lacks an absolute execPath");
@@ -260,7 +260,7 @@ async function resolveNode(request: ExecutableRequest, ctx: Ctx): Promise<Resolv
   }
   throw new OperationConflict(
     "EXECUTABLE_UNAVAILABLE",
-    `No usable ordinary Node.js >= ${MIN_NODE_MAJOR} executable resolved` +
+    `No usable ordinary Node.js ${SUPPORTED_NODE_RANGE} executable resolved` +
       (failures.length ? ` (${failures.join("; ")})` : "") +
       `. Supply an explicit nodePath in the activate request.`,
   );

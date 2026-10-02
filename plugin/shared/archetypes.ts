@@ -1,7 +1,7 @@
 // plugin/shared/archetypes.ts — the 12 standard Peer seat archetypes the
 // Manager's "Add a standard seat" picker seeds from. Pure data; token content comes
-// from shared/routing-vocabulary.ts, the mirror of the package's canonical
-// vocabulary (src/routing-vocabulary.mjs, docs/spec/routing-criteria.md §6).
+// from runtime/routing-vocabulary.ts, the shared canonical vocabulary
+// (docs/spec/routing-criteria.md §6).
 //
 // The package owns the meaning of these standard seats: suitableFor/avoidFor
 // are the closed 16-token `axis:value` set, read-only on the form, and notes
@@ -15,7 +15,7 @@
 // are seat names for KINDS of work, not dispositions: disposition is an open
 // vocabulary the assignment supplies.
 
-import { STANDARD_SEAT_TOKENS } from "./routing-vocabulary.ts";
+import { STANDARD_SEAT_TOKENS } from "./runtime/routing-vocabulary.ts";
 
 export interface SeatArchetype {
   id: string;

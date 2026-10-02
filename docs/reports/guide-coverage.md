@@ -24,7 +24,7 @@ agent compliance or E2E success.
 
 | Material | Entry and reader | When loaded |
 |---|---|---|
-| [Common](../../src/common.md) | [roleBundle](../../src/role-bundle.mjs) for all three roles | Session entry; adapter injects assembled instructions on supported start/resume/override messages. |
+| [Common](../../src/common.md) | [roleBundle](../../plugin/server/runtime/cli/role-bundle.ts) for all three roles | Session entry; adapter injects assembled instructions on supported start/resume/override messages. |
 | [Supervisor](../../src/roles/supervisor.md), [Lead](../../src/roles/lead.md), [Peer](../../src/roles/peer.md) | roleBundle selects exactly one | Always for that role. |
 | [Delegation](../../src/delegation.md) | roleBundle for orchestrating roles only (bundleParts) | Always for orchestrating roles; Peer excluded. Always-loaded core: carries the required review-gate invariant, the agent-scoped create_agent rule and the ambiguous-create/workspace invariants inline, with pointers to the two conditional procedure references below. |
 | [Delegation formation](../../src/references/delegation-formation.md) | Delegation core pointer | Before choosing the operation — new team, continuation or observe-existing — and recording the formation record. |
@@ -41,7 +41,7 @@ agent compliance or E2E success.
 | [Onboarding skill](../../skills/paseo-slp-onboarding/SKILL.md) | Installable skill at native project/global scope | Human requests repo setup/update: the host triggers the installed skill, which fills protocol and repo-local routing with preserved preferences and discovery evidence. Skill installation is separate from `init`. |
 | [Protocol template](../../src/templates/workspace-protocol.md) | Explicit init creates repository .paseo-slp/workspace-protocol.md | Supervisor and Lead read the repository file when the assignment lands — before tactic-dependent replies or decisions, not only before delegation; Supervisor also reads it for an assigned protocol audit. Peer receives only relevant constraints. |
 
-[Package identity/install](../../src/package.mjs) recursively includes `src/`, so all
+[Package identity/install](../../plugin/server/runtime/cli/package.ts) recursively includes `src/`, so all
 eleven references are in the install unit. Role-scoped locators keep Peer metadata
 limited to common.md, peer.md and conditional work-tracking.md without reducing
 install integrity coverage. Common resolves `references/` relative to the installed policy directory supplied by
@@ -276,7 +276,7 @@ brief/formation, in-session proof, Lead verdict).
 
 Work-tracker follow-up (2026-09-23): an optional beads (`bd`) work graph
 reached the package as the ninth reference, `work-tracking.md`, plus
-`src/work-tracker.mjs` probes, a `tracker` CLI, the plugin-owned
+`plugin/server/runtime/cli/work-tracker.ts` probes, a `tracker` CLI, the plugin-owned
 `slp-runtime/state/work-tracker.json` toggle with get/set RPCs and a
 Manager card, and a hook-family `BEADS_ACTOR`/`BD_*` env overlay at
 session open. Detection only — SLP never installs, initializes or

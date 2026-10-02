@@ -49,7 +49,7 @@ import type {
   LaunchSet,
   LaunchSetRequest,
 } from "../shared/contracts.ts";
-import { FAMILY_IDS, HOOK_FAMILY_IDS, ROLES, type RoleName } from "../shared/families.ts";
+import { FAMILY_IDS, HOOK_FAMILY_IDS, ROLES, type RoleName } from "../shared/runtime/families.ts";
 
 // The family/role axes derive from the shared registry (families.ts) — the
 // exports keep their historical names so existing imports keep working.

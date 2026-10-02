@@ -566,14 +566,14 @@ test('set-peer-pool rejects malformed input and unknown keys', async t => {
 // ---------------------------------------------------------------------------
 // Schema parity: the wire schema and the package validator must never drift
 // ---------------------------------------------------------------------------
-// set-peer-pool writes bytes that src/routing.mjs::readCatalog later validates
+// set-peer-pool writes bytes that plugin/server/runtime/cli/routing.ts::readCatalog later validates
 // for every repository without a repo-pinned catalog. A verdict mismatch means
 // either a saved pool that kills prepare/routes on every unpinned repo (wire
 // looser), or a healthy file the Manager reports as broken (wire stricter).
 // This table pins both sides to the same accept/reject verdict per case.
 
 import { PeerPool } from '../plugin/shared/contracts.ts';
-import { validateCatalog } from '../src/routing.mjs';
+import { validateCatalog } from '../plugin/server/runtime/cli/routing.ts';
 
 test('plugin PeerPool schema and package validateCatalog agree on every verdict', () => {
   const seat = {

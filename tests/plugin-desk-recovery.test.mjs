@@ -524,6 +524,22 @@ test('internal-error: a throwing recoverLockHeld hook still releases our recover
 
 // --- X5 idempotence ------------------------------------------------------------
 
+for (const checkpoint of ['recoverLockHeld', 'beforeLockRecheck']) {
+  test(`internal-error: rejected ${checkpoint} promise re-enters lock cleanup`, async t => {
+    const fx = repoFixture(t);
+    writeLock(fx.paths, await deadPid());
+    const bytes = readFileSync(fx.paths.lockPath);
+    const out = await run(fx, {
+      hooks: { [checkpoint]: async () => { throw new Error('async hook boom'); } },
+    });
+    assert.equal(out.receipt.result, 'internal-error');
+    assert.equal(out.receipt.recoverLockReleased, true);
+    assert.equal(existsSync(fx.paths.recoverLockPath), false);
+    assert.deepEqual(readFileSync(fx.paths.lockPath), bytes);
+    assert.equal(auditLines(fx.paths).length, 0);
+  });
+}
+
 test('X5: a second recovery call after success is a clean no-lock', async t => {
   const fx = repoFixture(t);
   writeLock(fx.paths, await deadPid());

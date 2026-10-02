@@ -2,7 +2,7 @@
 // plugin/server/work-tracker.ts RPC handlers (get/set, atomic 0600 writes,
 // HOME_UNVERIFIED on foreign homes, strict input) and live `bd` detection on
 // the plugin process PATH — a fake `bd` script on a temp PATH, never a real
-// install (no real bd exists on this machine). The reader-parity pin (T7)
+// install (no real bd exists on this machine). The reader-adapter check (T7)
 // lives in tests/work-tracker.test.mjs next to the package reader.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -133,7 +133,7 @@ test('detectBd: PATH order, telemetry forced off, failures fill bdError', t => {
   assert.equal(calls[0].env.BD_DISABLE_METRICS, '1');
 });
 
-test('beadsSeatEnv (plugin mirror): SLP actor always wins; defaults yield to the env', () => {
+test('beadsSeatEnv (hook overlay): SLP actor always wins; defaults yield to the env', () => {
   assert.deepEqual(beadsSeatEnv({ role: 'peer', agentId: 'abc', env: {} }), {
     BEADS_ACTOR: 'slp-peer-abc',
     BD_AGENT_PROFILE: 'conservative',

@@ -30,9 +30,9 @@ import {
   patchForDirection,
 } from '../plugin/server/config-transaction.ts';
 import { OperationConflict, OwnedProvider, PEER_PASEO_TOOLS_POLICY } from '../plugin/shared/contracts.ts';
-import { FAMILY_LABEL } from '../plugin/shared/families.ts';
+import { FAMILY_LABEL } from '../plugin/shared/runtime/families.ts';
 import { providerWrittenFieldsEqual } from '../plugin/server/config-view.ts';
-import { peerPaseoToolsPolicy } from '../src/profiles.mjs';
+import { peerPaseoToolsPolicy } from '../plugin/server/runtime/cli/profiles.ts';
 import {
   MiniStore,
   FAMILIES,

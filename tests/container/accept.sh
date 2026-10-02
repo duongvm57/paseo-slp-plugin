@@ -28,7 +28,7 @@ paseo_version=$(paseo --version | tr -d '[:space:]')
 # The pinned daemon must satisfy the plugin manifest's requirements.paseo
 # range — evaluate the declared expression, not a hardcoded mirror of it.
 # Supported syntax: space-separated conjunction of >=,<=,>,<,= X.Y.Z clauses
-# (covers the current '>=0.8.0 <0.10.0' shape; anything else fails clearly).
+# (covers the current '>=0.8.0' shape; anything else fails clearly).
 node - "$paseo_version" <<'EOF' || fail "paseo version violates plugin requirements.paseo"
 const version = process.argv[2];
 const range = JSON.parse(require('node:fs').readFileSync('/src/plugin/paseo-plugin.json', 'utf8')).requirements.paseo;

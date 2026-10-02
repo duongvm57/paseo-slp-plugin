@@ -7,9 +7,9 @@ The [README](../README.md) is the short tour; command details live in
 
 ## Requirements
 
-- Paseo `>=0.8.0 <0.10.0` with `pluginsEnabled: true` in the daemon's
+- Paseo `>=0.8.0` with `pluginsEnabled: true` in the daemon's
   `config.json`.
-- Node >=22 on the daemon host (the plugin resolves a stable ordinary Node —
+- Node 22.18+ or 23.6+ on the daemon host (the plugin resolves a stable ordinary Node —
   not the Electron binary — at activation).
 - The Codex/Pi/Devin/Claude CLIs matching the provider families you want to
   use, plus each family's credentials on the daemon host.

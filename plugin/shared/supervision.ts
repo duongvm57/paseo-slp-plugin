@@ -7,12 +7,12 @@
 import { z } from "zod";
 import { defineRpc } from "@getpaseo/plugin";
 import { Id, Sha, Target } from "./contracts.ts";
-import { OWNED_PROVIDER_ID_RE, ROLES } from "./families.ts";
-import type { RoleName } from "./families.ts";
+import { OWNED_PROVIDER_ID_RE, ROLES } from "./runtime/families.ts";
+import type { RoleName } from "./runtime/families.ts";
 
 // Exact SLP role predicates — derived from the shared family/role registry,
 // never a parallel provider list (spec: "derive role from
-// plugin/shared/families.ts, not a new provider list").
+// plugin/shared/runtime/families.ts, not a new provider list").
 export function roleFromProviderId(provider: unknown): RoleName | null {
   if (typeof provider !== "string") return null;
   const match = provider.match(OWNED_PROVIDER_ID_RE);

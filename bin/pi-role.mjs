@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { verifyInstall } from '../src/package.mjs';
-import { roleInstructions } from '../src/role-bundle.mjs';
-import { piRoleArgs } from '../src/role-transport.mjs';
+import { verifyInstall } from '../plugin/server/runtime/cli/package.ts';
+import { roleInstructions } from '../plugin/server/runtime/cli/role-bundle.ts';
+import { piRoleArgs } from '../plugin/server/runtime/cli/role-transport.ts';
 
 const [role, ...args] = process.argv.slice(2);
 const root = fileURLToPath(new URL('..', import.meta.url));

@@ -7,7 +7,7 @@ import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync,
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { hash, identity, json, verifyInstall } from '../src/package.mjs';
+import { hash, identity, json, verifyInstall } from '../plugin/server/runtime/cli/package.ts';
 import { createMaterializer } from '../plugin/server/materializer.ts';
 import { embeddedPayload } from '../plugin/server/generated/runtime-payload.ts';
 import { OperationConflict } from '../plugin/shared/contracts.ts';
@@ -90,7 +90,7 @@ test('executable modes survive a restrictive umask', async t => {
 
 test('an existing divergent destination is RUNTIME_INTEGRITY, never repaired or overwritten', async t => {
   for (const tamper of [
-    async destination => writeFileSync(join(destination, 'src/package.mjs'), 'tampered'),
+    async destination => writeFileSync(join(destination, 'plugin/server/runtime/cli/package.ts'), 'tampered'),
     async destination => rmSync(join(destination, 'install.sh')),
     async destination => writeFileSync(join(destination, 'extra.txt'), 'extra'),
     async destination => { rmSync(join(destination, 'package.json')); symlinkSync('/etc/hostname', join(destination, 'package.json')); },

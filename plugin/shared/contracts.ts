@@ -9,7 +9,8 @@
 
 import { z } from "zod";
 import { defineRpc } from "@getpaseo/plugin";
-import { FAMILY_IDS, OWNED_PROVIDER_ID_RE, PROVIDER_EXTENDS_IDS, ROLES } from "./families.ts";
+import { JEV_TRANSPORTS } from "./runtime/jev-transport.ts";
+import { FAMILY_IDS, OWNED_PROVIDER_ID_RE, PROVIDER_EXTENDS_IDS, ROLES } from "./runtime/families.ts";
 
 /** The serialized-RPC byte contract: every request and response envelope
  *  stays inside this many UTF-8 bytes. Defined once here — producers bound
@@ -222,7 +223,7 @@ export const SetRoleRoutingOutput = z.object({
   routing: RoleRouting,
 }).strict();
 /** One seat in the user-scope Peer pool — the wire mirror of the package's
- *  routing-catalog option (src/routing.mjs validateCatalog). `provider` and
+ *  routing-catalog option (plugin/server/runtime/cli/routing.ts validateCatalog). `provider` and
  *  `model` may be empty while `enabled` is false: an archetype-seeded seat
  *  stays parked until the Human fills both from live catalog discovery. The
  *  editor writes availability:"ready" and roles:["peer"] always; the schema
@@ -230,7 +231,7 @@ export const SetRoleRoutingOutput = z.object({
  *  Passthrough, not strict — the package validator tolerates extra option
  *  keys (a legacy file may still carry `priority`), so the wire does too. */
 // These three patterns mirror settingIdPattern / unsafeModelPattern /
-// swe2ModelPattern in src/binding.mjs — the shared boundary cannot import the
+// swe2ModelPattern in plugin/server/runtime/cli/binding.ts — the shared boundary cannot import the
 // package, so the parity test in tests/plugin-routing.test.mjs pins this
 // schema to the same accept/reject verdicts as validateCatalog.
 const POOL_SETTING_ID = /^[a-zA-Z0-9._-]+$/;
@@ -238,7 +239,7 @@ const POOL_UNSAFE_MODEL = /[\s\x00-\x1f\x7f]/;
 const POOL_SWE2_MODEL = /^swe-2($|-)/;
 const poolNonempty = (s: string) => s.trim().length > 0;
 
-/** The Jev decline sentinel (src/routing.mjs ROUTE_DECLINE_CANDIDATE) — a
+/** The Jev decline sentinel (plugin/server/runtime/cli/routing.ts ROUTE_DECLINE_CANDIDATE) — a
  *  seat may never take it as an id; validateCatalog rejects it the same way. */
 export const ROUTE_DECLINE_OPTION_ID = "no-suitable-option";
 
@@ -360,7 +361,7 @@ export const SetPeerPoolOutput = z.object({
  *  typesafe (first-party, verified against docs.typesafe.ai): model is a
  *  pinned bare `jev-<semver>` id; baseUrl accepts a bare https origin or an
  *  origin+path prefix (custom endpoint/proxy). Both require https and reject
- *  query/hash (parity with src/jev.mjs readJevConfig); absent baseUrl → the
+ *  query/hash (parity with plugin/server/runtime/cli/jev.ts readJevConfig); absent baseUrl → the
  *  kind's default origin. */
 const jevBaseUrl = (allowPath: (path: string) => boolean) =>
   z.string().min(1).max(512)
@@ -373,18 +374,18 @@ const jevBaseUrl = (allowPath: (path: string) => boolean) =>
 export const JevProvider = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("openrouter"),
-    baseUrl: jevBaseUrl(path => path === "" || path === "/api/v1").default("https://openrouter.ai"),
-    model: z.string().regex(/^[a-z0-9-]+\/jev-\d+\.\d+(\.\d+)?$/),
+    baseUrl: jevBaseUrl(JEV_TRANSPORTS.openrouter.baseUrlPathAllowed).default(JEV_TRANSPORTS.openrouter.defaultBaseUrl),
+    model: z.string().regex(JEV_TRANSPORTS.openrouter.modelPattern),
   }).strict(),
   z.object({
     kind: z.literal("typesafe"),
-    baseUrl: jevBaseUrl(() => true).default("https://api.typesafe.ai"),
-    model: z.string().regex(/^jev-\d+\.\d+\.\d+$/),
+    baseUrl: jevBaseUrl(JEV_TRANSPORTS.typesafe.baseUrlPathAllowed).default(JEV_TRANSPORTS.typesafe.defaultBaseUrl),
+    model: z.string().regex(JEV_TRANSPORTS.typesafe.modelPattern),
   }).strict(),
 ]);
 /** Per-daemon Jev config — all toggles default off; capabilities is a bool
  *  record so a future capability arrives without a schema bump (a missing
- *  capability defaults to off, matching src/jev.mjs). Stored as
+ *  capability defaults to off, matching plugin/server/runtime/cli/jev.ts). Stored as
  *  jev.json (0600); the key lives in a separate jev-<kind>.key file. */
 export const JevConfig = z.object({
   schemaVersion: z.literal(1),
@@ -460,7 +461,7 @@ export const TestJevOutput = z.object({
  *  slp-runtime/state/work-tracker.json whose sole writer is set-work-tracker
  *  (atomic 0600 whole-file write, same class as jev.json). Strict so a
  *  foreign shape is rejected rather than silently coerced; the package
- *  reader (src/work-tracker.mjs) applies the same checks byte-for-byte. */
+ *  reader (plugin/server/runtime/cli/work-tracker.ts) applies the same checks byte-for-byte. */
 export const WorkTrackerConfig = z.object({
   schemaVersion: z.literal(1),
   tracker: z.literal("beads"),

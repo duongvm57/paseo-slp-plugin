@@ -17,9 +17,9 @@ import { desiredProviderEntries } from '../plugin/server/config-transaction.ts';
 import { createMaterializer } from '../plugin/server/materializer.ts';
 import { embeddedPayload } from '../plugin/server/generated/runtime-payload.ts';
 import { OperationConflict } from '../plugin/shared/contracts.ts';
-import { FAMILY_LABEL } from '../plugin/shared/families.ts';
-import { identity, install } from '../src/package.mjs';
-import { roleBundle } from '../src/role-bundle.mjs';
+import { FAMILY_LABEL } from '../plugin/shared/runtime/families.ts';
+import { identity, install } from '../plugin/server/runtime/cli/package.ts';
+import { roleBundle } from '../plugin/server/runtime/cli/role-bundle.ts';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const GATE = join(root, 'bin', 'slp-gate.mjs');
@@ -38,7 +38,7 @@ function tmp(t, prefix = 'roleinj-') {
 }
 
 // A real materialized candidate (same layout the stable root publishes) so
-// the hook's dynamic import loads the candidate's own role-bundle.mjs.
+// the hook's dynamic import loads the candidate's own role-bundle.ts.
 function fixtureCandidate(t) {
   const dir = tmp(t);
   const home = join(dir, 'home');
@@ -477,7 +477,7 @@ test('agent.create: a tampered candidate file aborts through the real verifyPubl
     verifyCandidate: b => materializer.verifyPublished(b.runtimePath, b.candidateSha256, b.payloadSha256),
   });
 
-  const bundlePath = join(published.runtimePath, 'src', 'role-bundle.mjs');
+  const bundlePath = join(published.runtimePath, 'plugin', 'server', 'runtime', 'cli', 'role-bundle.ts');
   const original = readFileSync(bundlePath);
   writeFileSync(bundlePath, '// tampered\n' + original.toString('utf8'));
   const error = await injection.agentCreate(createReq('slp-codex-lead')).then(
@@ -773,7 +773,7 @@ test('parity: hook systemPrompt and devin wrapper inject the identical bundle fo
   // The candidate's own role-bundle module, loaded the same way the devin
   // wrapper loads it (static import inside the candidate tree — here via
   // dynamic import of the materialized file, the hook's own mechanism).
-  const wrapperModule = await import(pathToFileURL(join(f.candidate, 'src', 'role-bundle.mjs')).href);
+  const wrapperModule = await import(pathToFileURL(join(f.candidate, 'plugin', 'server', 'runtime', 'cli', 'role-bundle.ts')).href);
   for (const id of OWNED_IDS) {
     const role = id.split('-')[2];
     // (b) the session-entry render the devin wrapper injects via acpRolePrompt

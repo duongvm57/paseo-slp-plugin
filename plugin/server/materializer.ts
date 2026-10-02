@@ -12,7 +12,7 @@ import type { EmbeddedPayload, Materializer, MaterializeResult } from "../shared
 
 const sha256hex = (bytes: Buffer | string): string =>
   createHash("sha256").update(bytes).digest("hex");
-// The §5 candidate identity serializer (same shape as src/package.mjs `json`;
+// The §5 candidate identity serializer (same shape as plugin/server/runtime/cli/package.ts `json`;
 // the plugin boundary forbids importing it). Distinct from the §7 canonical
 // receipt JSON.
 const prettyJson = (value: unknown): string => JSON.stringify(value, null, 2) + "\n";

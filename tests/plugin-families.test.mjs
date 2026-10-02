@@ -1,4 +1,4 @@
-// Derivation coverage for plugin/shared/families.ts — the family registry is
+// Derivation coverage for plugin/shared/runtime/families.ts — the family registry is
 // the single source of truth for the slp-<family>-<role> id space; every
 // downstream list, regex, label and env map must agree with it. These tests
 // pin that agreement so a family added to the registry propagates to every
@@ -26,7 +26,7 @@ import {
   WRAPPER_PROVIDER_ID_RE,
   familyFromProviderId,
   ownedProviderId,
-} from '../plugin/shared/families.ts';
+} from '../plugin/shared/runtime/families.ts';
 import { Family, ProviderId } from '../plugin/shared/contracts.ts';
 import { FAMILIES as LAUNCHER_FAMILIES, GATE_FAMILIES, ROLES as LAUNCHER_ROLES } from '../plugin/server/launchers.ts';
 import { FAMILIES as RESOLVER_FAMILIES } from '../plugin/server/executables.ts';
@@ -40,7 +40,7 @@ test('the registry declares the four current families on two transports', () => 
   assert.deepEqual(WRAPPER_FAMILY_IDS, ['devin']);
   // The registry is pure — no imports at all, so the client bundle can
   // never pull a server-only or node module through it.
-  const source = readFileSync(join(root, 'plugin/shared/families.ts'), 'utf8');
+  const source = readFileSync(join(root, 'plugin/shared/runtime/families.ts'), 'utf8');
   assert.ok(!/^\s*import\s/m.test(source), 'families.ts must stay import-free');
 });
 

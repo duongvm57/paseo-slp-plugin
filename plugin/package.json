@@ -7,5 +7,6 @@
   "dependencies": {
     "@getpaseo/protocol": "0.10.0",
     "zod": "4.6.5"
-  }
+  },
+  "type": "module"
 }

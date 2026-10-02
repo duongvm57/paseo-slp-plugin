@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { extractRecords, recordSchema, recomputeSha, requireRecordKind, validateRecord } from '../src/report-records.mjs';
+import { extractRecords, recordSchema, recomputeSha, requireRecordKind, validateRecord } from '../plugin/server/runtime/cli/report-records.ts';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const head = 'a'.repeat(40);

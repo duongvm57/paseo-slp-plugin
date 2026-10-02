@@ -81,7 +81,7 @@ flowchart LR
 | `plugin/client/supervision-controls.ts` | The recipient-workspace bell. |
 
 No observer code lives in the immutable `bin/`/`src/` runtime payload.
-[`src/monitor.mjs`](../../src/monitor.mjs) stays a separate on-demand tool.
+[`plugin/server/runtime/cli/monitor.ts`](../../plugin/server/runtime/cli/monitor.ts) stays a separate on-demand tool.
 
 ### Host capability gaps and host facts
 

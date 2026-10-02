@@ -37,11 +37,12 @@ import {
   rolloutTransitionEdge,
   type CheckClassValue,
   type DeskRejectionValue,
+  type DeskRolloutDeclareInputValue,
+  type DeskRolloutTransitionInputValue,
   type RolloutStateValue,
 } from "../shared/enforcement.ts";
 import {
   LEDGER_LIMITS,
-  approvedScopeRound,
   assignmentStructuralRevision,
   type AssignmentValue,
   type CheckDefinitionValue,
@@ -53,8 +54,15 @@ import {
   type RolloutValue,
   type ScopeTransitionValue,
 } from "./desk-store.ts";
-import type { DeskRunnerDeps } from "./desk-handback.ts";
+import { approvedScopeRound } from "./desk-scope.ts";
+import { isRejection, readLedger, repoEnvelope, type DeskRunnerDeps, type RunnerCtx } from "./desk-runner.ts";
 import { canonicalJson, sha256Hex } from "./config-view.ts";
+import {
+  deriveId,
+  requireActor as requireDeskActor,
+  requireLead as requireDeskLead,
+  requireOwnedOpenAssignment as requireDeskOwnedOpenAssignment,
+} from "./desk-command.ts";
 
 // ---------------------------------------------------------------------------
 // command schemas — `actorAgentId` is server-derived (the bound
@@ -89,41 +97,20 @@ const ok = (
   tables: { rollouts?: RolloutValue[]; rolloutTransitions?: RolloutTransitionValue[] } = {},
 ): DecideOutcome => ({ ok: true, events, ...tables });
 
-function deriveId(prefix: "rol" | "rtn", parts: string[]): string {
-  return `${prefix}-${sha256Hex(canonicalJson(parts)).slice(0, 32)}`;
-}
-
 // ---------------------------------------------------------------------------
 // actor + target resolution — server-side, decide-level.
 // ---------------------------------------------------------------------------
 
-function liveMembership(ledger: Readonly<LedgerValue>, agentId: string): MembershipValue | undefined {
-  return ledger.memberships.find(
-    row => row.agentId === agentId && row.state !== "revoked" && row.registeredAt !== null,
-  );
-}
-
 function requireActor(ledger: Readonly<LedgerValue>, agentId: string): MembershipValue | DeskRejectionValue {
-  const actor = liveMembership(ledger, agentId);
-  if (actor === undefined) {
-    return reject(
-      "AUTHORITY_REQUIRED",
-      "the actor has no live bound membership on this desk",
-      "a rollout command needs a host-bound, registered row — peers and revoked seats cannot move rollout state",
-    );
-  }
-  return actor;
+  return requireDeskActor(ledger, agentId, "a rollout command needs a host-bound, registered row — peers and revoked seats cannot move rollout state");
 }
 
 function requireLead(actor: MembershipValue): DeskRejectionValue | null {
-  if (actor.role !== "lead") {
-    return reject(
-      "AUTHORITY_REQUIRED",
-      `role ${JSON.stringify(actor.role)} may not administer rollouts — the receiving owner holds a bound lead membership`,
-      "the role pin is a durable membership field, not a claim",
-    );
-  }
-  return null;
+  return requireDeskLead(
+    actor,
+    `role ${JSON.stringify(actor.role)} may not administer rollouts — the receiving owner holds a bound lead membership`,
+    "the role pin is a durable membership field, not a claim",
+  );
 }
 
 function requireOwnedOpenAssignment(
@@ -131,29 +118,23 @@ function requireOwnedOpenAssignment(
   actor: MembershipValue,
   assignmentId: string,
 ): AssignmentValue | DeskRejectionValue {
-  const assignment = ledger.assignments.find(a => a.assignmentId === assignmentId);
-  if (assignment === undefined) {
-    return reject(
+  return requireDeskOwnedOpenAssignment(ledger, actor, assignmentId, {
+    missing: reject(
       "AUTHORITY_REQUIRED",
       "the assignment is not registered on this desk",
       "rollout commands name a durable assignment binding of this repo desk",
-    );
-  }
-  if (assignment.ownerAgentId !== actor.agentId) {
-    return reject(
+    ),
+    ownerMismatch: reject(
       "ACTOR_MISMATCH",
       "only the assignment's receiving owner may administer its rollouts",
       "the registering lead's agentId is bound into the row — a peer, another lead, or a supervisor cannot move rollout state",
-    );
-  }
-  if (assignment.state !== "open") {
-    return reject(
+    ),
+    closed: reject(
       "ROLLOUT_CONFLICT",
       "the assignment is closed — its rollouts keep their recorded state",
       "closed assignments take no new declarations or transitions",
-    );
-  }
-  return assignment;
+    ),
+  });
 }
 
 /** The rollout's declaration stream (assignmentId, rolloutId) — sorted by
@@ -743,48 +724,10 @@ export function seatRolloutsView(
 // request key.
 // ---------------------------------------------------------------------------
 
-export type RolloutRunnerDeps = {
-  store: DeskRunnerDeps["store"];
-};
-
-type RunnerCtx = { repoKey: string; row: MembershipValue };
-
-function readLedger(deps: RolloutRunnerDeps, repoKey: string): Readonly<LedgerValue> | DeskRejectionValue {
-  const read = deps.store.read(repoKey);
-  if (read.state !== "ok") {
-    return {
-      ok: false,
-      code: "STATE_UNREADABLE",
-      message: `the bound repo ledger reads ${read.state}`,
-      recovery: "the desk must read cleanly for a tool call to be answered",
-    };
-  }
-  return read.ledger;
-}
-
-const isRejection = (value: unknown): value is DeskRejectionValue =>
-  typeof value === "object" && value !== null && "ok" in value && (value as { ok: unknown }).ok === false;
-
-const repoEnvelope = (ledger: Readonly<LedgerValue>) => ({
-  hostId: ledger.repo.hostId,
-  gitCommonDir: ledger.repo.gitCommonDir,
-});
-
 export async function runRolloutDeclare(
   ctx: RunnerCtx,
-  input: {
-    requestId: string;
-    assignmentId: string;
-    scopeId: string;
-    rolloutId: string;
-    label: string;
-    declarationSha256: string;
-    candidateSnapshot: string;
-    candidateHead: string | null;
-    requiredChecks: { checkId: string; definitionDigest: string }[];
-    refs: string[];
-  },
-  deps: RolloutRunnerDeps,
+  input: DeskRolloutDeclareInputValue,
+  deps: DeskRunnerDeps,
 ): Promise<{ ok: true; [key: string]: unknown } | DeskRejectionValue> {
   const ledger = readLedger(deps, ctx.repoKey);
   if (isRejection(ledger)) return ledger;
@@ -821,16 +764,8 @@ export async function runRolloutDeclare(
 
 export async function runRolloutTransition(
   ctx: RunnerCtx,
-  input: {
-    requestId: string;
-    assignmentId: string;
-    rolloutId: string;
-    transition: string;
-    rolloutRevision: number;
-    targetSnapshot: string | null;
-    evidenceRefs: string[];
-  },
-  deps: RolloutRunnerDeps,
+  input: DeskRolloutTransitionInputValue,
+  deps: DeskRunnerDeps,
 ): Promise<{ ok: true; [key: string]: unknown } | DeskRejectionValue> {
   const ledger = readLedger(deps, ctx.repoKey);
   if (isRejection(ledger)) return ledger;

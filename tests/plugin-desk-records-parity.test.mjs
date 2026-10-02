@@ -1,10 +1,9 @@
-// tests/plugin-desk-records-parity.test.mjs — P3-a parity oracle (contract
-// §4): the TypeScript port in plugin/server/desk-records.ts must answer
-// the same {valid, errors, warnings} as the authoritative
-// src/report-records.mjs validateRecord on a shared fixture corpus.
+// Adapter regression corpus: CLI filesystem capabilities and an equivalent
+// injected desk adapter must produce identical issues. The validator itself
+// now has one implementation, re-exported by the desk facade.
 //
 // Both sides run with the same capabilities: the test injects the JS-side
-// evidence behavior into the port through its readEvidence/realpath seams
+// evidence behavior into the core through its readEvidence/realpath seams
 // (real fs realpath + resolve + bounds-check + read), so identical inputs
 // produce identical issues. Without a `repo` override both resolve
 // outputRef under the record's own declared root, exactly as validateRecord
@@ -15,8 +14,37 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
-import { validateRecord } from '../src/report-records.mjs';
+import { validateRecord } from '../plugin/server/runtime/cli/report-records.ts';
 import { validateReportRecordV1, recomputeSha } from '../plugin/server/desk-records.ts';
+import * as core from '../plugin/server/runtime/report-records.ts';
+import * as cli from '../plugin/server/runtime/cli/report-records.ts';
+
+test('CLI and desk exports use the canonical core and frozen vocabulary', () => {
+  assert.equal(validateReportRecordV1, core.validateReportRecordV1);
+  assert.equal(recomputeSha, cli.recomputeSha);
+  for (const key of ['RECORD_KINDS', 'HANDBACK_VERDICTS', 'SETTLEMENT_VIA']) {
+    assert.equal(cli[key], core[key]);
+    assert.ok(Object.isFrozen(cli[key]));
+  }
+});
+
+test('injected read faults propagate while a failing realpath comparison stays observational', t => {
+  const repo = fixtureRepo(t);
+  const record = {
+    ...baseHandback(repo),
+    checks: [check({ output: undefined, outputRef: 'evidence.txt' })],
+  };
+  assert.throws(() => validateReportRecordV1(record, {
+    readEvidence: () => { throw new Error('adapter fault'); },
+  }), /adapter fault/);
+  const validation = validateReportRecordV1(record, {
+    repo,
+    realpath: () => { throw new Error('comparison fault'); },
+    readEvidence: () => ({ status: 'ok', bytes: Buffer.from(EVIDENCE) }),
+  });
+  assert.equal(validation.valid, true);
+  assert.deepEqual(validation.warnings, []);
+});
 
 function fixtureRepo(t) {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), 'slp-records-parity-')));
@@ -121,8 +149,7 @@ function corpus(t, repo) {
   ];
 }
 
-/** The port's evidence seam, implemented with the same realpath+resolve+
- *  bounds-check+read steps the JS validator performs inline. */
+/** An injected real-filesystem adapter, compared with the CLI adapter. */
 function realEvidence(repositoryRoot, outputRef) {
   try {
     const repoPath = realpathSync(repositoryRoot);
@@ -137,7 +164,7 @@ function realEvidence(repositoryRoot, outputRef) {
   }
 }
 
-test('parity: identical verdicts/errors/warnings across the corpus', t => {
+test('adapters: identical verdicts/errors/warnings across the corpus', t => {
   const repo = fixtureRepo(t);
   writeFileSync(join(repo, 'evidence.txt'), EVIDENCE);
   let checked = 0;
@@ -152,7 +179,7 @@ test('parity: identical verdicts/errors/warnings across the corpus', t => {
   assert.ok(checked >= 45, `corpus coverage — ${checked} cases`);
 });
 
-test('parity: verifier --repo override resolves outputRef identically', t => {
+test('adapters: verifier --repo override resolves outputRef identically', t => {
   const declared = fixtureRepo(t); // record-declared candidate root (empty)
   const verifier = fixtureRepo(t); // the verifier's checkout with evidence
   writeFileSync(join(verifier, 'evidence.txt'), EVIDENCE);

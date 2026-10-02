@@ -1,31 +1,9 @@
-// plugin/server/work-tracker.ts — the beads work-tracker state RPCs and the
-// seat-env overlay for hook-family providers.
-//
-// Same class of operation as jev/state-store: one plugin-owned file under
-// <stableRoot>/state, atomic 0600 whole-file write, no journal, no mutex, no
-// authority gate. Detect, never install: nothing here installs, initializes
-// or configures beads — `bd version` is the only command ever spawned, and a
-// missing or broken `bd` lands in `bdError` as evidence, never an RPC
-// failure.
-//
-// Parity note: readWorkTrackerSetting mirrors src/work-tracker.mjs
-// readWorkTrackerSetting — absent file = disabled, unparseable or
-// foreign-shape file = disabled plus a surfaced error string, non-ENOENT
-// filesystem errors propagate; findBd, the version parse, beadsSeatEnv and
-// the forced BD_DISABLE_METRICS=1 are mirrored too (the plugin cannot import
-// package code — the no-cross-boundary rule). Keep the check order, defaults
-// and reason strings identical; tests/work-tracker.test.mjs pins identical
-// results on the same fixtures.
-//
-// The file root differs by side: the package reader takes a daemon home and
-// reads <home>/slp-runtime/state/work-tracker.json; this reader takes the
-// stable root (<home>/slp-runtime) and reads state/work-tracker.json — same
-// file on disk.
+// Work-tracker RPCs and the hook-only seat env overlay. Shared runtime owns
+// reading, PATH selection and version diagnostics; writes remain plugin-owned.
+// The CLI adapter resolves a daemon home and omits the configured view field.
 
 import { execFileSync } from "node:child_process";
-import { accessSync, constants, readFileSync, statSync } from "node:fs";
 import { randomUUID } from "node:crypto";
-import { delimiter, isAbsolute, join } from "node:path";
 import {
   GetWorkTrackerInput,
   OperationConflict,
@@ -36,90 +14,8 @@ import {
 } from "../shared/contracts.ts";
 import { resolveDaemonHome } from "./daemon-home.ts";
 import { writePrivate } from "./state-store.ts";
-
-export const WORK_TRACKER_FILE = join("state", "work-tracker.json");
-
-// The five schema checks and their reason strings are the wire between this
-// reader and the package's — a mismatch must surface identically on both
-// sides.
-const schemaFail = (reason: string): string => `work-tracker.json failed schema validation: ${reason}`;
-
-export interface WorkTrackerSetting {
-  enabled: boolean;
-  error: string | null;
-  /** True only when a valid setting file exists on disk. */
-  configured: boolean;
-}
-
-export function readWorkTrackerSetting(stableRoot: string): WorkTrackerSetting {
-  let raw: string;
-  try {
-    raw = readFileSync(join(stableRoot, WORK_TRACKER_FILE), "utf8");
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      return { enabled: false, error: null, configured: false };
-    }
-    throw error;
-  }
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch (error) {
-    return { enabled: false, error: `work-tracker.json is not valid JSON: ${(error as Error).message}`, configured: false };
-  }
-  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
-    return { enabled: false, error: schemaFail("expected an object"), configured: false };
-  }
-  const record = parsed as Record<string, unknown>;
-  if (record.schemaVersion !== 1) {
-    return { enabled: false, error: schemaFail("expected schemaVersion 1"), configured: false };
-  }
-  if (record.tracker !== "beads") {
-    return { enabled: false, error: schemaFail('expected tracker "beads"'), configured: false };
-  }
-  if (typeof record.enabled !== "boolean") {
-    return { enabled: false, error: schemaFail("expected enabled to be a boolean"), configured: false };
-  }
-  const extra = Object.keys(record).filter(key => !["schemaVersion", "tracker", "enabled"].includes(key)).sort();
-  if (extra.length > 0) {
-    return { enabled: false, error: schemaFail(`unexpected keys: ${extra.join(", ")}`), configured: false };
-  }
-  return { enabled: record.enabled as boolean, error: null, configured: true };
-}
-
-// First executable `bd` on the given PATH, in order. Only absolute PATH
-// entries are eligible — a relative entry would resolve against whatever cwd
-// the probe happens to run in. On Windows the binary lands as bd.exe; plain
-// `bd` is checked last there so an extensionless shim cannot shadow it.
-export function findBd(env: Record<string, string | undefined>): string | null {
-  const pathEnv = typeof env.PATH === "string" ? env.PATH : "";
-  const names = process.platform === "win32" ? ["bd.exe", "bd.cmd", "bd.bat", "bd"] : ["bd"];
-  for (const entry of pathEnv.split(delimiter)) {
-    if (!isAbsolute(entry)) continue;
-    for (const name of names) {
-      const candidate = join(entry, name);
-      try {
-        if (!statSync(candidate).isFile()) continue;
-        if (process.platform !== "win32") accessSync(candidate, constants.X_OK);
-        return candidate;
-      } catch { /* not here — keep scanning */ }
-    }
-  }
-  return null;
-}
-
-// `bd version` prints `bd version <semver> (…)` [verify]. Accept the exact
-// documented shape first, then fall back to any semver-looking token so an
-// upstream format tweak still yields a version instead of a gap.
-const VERSION_LINE = /bd\s+version\s+(\S+)/;
-const SEMVER_TOKEN = /(\d+\.\d+\.\d+[^\s]*)/;
-const parseBdVersion = (output: string): string | null =>
-  VERSION_LINE.exec(output)?.[1] ?? SEMVER_TOKEN.exec(output)?.[1] ?? null;
-
-const summarize = (value: unknown, max = 160): string => {
-  const text = String(value).replaceAll("\n", " ").trim();
-  return text.length > max ? `${text.slice(0, max)}…` : text;
-};
+import { WORK_TRACKER_FILE, findBd, parseBdVersion, readWorkTrackerSetting, summarize } from "./runtime/work-tracker.ts";
+export { WORK_TRACKER_FILE, findBd, readWorkTrackerSetting, type WorkTrackerSetting } from "./runtime/work-tracker.ts";
 
 export type BdRun = (file: string, args: string[], options: { env: Record<string, string | undefined> }) => string;
 

@@ -12,10 +12,10 @@
 // Negative evidence is allowed to mark a row `unsupported` (a missing field,
 // a rejected contract); it is never upgraded to `supported`.
 //
-// Source pins: the host tree was audited at PASEO_SOURCE_REVISION; SDK claims
-// ride the pinned `@getpaseo/*` 0.8.0 in plugin/package.json. Rows can drift
-// when the host changes — re-audit on upgrade; a stale pin is visible in the
-// record rather than hidden.
+// Source pins: the host tree was audited at PASEO_SOURCE_REVISION; historical
+// SDK citations retain their audited 0.8.0 pin. Current build dependencies are
+// `@getpaseo/*` 0.10.0 in package.json. An upgrade does not refresh old evidence:
+// rows can drift, so re-audit on upgrade and keep the original pins visible.
 
 import { z } from "zod";
 import { OperationConflict } from "../shared/contracts.ts";
@@ -26,7 +26,7 @@ import {
   type CapabilityRecordValue,
   type CapabilityGapValue,
 } from "../shared/enforcement.ts";
-import { FAMILY_IDS, type FamilyId } from "../shared/families.ts";
+import { FAMILY_IDS, type FamilyId } from "../shared/runtime/families.ts";
 
 export const PASEO_SOURCE_REVISION = "0f20e6dfe4c2573e203dea2aae00aa5983ce4d62";
 const src = (path: string) => `paseo@${PASEO_SOURCE_REVISION}:${path}`;
@@ -370,7 +370,7 @@ export interface FamilyFacts {
 }
 
 // Keyed by FamilyId — the registry's own universe, so a key outside
-// plugin/shared/families.ts cannot compile in. Keys are optional on purpose:
+// plugin/shared/runtime/families.ts cannot compile in. Keys are optional on purpose:
 // a registry family landing ahead of its curation must not crash the audit —
 // auditCapabilities fails closed with a typed gap per fact-dependent row.
 const FAMILY_FACTS: Partial<Record<FamilyId, FamilyFacts>> = {

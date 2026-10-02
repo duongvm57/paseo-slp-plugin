@@ -41,7 +41,7 @@ import {
 import { createJournal, emptyReceipt, findOperation, pendingOperation } from "./journal.ts";
 import { receiptMatchesTarget, resolveDaemonHome } from "./daemon-home.ts";
 import { readLanguage, readRoleRouting } from "./state-store.ts";
-import { OWNED_PROVIDER_ID_RE } from "../shared/families.ts";
+import { OWNED_PROVIDER_ID_RE } from "../shared/runtime/families.ts";
 import {
   FAMILIES,
   OWNED_PROVIDER_IDS,

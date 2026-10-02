@@ -2,7 +2,7 @@
 // cross-run index. Read-only over the layers below; it never mutates a run.
 import { existsSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
-import { readJson } from '../src/package.mjs';
+import { readJson } from '../plugin/server/runtime/cli/package.ts';
 import { loadAttempt, loadRun } from './runs.mjs';
 import { evidenceStatus } from './ledger.mjs';
 import { reviewHistory, verifiedReport } from './integrity.mjs';

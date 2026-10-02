@@ -46,7 +46,7 @@ import {
   HOOK_FAMILY_IDS,
   OWNED_PROVIDER_ID_RE,
   ownedProviderId,
-} from "../shared/families.ts";
+} from "../shared/runtime/families.ts";
 import {
   FAMILIES,
   OWNED_PROFILE_IDS,
@@ -444,7 +444,7 @@ export function assertPersistedCompatible(rawJson: unknown): void {
 }
 
 // ---------------------------------------------------------------------------
-// Desired owned configuration (§6 provider/env shape; src/paseo-install.mjs
+// Desired owned configuration (§6 provider/env shape; plugin/server/runtime/cli/paseo-install.ts
 // label/profile conventions, duplicated per the no-cross-boundary rule)
 // ---------------------------------------------------------------------------
 

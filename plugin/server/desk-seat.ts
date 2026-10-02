@@ -26,7 +26,7 @@ import type {
 import type { AgentSessionConfig } from "@getpaseo/protocol/agent-types";
 import { canTransitionSeatBinding, WIRE_LIMITS, type DeskRejectionValue } from "../shared/enforcement.ts";
 import { Family, OperationConflict, Sha, Time } from "../shared/contracts.ts";
-import { ROLES, type FamilyId } from "../shared/families.ts";
+import { ROLES, type FamilyId } from "../shared/runtime/families.ts";
 import {
   LEDGER_LIMITS,
   createDeskStore,
@@ -165,8 +165,7 @@ export const DESK_SEAT_DIAGNOSTICS = [
 ] as const;
 export type DeskSeatDiagnostic = (typeof DESK_SEAT_DIAGNOSTICS)[number];
 
-export const DESK_SEAT_OPS = ["mint", "bind", "register", "revoke"] as const;
-export type DeskSeatOp = (typeof DESK_SEAT_OPS)[number];
+export type DeskSeatOp = "mint" | "bind" | "register" | "revoke";
 
 /** The handle is 256 bits of CSPRNG output, hex — bearer-in-practice for
  *  the seat's env (P0 §6) and never persisted anywhere (§5). */
@@ -201,7 +200,7 @@ function isAbsolute(value: string): boolean {
 
 /** §4.2 — normalize the cwd, probe the git common dir with a bounded
  *  spawnSync, and classify every failure with exactly one code. */
-export function resolveDeskRepo(
+function resolveDeskRepo(
   cwd: unknown,
   io: { realpath: (path: string) => string; spawnGit: (cwdReal: string) => ReturnType<typeof spawnSync> },
 ): DeskRepoResult {

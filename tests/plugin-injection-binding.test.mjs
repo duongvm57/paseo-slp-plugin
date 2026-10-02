@@ -20,9 +20,9 @@ import { createJournal } from '../plugin/server/journal.ts';
 import { readInjectionBinding } from '../plugin/server/injection-binding.ts';
 import { createRoleInjection } from '../plugin/server/role-injection.ts';
 import { OperationConflict, State } from '../plugin/shared/contracts.ts';
-import { FAMILY_IDS } from '../plugin/shared/families.ts';
+import { FAMILY_IDS } from '../plugin/shared/runtime/families.ts';
 import { OWNED_PROFILE_IDS, OWNED_PROVIDER_IDS, canonicalSha256 } from '../plugin/server/config-view.ts';
-import { identity, install } from '../src/package.mjs';
+import { identity, install } from '../plugin/server/runtime/cli/package.ts';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const journal = createJournal();

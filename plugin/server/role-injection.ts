@@ -21,7 +21,7 @@
 // shim+wrapper transport (the 0.8.0 ACP adapter drops systemPrompt anyway).
 //
 // The role bundle is dynamically imported from the binding's materialized
-// candidate (<stableRoot>/<candidateSha256>/src/role-bundle.mjs) — never from
+// candidate (<stableRoot>/<candidateSha256>/plugin/server/runtime/cli/role-bundle.ts) — never from
 // this plugin checkout (the §2 no-cross-boundary rule); imports are cached
 // per candidate sha so a hook call costs one receipt read plus a render.
 //
@@ -38,11 +38,11 @@
 // loads candidate code.
 
 import { createHash, randomUUID } from "node:crypto";
-import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { PluginBeforeRequests } from "@getpaseo/plugin/server";
-import { familyFromProviderId, HOOK_PROVIDER_ID_RE, ROLES, WRAPPER_PROVIDER_ID_RE, type FamilyId } from "../shared/families.ts";
+import { familyFromProviderId, HOOK_PROVIDER_ID_RE, ROLES, WRAPPER_PROVIDER_ID_RE, type FamilyId } from "../shared/runtime/families.ts";
 import { beadsSeatEnv } from "./work-tracker.ts";
+import { candidateModulePath } from "./candidate-module.ts";
 
 type AgentCreateRequest = PluginBeforeRequests["agent.create"];
 type SessionOpenRequest = PluginBeforeRequests["agent.session_open"];
@@ -62,7 +62,7 @@ export interface ActiveBinding {
   daemonHome: string;
 }
 
-/** Minimal structural type of the candidate's src/role-bundle.mjs. */
+/** Minimal structural type of the candidate's plugin/server/runtime/cli/role-bundle.ts. */
 export interface RoleBundleModule {
   roleBundle(
     root: string,
@@ -119,7 +119,7 @@ export interface RoleInjectionDeps {
   }) => Promise<void>;
 }
 
-// The id classes derive from the family registry (shared/families.ts): hook
+// The id classes derive from the family registry (shared/runtime/families.ts): hook
 // transport = thin alias + gate launcher; wrapper transport = devin's shim.
 const HOOK_FAMILY_PROVIDER = HOOK_PROVIDER_ID_RE;
 const DEVIN_PROVIDER = WRAPPER_PROVIDER_ID_RE;
@@ -178,7 +178,7 @@ export function createRoleInjection(deps: RoleInjectionDeps) {
   function loadRoleBundleModule(binding: ActiveBinding): Promise<RoleBundleModule> {
     const cached = moduleCache.get(binding.candidateSha256);
     if (cached !== undefined) return cached;
-    const specifier = pathToFileURL(join(binding.runtimePath, "src", "role-bundle.mjs")).href;
+    const specifier = pathToFileURL(candidateModulePath(binding.runtimePath, "role-bundle")).href;
     const promise = Promise.resolve(importModule(specifier));
     promise.catch(() => {
       if (moduleCache.get(binding.candidateSha256) === promise) {

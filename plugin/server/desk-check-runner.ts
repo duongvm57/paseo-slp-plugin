@@ -29,6 +29,8 @@ import {
   WIRE_LIMITS,
   type CheckClassValue,
   type CheckRunStatusValue,
+  type DeskCheckDeclareInputValue,
+  type DeskCheckRunInputValue,
   type DeskRejectionValue,
 } from "../shared/enforcement.ts";
 import {
@@ -42,8 +44,15 @@ import {
   type MembershipValue,
   type RolloutValue,
 } from "./desk-store.ts";
-import type { DeskRunnerDeps } from "./desk-handback.ts";
-import { canonicalJson, sha256Hex } from "./config-view.ts";
+import { isRejection, readLedger, repoEnvelope, type DeskRunnerDeps, type RunnerCtx } from "./desk-runner.ts";
+import { sha256Hex } from "./config-view.ts";
+import {
+  deriveId,
+  liveMembership,
+  requireActor as requireDeskActor,
+  requireLead as requireDeskLead,
+  requireOwnedOpenAssignment as requireDeskOwnedOpenAssignment,
+} from "./desk-command.ts";
 
 const execFileAsync = promisify(execFile);
 
@@ -117,41 +126,20 @@ const ok = (
   tables: { checkDefinitions?: CheckDefinitionValue[]; checkRuns?: CheckRunValue[] } = {},
 ): DecideOutcome => ({ ok: true, events, ...tables });
 
-function deriveId(prefix: "chk" | "run", parts: string[]): string {
-  return `${prefix}-${sha256Hex(canonicalJson(parts)).slice(0, 32)}`;
-}
-
 // ---------------------------------------------------------------------------
 // actor + target resolution — server-side, decide-level.
 // ---------------------------------------------------------------------------
 
-function liveMembership(ledger: Readonly<LedgerValue>, agentId: string): MembershipValue | undefined {
-  return ledger.memberships.find(
-    row => row.agentId === agentId && row.state !== "revoked" && row.registeredAt !== null,
-  );
-}
-
 function requireActor(ledger: Readonly<LedgerValue>, agentId: string): MembershipValue | DeskRejectionValue {
-  const actor = liveMembership(ledger, agentId);
-  if (actor === undefined) {
-    return reject(
-      "AUTHORITY_REQUIRED",
-      "the actor has no live bound membership on this desk",
-      "a check command needs a host-bound, registered row — peers and revoked seats cannot move check state",
-    );
-  }
-  return actor;
+  return requireDeskActor(ledger, agentId, "a check command needs a host-bound, registered row — peers and revoked seats cannot move check state");
 }
 
 function requireLead(actor: MembershipValue): DeskRejectionValue | null {
-  if (actor.role !== "lead") {
-    return reject(
-      "AUTHORITY_REQUIRED",
-      `role ${JSON.stringify(actor.role)} may not administer checks — the receiving owner holds a bound lead membership`,
-      "the role pin is a durable membership field, not a claim",
-    );
-  }
-  return null;
+  return requireDeskLead(
+    actor,
+    `role ${JSON.stringify(actor.role)} may not administer checks — the receiving owner holds a bound lead membership`,
+    "the role pin is a durable membership field, not a claim",
+  );
 }
 
 function requireOwnedOpenAssignment(
@@ -159,29 +147,23 @@ function requireOwnedOpenAssignment(
   actor: MembershipValue,
   assignmentId: string,
 ): AssignmentValue | DeskRejectionValue {
-  const assignment = ledger.assignments.find(a => a.assignmentId === assignmentId);
-  if (assignment === undefined) {
-    return reject(
+  return requireDeskOwnedOpenAssignment(ledger, actor, assignmentId, {
+    missing: reject(
       "AUTHORITY_REQUIRED",
       "the assignment is not registered on this desk",
       "check commands name a durable assignment binding of this repo desk",
-    );
-  }
-  if (assignment.ownerAgentId !== actor.agentId) {
-    return reject(
+    ),
+    ownerMismatch: reject(
       "ACTOR_MISMATCH",
       "only the assignment's receiving owner may administer its checks",
       "the registering lead's agentId is bound into the row — a peer, another lead, or a supervisor cannot run or declare checks",
-    );
-  }
-  if (assignment.state !== "open") {
-    return reject(
+    ),
+    closed: reject(
       "ROLLOUT_CONFLICT",
       "the assignment is closed — its checks keep their recorded state",
       "closed assignments take no new definitions or runs",
-    );
-  }
-  return assignment;
+    ),
+  });
 }
 
 /** The check's definition stream (assignmentId, checkId) — sorted by
@@ -493,8 +475,7 @@ export type CheckExecResult = {
 
 export type CheckCapabilityGap = { capability: string; detail: string };
 
-export type CheckRunnerDeps = {
-  store: DeskRunnerDeps["store"];
+export type CheckRunnerDeps = DeskRunnerDeps & {
   uuid: () => string;
   now: () => Date;
   /** The execution primitive — injectable so tests never spawn. */
@@ -562,7 +543,7 @@ async function boundedExec(
 /** The allowlisted executor registry — one bounded body per class name,
  *  keyed by the same CHECK_CLASSES the durable schema enumerates. Adding a
  *  class is a contract change in shared/enforcement.ts plus an entry here. */
-export const CHECK_EXECUTORS: Record<CheckClassValue, (ctx: CheckExecContext, exec: typeof execFileAsync) => Promise<CheckExecResult>> = {
+const CHECK_EXECUTORS: Record<CheckClassValue, (ctx: CheckExecContext, exec: typeof execFileAsync) => Promise<CheckExecResult>> = {
   /** The desk's own durable ledger reads cleanly and its event chain
    *  verifies — the runner already measured `ledgerState` via store.read;
    *  this class never spawns. */
@@ -613,44 +594,10 @@ function defaultProbe(className: CheckClassValue, ctx: CheckExecContext): CheckC
 // Runner orchestration — the bridge calls these from ToolDef.run.
 // ---------------------------------------------------------------------------
 
-type RunnerCtx = { repoKey: string; row: MembershipValue };
-
-function readLedger(deps: CheckRunnerDeps, repoKey: string): Readonly<LedgerValue> | DeskRejectionValue {
-  const read = deps.store.read(repoKey);
-  if (read.state !== "ok") {
-    return {
-      ok: false,
-      code: "STATE_UNREADABLE",
-      message: `the bound repo ledger reads ${read.state}`,
-      recovery: "the desk must read cleanly for a tool call to be answered",
-    };
-  }
-  return read.ledger;
-}
-
-const isRejection = (value: unknown): value is DeskRejectionValue =>
-  typeof value === "object" && value !== null && "ok" in value && (value as { ok: unknown }).ok === false;
-
-const repoEnvelope = (ledger: Readonly<LedgerValue>) => ({
-  hostId: ledger.repo.hostId,
-  gitCommonDir: ledger.repo.gitCommonDir,
-});
-
 export async function runCheckDeclare(
   ctx: RunnerCtx,
-  input: {
-    requestId: string;
-    assignmentId: string;
-    scopeId: string;
-    checkId: string;
-    checkClass: CheckClassValue;
-    label: string;
-    definitionSha256: string;
-    limits: { timeoutMs: number; maxOutputBytes: number; maxRetries: number };
-    requiredEvidence: string[];
-    refs: string[];
-  },
-  deps: CheckRunnerDeps,
+  input: DeskCheckDeclareInputValue,
+  deps: DeskRunnerDeps,
 ): Promise<{ ok: true; [key: string]: unknown } | DeskRejectionValue> {
   const ledger = readLedger(deps, ctx.repoKey);
   if (isRejection(ledger)) return ledger;
@@ -687,14 +634,7 @@ export async function runCheckDeclare(
 
 export async function runCheckRun(
   ctx: RunnerCtx,
-  input: {
-    requestId: string;
-    assignmentId: string;
-    rolloutId: string;
-    checkId: string;
-    definitionRevision: number;
-    evidenceRef: string | null;
-  },
+  input: DeskCheckRunInputValue,
   deps: CheckRunnerDeps,
 ): Promise<{ ok: true; [key: string]: unknown} | DeskRejectionValue> {
   const ledger = readLedger(deps, ctx.repoKey);

@@ -22,7 +22,7 @@ import { errorMessage } from "../manager-state.ts";
 import type { Colors } from "../ui-kit.tsx";
 import { Badge, Button, Card, ChipSelect, Field, styles, SwitchRow } from "../ui-kit.tsx";
 
-// Jev provider kinds — the same pin/defaults src/jev.mjs enforces
+// Jev provider kinds — the same pin/defaults plugin/server/runtime/cli/jev.ts enforces
 // daemon-side. Changing kind resets model/baseUrl to the kind's defaults.
 export const JEV_KIND_DEFAULT = {
   openrouter: { model: "typesafe/jev-1.13", baseUrl: "https://openrouter.ai", keyLabel: "OpenRouter API key", keyFile: "jev-openrouter.key", keyPlaceholder: "sk-or-v1-…" },
@@ -148,7 +148,7 @@ export function useJevCard({ target, targetKey, sameTarget, callGetJev, callSetJ
   }, [jevView, jevDirty]);
 
   // Provider kind drives the model pin and the baseUrl default/rule — the
-  // same contract src/jev.mjs readJevConfig enforces daemon-side. The shared
+  // same contract plugin/server/runtime/cli/jev.ts readJevConfig enforces daemon-side. The shared
   // JevProvider schema validates client-side first so a rejected field lands
   // its error AT that field instead of one pooled message.
   const save = async () => {

@@ -4,9 +4,9 @@ import { mkdirSync, mkdtempSync, writeFileSync, readFileSync, rmSync, existsSync
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { json, readJson, hash } from '../src/package.mjs';
-import { materializeWorkspace } from '../src/paseo-install.mjs';
-import { readCatalog } from '../src/routing.mjs';
+import { json, readJson, hash } from '../plugin/server/runtime/cli/package.ts';
+import { materializeWorkspace } from '../plugin/server/runtime/cli/paseo-install.ts';
+import { readCatalog } from '../plugin/server/runtime/cli/routing.ts';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 function fixture(t) {

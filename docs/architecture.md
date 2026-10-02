@@ -447,10 +447,60 @@ Deactivation detaches the owned provider/profile entries and restores the
 shared MCP flag — but retains all runtime files, because live sessions may
 still be executing from them.
 
+## Runtime source and execution
+
+The former `src/` runtime modules now live under `plugin/`. The standalone CLI,
+installer, verifier, policy renderer and transport helpers live in
+`plugin/server/runtime/cli/`; `src/` contains only policy and template assets.
+The CLI uses erasable TypeScript and participates in strict typechecking with
+the host plugin. `bin/` contains executable bootstraps and transport relays;
+`scripts/` contains development-only payload generation and graph checks.
+Bootstrap scripts stay JavaScript so the Node version check runs before loading
+TypeScript. The installed CLI and host plugin use the same dependency-free core
+for report validation, desk recovery and tracker reads. Canonical Node
+core lives in `plugin/server/runtime/`; routing vocabulary, Jev provider and
+credential rules, the family/role registry, recovery constants and the
+bootstrap-safe Node version check live in `plugin/shared/runtime/`. The Manager
+uses the same routing vocabulary and family registry as the CLI.
+Paseo rejects imports outside the plugin root. Keeping runtime source there
+gives both executions one implementation without copying source. The CLI
+subtree remains an adapter: core modules cannot import it, and it imports no
+host SDK or external package. The shim retains its bootstrap family/role sets
+so argv and Node-version diagnostics work before TypeScript imports and its
+recorded-manifest checks stay independent.
+
+`installUnitPaths()` includes these two subtrees alongside `bin/`, `src/`,
+`skills/`, `package.json` and `install.sh`. The payload preserves their exact
+source bytes and paths. Ordinary Node 22.18+ or 23.6+ runs the erasable TS
+directly; there is no runtime build or npm dependency. `bin/slp.mjs` checks
+the version before importing the CLI command body. The generator checks both
+runtime and type-only imports: adapters may reach the core, server core may
+reach shared core and Node builtins, and shared core stays free of Node.
+
+Report evidence reads remain a CLI adapter capability. Desk validation without
+injected IO never dereferences a claimed path. Recovery has one state machine
+with two protocol checkpoints: the CLI driver returns synchronously; the
+plugin driver awaits race hooks and feeds hook failures back through cleanup.
+Role injection and desk snapshot capture load the verified candidate's own
+runtime modules, not the current plugin's copy. Selection requires exactly one
+receipt-declared layout: `plugin/server/runtime/cli/*.ts`, retained `src/*.ts`
+or retained `src/*.mjs`. Import failures never trigger a layout fallback.
+Snapshot algorithm identifiers remain unchanged.
+
+RPC provenance and output bounds stay in the plugin adapter; CLI home and
+operator identity resolution stay in the CLI adapter.
+
+Legacy runtime receipts remain verifiable without the new subtrees. Ledger
+v1–v6 migration support remains in the store because deployed older ledgers
+have not been ruled out.
+
 ## Boundaries
 
-- The plugin installs and manages; it does **not** orchestrate. No
-  agent-facing tools, no `create_agent`, no delegation logic.
+- The plugin installs and manages the runtime and exposes the desk MCP
+  tools for durable assignments, handbacks, settlements, scopes, checks and
+  rollout decisions. Authority resolves from host-bound memberships and
+  durable owner bindings; these tools record evidence and state. They do
+  not create agents, choose delegation or deploy a rollout.
 - Jev is an explicit helper primitive, not an agent feature: the
   `route-decide` CLI is the only CLI call path (no loops, schedules or
   prepare-time calls), its key lives in per-daemon state, and routing
@@ -471,6 +521,14 @@ still be executing from them.
   its bounded metadata rings. On the client, the supervision bell re-reads
   the stored notify recipients every 60 s while the app runs — a cheap
   status RPC, not a daemon-side watcher.
-- The Supervisor/Lead/Peer intelligence is **policy text + Paseo
-  primitives**, not code in the plugin. The plugin's correctness job ends
-  at "the right bytes reach the right session through the right channel."
+- The Supervisor/Lead/Peer intelligence uses **policy text + Paseo
+  primitives**. The plugin delivers those instructions and enforces the
+  desk's authority, state and evidence invariants; workflow acceptance
+  remains with the receiving owner and required review seats.
+
+`src/` still owns executable CLI behavior: installation/update, launch planning,
+provider transports, report capture, monitoring and the policy documents shipped
+to seats. These modules have production callers. Shared logic moves into the
+runtime tiers when CLI and plugin need the same implementation; a CLI-only
+module keeps its own implementation. Routing no longer has a JS/TS mirror, and
+the hook-only tracker env overlay has no unused CLI copy.

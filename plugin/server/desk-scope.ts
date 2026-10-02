@@ -57,6 +57,9 @@ import {
   WIRE_LIMITS,
   scopeTransitionEdge,
   type DeskRejectionValue,
+  type DeskScopeDeclareInputValue,
+  type DeskScopeReviewInputValue,
+  type DeskScopeTransitionInputValue,
   type ScopeCommandValue,
   type ScopeReviewAxisValue,
   type ScopeStateValue,
@@ -73,8 +76,13 @@ import {
   type ScopeTransitionValue,
   type ScopeValue,
 } from "./desk-store.ts";
-import type { DeskRunnerDeps } from "./desk-handback.ts";
-import { canonicalJson, sha256Hex } from "./config-view.ts";
+import { isRejection, readLedger, repoEnvelope, type DeskRunnerDeps, type RunnerCtx } from "./desk-runner.ts";
+import {
+  deriveId,
+  requireActor as requireDeskActor,
+  requireLead as requireDeskLead,
+  requireOwnedOpenAssignment as requireDeskOwnedOpenAssignment,
+} from "./desk-command.ts";
 
 // ---------------------------------------------------------------------------
 // command schemas — the durable command body. `actorAgentId` is
@@ -120,43 +128,20 @@ const ok = (
   tables: { scopes?: ScopeValue[]; scopeReviews?: ScopeReviewValue[]; scopeTransitions?: ScopeTransitionValue[] } = {},
 ): DecideOutcome => ({ ok: true, events, ...tables });
 
-function deriveId(prefix: "scp" | "srv" | "stn", parts: string[]): string {
-  // Same discipline as the P3 surfaces: a canonical-JSON tuple encoding
-  // hashed inside the pure decide so a replay names the same row.
-  return `${prefix}-${sha256Hex(canonicalJson(parts)).slice(0, 32)}`;
-}
-
 // ---------------------------------------------------------------------------
 // actor + target resolution — server-side, decide-level.
 // ---------------------------------------------------------------------------
 
-function liveMembership(ledger: Readonly<LedgerValue>, agentId: string): MembershipValue | undefined {
-  return ledger.memberships.find(
-    row => row.agentId === agentId && row.state !== "revoked" && row.registeredAt !== null,
-  );
-}
-
 function requireActor(ledger: Readonly<LedgerValue>, agentId: string): MembershipValue | DeskRejectionValue {
-  const actor = liveMembership(ledger, agentId);
-  if (actor === undefined) {
-    return reject(
-      "AUTHORITY_REQUIRED",
-      "the actor has no live bound membership on this desk",
-      "a scope command needs a host-bound, registered row — peers and revoked seats cannot move scope state",
-    );
-  }
-  return actor;
+  return requireDeskActor(ledger, agentId, "a scope command needs a host-bound, registered row — peers and revoked seats cannot move scope state");
 }
 
 function requireLead(actor: MembershipValue): DeskRejectionValue | null {
-  if (actor.role !== "lead") {
-    return reject(
-      "AUTHORITY_REQUIRED",
-      `role ${JSON.stringify(actor.role)} may not administer scopes — the receiving owner holds a bound lead membership`,
-      "the role pin is a durable membership field, not a claim",
-    );
-  }
-  return null;
+  return requireDeskLead(
+    actor,
+    `role ${JSON.stringify(actor.role)} may not administer scopes — the receiving owner holds a bound lead membership`,
+    "the role pin is a durable membership field, not a claim",
+  );
 }
 
 /** The durable assignment the command names, owned by the actor and still
@@ -167,29 +152,23 @@ function requireOwnedOpenAssignment(
   actor: MembershipValue,
   assignmentId: string,
 ): AssignmentValue | DeskRejectionValue {
-  const assignment = ledger.assignments.find(a => a.assignmentId === assignmentId);
-  if (assignment === undefined) {
-    return reject(
+  return requireDeskOwnedOpenAssignment(ledger, actor, assignmentId, {
+    missing: reject(
       "AUTHORITY_REQUIRED",
       "the assignment is not registered on this desk",
       "scope commands name a durable assignment binding of this repo desk",
-    );
-  }
-  if (assignment.ownerAgentId !== actor.agentId) {
-    return reject(
+    ),
+    ownerMismatch: reject(
       "AUTHORITY_REQUIRED",
       "only the assignment's receiving owner may administer its scopes",
       "the registering lead's agentId is bound into the row — a peer, another lead, or a supervisor cannot move scope state",
-    );
-  }
-  if (assignment.state !== "open") {
-    return reject(
+    ),
+    closed: reject(
       "SCOPE_CONFLICT",
       "the assignment is closed — its scopes keep their recorded state",
       "closed assignments take no new declarations, transitions or reviews",
-    );
-  }
-  return assignment;
+    ),
+  });
 }
 
 /** The scope's declaration stream (assignmentId, scopeId) — sorted by
@@ -224,6 +203,40 @@ function activeRound(stream: ScopeTransitionValue[]): { scopeRevision: number; c
     }
   }
   return pin;
+}
+
+/** The scope review round currently standing approved or advanced, for the
+ *  rollout promote gate. A fresh round supersedes the prior approval.
+ *  The store's durable refinement separately verifies historical approve
+ *  edges: later scope transitions must not invalidate a committed rollout. */
+export function approvedScopeRound(
+  stream: ScopeTransitionValue[],
+): {
+  scopeRevision: number;
+  candidateSnapshot: string;
+  candidateHead: string | null;
+  discharged: ScopeTransitionValue["discharged"];
+} | null {
+  let pin: { scopeRevision: number; candidateSnapshot: string; candidateHead: string | null } | null = null;
+  let observed: ScopeTransitionValue["discharged"] | null = null;
+  let approved: { scopeRevision: number; candidateSnapshot: string; candidateHead: string | null; discharged: ScopeTransitionValue["discharged"] } | null = null;
+  let state: ScopeTransitionValue["to"] | null = null;
+  for (const row of stream) {
+    if (row.command === "submit-for-review") {
+      pin = { scopeRevision: row.scopeRevision, candidateSnapshot: row.candidateSnapshot as string, candidateHead: row.candidateHead };
+      observed = null;
+    }
+    // The gate transition carries the round's discharged set; approve is
+    // reachable only through it, so the standing approval's evidence is
+    // always the matching review-observed row's.
+    if (row.command === "review-observed") observed = row.discharged;
+    if (row.to === "approved" && pin !== null && observed !== null) {
+      approved = { ...pin, discharged: observed };
+    }
+    state = row.to;
+  }
+  if (state !== "approved" && state !== "advanced") return null;
+  return approved;
 }
 
 /** The required review axes for a gated transition — server-derived, the
@@ -266,7 +279,7 @@ function resolveDischarges(
 // decide — synchronous and pure.
 // ---------------------------------------------------------------------------
 
-export function decideDeskScope(ledger: Readonly<LedgerValue>, command: Record<string, unknown>): DecideOutcome {
+function decideDeskScope(ledger: Readonly<LedgerValue>, command: Record<string, unknown>): DecideOutcome {
   const parsed = DeskScopeCommand.safeParse(command);
   if (!parsed.success) {
     return reject("INVALID_RECORD", "command does not match any desk-scope command schema", "commands are strict JSON objects with a kind discriminator");
@@ -719,45 +732,10 @@ export function seatScopesView(
 // request key, never a live membershipId.
 // ---------------------------------------------------------------------------
 
-export type ScopeRunnerDeps = {
-  store: DeskRunnerDeps["store"];
-};
-
-type RunnerCtx = { repoKey: string; row: MembershipValue };
-
-function readLedger(deps: ScopeRunnerDeps, repoKey: string): Readonly<LedgerValue> | DeskRejectionValue {
-  const read = deps.store.read(repoKey);
-  if (read.state !== "ok") {
-    return {
-      ok: false,
-      code: "STATE_UNREADABLE",
-      message: `the bound repo ledger reads ${read.state}`,
-      recovery: "the desk must read cleanly for a tool call to be answered",
-    };
-  }
-  return read.ledger;
-}
-
-const isRejection = (value: unknown): value is DeskRejectionValue =>
-  typeof value === "object" && value !== null && "ok" in value && (value as { ok: unknown }).ok === false;
-
-const repoEnvelope = (ledger: Readonly<LedgerValue>) => ({
-  hostId: ledger.repo.hostId,
-  gitCommonDir: ledger.repo.gitCommonDir,
-});
-
 export async function runScopeDeclare(
   ctx: RunnerCtx,
-  input: {
-    requestId: string;
-    assignmentId: string;
-    scopeId: string;
-    label: string;
-    declarationSha256: string;
-    refs: string[];
-    seatAgentId: string | null;
-  },
-  deps: ScopeRunnerDeps,
+  input: DeskScopeDeclareInputValue,
+  deps: DeskRunnerDeps,
 ): Promise<{ ok: true; [key: string]: unknown } | DeskRejectionValue> {
   const ledger = readLedger(deps, ctx.repoKey);
   if (isRejection(ledger)) return ledger;
@@ -791,16 +769,8 @@ export async function runScopeDeclare(
 
 export async function runScopeTransition(
   ctx: RunnerCtx,
-  input: {
-    requestId: string;
-    assignmentId: string;
-    scopeId: string;
-    transition: string;
-    scopeRevision: number;
-    candidateSnapshot: string | null;
-    candidateHead: string | null;
-  },
-  deps: ScopeRunnerDeps,
+  input: DeskScopeTransitionInputValue,
+  deps: DeskRunnerDeps,
 ): Promise<{ ok: true; [key: string]: unknown } | DeskRejectionValue> {
   const ledger = readLedger(deps, ctx.repoKey);
   if (isRejection(ledger)) return ledger;
@@ -842,17 +812,8 @@ export async function runScopeTransition(
 
 export async function runScopeReview(
   ctx: RunnerCtx,
-  input: {
-    requestId: string;
-    assignmentId: string;
-    scopeId: string;
-    scopeRevision: number;
-    candidateSnapshot: string;
-    axis: string;
-    verdict: string;
-    findingsRef: string | null;
-  },
-  deps: ScopeRunnerDeps,
+  input: DeskScopeReviewInputValue,
+  deps: DeskRunnerDeps,
 ): Promise<{ ok: true; [key: string]: unknown } | DeskRejectionValue> {
   const ledger = readLedger(deps, ctx.repoKey);
   if (isRejection(ledger)) return ledger;

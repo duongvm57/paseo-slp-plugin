@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { readJson, json } from '../src/package.mjs';
+import { readJson, json } from '../plugin/server/runtime/cli/package.ts';
 import { scenarios } from './scenarios.mjs';
 import { initialize, begin, fixture, collect, collectCoordinator, collectResources, seal, review, reviewAddendum, defer, summary, attemptStatus, listRuns } from './collector.mjs';
 

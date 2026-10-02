@@ -1,9 +1,9 @@
 #!/usr/bin/env node
-import { runRoleProcess } from '../src/role-process.mjs';
+import { runRoleProcess } from '../plugin/server/runtime/cli/role-process.ts';
 import { fileURLToPath } from 'node:url';
-import { roleDelivery } from '../src/role-bundle.mjs';
-import { verifyInstall } from '../src/package.mjs';
-import { acpRolePrompt } from '../src/role-transport.mjs';
+import { roleDelivery } from '../plugin/server/runtime/cli/role-bundle.ts';
+import { verifyInstall } from '../plugin/server/runtime/cli/package.ts';
+import { acpRolePrompt } from '../plugin/server/runtime/cli/role-transport.ts';
 
 const [role, ...args] = process.argv.slice(2);
 const root = fileURLToPath(new URL('..', import.meta.url));

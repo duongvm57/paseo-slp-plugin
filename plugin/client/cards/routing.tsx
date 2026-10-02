@@ -18,8 +18,8 @@ import type {
   StatusResult,
   TargetValue,
 } from "../../shared/contracts.ts";
-import { FAMILY_LABEL, FAMILY_PICKER_ORDER } from "../../shared/families.ts";
-import type { RoleName } from "../../shared/families.ts";
+import { FAMILY_LABEL, FAMILY_PICKER_ORDER } from "../../shared/runtime/families.ts";
+import type { RoleName } from "../../shared/runtime/families.ts";
 import {
   activationLabel,
   applyFamilyChange,

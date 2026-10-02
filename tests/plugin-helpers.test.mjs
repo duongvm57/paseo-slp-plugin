@@ -10,9 +10,9 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, w
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { install, json, hash } from '../src/package.mjs';
-import { roleBundle, policyLocators } from '../src/role-bundle.mjs';
-import { verifyProvider } from '../src/binding.mjs';
+import { install, json, hash } from '../plugin/server/runtime/cli/package.ts';
+import { roleBundle, policyLocators } from '../plugin/server/runtime/cli/role-bundle.ts';
+import { verifyProvider } from '../plugin/server/runtime/cli/binding.ts';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 
@@ -362,7 +362,7 @@ test('managed inventory reads the exact home, never the CLI, and labels provider
   assert.ok(out.providers.every(p => p.provenance === 'configured'));
   // The fake CLI listing was never invoked.
   assert.ok(!out.providers.some(p => p.id === 'LIVE-MARKER'));
-  // Static config entries are rejected as launch evidence (src/binding.mjs).
+  // Static config entries are rejected as launch evidence (plugin/server/runtime/cli/binding.ts).
   assert.throws(
     () => verifyProvider(out.providers, 'slp-codex-lead', () => 'codex'),
     /configured inventory is not live evidence/,
@@ -503,8 +503,8 @@ test('unmanaged inventory keeps its existing shape — no provenance markers', t
 });
 
 test('ACP delivery keeps verified core while refreshing language and restoring carriers', async t => {
-  const { roleDelivery } = await import('../src/role-bundle.mjs');
-  const { acpRolePrompt } = await import('../src/role-transport.mjs');
+  const { roleDelivery } = await import('../plugin/server/runtime/cli/role-bundle.ts');
+  const { acpRolePrompt } = await import('../plugin/server/runtime/cli/role-transport.ts');
   const dir = fixture(t), installed = join(dir, 'release'), home = join(dir, 'daemon');
   install(root, installed);
   const state = join(home, 'slp-runtime/state/communication-language');

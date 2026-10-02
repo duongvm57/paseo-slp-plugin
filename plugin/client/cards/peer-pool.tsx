@@ -11,15 +11,15 @@ import { useEffect, useRef, useState } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
 import { copyText } from "@getpaseo/plugin/client/react-native";
 import { PEER_SEAT_ARCHETYPES } from "../../shared/archetypes.ts";
-import { FAMILY_LABEL, FAMILY_PICKER_ORDER } from "../../shared/families.ts";
-import type { RoleName } from "../../shared/families.ts";
+import { FAMILY_LABEL, FAMILY_PICKER_ORDER } from "../../shared/runtime/families.ts";
+import type { RoleName } from "../../shared/runtime/families.ts";
 import {
   HOW_TO_READ,
   STANDARD_SEAT_TOKENS,
   SUITABILITY_AXES,
   SUITABILITY_TOKENS,
   tokenDefinition,
-} from "../../shared/routing-vocabulary.ts";
+} from "../../shared/runtime/routing-vocabulary.ts";
 import type {
   CatalogResult,
   FamilyName,

@@ -8,7 +8,7 @@
 // echoed back — every view reports `hasKey` only. Toggling a capability off
 // never removes the stored key.
 //
-// Parity note: validation mirrors src/jev.mjs (readJevConfig/readJevKey) —
+// Config/key readers retain their plugin schema and observational view —
 // absent config = unconfigured (Jev OFF), corrupt config = error surfaced,
 // key group/other-accessible = reported. Keep the two validators aligned.
 // test-jev is the ONLY Jev RPC that touches the network (explicit human
@@ -36,6 +36,7 @@ import {
 import { sha256Hex } from "./config-view.ts";
 import { resolveDaemonHome } from "./daemon-home.ts";
 import { writePrivate } from "./state-store.ts";
+import { JEV_TRANSPORTS, assertRedacted as checkRedaction, sanitizeRemoteText } from "../shared/runtime/jev-transport.ts";
 
 const JEV_FILE = join("state", "jev.json");
 const keyFileName = (kind: string) => join("state", `jev-${kind}.key`);
@@ -52,38 +53,6 @@ const probeUrl = (provider: { kind: string; baseUrl: string }): string =>
   provider.kind === "typesafe"
     ? `${provider.baseUrl.replace(/\/+$/, "")}/v1/models`
     : `${new URL(provider.baseUrl).origin}/api/v1/auth/key`;
-
-// Remote-controlled text (auth/key labels, API error strings) is untrusted:
-// scrub credential-shaped substrings and bound length before it reaches RPC
-// details shown in the Manager UI. Mirrors src/jev.mjs sanitizeRemoteText —
-// keep the pattern sets AND the flag-preserving rebuild identical: the
-// bearer pattern is /i, so rebuilding with 'g' alone would miss lowercase
-// `bearer <token>`.
-// These three are assembled from fragments so the source never contains a
-// detector-matching secret literal; the runtime regexes are unchanged.
-const openRouterKeyPattern = new RegExp('\\b' + 'sk-or-' + '[A-Za-z0-9_-]{12,}');
-const privateKeyPattern = new RegExp('-----BEGIN ' + '[A-Z0-9 ]*' + 'PRIVATE' + ' KEY-----');
-const awsKeyPattern = new RegExp('\\b' + 'AKIA' + '[0-9A-Z]{16}' + '\\b');
-const remoteCredentialPatterns = [
-  openRouterKeyPattern,
-  /\bts-[A-Za-z0-9_-]{12,}/,
-  /\bsk-[A-Za-z0-9_-]{20,}/,
-  /Bearer\s+[A-Za-z0-9._~+/=-]{16,}/i,
-  privateKeyPattern,
-  awsKeyPattern,
-  /\bgh[pousr]_[A-Za-z0-9]{20,}/,
-  /\bxox[baprs]-[A-Za-z0-9-]{10,}/,
-  /\bAIza[0-9A-Za-z_-]{35}\b/,
-  /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{5,}\b/,
-];
-const sanitizeRemoteText = (value: string, maxLength = 200): string => {
-  let text = String(value);
-  for (const pattern of remoteCredentialPatterns) {
-    const flags = pattern.flags.includes("g") ? pattern.flags : `${pattern.flags}g`;
-    text = text.replace(new RegExp(pattern.source, flags), "<redacted>");
-  }
-  return text.slice(0, maxLength);
-};
 
 export interface JevDeps {
   now?: () => Date;
@@ -259,7 +228,7 @@ export type Jev = ReturnType<typeof createJev>;
 
 // ---------------------------------------------------------------------------
 // Supervision decision requests (Phase B) — the observer's only HTTP path.
-// Parity with src/jev.mjs resolveJev/askJev/postDecision: same endpoint join
+// Parity with plugin/server/runtime/cli/jev.ts resolveJev/askJev/postDecision: same endpoint join
 // (baseUrl + kind endpoint), same requestExtras, same credential preflight
 // over the assembled body, same envelope rule (model + answers record).
 // Differences are the spec's: NO automatic retry (observer evaluation is
@@ -277,14 +246,6 @@ export class JevRequestError extends Error {
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
-
-// Endpoint join parity: baseUrl path prefix is kept (string concat, matching
-// src/jev.mjs resolveJev). openrouter pins provider.allow_fallbacks off;
-// typesafe sends no provider field.
-const SUPERVISION_TRANSPORTS: Record<JevProviderValue["kind"], { endpoint: string; requestExtras: Record<string, unknown> }> = {
-  openrouter: { endpoint: "/api/alpha/decisions", requestExtras: { provider: { allow_fallbacks: false } } },
-  typesafe: { endpoint: "/v1/systemone", requestExtras: {} },
-};
 
 export type SupervisionGate =
   | { ok: true; provider: JevProviderValue; authorization: string }
@@ -306,7 +267,7 @@ export function resolveSupervision(stableRoot: string): SupervisionGate {
   if (config === null) return { ok: false, reason: error !== null ? "jev-config-invalid" : "jev-unconfigured" };
   if (config.enabled !== true) return { ok: false, reason: "jev-disabled" };
   if (config.capabilities.supervision !== true) return { ok: false, reason: "jev-capability-off" };
-  const transport = SUPERVISION_TRANSPORTS[config.provider.kind];
+  const transport = JEV_TRANSPORTS[config.provider.kind];
   if (transport === undefined) return { ok: false, reason: "jev-provider-unsupported" };
   const probe = keyProbe(stableRoot, config.provider.kind);
   if (!probe.hasKey) return { ok: false, reason: "jev-key-missing" };
@@ -321,44 +282,9 @@ export function resolveSupervision(stableRoot: string): SupervisionGate {
   return { ok: true, provider: config.provider, authorization: `Bearer ${key}` };
 }
 
-// Credential preflight over the assembled outbound payload — parity with
-// src/jev.mjs assertRedacted: string values AND object keys are tested; the
-// error names only the pattern class + JSON path, never the matched text.
-const credentialPatterns: { name: string; pattern: RegExp }[] = [
-  { name: "openrouter-key", pattern: openRouterKeyPattern },
-  { name: "typesafe-key", pattern: /\bts-[A-Za-z0-9_-]{12,}/ },
-  { name: "openai-style-key", pattern: /\bsk-[A-Za-z0-9_-]{20,}/ },
-  { name: "bearer-token", pattern: /Bearer\s+[A-Za-z0-9._~+/=-]{16,}/i },
-  { name: "private-key-block", pattern: privateKeyPattern },
-  { name: "aws-access-key", pattern: awsKeyPattern },
-  { name: "github-token", pattern: /\bgh[pousr]_[A-Za-z0-9]{20,}/ },
-  { name: "slack-token", pattern: /\bxox[baprs]-[A-Za-z0-9-]{10,}/ },
-  { name: "google-api-key", pattern: /\bAIza[0-9A-Za-z_-]{35}\b/ },
-  { name: "jwt", pattern: /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{5,}\b/ },
-];
-
+// Keep the observer error identity; shared preflight owns traversal and patterns.
 export function assertRedacted(payload: unknown): void {
-  const check = (text: string, path: string, what: string) => {
-    for (const { name, pattern } of credentialPatterns) {
-      if (pattern.test(text)) {
-        throw new JevRequestError("jev-redacted", `Refusing to send: credential-shaped ${what} (${name}) at ${path === "" ? "<root>" : path}`);
-      }
-    }
-  };
-  const walk = (value: unknown, path: string): void => {
-    if (typeof value === "string") return check(value, path, "string");
-    if (Array.isArray(value)) {
-      value.forEach((item, index) => walk(item, `${path}[${index}]`));
-      return;
-    }
-    if (isRecord(value)) {
-      for (const [key, item] of Object.entries(value)) {
-        check(key, path, "object key");
-        walk(item, path === "" ? key : `${path}.${key}`);
-      }
-    }
-  };
-  walk(payload, "");
+  checkRedaction(payload, message => new JevRequestError("jev-redacted", message));
 }
 
 export interface JevDecisionRequest {
@@ -386,7 +312,7 @@ export async function askJevDecision(
 ): Promise<JevDecisionEnvelope> {
   const fetchImpl = opts.fetchImpl ?? fetch;
   const timeoutMs = opts.timeoutMs ?? 5000;
-  const transport = SUPERVISION_TRANSPORTS[provider.kind];
+  const transport = JEV_TRANSPORTS[provider.kind];
   if (transport === undefined) throw new JevRequestError("jev-request-invalid", `provider kind ${provider.kind} has no decision endpoint`);
   if (typeof request.state !== "string" && !isRecord(request.state) && !Array.isArray(request.state)) {
     throw new JevRequestError("jev-request-invalid", "state must be a string, object or array");
@@ -409,7 +335,7 @@ export async function askJevDecision(
   }
   const body = { model: provider.model, state: request.state, questions: request.questions, ...transport.requestExtras };
   // Redaction runs over the exact outbound payload — after assembly, before
-  // any network call (src/jev.mjs askJev parity).
+  // any network call (plugin/server/runtime/cli/jev.ts askJev parity).
   assertRedacted(body);
   const endpoint = provider.baseUrl.replace(/\/+$/, "") + transport.endpoint;
   // ES2022 lib lacks AbortSignal.any/timeout — own the controller: the
@@ -420,7 +346,7 @@ export async function askJevDecision(
   const onOuterAbort = () => controller.abort();
   opts.signal?.addEventListener("abort", onOuterAbort, { once: true });
   // The deadline covers the WHOLE request — headers AND body reads (parity
-  // src/jev.mjs). Aborting the fetch signal aborts a stalled body stream on
+  // plugin/server/runtime/cli/jev.ts). Aborting the fetch signal aborts a stalled body stream on
   // a real transport, but the deadline must not depend on it: every body
   // read races a rejection armed on this controller's abort.
   const requestError = (error: unknown): JevRequestError => {

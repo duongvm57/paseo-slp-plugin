@@ -9,7 +9,7 @@ import { dirname, join } from 'node:path';
 import { createJev } from '../plugin/server/jev.ts';
 import { makeHome, seqNow, targetOf } from './helpers/plugin-doubles.mjs';
 import { fakeOrKey, fakeTsKey } from './fake-secrets.mjs';
-import { assertRedacted, readJevConfig, readJevKey, sanitizeRemoteText } from '../src/jev.mjs';
+import { assertRedacted, readJevConfig, readJevKey, sanitizeRemoteText } from '../plugin/server/runtime/cli/jev.ts';
 import { redactionFixtures } from './jev-redaction-matrix.mjs';
 
 const jevPath = home => join(home, 'slp-runtime', 'state', 'jev.json');
@@ -85,7 +85,7 @@ test('set-jev rejects malformed input and drift-prone provider values', async t 
   assert.equal(existsSync(jevPath(home)), false, 'a rejected write never creates the file');
 });
 
-test('validator parity with src/jev.mjs — prefixed baseUrl + defaults fill identically', async t => {
+test('validator parity with plugin/server/runtime/cli/jev.ts — prefixed baseUrl + defaults fill identically', async t => {
   const home = makeHome(t);
   const jev = createJev();
   // The documented prefixed form is accepted on the plugin side as well.
@@ -277,8 +277,8 @@ test('get/set-jev verify the daemon home like every other mutation', async t => 
 });
 
 // ---------------------------------------------------------------------------
-// Redaction parity — one fixture matrix through BOTH sanitizers
-// (tests/jev-redaction-matrix.mjs). src/jev.mjs exposes assertRedacted (the
+// Credential adapter coverage — one fixture matrix through CLI and RPC paths
+// (tests/jev-redaction-matrix.mjs). plugin/server/runtime/cli/jev.ts exposes assertRedacted (the
 // outbound guard that refuses the send) and sanitizeRemoteText (exported);
 // plugin/server/jev.ts keeps its sanitizeRemoteText private — the only
 // reachable surfaces are testJev's accepted-label detail (cap 120) and its
@@ -286,7 +286,7 @@ test('get/set-jev verify the daemon home like every other mutation', async t => 
 // pins are byte-exact between the sides.
 // ---------------------------------------------------------------------------
 
-test('redaction parity: the fixture matrix behaves identically on both sanitizers', async t => {
+test('credential handling preserves CLI errors and RPC detail sanitization', async t => {
   const home = makeHome(t);
   const jev = createJev();
   await setJev(jev, home, config());
@@ -344,7 +344,7 @@ test('redaction parity: the fixture matrix behaves identically on both sanitizer
   }
 });
 
-test('redaction parity edge inputs — caps after scrub, non-strings, payload paths', async t => {
+test('credential edge inputs — caps after scrub, non-strings, payload paths', async t => {
   const home = makeHome(t);
   const jev = createJev();
   await setJev(jev, home, config());

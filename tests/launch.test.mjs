@@ -6,11 +6,11 @@ import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { basename, dirname, join } from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { install, json, hash } from '../src/package.mjs';
-import { launchPlan, handoffPlan, launchCheck, requestSchema } from '../src/launch.mjs';
-import { readAssignmentSnapshot } from '../src/assignment-file.mjs';
-import { readCatalog } from '../src/routing.mjs';
-import { spawnKit } from '../src/spawn-kit.mjs';
+import { install, json, hash } from '../plugin/server/runtime/cli/package.ts';
+import { launchPlan, handoffPlan, launchCheck, requestSchema } from '../plugin/server/runtime/cli/launch.ts';
+import { readAssignmentSnapshot } from '../plugin/server/runtime/cli/assignment-file.ts';
+import { readCatalog } from '../plugin/server/runtime/cli/routing.ts';
+import { spawnKit } from '../plugin/server/runtime/cli/spawn-kit.ts';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 function fixture(t) {

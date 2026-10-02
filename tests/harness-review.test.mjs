@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { begin, collect, review, reviewAddendum, summary } from '../e2e/collector.mjs';
 import { evidenceKinds } from '../e2e/evidence.mjs';
 import { criterionEvidence } from '../e2e/criteria.mjs';
-import { hash } from '../src/package.mjs';
+import { hash } from '../plugin/server/runtime/cli/package.ts';
 import { config, setup, fakeReview } from './helpers.mjs';
 
 test('review requires independent identity, all criteria, assertions and real evidence references', t => {

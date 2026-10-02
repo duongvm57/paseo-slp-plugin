@@ -74,7 +74,7 @@ const RING_MAX = 200;
 const RING_AGE_MS = 30 * 24 * 60 * 60 * 1000;
 const SDK_TIMEOUT_MS = 15_000;
 // Parity with the shared Jev helper's default bound (5s, same as
-// src/jev.mjs) — the deadline covers the whole request including the body
+// plugin/server/runtime/cli/jev.ts) — the deadline covers the whole request including the body
 // read; a longer observer-only override would silently widen the cost of a
 // stalled provider.
 const HTTP_TIMEOUT_MS = 5_000;

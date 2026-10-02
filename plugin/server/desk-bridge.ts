@@ -82,7 +82,6 @@ import {
   WIRE_LIMITS,
   type DeskRejectionValue,
   type DeskSeatStatusValue,
-  type DeskSettlementRecordInputValue,
 } from "../shared/enforcement.ts";
 import { auditCapabilities, CAPABILITY_IDS } from "./capabilities.ts";
 import {
@@ -92,7 +91,7 @@ import {
   runAssignmentRegister,
   runHandbackSubmit,
   seatAssignmentsView,
-  type DeskRunnerDeps,
+  type HandbackRunnerDeps,
   type ObservedCaptureValue,
 } from "./desk-handback.ts";
 import {
@@ -107,7 +106,6 @@ import {
   runScopeReview,
   runScopeTransition,
   seatScopesView,
-  type ScopeRunnerDeps,
 } from "./desk-scope.ts";
 import {
   runCheckDeclare,
@@ -118,7 +116,6 @@ import {
   runRolloutDeclare,
   runRolloutTransition,
   seatRolloutsView,
-  type RolloutRunnerDeps,
 } from "./desk-rollout.ts";
 
 type AgentCreateRequest = PluginBeforeRequests["agent.create"];
@@ -412,7 +409,7 @@ interface LockHolder {
  *  before it can ground `completed`; `absent`/`outside-root`/`mismatch`
  *  disprove the claim, `unavailable` means the seam itself could not
  *  prove anything. */
-export function makeExportVerifier(realpath: (path: string) => string): ExportVerifier {
+function makeExportVerifier(realpath: (path: string) => string): ExportVerifier {
   return async (claim, repo) => {
     let root: string;
     try {
@@ -964,28 +961,48 @@ export function createDeskBridge(deps: DeskBridgeDeps) {
   // tool catalog — server-side source of truth (D3)
   // ---------------------------------------------------------------------
 
-  interface ToolDef {
+  interface ToolContext {
+    row: SeatRow;
+    bound: BoundSeat;
+    availability: Availability;
+    /** The one ledger observation behind this dispatch — the status
+     *  runner projects it directly; mutations re-read under the lock. */
+    seatRead: DeskStoreRead | null;
+  }
+
+  interface ToolHandler {
+    input: z.ZodType;
+    prepare(input: unknown): ((ctx: ToolContext) => Promise<unknown>) | null;
+  }
+
+  interface ToolDef extends ToolHandler {
     name: string;
     visible: boolean;
     mutation: boolean;
     description: string;
-    input: z.ZodType;
-    run(ctx: {
-      row: SeatRow;
-      bound: BoundSeat;
-      availability: Availability;
-      /** The one ledger observation behind this dispatch — the status
-       *  runner projects it directly; mutations re-read under the lock. */
-      seatRead: DeskStoreRead | null;
-      input: unknown;
-    }): Promise<unknown>;
+  }
+
+  /** Parse at the strict-input guard, then retain the schema's output type
+   *  until execution after the availability guard. No unchecked input cast
+   *  or second parse is needed when heterogeneous tools share the catalog. */
+  function defineTool<S extends z.ZodType>(
+    input: S,
+    run: (ctx: ToolContext & { input: z.output<S> }) => Promise<unknown>,
+  ): ToolHandler {
+    return {
+      input,
+      prepare(value) {
+        const parsed = input.safeParse(value);
+        return parsed.success ? ctx => run({ ...ctx, input: parsed.data }) : null;
+      },
+    };
   }
 
   /** Runner deps shared by the mutation tools — the store and bound-runtime
    *  capture wiring live in the bridge scope; the P3-b export seam joins
    *  the same assembly so every record call verifies through one path. */
-  const runnerDeps = (): DeskRunnerDeps & SettlementRunnerDeps & ScopeRunnerDeps & CheckRunnerDeps & RolloutRunnerDeps => ({
-    store: store as DeskRunnerDeps["store"],
+  const runnerDeps = (): HandbackRunnerDeps & SettlementRunnerDeps & CheckRunnerDeps => ({
+    store: store as DeskStore,
     capture,
     uuid,
     now,
@@ -996,313 +1013,201 @@ export function createDeskBridge(deps: DeskBridgeDeps) {
     environment: deps.checkEnvironment,
   });
 
-  const TOOL_IMPLS: Record<string, { input: z.ZodType; run: ToolDef["run"] }> = {
-    [STATUS_TOOL]: {
-      input: z.object({}).strict(),
-      async run({ row, bound, availability, seatRead }) {
-        const limitations: string[] = [];
-        if (availability === "recovery-required") {
-          limitations.push(BRIDGE_LIMITATIONS.deskRecoveryRequired);
-        } else if (availability === "degraded") {
-          limitations.push(BRIDGE_LIMITATIONS.deskDegraded);
+  const TOOL_IMPLS: Record<(typeof DESK_TOOL_CATALOG)[number]["name"], ToolHandler> = {
+    [STATUS_TOOL]: defineTool(z.object({}).strict(), async ({ row, bound, availability, seatRead }) => {
+      const limitations: string[] = [];
+      if (availability === "recovery-required") {
+        limitations.push(BRIDGE_LIMITATIONS.deskRecoveryRequired);
+      } else if (availability === "degraded") {
+        limitations.push(BRIDGE_LIMITATIONS.deskDegraded);
+      }
+      let assignments: DeskSeatStatusValue["assignments"] = [];
+      if (availability === "available" && seatRead !== null && seatRead.state === "ok") {
+        // The projection reads the SAME ledger observation that resolved
+        // this seat's identity — availability and assignments can never
+        // come from different ledger versions inside one status call.
+        const projection = seatAssignmentsView(seatRead.ledger, row, {
+          assignments: WIRE_LIMITS.deskStatusAssignments,
+          seats: WIRE_LIMITS.deskStatusSeats,
+          handbacks: WIRE_LIMITS.deskStatusHandbacks,
+        });
+        // P3-b — the settlement mirror joins the same observation, scoped
+        // like the handback list: the owner sees every row on its owned
+        // assignment; a seat sees only the revisions that settle its own
+        // seat.
+        const settlementProjection = seatSettlementsView(seatRead.ledger, row, {
+          settlements: WIRE_LIMITS.deskStatusSettlements,
+        });
+        // P4 — the scope machinery joins the same observation: the owner
+        // sees every scope; a bound seat sees the scopes it is bound to or
+        // may review, with the active round pin so it can bind its
+        // observation. Claimed refs/findingsRef never leave the ledger.
+        const scopeProjection = seatScopesView(seatRead.ledger, row, {
+          scopes: WIRE_LIMITS.deskStatusScopes,
+          reviews: WIRE_LIMITS.deskStatusScopeReviews,
+        });
+        // P5 — the check-runner/rollout machinery joins the same
+        // observation: the owner sees every definition/rollout; a bound
+        // seat sees the rows of scopes it is bound to or may review.
+        // Cohort pins and run identifiers surface; output and claimed
+        // refs never leave the ledger.
+        const rolloutProjection = seatRolloutsView(seatRead.ledger, row, {
+          rollouts: WIRE_LIMITS.deskStatusRollouts,
+          runs: WIRE_LIMITS.deskStatusCheckRuns,
+          checkDefs: WIRE_LIMITS.deskStatusCheckDefs,
+        });
+        assignments = projection.assignments.map(a => ({
+          ...a,
+          settlements: settlementProjection.byAssignment.get(a.assignmentId) ?? [],
+          scopes: scopeProjection.byAssignment.get(a.assignmentId) ?? [],
+          checkDefinitions: rolloutProjection.defsByAssignment.get(a.assignmentId) ?? [],
+          rollouts: rolloutProjection.rolloutsByAssignment.get(a.assignmentId) ?? [],
+        }));
+        limitations.push(...projection.limitations);
+        if (settlementProjection.truncated > 0) {
+          limitations.push(`${settlementProjection.truncated} assignment(s) have settlement lists truncated at ${WIRE_LIMITS.deskStatusSettlements}`);
         }
-        let assignments: DeskSeatStatusValue["assignments"] = [];
-        if (availability === "available" && seatRead !== null && seatRead.state === "ok") {
-          // The projection reads the SAME ledger observation that resolved
-          // this seat's identity — availability and assignments can never
-          // come from different ledger versions inside one status call.
-          const projection = seatAssignmentsView(seatRead.ledger, row, {
-            assignments: WIRE_LIMITS.deskStatusAssignments,
-            seats: WIRE_LIMITS.deskStatusSeats,
-            handbacks: WIRE_LIMITS.deskStatusHandbacks,
-          });
-          // P3-b — the settlement mirror joins the same observation, scoped
-          // like the handback list: the owner sees every row on its owned
-          // assignment; a seat sees only the revisions that settle its own
-          // seat.
-          const settlementProjection = seatSettlementsView(seatRead.ledger, row, {
-            settlements: WIRE_LIMITS.deskStatusSettlements,
-          });
-          // P4 — the scope machinery joins the same observation: the owner
-          // sees every scope; a bound seat sees the scopes it is bound to or
-          // may review, with the active round pin so it can bind its
-          // observation. Claimed refs/findingsRef never leave the ledger.
-          const scopeProjection = seatScopesView(seatRead.ledger, row, {
-            scopes: WIRE_LIMITS.deskStatusScopes,
-            reviews: WIRE_LIMITS.deskStatusScopeReviews,
-          });
-          // P5 — the check-runner/rollout machinery joins the same
-          // observation: the owner sees every definition/rollout; a bound
-          // seat sees the rows of scopes it is bound to or may review.
-          // Cohort pins and run identifiers surface; output and claimed
-          // refs never leave the ledger.
-          const rolloutProjection = seatRolloutsView(seatRead.ledger, row, {
-            rollouts: WIRE_LIMITS.deskStatusRollouts,
-            runs: WIRE_LIMITS.deskStatusCheckRuns,
-            checkDefs: WIRE_LIMITS.deskStatusCheckDefs,
-          });
-          assignments = projection.assignments.map(a => ({
-            ...a,
-            settlements: settlementProjection.byAssignment.get(a.assignmentId) ?? [],
-            scopes: scopeProjection.byAssignment.get(a.assignmentId) ?? [],
-            checkDefinitions: rolloutProjection.defsByAssignment.get(a.assignmentId) ?? [],
-            rollouts: rolloutProjection.rolloutsByAssignment.get(a.assignmentId) ?? [],
-          }));
-          limitations.push(...projection.limitations);
-          if (settlementProjection.truncated > 0) {
-            limitations.push(`${settlementProjection.truncated} assignment(s) have settlement lists truncated at ${WIRE_LIMITS.deskStatusSettlements}`);
-          }
-          if (scopeProjection.truncated > 0) {
-            limitations.push(`${scopeProjection.truncated} assignment(s) have scope lists truncated at ${WIRE_LIMITS.deskStatusScopes}`);
-          }
-          if (scopeProjection.reviewsTruncated > 0) {
-            limitations.push(`${scopeProjection.reviewsTruncated} scope(s) have review lists truncated at ${WIRE_LIMITS.deskStatusScopeReviews}`);
-          }
-          if (rolloutProjection.defsTruncated > 0) {
-            limitations.push(`${rolloutProjection.defsTruncated} assignment(s) have check-definition lists truncated at ${WIRE_LIMITS.deskStatusCheckDefs}`);
-          }
-          if (rolloutProjection.truncated > 0) {
-            limitations.push(`${rolloutProjection.truncated} assignment(s) have rollout lists truncated at ${WIRE_LIMITS.deskStatusRollouts}`);
-          }
-          if (rolloutProjection.runsTruncated > 0) {
-            limitations.push(`${rolloutProjection.runsTruncated} rollout(s) have run lists truncated at ${WIRE_LIMITS.deskStatusCheckRuns}`);
-          }
-        } else if (availability !== "available") {
-          // The projection is withheld, not faked — a desk that cannot be
-          // read cannot serve a trustworthy seat view; the limitation
-          // records the elision instead of silently returning [].
-          limitations.push(BRIDGE_LIMITATIONS.assignmentsWithheld);
-        } else {
-          limitations.push("assignments view unavailable — ledger did not read cleanly");
+        if (scopeProjection.truncated > 0) {
+          limitations.push(`${scopeProjection.truncated} assignment(s) have scope lists truncated at ${WIRE_LIMITS.deskStatusScopes}`);
         }
-        const view: DeskSeatStatusValue = {
-          schemaVersion: 1,
-          generatedAt: now().toISOString(),
-          seat: {
-            membershipId: row.membershipId,
-            agentId: row.agentId as string,
-            state: row.state,
-            family: row.family,
-            role: row.role,
-            provider: row.provider,
-            workspaceId: row.workspaceId,
-            createCwd: row.createCwd,
-            openGeneration: row.openGeneration,
-            createdAt: row.createdAt,
-            hostConfirmedAt: row.hostConfirmedAt,
-            registeredAt: row.registeredAt,
-          },
-          desk: { repoKey: bound.repoKey, state: availability, protocol: DESK_BRIDGE_PROTOCOL },
-          assignments,
-          limitations: boundLimitations(limitations, WIRE_LIMITS.deskBridgeLimitations),
-          acceptance: "not-established-by-this-view",
-        };
-        return DeskSeatStatus.parse(view);
-      },
-    },
-    [HANDBACK_SUBMIT_TOOL]: {
-      input: DeskHandbackSubmitInput,
-      async run({ row, bound, input }) {
-        return runHandbackSubmit(
-          { repoKey: bound.repoKey, row },
-          input as {
-            requestId: string;
-            assignmentId: string;
-            recordV1: Record<string, unknown>;
-            candidateId: string | null;
-          },
-          runnerDeps(),
-        );
-      },
-    },
-    [ASSIGNMENT_REGISTER_TOOL]: {
-      input: DeskAssignmentRegisterInput,
-      async run({ row, bound, input }) {
-        return runAssignmentRegister(
-          { repoKey: bound.repoKey, row },
-          input as { requestId: string; authorityRef: string; objective: string | null },
-          runnerDeps(),
-        );
-      },
-    },
-    [ASSIGNMENT_ATTACH_TOOL]: {
-      input: DeskAssignmentAttachInput,
-      async run({ row, bound, input }) {
-        return runAssignmentAttach(
-          { repoKey: bound.repoKey, row },
-          input as { requestId: string; assignmentId: string; agentId: string },
-          runnerDeps(),
-        );
-      },
-    },
-    [ASSIGNMENT_CLOSE_TOOL]: {
-      input: DeskAssignmentCloseInput,
-      async run({ row, bound, input }) {
-        return runAssignmentClose(
-          { repoKey: bound.repoKey, row },
-          input as { requestId: string; assignmentId: string },
-          runnerDeps(),
-        );
-      },
-    },
-    [SETTLEMENT_RECORD_TOOL]: {
-      input: DeskSettlementRecordInput,
-      async run({ row, bound, input }) {
-        return runSettlementRecord(
-          { repoKey: bound.repoKey, row },
-          input as DeskSettlementRecordInputValue,
-          runnerDeps(),
-        );
-      },
-    },
-    [SETTLEMENT_EXPORT_TOOL]: {
-      input: DeskSettlementExportInput,
-      async run({ row, bound, input }) {
-        return runSettlementExport(
-          { repoKey: bound.repoKey, row },
-          input as { settlementId: string },
-          runnerDeps(),
-        );
-      },
-    },
-    [SCOPE_DECLARE_TOOL]: {
-      input: DeskScopeDeclareInput,
-      async run({ row, bound, input }) {
-        return runScopeDeclare(
-          { repoKey: bound.repoKey, row },
-          input as {
-            requestId: string;
-            assignmentId: string;
-            scopeId: string;
-            label: string;
-            declarationSha256: string;
-            refs: string[];
-            seatAgentId: string | null;
-          },
-          runnerDeps(),
-        );
-      },
-    },
-    [SCOPE_TRANSITION_TOOL]: {
-      input: DeskScopeTransitionInput,
-      async run({ row, bound, input }) {
-        return runScopeTransition(
-          { repoKey: bound.repoKey, row },
-          input as {
-            requestId: string;
-            assignmentId: string;
-            scopeId: string;
-            transition: string;
-            scopeRevision: number;
-            candidateSnapshot: string | null;
-            candidateHead: string | null;
-          },
-          runnerDeps(),
-        );
-      },
-    },
-    [SCOPE_REVIEW_TOOL]: {
-      input: DeskScopeReviewInput,
-      async run({ row, bound, input }) {
-        return runScopeReview(
-          { repoKey: bound.repoKey, row },
-          input as {
-            requestId: string;
-            assignmentId: string;
-            scopeId: string;
-            scopeRevision: number;
-            candidateSnapshot: string;
-            axis: string;
-            verdict: string;
-            findingsRef: string | null;
-          },
-          runnerDeps(),
-        );
-      },
-    },
-    [CHECK_DECLARE_TOOL]: {
-      input: DeskCheckDeclareInput,
-      async run({ row, bound, input }) {
-        return runCheckDeclare(
-          { repoKey: bound.repoKey, row },
-          input as {
-            requestId: string;
-            assignmentId: string;
-            scopeId: string;
-            checkId: string;
-            checkClass: "ledger-integrity" | "repo-payload-check" | "repo-git-head";
-            label: string;
-            definitionSha256: string;
-            limits: { timeoutMs: number; maxOutputBytes: number; maxRetries: number };
-            requiredEvidence: string[];
-            refs: string[];
-          },
-          runnerDeps(),
-        );
-      },
-    },
-    [CHECK_RUN_TOOL]: {
-      input: DeskCheckRunInput,
-      async run({ row, bound, input }) {
-        return runCheckRun(
-          { repoKey: bound.repoKey, row },
-          input as {
-            requestId: string;
-            assignmentId: string;
-            rolloutId: string;
-            checkId: string;
-            definitionRevision: number;
-            evidenceRef: string | null;
-          },
-          runnerDeps(),
-        );
-      },
-    },
-    [ROLLOUT_DECLARE_TOOL]: {
-      input: DeskRolloutDeclareInput,
-      async run({ row, bound, input }) {
-        return runRolloutDeclare(
-          { repoKey: bound.repoKey, row },
-          input as {
-            requestId: string;
-            assignmentId: string;
-            scopeId: string;
-            rolloutId: string;
-            label: string;
-            declarationSha256: string;
-            candidateSnapshot: string;
-            candidateHead: string | null;
-            requiredChecks: { checkId: string; definitionDigest: string }[];
-            refs: string[];
-          },
-          runnerDeps(),
-        );
-      },
-    },
-    [ROLLOUT_TRANSITION_TOOL]: {
-      input: DeskRolloutTransitionInput,
-      async run({ row, bound, input }) {
-        return runRolloutTransition(
-          { repoKey: bound.repoKey, row },
-          input as {
-            requestId: string;
-            assignmentId: string;
-            rolloutId: string;
-            transition: string;
-            rolloutRevision: number;
-            targetSnapshot: string | null;
-            evidenceRefs: string[];
-          },
-          runnerDeps(),
-        );
-      },
-    },
-    [HIDDEN_TOOL]: {
-      input: z.object({}).strict(),
-      async run() {
-        throw new Error("hidden tool must never run");
-      },
-    },
+        if (scopeProjection.reviewsTruncated > 0) {
+          limitations.push(`${scopeProjection.reviewsTruncated} scope(s) have review lists truncated at ${WIRE_LIMITS.deskStatusScopeReviews}`);
+        }
+        if (rolloutProjection.defsTruncated > 0) {
+          limitations.push(`${rolloutProjection.defsTruncated} assignment(s) have check-definition lists truncated at ${WIRE_LIMITS.deskStatusCheckDefs}`);
+        }
+        if (rolloutProjection.truncated > 0) {
+          limitations.push(`${rolloutProjection.truncated} assignment(s) have rollout lists truncated at ${WIRE_LIMITS.deskStatusRollouts}`);
+        }
+        if (rolloutProjection.runsTruncated > 0) {
+          limitations.push(`${rolloutProjection.runsTruncated} rollout(s) have run lists truncated at ${WIRE_LIMITS.deskStatusCheckRuns}`);
+        }
+      } else if (availability !== "available") {
+        // The projection is withheld, not faked — a desk that cannot be
+        // read cannot serve a trustworthy seat view; the limitation
+        // records the elision instead of silently returning [].
+        limitations.push(BRIDGE_LIMITATIONS.assignmentsWithheld);
+      } else {
+        limitations.push("assignments view unavailable — ledger did not read cleanly");
+      }
+      const view: DeskSeatStatusValue = {
+        schemaVersion: 1,
+        generatedAt: now().toISOString(),
+        seat: {
+          membershipId: row.membershipId,
+          agentId: row.agentId as string,
+          state: row.state,
+          family: row.family,
+          role: row.role,
+          provider: row.provider,
+          workspaceId: row.workspaceId,
+          createCwd: row.createCwd,
+          openGeneration: row.openGeneration,
+          createdAt: row.createdAt,
+          hostConfirmedAt: row.hostConfirmedAt,
+          registeredAt: row.registeredAt,
+        },
+        desk: { repoKey: bound.repoKey, state: availability, protocol: DESK_BRIDGE_PROTOCOL },
+        assignments,
+        limitations: boundLimitations(limitations, WIRE_LIMITS.deskBridgeLimitations),
+        acceptance: "not-established-by-this-view",
+      };
+      return DeskSeatStatus.parse(view);
+    }),
+    [HANDBACK_SUBMIT_TOOL]: defineTool(DeskHandbackSubmitInput, async ({ row, bound, input }) => {
+      return runHandbackSubmit(
+        { repoKey: bound.repoKey, row },
+        input,
+        runnerDeps(),
+      );
+    }),
+    [ASSIGNMENT_REGISTER_TOOL]: defineTool(DeskAssignmentRegisterInput, async ({ row, bound, input }) => {
+      return runAssignmentRegister(
+        { repoKey: bound.repoKey, row },
+        input,
+        runnerDeps(),
+      );
+    }),
+    [ASSIGNMENT_ATTACH_TOOL]: defineTool(DeskAssignmentAttachInput, async ({ row, bound, input }) => {
+      return runAssignmentAttach(
+        { repoKey: bound.repoKey, row },
+        input,
+        runnerDeps(),
+      );
+    }),
+    [ASSIGNMENT_CLOSE_TOOL]: defineTool(DeskAssignmentCloseInput, async ({ row, bound, input }) => {
+      return runAssignmentClose(
+        { repoKey: bound.repoKey, row },
+        input,
+        runnerDeps(),
+      );
+    }),
+    [SETTLEMENT_RECORD_TOOL]: defineTool(DeskSettlementRecordInput, async ({ row, bound, input }) => {
+      return runSettlementRecord(
+        { repoKey: bound.repoKey, row },
+        input,
+        runnerDeps(),
+      );
+    }),
+    [SETTLEMENT_EXPORT_TOOL]: defineTool(DeskSettlementExportInput, async ({ row, bound, input }) => {
+      return runSettlementExport(
+        { repoKey: bound.repoKey, row },
+        input,
+        runnerDeps(),
+      );
+    }),
+    [SCOPE_DECLARE_TOOL]: defineTool(DeskScopeDeclareInput, async ({ row, bound, input }) => {
+      return runScopeDeclare(
+        { repoKey: bound.repoKey, row },
+        input,
+        runnerDeps(),
+      );
+    }),
+    [SCOPE_TRANSITION_TOOL]: defineTool(DeskScopeTransitionInput, async ({ row, bound, input }) => {
+      return runScopeTransition(
+        { repoKey: bound.repoKey, row },
+        input,
+        runnerDeps(),
+      );
+    }),
+    [SCOPE_REVIEW_TOOL]: defineTool(DeskScopeReviewInput, async ({ row, bound, input }) => {
+      return runScopeReview(
+        { repoKey: bound.repoKey, row },
+        input,
+        runnerDeps(),
+      );
+    }),
+    [CHECK_DECLARE_TOOL]: defineTool(DeskCheckDeclareInput, async ({ row, bound, input }) => {
+      return runCheckDeclare(
+        { repoKey: bound.repoKey, row },
+        input,
+        runnerDeps(),
+      );
+    }),
+    [CHECK_RUN_TOOL]: defineTool(DeskCheckRunInput, async ({ row, bound, input }) => {
+      return runCheckRun(
+        { repoKey: bound.repoKey, row },
+        input,
+        runnerDeps(),
+      );
+    }),
+    [ROLLOUT_DECLARE_TOOL]: defineTool(DeskRolloutDeclareInput, async ({ row, bound, input }) => {
+      return runRolloutDeclare(
+        { repoKey: bound.repoKey, row },
+        input,
+        runnerDeps(),
+      );
+    }),
+    [ROLLOUT_TRANSITION_TOOL]: defineTool(DeskRolloutTransitionInput, async ({ row, bound, input }) => {
+      return runRolloutTransition(
+        { repoKey: bound.repoKey, row },
+        input,
+        runnerDeps(),
+      );
+    }),
+    [HIDDEN_TOOL]: defineTool(z.object({}).strict(), async () => {
+      throw new Error("hidden tool must never run");
+    }),
   };
   // Producer contract: every catalog row — visible or hidden — must satisfy
   // the centralized DeskBridgeToolEntry caps and bind an implementation
@@ -1375,8 +1280,8 @@ export function createDeskBridge(deps: DeskBridgeDeps) {
     if (identityError !== null) return fail(identityError);
     const capError = capabilityGate();
     if (capError !== null) return fail(capError);
-    const input = tool.input.safeParse(call.data.arguments ?? {});
-    if (!input.success) {
+    const run = tool.prepare(call.data.arguments ?? {});
+    if (run === null) {
       return fail(rejection(
         "INVALID_RECORD",
         `tool arguments fail the strict input schema for ${tool.name}`,
@@ -1406,7 +1311,7 @@ export function createDeskBridge(deps: DeskBridgeDeps) {
             : "degraded";
     }
     try {
-      const result = await tool.run({ row, bound, availability, seatRead, input: input.data });
+      const result = await run({ row, bound, availability, seatRead });
       return { content: [{ type: "text", text: text(result) }] };
     } catch (error) {
       return fail(rejection(

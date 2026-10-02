@@ -9,7 +9,7 @@
 // idea (latest user_message boundary, confirmed-send evidence) is adapted;
 // the per-family adapters below are SLP-specific and open shapes backed by
 // real normalized fixtures (tests/fixtures/supervision/). The common launch
-// envelope parser is source-derived from src/launch.mjs and synthetically
+// envelope parser is source-derived from plugin/server/runtime/cli/launch.ts and synthetically
 // pinned for Pi, whose live message had no such wrapper.
 //
 // Evidence is separate for the brief, the handback, each send's INPUT and
@@ -25,8 +25,8 @@ import { createHash } from "node:crypto";
 import type { AgentTimelineItem } from "@getpaseo/protocol/agent-types";
 import type { PluginHookAgent, PluginLifecycleEvents } from "@getpaseo/plugin/server";
 import { z } from "zod";
-import { familyFromProviderId, ROLES } from "../../shared/families.ts";
-import type { FamilyId } from "../../shared/families.ts";
+import { familyFromProviderId, ROLES } from "../../shared/runtime/families.ts";
+import type { FamilyId } from "../../shared/runtime/families.ts";
 import { isSlpLead, isSlpPeer, isSlpSupervisor } from "../../shared/supervision.ts";
 
 export type TurnEnded = PluginLifecycleEvents["agent.turn_ended"];
@@ -195,9 +195,9 @@ const sendInputSchema = z.object({ agentId: z.string().min(1), prompt: z.string(
 
 // --- message mapping ----------------------------------------------------------
 
-// The SLP ACP role transport (src/role-transport.mjs acpRolePrompt) puts the
+// The SLP ACP role transport (plugin/server/runtime/cli/role-transport.ts acpRolePrompt) puts the
 // role policy in front of every Devin prompt: `entry()` on the first prompt
-// of a session, `anchor()` after (src/role-bundle.mjs roleDelivery). Both
+// of a session, `anchor()` after (plugin/server/runtime/cli/role-bundle.ts roleDelivery). Both
 // start with `SLP role=<role>\n` and end with this exact line; `entry()` is
 // followed by the measured carrier block. The strip accepts only that
 // rendering (pinned by a test that renders the real bundle).
@@ -306,8 +306,8 @@ const stripCompactLaunch = (text: string, family: FamilyId, role: "lead" | "peer
 };
 // Any trace of the SLP ACP role transport or launch builder anywhere in a
 // Devin user_message — every fixed structural line the renderers emit
-// (src/role-bundle.mjs roleDelivery/managedHelpers/communicationLanguage/
-// carrierBlock, src/work-tracker.mjs workTrackerBlock, src/launch.mjs):
+// (plugin/server/runtime/cli/role-bundle.ts roleDelivery/managedHelpers/communicationLanguage/
+// carrierBlock, plugin/server/runtime/cli/work-tracker.ts workTrackerBlock, plugin/server/runtime/cli/launch.ts):
 // the role line, either half of the terminal line, the recovery and snapshot
 // lines, the onboarding locator, the managed-runtime helper block, the
 // communication-language line, the work-tracker line, the carrier block, or

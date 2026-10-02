@@ -1,7 +1,7 @@
-// tests/desk-recovery-cli.test.mjs — P2-e CLI mirror coverage.
+// tests/desk-recovery-cli.test.mjs — CLI/RPC adapter and sync/async driver coverage.
 //
-// X2 parity: the same fixture driven through the plugin TS algorithm and
-// src/desk-recovery.mjs produces the same output object except
+// X2 surface parity: the same shared engine driven through the plugin and
+// plugin/server/runtime/cli/desk-recovery.ts produces the same output object except
 // receipt.actorKey/receipt.at (surface identity and clock). The bin verb is
 // spawned as a real process for exit codes and --json shape.
 //
@@ -23,7 +23,7 @@ import { repoKeyFor } from '../plugin/server/desk-store.ts';
 import { DeskRecoveryResult, RecoverLockOutput, WIRE_LIMITS } from '../plugin/shared/enforcement.ts';
 import {
   deskRecover, repoKeyOf, repoKeyFor as mirrorRepoKeyFor, cliActorKey, DESK_BRIDGE_REPO,
-} from '../src/desk-recovery.mjs';
+} from '../plugin/server/runtime/cli/desk-recovery.ts';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const SLP = join(ROOT, 'bin', 'slp.mjs');

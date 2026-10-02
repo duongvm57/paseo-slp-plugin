@@ -20,7 +20,7 @@ import {
 } from "../shared/contracts.ts";
 
 // Domain constants derive from the shared family registry
-// (../shared/families.ts) — the plugin bundle may not import ../src/*.mjs
+// (../shared/runtime/families.ts) — the plugin bundle may not import ../src/*.mjs
 // across the plugin boundary (§2), and there is no second literal family
 // list. The historical export names stay so consumers keep one import site.
 import {
@@ -31,7 +31,7 @@ import {
   ROLES,
   type FamilyId,
   type RoleName,
-} from "../shared/families.ts";
+} from "../shared/runtime/families.ts";
 export { OWNED_PROVIDER_IDS, PROVIDER_EXTENDS, ROLES };
 export const FAMILIES = FAMILY_IDS;
 export type FamilyName = FamilyId;

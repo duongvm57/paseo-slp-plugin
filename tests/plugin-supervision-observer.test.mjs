@@ -18,9 +18,9 @@ import {
 } from '../plugin/server/supervision/assessment.ts';
 import { resolveSupervision, askJevDecision, assertRedacted, JevRequestError } from '../plugin/server/jev.ts';
 import { makeHome } from './helpers/plugin-doubles.mjs';
-import { install, json } from '../src/package.mjs';
-import { readCatalog } from '../src/routing.mjs';
-import { roleDelivery } from '../src/role-bundle.mjs';
+import { install, json } from '../plugin/server/runtime/cli/package.ts';
+import { readCatalog } from '../plugin/server/runtime/cli/routing.ts';
+import { roleDelivery } from '../plugin/server/runtime/cli/role-bundle.ts';
 
 const LEAD = '11111111-1111-4111-8111-111111111111';
 const PEER = '22222222-2222-4222-8222-222222222222';

@@ -79,7 +79,7 @@ different providers, models and effort levels.
 You need:
 
 - Paseo `>=0.8.0`, with `pluginsEnabled: true` and an effective `mcp.enabled: true`
-- Node.js 22 or newer on the daemon host
+- Node.js 22.18+ or 23.6+ on the daemon host (native TypeScript stripping)
 - the CLI of each provider family you use (Codex, Pi, Devin, Claude), signed in on the daemon host;
   Pi needs repeatable `--append-system-prompt` support
 
@@ -151,7 +151,7 @@ profiles and keeps the runtime files for sessions still running), then run
 ```bash
 PASEO_HOME="$(mktemp -d)" npm test   # isolate from your live daemon, as CI does
 npm run typecheck
-npm run check:plugin-payload         # regenerate with npm run generate:plugin-payload after changing src/, bin/, skills/
+npm run check:plugin-payload         # regenerate after changing plugin runtime, src/ policy, bin/ or skills/
 ```
 
 To dogfood live from a source checkout, ask an open session to *run the package's full E2E*. See

@@ -3,7 +3,7 @@
 // end-to-end over the REAL Unix socket — real desk store, real wire frames,
 // structural doubles only for the host SDK and the observed-capture
 // subprocess. The derived record is also re-validated against the
-// AUTHORITATIVE src/report-records.mjs validateRecord (B5 parser parity).
+// AUTHORITATIVE plugin/server/runtime/cli/report-records.ts validateRecord (B5 parser parity).
 // Fixtures live under tmpdir(); the real daemon home and repo tree are
 // never touched.
 
@@ -25,7 +25,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { validateRecord } from '../src/report-records.mjs';
+import { validateRecord } from '../plugin/server/runtime/cli/report-records.ts';
 import {
   createDeskStore,
   deskBridgePaths,
@@ -781,7 +781,7 @@ test('B5: export re-derives the committed v1 record — authoritative validator 
   assert.equal(v1.decisionRef, undefined);
   assert.equal(v1.deliveryRef, undefined);
   assert.equal(v1.status, undefined);
-  // B5 — the AUTHORITATIVE validator (src/report-records.mjs), not the port.
+  // B5 — the AUTHORITATIVE validator (plugin/server/runtime/cli/report-records.ts), not the port.
   const verdict = validateRecord(v1);
   assert.equal(verdict.valid, true, JSON.stringify(verdict.errors));
 });

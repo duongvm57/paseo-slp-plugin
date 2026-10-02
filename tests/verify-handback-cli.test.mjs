@@ -9,7 +9,7 @@ import { chmodSync, cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeF
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { hash, identity, snapshot } from '../src/package.mjs';
+import { hash, identity, snapshot } from '../plugin/server/runtime/cli/package.ts';
 
 const PKG = fileURLToPath(new URL('..', import.meta.url));
 const BIN = join(PKG, 'bin', 'slp.mjs');
@@ -200,7 +200,7 @@ test('a malformed repo-probe line after exit 0 is IO_FAILURE at the CLI', t => {
 });
 
 test('an old runtime without the verb keeps its existing unknown-command behavior', t => {
-  // The "old runtime" is a hermetic copy of this package's bin/ + src/ with
+  // The "old runtime" is a hermetic copy of this package's install unit with
   // the verify-handback commands-table entry and dispatch branch stripped —
   // no git history, commit SHA or network, so a shallow CI checkout cannot
   // break it (Lead's CI-surface finding, correction round 3). Running the
@@ -210,8 +210,12 @@ test('an old runtime without the verb keeps its existing unknown-command behavio
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   cpSync(join(PKG, 'bin'), join(dir, 'bin'), { recursive: true });
   cpSync(join(PKG, 'src'), join(dir, 'src'), { recursive: true });
+  cpSync(join(PKG, 'plugin/server/runtime'), join(dir, 'plugin/server/runtime'), { recursive: true });
+  cpSync(join(PKG, 'plugin/shared/runtime'), join(dir, 'plugin/shared/runtime'), { recursive: true });
+  cpSync(join(PKG, 'package.json'), join(dir, 'package.json'));
   const slpPath = join(dir, 'bin', 'slp.mjs');
-  const lines = readFileSync(slpPath, 'utf8').split('\n');
+  const commandsPath = join(dir, 'plugin', 'server', 'runtime', 'cli', 'cli.ts');
+  const lines = readFileSync(commandsPath, 'utf8').split('\n');
   const entry = lines.findIndex(line => line.includes("'verify-handback':"));
   assert.ok(entry > -1, 'source commands table must contain the verb entry');
   lines.splice(entry, 1);
@@ -223,7 +227,7 @@ test('an old runtime without the verb keeps its existing unknown-command behavio
   const stripped = lines.join('\n');
   assert.ok(!stripped.includes("'verify-handback':"), 'copy must lose the commands-table entry');
   assert.ok(!stripped.includes("command === 'verify-handback'"), 'copy must lose the dispatch branch');
-  writeFileSync(slpPath, stripped);
+  writeFileSync(commandsPath, stripped);
   const res = spawnSync(process.execPath, [slpPath, 'verify-handback', 'report.md'], { encoding: 'utf8' });
   assert.equal(res.status, 1);
   assert.equal(res.stdout, '');

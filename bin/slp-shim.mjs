@@ -11,6 +11,7 @@
 // with the frozen manifest environment. Missing separator, invalid fixed
 // fields, unavailable binaries and corrupt runtimes are hard failures — the
 // shim never falls back to an unwrapped executable.
+import { supportsNodeVersion, SUPPORTED_NODE_RANGE } from '../plugin/shared/runtime/node-version.mjs';
 import { readFileSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -32,7 +33,7 @@ const RUNTIME_CONTROL_ENV_KEYS = [
 const STRIPPED_ENV_KEYS = [...RUNTIME_CONTROL_ENV_KEYS, 'NODE_OPTIONS'];
 const FAMILIES = ['codex', 'pi', 'devin', 'claude'];
 const ROLES = ['supervisor', 'lead', 'peer'];
-const MIN_NODE_MAJOR = 22;
+
 
 const fail = message => {
   console.error(`slp-shim: ${message}`);
@@ -69,7 +70,7 @@ function loadManifest(path, expectedSha256) {
 // (already digest-verified) launch manifest.
 async function verifyCandidate(manifest) {
   const root = manifest.candidate.path;
-  const pkg = await import(pathToFileURL(join(root, 'src/package.mjs')).href);
+  const pkg = await import(pathToFileURL(join(root, 'plugin/server/runtime/cli/package.ts')).href);
   pkg.verifyInstall(root);
   const actual = pkg.identity(root).sha256;
   if (actual !== manifest.candidate.sha256) {
@@ -120,8 +121,7 @@ async function main() {
   if (!ROLES.includes(role)) return fail(`invalid role '${role}'`);
   // The shim itself must be running on ordinary supported Node, not Electron.
   if (process.versions.electron != null) return fail('requires ordinary Node.js, not an Electron runtime');
-  const major = Number.parseInt(process.versions.node.split('.')[0], 10);
-  if (!(major >= MIN_NODE_MAJOR)) return fail(`requires Node.js >= ${MIN_NODE_MAJOR}, running ${process.versions.node}`);
+  if (!supportsNodeVersion(process.versions.node)) return fail(`requires Node.js ${SUPPORTED_NODE_RANGE}, running ${process.versions.node}`);
 
   const manifest = loadManifest(manifestPath, manifestSha256);
   const binary = manifest.binaries[family];

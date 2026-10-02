@@ -5,8 +5,8 @@ import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { json, readJson } from '../src/package.mjs';
-import { monitor } from '../src/monitor.mjs';
+import { json, readJson } from '../plugin/server/runtime/cli/package.ts';
+import { monitor } from '../plugin/server/runtime/cli/monitor.ts';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 function fixture(t) {

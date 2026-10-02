@@ -3,10 +3,12 @@
 // install unit for the Option A manager plugin (spec §5). Runs from the repo
 // root during development/release preparation; `--check` regenerates in memory
 // and byte-compares against the committed module for CI.
-import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { hash, identity, json } from '../src/package.mjs';
+import { hash, identity, installUnitPaths, json } from '../plugin/server/runtime/cli/package.ts';
+
+import { assertRuntimeGraph } from './runtime-graph.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const output = join(root, 'plugin/server/generated/runtime-payload.ts');
@@ -17,40 +19,17 @@ const fail = message => {
   process.exit(1);
 };
 
-// POSIX-relative install-unit paths: package.json, install.sh, every regular
-// file under bin/, optional skills/, and src/. Symlinks and non-regular
-// entries are rejected rather than followed or skipped.
-const walk = directory => readdirSync(join(root, directory), { withFileTypes: true }).flatMap(entry => {
-  const path = `${directory}/${entry.name}`;
-  if (entry.isSymbolicLink()) throw new Error(`payload symlink unsupported: ${path}`);
-  if (entry.isDirectory()) return walk(path);
-  if (!entry.isFile()) throw new Error(`payload entry is not a regular file: ${path}`);
-  return [path];
-});
-const statFile = path => {
-  const stat = lstatSync(join(root, path));
-  if (stat.isSymbolicLink()) throw new Error(`payload symlink unsupported: ${path}`);
-  if (!stat.isFile()) throw new Error(`payload entry is not a regular file: ${path}`);
-  return stat;
-};
-const walkRoot = directory => {
-  const stat = lstatSync(join(root, directory));
-  if (stat.isSymbolicLink() || !stat.isDirectory()) throw new Error(`payload entry is not a directory: ${directory}`);
-  return walk(directory);
-};
-const optionalRoot = directory => {
-  try { lstatSync(join(root, directory)); } catch (error) {
-    if (error && error.code === 'ENOENT') return [];
-    throw error;
-  }
-  return walkRoot(directory);
-};
+// The installed runtime owns selection; the generator only encodes bytes/modes.
 let paths;
 try {
-  paths = ['package.json', 'install.sh', ...walkRoot('bin'), ...optionalRoot('skills'), ...walkRoot('src')].sort();
+  paths = installUnitPaths(root);
+  assertRuntimeGraph(paths.filter(path => /\.(?:mjs|ts)$/u.test(path)).map(path => ({
+    path, source: readFileSync(join(root, path), 'utf8'),
+  })));
 } catch (error) {
   fail(error instanceof Error ? error.message : String(error));
 }
+const statFile = path => lstatSync(join(root, path));
 
 // Path keys stay portable: relative POSIX separators, no empty/dot/dot-dot
 // components, no absolute or drive-prefixed forms, no duplicates or
@@ -86,7 +65,8 @@ const payloadSha256 = hash(json(files.map(({ path, sha256, mode }) => ({ path, s
 const payload = { schemaVersion: 1, candidate, payloadSha256, files };
 
 const module_ = `// generated — do not edit. Produced by scripts/generate-plugin-payload.mjs
-// from the install unit (package.json, install.sh, bin/, skills/, src/).
+// from installUnitPaths(): package.json, install.sh, bin/, skills/, src/,
+// plugin/server/runtime/ and plugin/shared/runtime/ (exact source bytes).
 // Regenerate with \`npm run generate:plugin-payload\`; CI verifies with
 // \`npm run check:plugin-payload\` (--check byte-compares this file).
 import type { EmbeddedPayload } from "../../shared/contracts.ts";

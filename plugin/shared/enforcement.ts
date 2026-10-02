@@ -1,3 +1,4 @@
+import { DESK_REJECTION_LIMITS, DESK_RECOVERY_LIMITS, DESK_RECOVERY_RESULTS } from "./runtime/desk-contract.ts";
 // Shared enforcement wire/view contracts for the mechanize-enforcement desk
 // (P0). Same boundary rules as contracts.ts: shared/ modules may import only
 // zod, react-family specifiers and @getpaseo/plugin — no node builtins. This
@@ -73,8 +74,7 @@ export const WIRE_LIMITS = {
   limitationLen: 128,
   recordLimitations: 4,
   mcpToolRefLen: 256,
-  rejectionMessage: 2048,
-  rejectionRecovery: 1024,
+  ...DESK_REJECTION_LIMITS,
   /** Install-receipt projection bounds — typed, never raw file content. */
   installationState: 64,
   installationError: 256,
@@ -122,9 +122,7 @@ export const WIRE_LIMITS = {
   // bounded by length only — the writer emits randomUUID, the reader
   // accepts any nonempty string up to the cap; the result name bound
   // covers the longest result string.
-  recoverActorKey: 128,
-  recoverNonce: 64,
-  recoverResult: 32,
+  ...DESK_RECOVERY_LIMITS,
   // desk MCP bridge (P2-d): raw UTF-8 line caps per direction — inbound
   // request frames to the adapter (and seat-side stdin) vs outbound
   // response frames (adapter writes and socket→stdout relay). Both are
@@ -407,8 +405,7 @@ export function mergeToolPolicyPreapprovals(
 
 // ---------------------------------------------------------------------------
 // Desk error vocabulary — the closed enum the desk's Rejection envelope uses
-// across all transports (P2+). P0 dispatch rejects every command with
-// CAPABILITY_GAP through this same shape.
+// across the desk bridge, command runners and operator RPCs.
 // ---------------------------------------------------------------------------
 
 export const DeskErrorCode = z.enum([
@@ -1486,25 +1483,7 @@ export const enforcementStatus = defineRpc({
 /** The closed recovery-result vocabulary — exactly 17 values (P2-e §3.2–3.3).
  *  Precedence group E adds none: it keeps the original result and only swaps
  *  the envelope + recoverLockReleased. Tests enumerate this enum. */
-export const DeskRecoveryResult = z.enum([
-  "home-unverified",
-  "target-mismatch",
-  "actor-invalid",
-  "unsafe",
-  "recover-lock-io",
-  "busy",
-  "recover-lock-orphan",
-  "no-lock",
-  "unreadable",
-  "held",
-  "undetermined",
-  "changed",
-  "audit-failed",
-  "unlink-failed",
-  "unlink-unsynced",
-  "recovered",
-  "internal-error",
-]);
+export const DeskRecoveryResult = z.enum(DESK_RECOVERY_RESULTS);
 
 export type DeskRecoveryResultValue = z.infer<typeof DeskRecoveryResult>;
 

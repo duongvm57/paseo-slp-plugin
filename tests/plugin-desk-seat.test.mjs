@@ -8,7 +8,7 @@
 // Fixtures live under tmpdir(); the real daemon home, the repo tree and
 // .local-checks are never touched.
 
-import test from 'node:test';
+import test, { before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
@@ -31,6 +31,13 @@ import { sha256Hex } from '../plugin/server/config-view.ts';
 import { OperationConflict } from '../plugin/shared/contracts.ts';
 
 const require = createRequire(import.meta.url);
+// Production hooks run in a live daemon. Keep a referenced event-loop handle
+// here too: Node 22's test runner otherwise exits while an intentional unref'd
+// desk timeout is the only pending work in fault-injection tests.
+let hostLoop;
+before(() => { hostLoop = setInterval(() => {}, 1000); });
+after(() => clearInterval(hostLoop));
+
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const FIXED_AT = '2026-01-01T00:00:00.000Z';
 const PROVIDER = 'slp-codex-peer';

@@ -4,7 +4,7 @@
 import { mkdirSync, readFileSync, writeFileSync, existsSync, readdirSync, realpathSync } from 'node:fs';
 import { resolve, join, dirname, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { identity, files, hash, json, readJson } from '../src/package.mjs';
+import { identity, files, hash, json, readJson } from '../plugin/server/runtime/cli/package.ts';
 import { criterionIds, criterionEvidence } from './criteria.mjs';
 import { evidenceKinds, evidenceVersion } from './evidence.mjs';
 import { createFixture } from './fixture.mjs';

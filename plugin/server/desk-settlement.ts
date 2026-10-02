@@ -42,16 +42,18 @@ import {
   SETTLEMENT_RESOURCE_DISPOSITIONS,
   WIRE_LIMITS,
   type DeskRejectionValue,
+  type DeskSettlementExportInputValue,
+  type DeskSettlementRecordInputValue,
 } from "../shared/enforcement.ts";
-import { ROLES } from "../shared/families.ts";
-import { canonicalJson, sha256Hex } from "./config-view.ts";
+import { ROLES } from "../shared/runtime/families.ts";
+import { deriveId, requireActor as requireDeskActor, requireLead as requireDeskLead } from "./desk-command.ts";
 import {
   LEDGER_LIMITS,
   type LedgerValue,
   type MembershipValue,
   type SettlementValue,
 } from "./desk-store.ts";
-import type { DeskRunnerDeps } from "./desk-handback.ts";
+import { isRejection, readLedger, repoEnvelope, type DeskRunnerDeps, type RunnerCtx } from "./desk-runner.ts";
 import { SETTLEMENT_VIA, validateReportRecordV1 } from "./desk-records.ts";
 
 // ---------------------------------------------------------------------------
@@ -95,7 +97,7 @@ const SettlementResourceCommand = z
  *  envelope hash keeps a replay bound to the verdict it committed under.
  *  `verified`/`absent`/`outside-root`/`mismatch` are definitive outcomes;
  *  `unavailable` means the seam itself could not prove anything. */
-export const ExportVerificationCommand = z
+const ExportVerificationCommand = z
   .object({
     status: z.enum(["verified", "absent", "outside-root", "mismatch", "unavailable"]),
     detail: z.string().min(1).max(WIRE_LIMITS.gapLen).nullable(),
@@ -103,7 +105,7 @@ export const ExportVerificationCommand = z
   .strict()
   .nullable();
 
-export const SettlementRecordCommand = z
+const SettlementRecordCommand = z
   .object({
     kind: z.literal("settlement.record"),
     requestId: CommandId,
@@ -147,48 +149,19 @@ const ok = (events: { kind: string; payload: Record<string, unknown> }[], tables
   ...tables,
 });
 
-/** Deterministic ids, same discipline as the P3-a surface: canonical-JSON
- *  tuple encoding before hashing (bare concatenation aliases distinct
- *  tuples), the id derived inside the pure decide so a replay names the
- *  same row. */
-function deriveId(prefix: "stl", parts: string[]): string {
-  return `${prefix}-${sha256Hex(canonicalJson(parts)).slice(0, 32)}`;
-}
-
-/** The caller's live bound+registered membership — mirrors the bridge's
- *  freshRow semantics (host-bound, registered, unrevoked). The settlement
- *  decide keeps its own copy rather than importing the P3-a module's
- *  private helper: same predicate, same closed outcome. */
-function liveMembership(ledger: Readonly<LedgerValue>, agentId: string): MembershipValue | undefined {
-  return ledger.memberships.find(
-    row => row.agentId === agentId && row.state !== "revoked" && row.registeredAt !== null,
-  );
-}
-
 function requireActor(
   ledger: Readonly<LedgerValue>,
   agentId: string,
 ): MembershipValue | DeskRejectionValue {
-  const actor = liveMembership(ledger, agentId);
-  if (actor === undefined) {
-    return reject(
-      "AUTHORITY_REQUIRED",
-      "the actor has no live bound membership on this desk",
-      "a settlement commit needs a host-bound, registered lead row",
-    );
-  }
-  return actor;
+  return requireDeskActor(ledger, agentId, "a settlement commit needs a host-bound, registered lead row");
 }
 
 function requireLead(actor: MembershipValue): DeskRejectionValue | null {
-  if (actor.role !== "lead") {
-    return reject(
-      "AUTHORITY_REQUIRED",
-      `role ${JSON.stringify(actor.role)} may not record settlement — the receiving owner holds a bound lead membership`,
-      `the ${ROLES.join("/")} role pin is a durable membership field, not a claim`,
-    );
-  }
-  return null;
+  return requireDeskLead(
+    actor,
+    `role ${JSON.stringify(actor.role)} may not record settlement — the receiving owner holds a bound lead membership`,
+    `the ${ROLES.join("/")} role pin is a durable membership field, not a claim`,
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -513,72 +486,17 @@ export type ExportVerifier = (
   repo: { gitCommonDir: string },
 ) => Promise<ExportVerification>;
 
-/** The runner deps — the same store contract the P3-a runners consume
- *  (DeskRunnerDeps["store"]) plus the export-verification seam; the bridge
- *  passes its runnerDeps() through. Capture/binding fields are unused by
- *  settlement tools. */
-export type SettlementRunnerDeps = {
-  store: DeskRunnerDeps["store"];
+/** Recording verifies claimed exports through the injected artifact seam. */
+export type SettlementRunnerDeps = DeskRunnerDeps & {
   verifyExport: ExportVerifier;
 };
 
 export type MutationOk = { ok: true; [key: string]: unknown };
 export type SettlementOutcome = MutationOk | DeskRejectionValue;
 
-type RunnerCtx = { repoKey: string; row: MembershipValue };
-
-function readLedger(
-  deps: SettlementRunnerDeps,
-  repoKey: string,
-): Readonly<LedgerValue> | DeskRejectionValue {
-  const read = deps.store.read(repoKey);
-  if (read.state !== "ok") {
-    return {
-      ok: false,
-      code: "STATE_UNREADABLE",
-      message: `the bound repo ledger reads ${read.state}`,
-      recovery: "the desk must read cleanly for a tool call to be answered",
-    };
-  }
-  return read.ledger;
-}
-
-const isRejection = (value: unknown): value is DeskRejectionValue =>
-  typeof value === "object" && value !== null && "ok" in value && (value as { ok: unknown }).ok === false;
-
-const repoEnvelope = (ledger: Readonly<LedgerValue>) => ({
-  hostId: ledger.repo.hostId,
-  gitCommonDir: ledger.repo.gitCommonDir,
-});
-
-/** The runner's input type mirrors the WIRE schema (DeskSettlementRecordInput)
- *  — `timeline.via` is the bounded wire string here; the decide's command
- *  schema enforces the closed SETTLEMENT_VIA enum. */
-export type SettlementRecordInputValue = {
-  requestId: string;
-  assignmentId: string;
-  seatAgentId: string;
-  seatTitle: string;
-  at: string;
-  deliveryRef: string | null;
-  reworkClosureRef: string | null;
-  sinkRef: string | null;
-  decisionRef: string | null;
-  handbackRefs: string[];
-  candidateRefs: string[];
-  resources: { ref: string; disposition: (typeof SETTLEMENT_RESOURCE_DISPOSITIONS)[number] }[];
-  timeline: {
-    nativeHandle: string | null;
-    sessionId: string | null;
-    via: string;
-    export: { path: string; sha256: string; bytes: number } | null;
-    gap: string | null;
-  };
-};
-
 export async function runSettlementRecord(
   ctx: RunnerCtx,
-  input: SettlementRecordInputValue,
+  input: DeskSettlementRecordInputValue,
   deps: SettlementRunnerDeps,
 ): Promise<SettlementOutcome> {
   const ledger = readLedger(deps, ctx.repoKey);
@@ -643,8 +561,8 @@ export async function runSettlementRecord(
  *  closed rather than exported. */
 export async function runSettlementExport(
   ctx: RunnerCtx,
-  input: { settlementId: string },
-  deps: SettlementRunnerDeps,
+  input: DeskSettlementExportInputValue,
+  deps: DeskRunnerDeps,
 ): Promise<SettlementOutcome> {
   const ledger = readLedger(deps, ctx.repoKey);
   if (isRejection(ledger)) return ledger;

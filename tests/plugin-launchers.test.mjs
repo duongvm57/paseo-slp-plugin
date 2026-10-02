@@ -26,9 +26,9 @@ import { fileURLToPath } from 'node:url';
 import { basename, delimiter, join } from 'node:path';
 import { createExecutableResolver, RUNTIME_CONTROL_ENV_KEYS } from '../plugin/server/executables.ts';
 import { createLauncherBuilder } from '../plugin/server/launchers.ts';
-import { identity, install } from '../src/package.mjs';
-import { roleInstructions, roleDelivery } from '../src/role-bundle.mjs';
-import { acpRolePrompt, claudeRolePrompt, injectRole, piRoleArgs } from '../src/role-transport.mjs';
+import { identity, install } from '../plugin/server/runtime/cli/package.ts';
+import { roleInstructions, roleDelivery } from '../plugin/server/runtime/cli/role-bundle.ts';
+import { acpRolePrompt, claudeRolePrompt, injectRole, piRoleArgs } from '../plugin/server/runtime/cli/role-transport.ts';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const FAMILIES = ['codex', 'pi', 'devin', 'claude'];
@@ -126,7 +126,7 @@ test('resolver: Electron and old Node probes are rejected, not misread as Node',
     run: fakeRun({ [old]: file => ({ code: 0, stdout: nodeReport(file, { node: '20.9.0' }), stderr: '' }) }).run,
     env: { PATH: '' },
   });
-  await assert.rejects(stale.resolve({ ...request, nodePath: old }), /below required major 22/);
+  await assert.rejects(stale.resolve({ ...request, nodePath: old }), /does not satisfy required range/);
 });
 
 test('resolver: invalid explicit nodePath refuses without falling back to PATH', async t => {
@@ -145,6 +145,24 @@ test('resolver: invalid explicit nodePath refuses without falling back to PATH',
     },
   );
   assert.equal(calls.length, 0, 'PATH fallback must not run after an explicit failure');
+});
+
+test('resolver: native TypeScript floor covers both Node 22 and Node 23 boundaries', async t => {
+  const { request } = resolveDeps(t);
+  const node = join(tmp(t), 'node-floor');
+  mkExe(node);
+  for (const [version, supported] of [
+    ['22.17.0', false], ['22.18.0', true], ['22.99.0', true],
+    ['23.0.0', false], ['23.5.0', false], ['23.6.0', true], ['24.0.0', true],
+    ['garbage', false], ['24.0.0-rc.1', false],
+  ]) {
+    const resolver = createExecutableResolver({
+      run: fakeRun({ [node]: file => ({ code: 0, stdout: nodeReport(file, { node: version }), stderr: '' }) }).run,
+      env: { PATH: '' },
+    });
+    if (supported) assert.equal((await resolver.resolve({ ...request, nodePath: node })).node.version, version);
+    else await assert.rejects(resolver.resolve({ ...request, nodePath: node }), /does not satisfy required range/);
+  }
 });
 
 test('resolver: PATH order, absolute-only entries, execPath consistency', async t => {

@@ -149,7 +149,7 @@ As built on `feat/slp-paseo-plugin`:
     candidate via the materializer's `verifyPublished` (cached once per
     candidate sha per plugin process; failures evict so a repaired
     candidate re-verifies), then dynamically imports the materialized
-    candidate's `src/role-bundle.mjs` (cached per candidate sha) and writes
+    candidate's `plugin/server/runtime/cli/role-bundle.ts` (cached per candidate sha) and writes
     `config.systemPrompt` — role bundle first, a pre-existing prompt
     appended after it. Foreign providers and `slp-devin-*` pass through
     untouched; an `slp-*` provider whose role, binding or candidate cannot
@@ -250,11 +250,11 @@ families — not a behavior redesign.
 
 ## 9. Family registry and consolidated routing surface (implemented)
 
-Post-refactor, `plugin/shared/families.ts` is the single source of truth
+Post-refactor, `plugin/shared/runtime/families.ts` is the single source of truth
 for the family domain. Every family list, label map, provider-id regex,
 hook/wrapper classification, `extends` target, binary env name, zod enum
-and picker order in `plugin/` derives from that one table — no second
-literal list exists downstream. The registry is pure data plus derived
+and picker order in `plugin/`, plus CLI family/role lists, provider IDs and
+transport targets in `src/`, derive from that one table. The registry is pure data plus derived
 constants with zero imports, so the client bundle can import it under the
 same host-compiler boundary as `contracts.ts` (no node builtins).
 
@@ -277,15 +277,16 @@ Registry entry shape (chosen over the brief's minimal
 After this refactor the remaining steps are exactly three:
 
 1. **Registry entry** — append one entry to `FAMILIES` in
-   `plugin/shared/families.ts`. Every downstream list, regex, schema
+   `plugin/shared/runtime/families.ts`. Every downstream list, regex, schema
    enum, env map and picker derives automatically; the derivation tests
    in `tests/plugin-families.test.mjs` verify that claim.
 2. **Executable detection** — teach the resolver the new binary:
    `plugin/server/executables.ts` probe/recognition logic (binary name,
    version probe, any wrapper quirks).
-3. **Payload regen** — the payload keeps its own family knowledge on
-   purpose (`bin/`, `src/` must not import the plugin registry; the
-   shipped shim validates recorded family/role sets independently). Add
+3. **Payload and bootstrap** — the registry ships as exact source bytes.
+   The shim keeps its family/role sets so it can validate argv and reject
+   unsupported Node before importing TypeScript; its manifest checks stay
+   independent. Update those sets and add
    the payload-side role wrapper/gate handling as needed, then run
    `npm run generate:plugin-payload` so
    `plugin/server/generated/runtime-payload.ts` is rebuilt and
@@ -293,9 +294,9 @@ After this refactor the remaining steps are exactly three:
 
 ### Either/or decisions taken
 
-- **Registry filename** — `plugin/shared/families.ts` (the brief's
-  preferred name); it sits beside `contracts.ts` under the same
-  shared-module boundary.
+- **Registry filename** — `plugin/shared/runtime/families.ts`, in the
+  dependency-free shared tier included in the CLI install unit and both
+  host bundles. There is no facade at the old path.
 - **Canonical `FAMILIES` home** — the registry itself. `launchers.ts`,
   `executables.ts` and `config-view.ts` re-export `FAMILIES`/`ROLES`/
   `OWNED_PROVIDER_IDS`/`PROVIDER_EXTENDS` under their historical names

@@ -19,8 +19,8 @@ import {
 } from "react-native";
 import { activate, catalog, deactivate, reconcile, status, localTarget, setLanguage, getRoleRouting, setRoleRouting, getJev, setJev, setJevKey, testJev, getPeerPool, setPeerPool, getWorkTracker, setWorkTracker } from "../shared/contracts.ts";
 import { getSupervision, setSupervision } from "../shared/supervision.ts";
-import { FAMILY_IDS, FAMILY_LABEL, FAMILY_PICKER_ORDER } from "../shared/families.ts";
-import type { RoleName } from "../shared/families.ts";
+import { FAMILY_IDS, FAMILY_LABEL, FAMILY_PICKER_ORDER } from "../shared/runtime/families.ts";
+import type { RoleName } from "../shared/runtime/families.ts";
 import { PEER_SEAT_ARCHETYPES } from "../shared/archetypes.ts";
 import {
   HOW_TO_READ,
@@ -28,7 +28,7 @@ import {
   SUITABILITY_AXES,
   SUITABILITY_TOKENS,
   tokenDefinition,
-} from "../shared/routing-vocabulary.ts";
+} from "../shared/runtime/routing-vocabulary.ts";
 import type { CatalogOptionValue, CatalogResult, FamilyName, StartResult, StatusResult, TargetValue } from "../shared/contracts.ts";
 import {
   DISABLE_REMOVE_NOTICE,
@@ -88,7 +88,7 @@ import { usePeerPoolCard, PeerPoolCard } from "./cards/peer-pool.tsx";
 import { useWorkTrackerCard, WorkTrackerCard } from "./cards/work-tracker.tsx";
 import { useSupervisionCard, SupervisionCard } from "./cards/supervision.tsx";
 
-// Family knowledge derives from the shared registry (shared/families.ts):
+// Family knowledge derives from the shared registry (shared/runtime/families.ts):
 // FAMILY_IDS is the canonical order, FAMILY_PICKER_ORDER the picker order
 // (registry pickerRank), FAMILY_LABEL the display names — no local literals.
 const AUTHORITY = { exclusiveAdministrativeWindow: true, verifiedHostHomeMapping: true } as const;

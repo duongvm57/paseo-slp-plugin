@@ -61,7 +61,7 @@ import {
   pickSnapshotEntry,
   snapshotEntryCatalog,
 } from '../plugin/shared/snapshot-catalog.ts';
-import { validateCatalog } from '../src/routing.mjs';
+import { validateCatalog } from '../plugin/server/runtime/cli/routing.ts';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 

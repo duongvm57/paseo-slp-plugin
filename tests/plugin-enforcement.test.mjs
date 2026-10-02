@@ -2,7 +2,7 @@
 // wire/view schemas, the closed seat-binding transition vocabulary,
 // toolPolicy preapproval merge semantics, the capability audit's
 // unknown-by-default floor and per-family probe rows, and the read-only
-// readView/dispatch seam under the capability-rows-only contract —
+// readView seam under the capability-rows-only contract —
 // provider projection is the P1 backlog (gap `providerTools-projection`).
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -43,7 +43,7 @@ import { emptyReceipt } from '../plugin/server/journal.ts';
 import { readRawConfig } from '../plugin/server/config-view.ts';
 import { MAX_RPC_BYTES, OperationConflict } from '../plugin/shared/contracts.ts';
 import { FetchAgentsResponseMessageSchema } from '@getpaseo/protocol/messages';
-import { FAMILY_IDS } from '../plugin/shared/families.ts';
+import { FAMILY_IDS } from '../plugin/shared/runtime/families.ts';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 
@@ -364,7 +364,7 @@ test('every one of the 54 observation tuples yields the exact pinned inventory',
 });
 
 test('auditCapabilities fails closed when the registry is ahead of fact curation', () => {
-  // Simulates a family added to plugin/shared/families.ts without a matching
+  // Simulates a family added to plugin/shared/runtime/families.ts without a matching
   // FAMILY_FACTS entry: the audit must not crash on an undefined lookup, must
   // not fabricate evidence, and must emit a typed gap per fact-dependent row.
   const { records, gaps } = auditCapabilities({ now: NOW, observed: silentHost, familyFacts: {} });
@@ -428,7 +428,7 @@ test('a curated fact that breaks the wire schema fails closed as IO_FAILURE, nev
 });
 
 // ---------------------------------------------------------------------------
-// readView / dispatch — the read-only desk seam under the provenance gate
+// readView — the read-only desk seam under the provenance gate
 // ---------------------------------------------------------------------------
 
 function fixtureHome(t) {
@@ -788,17 +788,6 @@ test('readView rejects malformed input with INVALID_REQUEST', async t => {
     error => error instanceof OperationConflict && error.code === 'INVALID_REQUEST',
   );
   assert.throws(() => GetEnforcementStatusInput.parse({ schemaVersion: 1, target: { hostId: 'x' } }));
-});
-
-test('dispatch rejects every command with CAPABILITY_GAP — P0 has no mutation path', async () => {
-  const enforcement = createEnforcement({ journal: stubJournal(null) });
-  for (const command of [{ kind: 'seat.bind' }, { kind: 'authority.grant' }, 'not-an-object', null]) {
-    const rejection = await enforcement.dispatch(command);
-    assert.equal(rejection.ok, false);
-    assert.equal(rejection.code, 'CAPABILITY_GAP');
-    assert.deepEqual(DeskRejection.parse(rejection), rejection);
-    assert.ok(rejection.recovery.length > 0);
-  }
 });
 
 // ---------------------------------------------------------------------------

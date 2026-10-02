@@ -4,11 +4,11 @@ import { mkdirSync, mkdtempSync, writeFileSync, readFileSync, rmSync, existsSync
 import { fileURLToPath } from 'node:url';
 import { join, dirname, resolve } from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { identity, install, verifyInstall, uninstall, snapshot, json } from '../src/package.mjs';
-import { configurationPlan } from '../src/paseo-install.mjs';
-import { prompt, launchPlan } from '../src/launch.mjs';
-import { roleBundle } from '../src/role-bundle.mjs';
-import { peerPaseoToolsPolicy, resolveProfile } from '../src/profiles.mjs';
+import { identity, install, verifyInstall, uninstall, snapshot, json } from '../plugin/server/runtime/cli/package.ts';
+import { configurationPlan } from '../plugin/server/runtime/cli/paseo-install.ts';
+import { prompt, launchPlan } from '../plugin/server/runtime/cli/launch.ts';
+import { roleBundle } from '../plugin/server/runtime/cli/role-bundle.ts';
+import { peerPaseoToolsPolicy, resolveProfile } from '../plugin/server/runtime/cli/profiles.ts';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const binding = { provider: 'codex', model: 'gpt-5.6-luna', modeId: 'auto', thinkingOptionId: 'medium' };

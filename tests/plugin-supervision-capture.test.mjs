@@ -11,8 +11,8 @@ import { fileURLToPath } from 'node:url';
 import {
   capture, handbackAnchorIndex, sendCoverageOf, stripAcpRolePrefix, ROLE_PREFIX_TERMINAL,
 } from '../plugin/server/supervision/capture.ts';
-import { roleDelivery } from '../src/role-bundle.mjs';
-import { prompt as launchPrompt } from '../src/launch.mjs';
+import { roleDelivery } from '../plugin/server/runtime/cli/role-bundle.ts';
+import { prompt as launchPrompt } from '../plugin/server/runtime/cli/launch.ts';
 
 const LEAD = '11111111-1111-4111-8111-111111111111';
 const PEER = '22222222-2222-4222-8222-222222222222';
@@ -305,8 +305,8 @@ test('devin plain follow-up (synthetic, r4 shape): a user_message with no transp
 test('devin transport markers: every fixed structural line of the renderers keeps the strict path, alone or mid-text', () => {
   // Each fixed text is pinned to its renderer source, so a wording change
   // there fails here instead of silently widening the plain path.
-  const roleBundleSrc = readFileSync(new URL('../src/role-bundle.mjs', import.meta.url), 'utf8');
-  const workTrackerSrc = readFileSync(new URL('../src/work-tracker.mjs', import.meta.url), 'utf8');
+  const roleBundleSrc = readFileSync(new URL('../plugin/server/runtime/cli/role-bundle.ts', import.meta.url), 'utf8');
+  const workTrackerSrc = readFileSync(new URL('../plugin/server/runtime/cli/work-tracker.ts', import.meta.url), 'utf8');
   const structures = [
     // [fixed text in the source, a rendered-looking fragment, source]
     ['Snapshot command: ', "Snapshot command: node '/r/bin/slp.mjs' snapshot <repository>", roleBundleSrc],

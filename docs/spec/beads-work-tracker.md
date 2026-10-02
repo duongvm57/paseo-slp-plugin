@@ -91,7 +91,7 @@ needs no daemon; beads telemetry is opt-out (`BD_DISABLE_METRICS=1`).
 
 ## 5. Package changes (`src/`, `bin/`)
 
-### 5.1 `src/work-tracker.mjs` (new)
+### 5.1 `plugin/server/runtime/cli/work-tracker.ts` (CLI adapter)
 
 | Export | Behavior |
 |---|---|
@@ -99,7 +99,6 @@ needs no daemon; beads telemetry is opt-out (`BD_DISABLE_METRICS=1`).
 | `readWorkTrackerSetting(daemonHome)` | → `{ enabled, error }` per §4 |
 | `findBd(env)` | first executable `bd` in **absolute** PATH entries, in order; relative entries skipped |
 | `probeWorkTracker(repo, { daemonHome?, env?, run? })` | read-only: `bd version`, `bd where --json` with `cwd=repo`, env forced `BD_DISABLE_METRICS=1`, 5 s timeout, 64 KiB buffer. Returns `{ tracker:"beads", repository, enabled (null without home), state: "ready"\|"uninitialized"\|"unavailable", bd:{path,version}\|null, workspace:{path,prefix,redirectedFrom}\|null, gaps[] }`. Never throws for a missing/broken tracker. `run` is the test seam. |
-| `beadsSeatEnv({ role, agentId, env })` | `BEADS_ACTOR=slp-<role>-<agentId>` (always SLP's — a daemon-wide actor would erase attribution); `BD_AGENT_PROFILE=conservative`, `BD_DISABLE_METRICS=1` as defaults where `env` does not already set them |
 | `workTrackerBlock(daemonHome, { cli, policyDir, shq })` | `''` when disabled; one gap line when unreadable; otherwise one line: tracker enabled, read `<policyDir>/references/work-tracking.md` before tracked work, run `<cli> tracker <repository> --paseo-home <home>` first, unavailable/uninitialized = gap and continue |
 
 `bd where --json` field names (`Path`, `Prefix`, `RedirectedFrom`) and the
@@ -111,7 +110,7 @@ New command `tracker <repository> [--paseo-home <home>]` → prints
 `probeWorkTracker` JSON; exit 0 even when the state is not `ready` (gaps are
 data). Add to `commandFlags`, `targetArg` and the usage string.
 
-### 5.3 `src/role-bundle.mjs`
+### 5.3 `plugin/server/runtime/cli/role-bundle.ts`
 
 In `roleDelivery().entry()`, for **managed** sessions only, append
 `workTrackerBlock(...)` after the communication-language line and before the
@@ -161,7 +160,7 @@ in SLP settings)`; otherwise ignore. Content:
 
 ### 5.5 Not changed
 
-`src/roles/*.md`, `src/common.md`, `src/delegation.md`, `src/launch.mjs`,
+`src/roles/*.md`, `src/common.md`, `src/delegation.md`, `plugin/server/runtime/cli/launch.ts`,
 `prepare`/`prepare --check`/`prepare-handoff` output, routing, Jev, monitor.
 
 ## 6. Plugin changes (`plugin/`)
@@ -176,11 +175,17 @@ in SLP settings)`; otherwise ignore. Content:
 ### 6.2 `plugin/server/work-tracker.ts` (new)
 
 Jev/state-store pattern: `resolveDaemonHome` for the target, `writePrivate`
-for the atomic 0600 write, reader mirroring `readWorkTrackerSetting` (parity
-note in both files; a test pins identical results on the same fixtures).
+for the atomic 0600 write. `plugin/server/runtime/work-tracker.ts` owns the
+setting reader, PATH selection, version parser and diagnostic formatter for
+both adapters. The CLI takes a daemon home and returns `{ enabled, error }`;
+the plugin takes the stable runtime root and also returns `configured`.
 `get-work-tracker` also detects `bd` on the **plugin process PATH** (= daemon
 PATH) with `bd version` — local exec, no network, 5 s timeout; failure fills
-`bdError`, never fails the RPC. Wire both handlers in `plugin/index.server.ts`.
+`bdError`, never fails the RPC. `beadsSeatEnv({ role, agentId, env })` lives
+only in this plugin module for the hook overlay (§6.3): it always sets
+`BEADS_ACTOR=slp-<role>-<agentId>` and supplies `BD_AGENT_PROFILE=conservative`
+and `BD_DISABLE_METRICS=1` only when absent from the Human-set env.
+Wire both handlers in `plugin/index.server.ts`.
 
 ### 6.3 Seat env (`plugin/server/role-injection.ts`)
 
@@ -223,7 +228,7 @@ Regenerate `plugin/server/generated/runtime-payload.ts`
 | T4 | Corrupt setting: spawn path succeeds, bundle carries the gap line, card shows the error | plugin + src tests |
 | T5 | Enabled + `bd` missing / `bd where` failing / garbage version: probe returns gaps, never throws; state values correct | `tests/work-tracker.test.mjs` with a fake `bd` script on a temp PATH |
 | T6 | Enabled: block present with absolute reference path and explicit home; env overlay has `BEADS_ACTOR=slp-<role>-<id>`; Human-set `BD_AGENT_PROFILE` preserved | src + plugin tests |
-| T7 | Plugin reader ↔ src reader parity on the same fixture files | `tests/work-tracker.test.mjs` |
+| T7 | CLI daemon-home and plugin stable-root adapters resolve the same fixture and preserve their result shapes | `tests/work-tracker.test.mjs` |
 | T8 | Existing suite green | all |
 
 Update the locator-count assertions (`tests/launch.test.mjs` currently
@@ -293,7 +298,7 @@ Branch `feat/beads-work-tracker` from `main`. Suggested conventional commits:
 2. `feat(tracker): gate session-entry pointer and policy reference on the setting` — §5.3, §5.4, tests T1/T3/T4/T6
 3. `feat(plugin): work-tracker setting RPCs and seat actor env` — §6.1–6.3, T2/T6
 4. `feat(plugin): work-tracker manager card` — §6.4, §6.5
-5. `docs: work tracker contract, coverage and onboarding` — contract.md file-map rows (`src/work-tracker.mjs`, `src/references/work-tracking.md`, state file + sole writer), guide-coverage load path + Devin gap, onboarding skill (install `bd`, per-repo init under authority, enable in the card)
+5. `docs: work tracker contract, coverage and onboarding` — contract.md file-map rows (`plugin/server/runtime/cli/work-tracker.ts`, `src/references/work-tracking.md`, state file + sole writer), guide-coverage load path + Devin gap, onboarding skill (install `bd`, per-repo init under authority, enable in the card)
 
 Local checks are not E2E acceptance: a dogfood run (enabled, one Lead + one
 Peer, issue created/claimed/closed with SLP actors in `bd history`) and a

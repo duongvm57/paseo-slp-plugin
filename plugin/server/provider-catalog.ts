@@ -5,7 +5,7 @@
 // pins probe-and-latch to plugin-process lifetime, and per-instance state
 // would shorten it.
 import type { CatalogRequest } from "../shared/contracts.ts";
-import { ownedProviderId } from "../shared/families.ts";
+import { ownedProviderId } from "../shared/runtime/families.ts";
 import { pickSnapshotEntry, snapshotEntryCatalog } from "../shared/snapshot-catalog.ts";
 import type { ProviderSnapshotEntryLike } from "../shared/snapshot-catalog.ts";
 

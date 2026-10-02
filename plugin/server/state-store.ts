@@ -25,7 +25,7 @@ import {
   type SetPeerPoolResult,
   type SetRoleRoutingResult,
 } from "../shared/contracts.ts";
-import { catalogTokenConflicts } from "../shared/routing-vocabulary.ts";
+import { catalogTokenConflicts } from "../shared/runtime/routing-vocabulary.ts";
 import { sha256Hex } from "./config-view.ts";
 import { resolveDaemonHome } from "./daemon-home.ts";
 
@@ -87,7 +87,7 @@ export function readRoleRouting(stableRoot: string): RoleRoutingValue | null {
 }
 
 // Plugin-owned user-scope Peer pool: <stableRoot>/state/peer-pool.json is the
-// catalog src/routing.mjs resolves for repositories without their own
+// catalog plugin/server/runtime/cli/routing.ts resolves for repositories without their own
 // .paseo-slp/slp-routing.json. The plugin is its sole writer; set-peer-pool
 // overwrites it atomically under sha256 CAS (same class of state write as
 // set-role-routing). The retired pre-plugin catalog still sits directly under

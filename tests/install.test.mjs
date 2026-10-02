@@ -4,11 +4,11 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
-import { install, update, verifyInstall, json, readJson } from '../src/package.mjs';
-import { installPaseo, uninstallPaseo, initWorkspace, installHome } from '../src/paseo-install.mjs';
-import { configFile, writeConfig } from '../src/host-config.mjs';
-import { emptyCatalog } from '../src/routing.mjs';
-import { roleInstructions, roleBundle } from '../src/role-bundle.mjs';
+import { install, update, verifyInstall, json, readJson } from '../plugin/server/runtime/cli/package.ts';
+import { installPaseo, uninstallPaseo, initWorkspace, installHome } from '../plugin/server/runtime/cli/paseo-install.ts';
+import { configFile, writeConfig } from '../plugin/server/runtime/cli/host-config.ts';
+import { emptyCatalog } from '../plugin/server/runtime/cli/routing.ts';
+import { roleInstructions, roleBundle } from '../plugin/server/runtime/cli/role-bundle.ts';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 function fixture(t) {
@@ -314,12 +314,12 @@ test('an intact installation updates in place, preserving tuned settings', t => 
   const preview = installPaseo(source2, destination, home);
   assert.equal(preview.updated, true);
   assert.equal(preview.applied, false);
-  assert.equal(readFileSync(join(destination, 'src/monitor.mjs'), 'utf8').length > 0, true);
+  assert.equal(readFileSync(join(destination, 'plugin/server/runtime/cli/monitor.ts'), 'utf8').length > 0, true);
   const applied = installPaseo(source2, destination, home, true);
   assert.equal(applied.updated, true);
   verifyInstall(destination);
   assert.equal(readFileSync(join(destination, 'src/roles.md'), 'utf8'), 'v2');
-  assert.equal(existsSync(join(destination, 'src/monitor.mjs')), false);
+  assert.equal(existsSync(join(destination, 'plugin/server/runtime/cli/monitor.ts')), false);
   const cfg = readJson(join(home, 'config.json'));
   assert.equal(Object.keys(cfg.agents.providers).filter(id => id.startsWith('slp-')).length, 12);
   assert.equal(cfg.daemon.agentProfiles[0].modeId, 'full-access');
@@ -331,9 +331,9 @@ test('a modified installation refuses in-place update', t => {
   const { dir, home, destination } = fixture(t);
   installPaseo(root, destination, home, true);
   const source2 = fakeSource(dir, 'v2');
-  writeFileSync(join(destination, 'src/monitor.mjs'), 'human tweak');
+  writeFileSync(join(destination, 'plugin/server/runtime/cli/monitor.ts'), 'human tweak');
   assert.throws(() => installPaseo(source2, destination, home, true), /candidate changed/);
-  assert.equal(readFileSync(join(destination, 'src/monitor.mjs'), 'utf8'), 'human tweak');
+  assert.equal(readFileSync(join(destination, 'plugin/server/runtime/cli/monitor.ts'), 'utf8'), 'human tweak');
 });
 
 test('an extra top-level file refuses in-place update', t => {

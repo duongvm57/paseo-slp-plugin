@@ -25,9 +25,9 @@ import {
 import {
   GetEnforcementStatusInput, GetRuntimePinInput, GetRuntimePinOutput, RuntimePin, RuntimePinReason, WIRE_LIMITS,
 } from '../plugin/shared/enforcement.ts';
-import { FAMILY_IDS } from '../plugin/shared/families.ts';
+import { FAMILY_IDS } from '../plugin/shared/runtime/families.ts';
 import { MAX_RPC_BYTES, OperationConflict, State } from '../plugin/shared/contracts.ts';
-import { hash } from '../src/package.mjs';
+import { hash } from '../plugin/server/runtime/cli/package.ts';
 
 const PKG = fileURLToPath(new URL('..', import.meta.url));
 const materializer = createMaterializer(embeddedPayload);

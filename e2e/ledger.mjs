@@ -2,7 +2,7 @@
 // per-kind discharge check used by the seal gate and the status preview.
 import { existsSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
-import { files, hash, json, readJson } from '../src/package.mjs';
+import { files, hash, json, readJson } from '../plugin/server/runtime/cli/package.ts';
 import { within, acceptEvidence, dischargesEvidence } from './evidence.mjs';
 import { loadAttempt, nonempty, now, put, requireValue } from './runs.mjs';
 

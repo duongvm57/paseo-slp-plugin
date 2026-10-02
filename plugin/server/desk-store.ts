@@ -1,3 +1,5 @@
+import { REPO_KEY_ALGORITHM, REPO_KEY_PATTERN, DESK_BRIDGE_REPO, deskReposDir, deskRepoPaths, repoKeyFor } from "./runtime/desk-paths.ts";
+export { REPO_KEY_ALGORITHM, REPO_KEY_PATTERN, DESK_BRIDGE_REPO, deskReposDir, deskRepoPaths, repoKeyFor } from "./runtime/desk-paths.ts";
 // plugin/server/desk-store.ts — the durable desk store kernel (P2-a).
 //
 // One store per repoKey under <stableRoot>/state/enforcement/repos/<repoKey>/:
@@ -62,7 +64,7 @@ import {
   type ScopeStateValue,
 } from "../shared/enforcement.ts";
 import { SETTLEMENT_VIA } from "./desk-records.ts";
-import { ROLES } from "../shared/families.ts";
+import { ROLES } from "../shared/runtime/families.ts";
 import { canonicalJson, canonicalSha256, sha256Hex } from "./config-view.ts";
 import {
   ensurePrivateDirectory,
@@ -136,70 +138,9 @@ export const LEDGER_LIMITS = {
 
 const LEDGER_FORMAT = "paseo-slp/enforcement";
 const LEDGER_SCHEMA_VERSION = 6;
-/** The one repoKey algorithm label — schema literal and namespace refinement
- *  both read it from here; nothing else may restate it. */
-export const REPO_KEY_ALGORITHM = "sha256(hostId|gitCommonDir)@1";
-
-const deskStateDir = (stableRoot: string) => join(stableRoot, "state");
-const deskEnforcementDir = (stableRoot: string) => join(deskStateDir(stableRoot), "enforcement");
-
-/** The repos root every repo namespace lives under — the companion owner
- *  for callers (the P2-e projection) that scan the root itself rather than
- *  one repo's paths. The join rule lives here and nowhere else. */
-export function deskReposDir(stableRoot: string): string {
-  return join(deskEnforcementDir(stableRoot), "repos");
-}
-
-/** The repo-directory layout recovery shares with the store — the single
- *  owner of every path join under the stable root, so the store, the
- *  recovery module and the projection never restate a join rule.
- *  `acquireLock`/`releaseLock` are unchanged. */
-export function deskRepoPaths(stableRoot: string, repoKey: string): {
-  stateDir: string;
-  enforcementDir: string;
-  baseDir: string;
-  repoDir: string;
-  eventsDir: string;
-  ledgerPath: string;
-  lockPath: string;
-  recoverLockPath: string;
-  auditPath: string;
-} {
-  const baseDir = deskReposDir(stableRoot);
-  const repoDir = join(baseDir, repoKey);
-  return {
-    stateDir: deskStateDir(stableRoot),
-    enforcementDir: deskEnforcementDir(stableRoot),
-    baseDir,
-    repoDir,
-    eventsDir: join(repoDir, "events"),
-    ledgerPath: join(repoDir, "ledger.json"),
-    lockPath: join(repoDir, "lock"),
-    recoverLockPath: join(repoDir, "recover.lock"),
-    auditPath: join(repoDir, "recovery-log.jsonl"),
-  };
-}
 const CANONICALIZATION = "slp-canonical-json/1";
-/** Exported for the P2-e bindings projection — repo directory names are
- *  filtered by this pattern before any ledger read (§4.1). */
-export const REPO_KEY_PATTERN = /^[0-9a-f]{64}$/;
 const SEGMENT_NAME = /^(\d+)-(\d+)\.jsonl$/;
 const LOCK_RETRY_MS = 25;
-
-/** The pure repoKey derivation — the only place the join rule lives. */
-export function repoKeyFor(repo: { hostId: string; gitCommonDir: string }): string {
-  return sha256Hex(`${repo.hostId}|${repo.gitCommonDir}`);
-}
-
-/** P2-d — the reserved repo descriptor the desk-bridge lifecycle lock lives
- *  under. The values are a sentinel, never a real repository: they keep the
- *  lock inside the single path-owner rule (`repos/<repoKey>/lock`) and let
- *  the operator recovery seam reach it like any other orphaned repo lock.
- *  `gitCommonDir` is a marker string, not a path. */
-export const DESK_BRIDGE_REPO = {
-  hostId: "desk-bridge",
-  gitCommonDir: "desk-bus",
-} as const;
 
 /** P2-d — the desk-bridge transport paths. The Unix socket lives at the
  *  enforcement root (not inside a repo namespace — it serves every seat
@@ -347,7 +288,7 @@ const MembershipSchema = z
   .strict();
 
 /** A Git object id — 40-hex full sha or the 64-hex sha256 form, mirroring
- *  src/report-records.mjs GIT_HEAD_PATTERN. */
+ *  plugin/server/runtime/cli/report-records.ts GIT_HEAD_PATTERN. */
 const GitHead = z.string().regex(/^[0-9a-f]{40}$|^[0-9a-f]{64}$/);
 
 /** P3-a — one seat binding inside an assignment row. The seat's agentId is
@@ -1033,43 +974,6 @@ export type RolloutTransitionValue = z.infer<typeof RolloutTransitionSchema>;
 export type RequestRecordValue = z.infer<typeof RequestRecordSchema>;
 export type EventValue = z.infer<typeof EventSchema>;
 export type DeskStoreEnvelope = z.infer<typeof EnvelopeSchema>;
-
-/** P4/P5 shared — the scope review round that currently stands approved:
- *  the (scopeRevision, candidateSnapshot, candidateHead) pin plus the
- *  (axis, reviewId) discharge set of the round whose machine state sits at
- *  `approved` or `advanced`. A fresh submit-for-review supersedes a
- *  standing approval — the gate sees only the approval in force, and a
- *  rejected/closed/in-flight round yields null. The promote gate and the
- *  durable refinement walk the same stream with this one derivation. */
-export function approvedScopeRound(
-  stream: ScopeTransitionValue[],
-): {
-  scopeRevision: number;
-  candidateSnapshot: string;
-  candidateHead: string | null;
-  discharged: ScopeTransitionValue["discharged"];
-} | null {
-  let pin: { scopeRevision: number; candidateSnapshot: string; candidateHead: string | null } | null = null;
-  let observed: ScopeTransitionValue["discharged"] | null = null;
-  let approved: { scopeRevision: number; candidateSnapshot: string; candidateHead: string | null; discharged: ScopeTransitionValue["discharged"] } | null = null;
-  let state: ScopeTransitionValue["to"] | null = null;
-  for (const row of stream) {
-    if (row.command === "submit-for-review") {
-      pin = { scopeRevision: row.scopeRevision, candidateSnapshot: row.candidateSnapshot as string, candidateHead: row.candidateHead };
-      observed = null;
-    }
-    // The gate transition carries the round's discharged set; approve is
-    // reachable only through it, so the standing approval's evidence is
-    // always the matching review-observed row's.
-    if (row.command === "review-observed") observed = row.discharged;
-    if (row.to === "approved" && pin !== null && observed !== null) {
-      approved = { ...pin, discharged: observed };
-    }
-    state = row.to;
-  }
-  if (state !== "approved" && state !== "advanced") return null;
-  return approved;
-}
 
 /** Read outcomes — `diagnostics.code` is a closed vocabulary, never a free
  *  string: corrupt (invalid-json | header-invalid | schema-invalid |

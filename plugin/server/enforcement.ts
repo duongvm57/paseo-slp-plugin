@@ -1,15 +1,12 @@
-// plugin/server/enforcement.ts — the enforcement desk seam (P0).
+// plugin/server/enforcement.ts — the read-only enforcement status seam.
 //
-// This module is the single use-case Interface the migration table assigns:
-// callers reach the desk only through `readView` / `dispatch` — sequencing of
-// locks, grants, pins and receipts is the desk's job, never the caller's.
-// The desk stays observational by construction:
+// `readView` stays observational by construction:
 //   - `readView` answers the capability audit, the install-receipt state and
 //     the P2-e membership projection (bindings rows carrying an agentId,
 //     read-only from the verified served home) — it never projects
 //     configured provider values, effective policy or per-agent model rows;
-//   - `dispatch` exists so every future mutation enters through one typed
-//     rejection boundary — at P0 it refuses everything with CAPABILITY_GAP.
+// Desk mutations enter through desk-bridge.ts and the feature runners;
+// their authority guards and store transactions own mutation sequencing.
 //
 // Ownership lines it must never cross: role-injection.ts stays the hook
 // owner, journal.ts stays the durable-write primitive, state-store.ts stays
@@ -22,18 +19,15 @@ import { FetchAgentsResponseMessageSchema } from "@getpaseo/protocol/messages";
 import {
   CompletenessCollection,
   CompletenessReason,
-  DeskRejection,
   GetEnforcementStatusInput,
   GetEnforcementStatusOutput,
   WIRE_LIMITS,
   type CompletenessCollectionValue,
   type CompletenessEntryValue,
   type CompletenessReasonValue,
-  type DeskRejectionValue,
   type GetEnforcementStatusOutputValue,
   type SeatBindingViewValue,
 } from "../shared/enforcement.ts";
-import { isRecord } from "./config-view.ts";
 import { detectDaemonHome, receiptMatchesTarget } from "./daemon-home.ts";
 import { MAX_RPC_BYTES, OperationConflict } from "../shared/contracts.ts";
 import type { Journal } from "./journal.ts";
@@ -87,7 +81,7 @@ export interface EnforcementDeps {
  *  The bindings entry is the P2-e L-B literal, read from the single
  *  limitation table (contract §4.7). */
 export const P0_STATIC_LIMITATIONS = [
-  "P0 is observational only — nothing in this view is enforced by a desk; dispatch rejects every command",
+  "this status view is observational only; desk mutations enter through the guarded MCP bridge",
   limitation("L-B"),
   "capability rows default to unknown; source-static-compat evidence proves interfaces, never live delivery",
   "a requested catalog model is not the effective model; per-agent model rows are outside the P0 contract",
@@ -523,20 +517,5 @@ export function createEnforcement(deps: EnforcementDeps) {
     });
   }
 
-  /** P0 keeps one typed rejection boundary for every mutation command; the
-   *  command vocabulary lands with the ledger in P1/P2. Nothing here may
-   *  write host state, assign authority or spawn work. */
-  async function dispatch(command: unknown): Promise<DeskRejectionValue> {
-    const named = isRecord(command) && typeof command.kind === "string"
-      ? command.kind
-      : "unknown";
-    return DeskRejection.parse({
-      ok: false,
-      code: "CAPABILITY_GAP",
-      message: `enforcement desk command '${named}' is not implemented at P0`,
-      recovery: "P1+ assignment and a capability-audit pass are required before any desk mutation",
-    });
-  }
-
-  return { readView, dispatch };
+  return { readView };
 }

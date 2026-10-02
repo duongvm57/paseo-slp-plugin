@@ -17,11 +17,11 @@ import {
   verifyHandback, VerifyError, AXES, COMPARISON, REASON, RECORD_CODES,
   RECORD_VALIDATION, CHECK_CONSISTENCY, SUMMARY_VALUES, CWD_RELATIONS,
   COMPLETENESS_COLLECTIONS, COMPLETENESS_REASONS, VERIFY_LIMITS,
-} from '../src/candidate-verify.mjs';
-import { snapshot, hash, identity } from '../src/package.mjs';
+} from '../plugin/server/runtime/cli/candidate-verify.ts';
+import { snapshot, hash, identity } from '../plugin/server/runtime/cli/package.ts';
 
 const PKG = fileURLToPath(new URL('..', import.meta.url));
-const ENGINE_PATH = join(PKG, 'src', 'candidate-verify.mjs');
+const ENGINE_PATH = join(PKG, 'plugin', 'server', 'runtime', 'cli', 'candidate-verify.ts');
 const GITLINK_OID = '0123456789012345678901234567890123456789';
 
 // Pinned author/committer dates keep fixture commits byte-identical — the
@@ -1093,12 +1093,12 @@ test('runtime measurement — malformed --expect-runtime is INVALID_REQUEST', as
 
 // P2-b §5/Y4 — the verifier compares a caller-supplied runtime hash only; it
 // must never grow a receipt parser, read the daemon config or reach for
-// runtime-state.mjs. These are source-level pins.
-test('static — the engine never touches receipt.json, config.json or runtime-state.mjs', () => {
+// runtime-state.ts. These are source-level pins.
+test('static — the engine never touches receipt.json, config.json or runtime-state.ts', () => {
   const source = readFileSync(ENGINE_PATH, 'utf8');
   assert.ok(!source.includes('receipt.json'), 'engine must not open receipt.json');
   assert.ok(!source.includes('config.json'), 'engine must not read config.json');
-  assert.ok(!/runtime-state/.test(source), 'engine must not import runtime-state.mjs');
+  assert.ok(!/runtime-state/.test(source), 'engine must not import runtime-state.ts');
 });
 
 test('static — the predicate catches an injected receipt.json literal', () => {

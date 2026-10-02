@@ -21,29 +21,36 @@
 //
 // The observed capture runs between the two commits, under the bound
 // runtime — a bounded subprocess (60s / 32MiB, VERIFY_LIMITS parity) that
-// imports the installed runtime's src/package.mjs snapshot(). Its outcome
+// imports the installed runtime's plugin/server/runtime/cli/package.ts snapshot(). Its outcome
 // is fed back as command input; capture failure is recorded as `failed`
 // plus a gaps entry, never a rejection of the handback.
 
+import { candidateModulePath } from "./candidate-module.ts";
 import { execFile } from "node:child_process";
-import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import { z } from "zod";
 import { Time } from "../shared/contracts.ts";
-import { WIRE_LIMITS, type DeskRejectionValue } from "../shared/enforcement.ts";
-import { ROLES } from "../shared/families.ts";
-import { canonicalJson, canonicalSha256, sha256Hex } from "./config-view.ts";
+import {
+  WIRE_LIMITS,
+  type DeskAssignmentAttachInputValue,
+  type DeskAssignmentCloseInputValue,
+  type DeskAssignmentRegisterInputValue,
+  type DeskHandbackSubmitInputValue,
+  type DeskRejectionValue,
+} from "../shared/enforcement.ts";
+import { ROLES } from "../shared/runtime/families.ts";
+import { canonicalJson, canonicalSha256 } from "./config-view.ts";
+import { deriveId, liveMembership, requireActor as requireDeskActor, requireLead as requireDeskLead } from "./desk-command.ts";
 import {
   LEDGER_LIMITS,
   type AssignmentValue,
   type CandidateValue,
-  type DeskStoreRead,
   type HandbackValue,
   type LedgerValue,
   type MembershipValue,
-  type TransactResult,
 } from "./desk-store.ts";
+import { isRejection, readLedger, repoEnvelope, type DeskRunnerDeps, type RunnerCtx } from "./desk-runner.ts";
 import { validateReportRecordV1 } from "./desk-records.ts";
 
 const execFileAsync = promisify(execFile);
@@ -63,7 +70,7 @@ const AbsolutePath = z
 const GitHead = z.string().regex(/^[0-9a-f]{40}$|^[0-9a-f]{64}$/);
 const JsonObject = z.record(z.string(), z.unknown()).refine(value => value !== null && !Array.isArray(value));
 
-export const AssignmentRegisterCommand = z
+const AssignmentRegisterCommand = z
   .object({
     kind: z.literal("assignment.register"),
     requestId: CommandId,
@@ -73,7 +80,7 @@ export const AssignmentRegisterCommand = z
   })
   .strict();
 
-export const AssignmentAttachCommand = z
+const AssignmentAttachCommand = z
   .object({
     kind: z.literal("assignment.attach"),
     requestId: CommandId,
@@ -83,7 +90,7 @@ export const AssignmentAttachCommand = z
   })
   .strict();
 
-export const AssignmentCloseCommand = z
+const AssignmentCloseCommand = z
   .object({
     kind: z.literal("assignment.close"),
     requestId: CommandId,
@@ -92,7 +99,7 @@ export const AssignmentCloseCommand = z
   })
   .strict();
 
-export const HandbackSubmitCommand = z
+const HandbackSubmitCommand = z
   .object({
     kind: z.literal("handback.submit"),
     requestId: CommandId,
@@ -130,7 +137,7 @@ export const ObservedCapture = z.discriminatedUnion("status", [
 ]);
 export type ObservedCaptureValue = z.infer<typeof ObservedCapture>;
 
-export const HandbackObserveCommand = z
+const HandbackObserveCommand = z
   .object({
     kind: z.literal("handback.observe"),
     requestId: CommandId,
@@ -171,49 +178,19 @@ const ok = (events: { kind: string; payload: Record<string, unknown> }[], tables
   ...tables,
 });
 
-/** Entity ids are deterministic — derived inside the pure decide from the
- *  request key, so a replayed command always names the same row. Parts are
- *  canonical-JSON encoded before hashing: bare concatenation aliases
- *  distinct tuples (["ab","c"] and ["a","bc"] both hash "abc"). Rows keep
- *  their stored id forever — response resolvers locate rows by the durable
- *  request fields, never by re-deriving a legacy id. */
-function deriveId(prefix: "asg" | "hb" | "cand", parts: string[]): string {
-  return `${prefix}-${sha256Hex(canonicalJson(parts)).slice(0, 32)}`;
-}
-
-/** The caller's live bound+registered membership for an agentId — the
- *  decide-side authority check, mirroring the bridge's freshRow semantics
- *  (host-bound, registered, unrevoked). */
-function liveMembership(ledger: Readonly<LedgerValue>, agentId: string): MembershipValue | undefined {
-  return ledger.memberships.find(
-    row => row.agentId === agentId && row.state !== "revoked" && row.registeredAt !== null,
-  );
-}
-
 function requireActor(
   ledger: Readonly<LedgerValue>,
   agentId: string,
 ): MembershipValue | DeskRejectionValue {
-  const actor = liveMembership(ledger, agentId);
-  if (actor === undefined) {
-    return reject(
-      "AUTHORITY_REQUIRED",
-      "the actor has no live bound membership on this desk",
-      "a handback commit needs a host-bound, registered seat row",
-    );
-  }
-  return actor;
+  return requireDeskActor(ledger, agentId, "a handback commit needs a host-bound, registered seat row");
 }
 
 function requireLead(actor: MembershipValue): DeskRejectionValue | null {
-  if (actor.role !== "lead") {
-    return reject(
-      "AUTHORITY_REQUIRED",
-      `role ${JSON.stringify(actor.role)} may not administer assignments — a bound lead membership is required`,
-      `the ${ROLES.join("/")} role pin is a durable membership field, not a claim`,
-    );
-  }
-  return null;
+  return requireDeskLead(
+    actor,
+    `role ${JSON.stringify(actor.role)} may not administer assignments — a bound lead membership is required`,
+    `the ${ROLES.join("/")} role pin is a durable membership field, not a claim`,
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -497,7 +474,6 @@ export async function captureSeatSnapshot(deps: CaptureDeps): Promise<ObservedCa
   const { nodePath, runtimePath, repository, now } = deps;
   const exec = deps.exec ?? execFileAsync;
   const measuredAt = () => now().toISOString();
-  const spec = pathToFileURL(join(runtimePath, "src", "package.mjs")).href;
   const fail = (reason: "spawn-failed" | "timeout" | "exit" | "byte-cap" | "invalid-output", detail: string): ObservedCaptureValue => ({
     status: "failed",
     repository,
@@ -507,6 +483,7 @@ export async function captureSeatSnapshot(deps: CaptureDeps): Promise<ObservedCa
   });
   let stdout: string;
   try {
+    const spec = pathToFileURL(candidateModulePath(runtimePath, "package")).href;
     const result = await exec(
       nodePath,
       ["--input-type", "module", "--eval", CAPTURE_SCRIPT],
@@ -639,15 +616,7 @@ export function seatAssignmentsView(
 // fields because the command body carries no generated ids or timestamps).
 // ---------------------------------------------------------------------------
 
-export type DeskRunnerDeps = {
-  store: {
-    transact(
-      repoKey: string,
-      envelope: Record<string, unknown>,
-      decide: (ledger: Readonly<LedgerValue>, command: Record<string, unknown>) => DecideOutcome,
-    ): Promise<TransactResult>;
-    read(repoKey: string): DeskStoreRead;
-  };
+export type HandbackRunnerDeps = DeskRunnerDeps & {
   capture: (deps: { nodePath: string; runtimePath: string; repository: string; now: () => Date }) => Promise<ObservedCaptureValue>;
   uuid: () => string;
   now: () => Date;
@@ -657,42 +626,9 @@ export type DeskRunnerDeps = {
 export type MutationOk = { ok: true; [key: string]: unknown };
 export type MutationOutcome = MutationOk | DeskRejectionValue;
 
-type RunnerCtx = { repoKey: string; row: MembershipValue };
-
-/** Read the ledger fresh inside a run — the seat row was already re-checked
- *  by the dispatch guard, this read supplies the envelope's repo binding
- *  and the response's row lookups. A DeskRejectionValue is distinguished
- *  from a ledger by its `ok` field. */
-function readLedger(
-  deps: DeskRunnerDeps,
-  repoKey: string,
-): Readonly<LedgerValue> | DeskRejectionValue {
-  const read = deps.store.read(repoKey);
-  if (read.state !== "ok") {
-    return {
-      ok: false,
-      code: "STATE_UNREADABLE",
-      message: `the bound repo ledger reads ${read.state}`,
-      recovery: "the desk must read cleanly for a tool call to be answered",
-    };
-  }
-  return read.ledger;
-}
-
-const isRejection = (value: unknown): value is DeskRejectionValue =>
-  typeof value === "object" && value !== null && "ok" in value && (value as { ok: unknown }).ok === false;
-
-/** The envelope's repo slot is the strict {hostId, gitCommonDir} pair —
- *  the ledger's own binding row carries derived fields that would fail
- *  the envelope schema, so it is narrowed back here. */
-const repoEnvelope = (ledger: Readonly<LedgerValue>) => ({
-  hostId: ledger.repo.hostId,
-  gitCommonDir: ledger.repo.gitCommonDir,
-});
-
 export async function runAssignmentRegister(
   ctx: RunnerCtx,
-  input: { requestId: string; authorityRef: string; objective: string | null },
+  input: DeskAssignmentRegisterInputValue,
   deps: DeskRunnerDeps,
 ): Promise<MutationOutcome> {
   const ledger = readLedger(deps, ctx.repoKey);
@@ -726,7 +662,7 @@ export async function runAssignmentRegister(
 
 export async function runAssignmentAttach(
   ctx: RunnerCtx,
-  input: { requestId: string; assignmentId: string; agentId: string },
+  input: DeskAssignmentAttachInputValue,
   deps: DeskRunnerDeps,
 ): Promise<MutationOutcome> {
   const ledger = readLedger(deps, ctx.repoKey);
@@ -756,7 +692,7 @@ export async function runAssignmentAttach(
 
 export async function runAssignmentClose(
   ctx: RunnerCtx,
-  input: { requestId: string; assignmentId: string },
+  input: DeskAssignmentCloseInputValue,
   deps: DeskRunnerDeps,
 ): Promise<MutationOutcome> {
   const ledger = readLedger(deps, ctx.repoKey);
@@ -790,8 +726,8 @@ export async function runAssignmentClose(
  *  and a claim is never rewritten. */
 export async function runHandbackSubmit(
   ctx: RunnerCtx,
-  input: { requestId: string; assignmentId: string; recordV1: Record<string, unknown>; candidateId: string | null },
-  deps: DeskRunnerDeps,
+  input: DeskHandbackSubmitInputValue,
+  deps: HandbackRunnerDeps,
 ): Promise<MutationOutcome> {
   const ledger = readLedger(deps, ctx.repoKey);
   if (isRejection(ledger)) return ledger;

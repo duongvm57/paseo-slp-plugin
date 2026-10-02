@@ -23,7 +23,7 @@ Làm gì:
    `node:24-bookworm` pin theo digest
    (`sha256:64af3819f9275802414d7cdc38c27e9d82bd564dec4d4da87d008255d36c63b4`),
    cài sẵn `@getpaseo/cli@0.9.2` — version nằm trong range
-   `plugin/paseo-plugin.json` (`requirements.paseo: >=0.8.0 <0.10.0`).
+   `plugin/paseo-plugin.json` (`requirements.paseo: >=0.8.0`).
 2. Mount checkout read-only tại `/src`; fake `HOME` + `PASEO_HOME` dưới
    `/acceptance`.
 3. `slp.mjs install --paseo-home --apply` (integrated install thật), `verify`,

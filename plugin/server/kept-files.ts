@@ -1,3 +1,5 @@
+import { PRIVATE_DIR_MODE, lstatOrNull } from "./runtime/filesystem.ts";
+export { PRIVATE_DIR_MODE, PRIVATE_FILE_MODE, lstatOrNull, fsyncDirectory } from "./runtime/filesystem.ts";
 // plugin/server/kept-files.ts — the shared filesystem primitives used by
 // every durable store in this package (P2-a decision A5).
 //
@@ -12,26 +14,10 @@
 
 import {
   chmodSync,
-  closeSync,
-  fsyncSync,
-  lstatSync,
   mkdirSync,
-  openSync,
 } from "node:fs";
 import { isAbsolute, join, relative, sep } from "node:path";
 import { OperationConflict } from "../shared/contracts.ts";
-
-export const PRIVATE_DIR_MODE = 0o700;
-export const PRIVATE_FILE_MODE = 0o600;
-
-export function lstatOrNull(path: string) {
-  try {
-    return lstatSync(path);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
-    throw error;
-  }
-}
 
 export function assertRealDirectory(path: string, what: string) {
   const stat = lstatOrNull(path);
@@ -83,15 +69,5 @@ export function assertRealComponents(root: string, target: string, what: string)
         { path: level },
       );
     }
-  }
-}
-
-export function fsyncDirectory(path: string, platform: string) {
-  if (platform === "win32") return;
-  const fd = openSync(path, "r");
-  try {
-    fsyncSync(fd);
-  } finally {
-    closeSync(fd);
   }
 }

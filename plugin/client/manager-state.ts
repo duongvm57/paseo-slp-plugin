@@ -2,11 +2,11 @@
 // No react/host imports: this module is unit-tested directly under node, and
 // the client bundle check proves it pulls in no server-only or node code.
 import { AbsolutePath, Id, ROUTE_DECLINE_OPTION_ID } from "../shared/contracts.ts";
-import { OWNED_PROVIDER_ID_RE, ownedProviderId } from "../shared/families.ts";
-import { isStandardSeatId, seatTokenConflict } from "../shared/routing-vocabulary.ts";
-import type { SeatTokenConflict } from "../shared/routing-vocabulary.ts";
+import { OWNED_PROVIDER_ID_RE, ownedProviderId } from "../shared/runtime/families.ts";
+import { isStandardSeatId, seatTokenConflict } from "../shared/runtime/routing-vocabulary.ts";
+import type { SeatTokenConflict } from "../shared/runtime/routing-vocabulary.ts";
 import type { SeatArchetype } from "../shared/archetypes.ts";
-import type { RoleName } from "../shared/families.ts";
+import type { RoleName } from "../shared/runtime/families.ts";
 import type {
   CatalogResult,
   CatalogSelectOptionValue,
