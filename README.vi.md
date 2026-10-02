@@ -78,8 +78,8 @@ dùng provider, model và mức effort khác nhau.
 
 Bạn cần:
 
-- Paseo `>=0.8.0 <0.10.0`, với `pluginsEnabled: true` và `mcp.enabled` hiệu lực là `true`
-- Node.js 22 trở lên trên máy chạy daemon
+- Paseo `>=0.8.0`, với `pluginsEnabled: true` và `mcp.enabled` hiệu lực là `true`
+- Node.js 22.18+ hoặc 23.6+ trên máy chạy daemon (native TypeScript stripping)
 - CLI của từng provider family bạn dùng (Codex, Pi, Devin, Claude), đã đăng nhập trên máy daemon;
   Pi cần hỗ trợ truyền `--append-system-prompt` nhiều lần
 
@@ -159,6 +159,9 @@ Muốn dogfood live từ source checkout, nhờ một session đang mở *run th
 
 ## Tài liệu
 
+Các yêu cầu cài đặt được đối chiếu với [README.md](README.md), `package.json`
+và manifest plugin ngày 2026-10-02. Khi thay đổi nguồn này, cập nhật cả hai README.
+
 Tài liệu chi tiết viết bằng tiếng Anh.
 
 | Đọc                                              | Khi bạn muốn                                                                    |
@@ -171,6 +174,8 @@ Tài liệu chi tiết viết bằng tiếng Anh.
 | [AGENTS.md](AGENTS.md)                           | Các quy tắc contributor và agent tuân theo trong repo này                       |
 
 Spec và các bản điều tra nằm trong [docs/spec/](docs/spec/) và [docs/reports/](docs/reports/).
+
+[Trải nghiệm giao thức](docs/protocol-experience.vi.md) ghi lại các bài học vận hành trước đây.
 
 ## Giấy phép
 

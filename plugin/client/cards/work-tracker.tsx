@@ -1,13 +1,9 @@
-// Work-tracker-card ownership (spec §6.4): the card owns the stored view,
-// the once-per-target load, the target-switch reset and the toggle/refresh
-// handlers. The shell supplies the target, its stale-guard predicate
-// (`sameTarget` wraps the shell-owned keyRef/targetKey mechanism), the RPC
-// callers and the lastError plumbing. The toggle applies immediately in
-// both directions — a single boolean, nothing to type — and every write is
-// a whole-file set-work-tracker call that returns the post-write view.
-// SLP detects `bd`, never installs or initializes it: this card offers no
-// install button, only the Human-facing status line.
-import { useCallback, useEffect, useRef, useState } from "react";
+// Work tracker owns the immediate whole-file toggle and target-switch reset.
+// Target async owns reads, read errors and session tickets; the shell supplies
+// RPC adapters and target-bound lastError plumbing. SLP probes bd, never
+// installs or initializes it.
+import { useEffect, useState } from "react";
+import { useTargetSnapshot } from "../target-async.ts";
 import { Text, View } from "react-native";
 import type {
   GetWorkTrackerRequest,
@@ -29,58 +25,32 @@ export function useWorkTrackerCard({ target, targetKey, sameTarget, callGetWorkT
   callSetWorkTracker: (input: SetWorkTrackerRequest) => Promise<SetWorkTrackerResult>;
   update: (patch: { lastError: string | null }, target: TargetValue) => void;
 }) {
-  const [view, setView] = useState<WorkTrackerViewValue | null>(null);
+  const snapshot = useTargetSnapshot(target, targetKey, async target =>
+    (await callGetWorkTracker({ schemaVersion: 1, target })).workTracker);
+  const { data: view, replace: setView, error: loadError, reload: load, capture } = snapshot;
   const [busy, setBusy] = useState(false);
-  // A get-work-tracker failure is a distinct error branch with Retry, not
-  // an eternal "loading…" (the jev.tsx load/stale-target guard pattern).
-  const [loadError, setLoadError] = useState<string | null>(null);
-
-  // Fetch once per target; Refresh re-runs it (re-probing `bd` on the
-  // daemon PATH). Stale-write guard: a response issued for the previous
-  // target must never paint over the displayed target's view.
-  const loadedFor = useRef<string | null>(null);
-  const load = useCallback(async (forTarget: TargetValue) => {
-    setLoadError(null);
-    try {
-      const result = await callGetWorkTracker({ schemaVersion: 1, target: forTarget });
-      if (!sameTarget(forTarget)) return;
-      setView(result.workTracker);
-    } catch (error) {
-      if (!sameTarget(forTarget)) return;
-      setView(null);
-      setLoadError(errorMessage(error));
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- sameTarget wraps the shell's key guard
-  }, [callGetWorkTracker]);
-  useEffect(() => {
-    if (!target || !targetKey || loadedFor.current === targetKey) return;
-    loadedFor.current = targetKey;
-    setView(null);
-    void load(target);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- targetKey captures target
-  }, [targetKey]);
 
   // Target switch drops the view and pending flags — a stale op's guarded
   // finally skips its busy clear, so the switch itself is what releases
   // the abandoned view's pending flag.
   useEffect(() => {
     setView(null);
-    setLoadError(null);
     setBusy(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- targetKey captures target
   }, [targetKey]);
 
   const apply = async (enabled: boolean) => {
     if (!target) return;
+    const ticket = capture();
     setBusy(true);
     try {
       const result = await callSetWorkTracker({ schemaVersion: 1, target, enabled });
-      if (!sameTarget(target)) return;
+      if (!ticket.isCurrent()) return;
       setView(result.workTracker);
     } catch (error) {
       update({ lastError: errorMessage(error) }, target);
     } finally {
-      if (sameTarget(target)) setBusy(false);
+      if (ticket.isCurrent()) setBusy(false);
     }
   };
 

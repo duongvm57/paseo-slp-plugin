@@ -1,7 +1,9 @@
 # Provider/model routing and quota handoff
 
 Supervisor/Lead consult before delegation or quota fallback under the common
-core's policy-text freshness rule. Supervisor and
+core's policy-text freshness rule. This reference owns runtime source selection,
+provider inventory and complete-bundle settings; delegation-execution.md owns
+the preparation/create/verification procedure. Supervisor and
 Lead have saved Paseo profiles; Peer has a project runtime pool. The three roles
 are behavior contracts, not a requirement for three saved profiles.
 
@@ -23,10 +25,10 @@ Read the assigned repository's .paseo-slp/slp-routing.json with
 Resolution is skill-style: the repository catalog wins when present; when the
 repository has no catalog, routes resolves the plugin-owned user-scope pool
 ($PASEO_HOME/slp-runtime/state/peer-pool.json, default ~/.paseo) and reports
-scope/path. routes also reports `jevRouting` (unconfigured | off | shadow |
-armed | error) so the mode is visible at seat selection; read
-`references/jev-routing.md` only for `shadow`, `armed` or `error`. When the
-repository catalog wins, routes attaches `userPool` plus
+scope/path. When `routes` reports `jevRouting.routing` as `shadow`, `armed` or
+`error`, read `references/jev-routing.md`; skip it for `unconfigured` or
+`off`. `error` blocks the dependent routing branch. When the repository
+catalog wins, routes attaches `userPool` plus
 `poolDrift`, an advisory diff of the two Human-owned sources (sha pair plus
 per-option field differences). The Manager's Peer pool card is that file's sole writer — its
 model/mode/thinking values come from the live provider catalog, so a seat
@@ -45,8 +47,9 @@ resolved; every other id is a custom seat with free strings.
 Human/onboarding establishes the pool and suitability under
 project setup authority; Lead chooses within it for each task and budget.
 
-Choose an enabled, ready option with peer in roles. Explain suitability using the
-assignment and the option's suitability tokens; Engineer/Architect/Reviewer are dispositions,
+Choose an enabled, ready option with peer in roles. Use suitableFor, avoidFor,
+notes and the task budget to explain why it fits the assignment.
+Engineer/Architect/Reviewer are dispositions,
 not fixed model mappings. Two Peers may use different models or providers while
 receiving the same Peer policy. Supervisor/Lead profiles need not match their family.
 
@@ -105,7 +108,8 @@ the chosen option whenever its runtime bundle (provider/model/modeId/
 thinkingOptionId/features) differs from the live pool record — reported for
 reconciliation, never auto-merged.
 Pass the array returned by live list_providers as request.providers, extracting
-it from the tool response envelope when necessary — each provider object
+it from the tool response envelope when necessary; never pass the envelope as
+request.providers — each provider object
 verbatim from that array: no added, removed or edited fields, never a
 configured or hand-authored entry (preparation refuses anything else and the
 error says so). Each entry carries the observed
@@ -123,6 +127,21 @@ configuration completeness, never provider health — a listed entry can be stal
 launch. A missing inventory is a request
 construction error: supply the discovery already obtained and rerun preparation;
 it is not a reason to change the selected model or read package implementation.
+All catalog settings are complete; do not overlay model/effort/features from
+slp-peer, the Lead or a different option. Combine the selected wrapper ID with
+the exact model ID, preserving embedded slashes. Copy modeId,
+thinkingOptionId and features to settings, omitting absent fields; saved
+profiles use featureValues as settings.features. `settings.modeId` resolves
+by precedence: the prepare plan's resolved `modeId` — emitted top-level
+with `modeIdSource` (`binding` | `bundle` | `agent_mode` | `none`) and
+copied into `create.settings.modeId` — then, for direct spawns
+(Human→Supervisor), the protocol frontmatter `agent_mode`. A saved-profile
+or catalog-option pin reports `bundle`; an explicit binding reports
+`binding`. When nothing resolves (`none`) the plan warns: pin modeId in
+the Human-owned option/profile or ask the Human — an agent must never
+silently inherit the caller's default, and cross-family inheritance fails
+at the host.
+
 Use taskLabel for a short Human-readable work label and disposition for the Peer
 seat. prepare renders the naming convention from delegation-execution.md; omitted taskLabel
 uses the repository directory name, and omitted Peer disposition displays General.

@@ -69,6 +69,40 @@ export function configurationPlan(destination: string, config: HostConfig) {
   return { providers, profiles };
 }
 
+// Host-owned-entry planning is independent of candidate placement and rollback.
+// Callers supply already-verified prior ownership; each operation keeps its
+// own guard/freshness order. Receipt serialization stays at publication time.
+function hostRebindPlan(destination: string, file: ReturnType<typeof configFile>, previous?: { binding: PaseoBinding; saved: Map<string, Profile> }) {
+  const next = structuredClone(file.config);
+  if (previous) {
+    for (const id of Object.keys(previous.binding.providers)) delete next.agents!.providers![id];
+    next.daemon!.agentProfiles! = next.daemon!.agentProfiles!.filter(p => !previous.saved.has((p as { id: string }).id));
+  }
+  const proposal = configurationPlan(destination, next);
+  if (previous) proposal.profiles = proposal.profiles.map(p => previous.saved.get(p.id) ?? p);
+  const retainedIds = new Set(proposal.profiles.map(p => p.id));
+  const retiredProfiles = previous ? [...previous.saved.values()].filter(p => !retainedIds.has(p.id)) : [];
+  next.agents ??= {};
+  next.agents!.providers! = { ...next.agents!.providers!, ...proposal.providers };
+  next.daemon ??= {};
+  next.daemon!.agentProfiles! = [...(next.daemon!.agentProfiles! ?? []), ...proposal.profiles];
+  const mcpBefore = previous ? previous.binding.mcpBefore
+    : Object.fromEntries(mcpFlags.map(key => [key, next.daemon!.mcp?.[key] ?? null]));
+  if (!previous) next.daemon!.mcp = { ...next.daemon!.mcp, ...Object.fromEntries(mcpFlags.map(key => [key, true])) };
+  return { proposal, next, retiredProfiles,
+    receipt: () => json({ configPath: file.path, ...proposal, mcpBefore,
+      ...(previous ? { retiredProfiles: [...(previous.binding.retiredProfiles ?? []), ...retiredProfiles] } : {}) }),
+  };
+}
+
+// The binding receipt is exclusive and its exact bytes must be pinned before
+// host configuration is committed. Verification and rollback belong to callers.
+function writeCandidateBinding(destination: string, binding: string) {
+  writeFileSync(join(destination, 'paseo-binding.json'), binding, { flag: 'wx', mode: 0o600 });
+  const manifest = (readJson(join(destination, 'installed.json')) as InstalledManifest);
+  writeFileSync(join(destination, 'installed.json'), json({ ...manifest, paseoBindingSha256: hash(binding) }));
+}
+
 export function installPaseo(source: string, destination: string, home: string, apply = false) {
   destination = resolve(destination);
   const homeWithinInstall = relative(destination, resolve(home));
@@ -89,25 +123,16 @@ export function installPaseo(source: string, destination: string, home: string, 
       return { destination, configPath: file.path, applied: false, alreadyInstalled: true, reloadRequired: true };
     return updatePaseo(source, destination, file, binding, saved, apply);
   }
-  const proposal = configurationPlan(destination, file.config);
+  const plan = hostRebindPlan(destination, file);
+  const { proposal, next } = plan;
   const result = { destination, configPath: file.path, applied: apply, ...proposal,
     mcp: { enabled: true, injectIntoAgents: true }, reloadRequired: true };
   if (!apply) return result;
   const candidate = install(source, destination).candidate;
-  const next = structuredClone(file.config);
-  next.agents ??= {};
-  next.agents!.providers! = { ...next.agents!.providers!, ...proposal.providers };
-  next.daemon ??= {};
-  next.daemon!.agentProfiles! = [...(next.daemon!.agentProfiles! ?? []), ...proposal.profiles];
-  const mcpBefore = Object.fromEntries(mcpFlags.map(key => [key, next.daemon!.mcp?.[key] ?? null]));
-  next.daemon!.mcp = { ...next.daemon!.mcp, ...Object.fromEntries(mcpFlags.map(key => [key, true])) };
   try {
     // Only owned entries and two shared MCP flags are recorded, never credentials.
     mkdirSync(home, { recursive: true });
-    const binding = json({ configPath: file.path, ...proposal, mcpBefore });
-    writeFileSync(join(destination, 'paseo-binding.json'), binding, { flag: 'wx', mode: 0o600 });
-    const manifest = (readJson(join(destination, 'installed.json')) as InstalledManifest);
-    writeFileSync(join(destination, 'installed.json'), json({ ...manifest, paseoBindingSha256: hash(binding) }));
+    writeCandidateBinding(destination, plan.receipt());
     writeConfig(file, next);
   } catch (error) {
     rmSync(destination, { recursive: true, force: true });
@@ -124,26 +149,15 @@ export function installPaseo(source: string, destination: string, home: string, 
 function updatePaseo(source: string, destination: string, file: ReturnType<typeof configFile>, prior: PaseoBinding, saved: Map<string, Profile>, apply: boolean) {
   const manifest = verifyInstall(destination);
   verifyReplaceable(destination, manifest);
-  const base = structuredClone(file.config);
-  for (const id of Object.keys(prior.providers)) delete base.agents!.providers![id];
-  base.daemon!.agentProfiles! = base.daemon!.agentProfiles!.filter(p => !saved.has((p as { id: string }).id));
-  const proposal = configurationPlan(destination, base);
-  proposal.profiles = proposal.profiles.map(p => saved.get(p.id) ?? p);
-  const retiredProfiles = [...saved.values()].filter(profile => !proposal.profiles.some(p => p.id === profile.id));
+  const plan = hostRebindPlan(destination, file, { binding: prior, saved });
+  const { proposal, retiredProfiles, next } = plan;
   const result = { destination, configPath: file.path, applied: apply, ...proposal,
     updated: true, retiredProfiles: retiredProfiles.map(p => p.id), reloadRequired: true };
   if (!apply) return result;
   const { staging, candidate } = stageInstall(source, destination);
   try {
-    const binding = json({ configPath: file.path, ...proposal, mcpBefore: prior.mcpBefore,
-      retiredProfiles: [...(prior.retiredProfiles ?? []), ...retiredProfiles] });
-    writeFileSync(join(staging, 'paseo-binding.json'), binding, { flag: 'wx', mode: 0o600 });
-    const staged = (readJson(join(staging, 'installed.json')) as InstalledManifest);
-    writeFileSync(join(staging, 'installed.json'), json({ ...staged, paseoBindingSha256: hash(binding) }));
+    writeCandidateBinding(staging, plan.receipt());
     verifyInstall(staging);
-    const next = structuredClone(base);
-    next.agents!.providers! = { ...next.agents!.providers!, ...proposal.providers };
-    next.daemon!.agentProfiles! = [...next.daemon!.agentProfiles!, ...proposal.profiles];
     const replaced = swapIn(staging, destination);
     try { writeConfig(file, next); rmSync(replaced, { recursive: true, force: true }); }
     catch (error) {
@@ -197,29 +211,18 @@ export function upgradePaseo(source: string, destination: string, previous: stri
   const homeWithinInstall = relative(destination, home);
   if (!homeWithinInstall || (!homeWithinInstall.startsWith('..') && !isAbsolute(homeWithinInstall))) throw new Error('Paseo home must be outside the installation directory');
   const file = configFile(home);
-  const base = structuredClone(file.config);
-  verifyOwnedProviders(base, prior.providers, 'previous installation');
-  for (const id of Object.keys(prior.providers)) delete base.agents!.providers![id];
-  const saved = verifyOwnedProfiles(base, prior.profiles, 'bound');
-  base.daemon!.agentProfiles! = base.daemon!.agentProfiles!.filter(p => !saved.has((p as { id: string }).id));
-  const proposal = configurationPlan(destination, base);
-  proposal.profiles = proposal.profiles.map(p => saved.get(p.id) ?? p);
-  const retainedIds = new Set(proposal.profiles.map(profile => profile.id));
-  const retiredProfiles = [...saved.values()].filter(profile => !retainedIds.has(profile.id));
+  verifyOwnedProviders(file.config, prior.providers, 'previous installation');
+  const saved = verifyOwnedProfiles(file.config, prior.profiles, 'bound');
+  const plan = hostRebindPlan(destination, file, { binding: prior, saved });
+  const { proposal, retiredProfiles, next } = plan;
   const result = { destination, retainedInstallation: previous, configPath: file.path, applied: apply, ...proposal,
     retiredProfiles: retiredProfiles.map(profile => profile.id), reloadRequired: true };
   if (!apply) return result;
   const candidate = install(source, destination).candidate;
   try {
-    const next = structuredClone(base);
-    next.agents!.providers! = { ...next.agents!.providers!, ...proposal.providers };
-    next.daemon!.agentProfiles! = [...next.daemon!.agentProfiles!, ...proposal.profiles];
-    const binding = json({ configPath: file.path, ...proposal, mcpBefore: prior.mcpBefore,
-      retiredProfiles: [...(prior.retiredProfiles ?? []), ...retiredProfiles] });
+    const binding = plan.receipt();
     requireMcp(next);
-    writeFileSync(join(destination, 'paseo-binding.json'), binding, { flag: 'wx', mode: 0o600 });
-    const manifest = (readJson(join(destination, 'installed.json')) as InstalledManifest);
-    writeFileSync(join(destination, 'installed.json'), json({ ...manifest, paseoBindingSha256: hash(binding) }));
+    writeCandidateBinding(destination, binding);
     writeConfig(file, next);
   } catch (error) {
     rmSync(destination, { recursive: true, force: true });

@@ -7,13 +7,26 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import net from 'node:net';
-import { execFileSync } from 'node:child_process';
+import {
+  BIN_SOURCE,
+  bridgeFixture as deskBridgeFixture,
+  gitRepo as deskGitRepo,
+  startBridge,
+  memberRow as deskMemberRow,
+  repoOf,
+  seedMemberships,
+  seedStore,
+  hello,
+  handshake,
+  rpc,
+  tmp,
+  connect,
+  LineReader,
+} from './helpers/desk-bridge-fixture.mjs';
 import { randomUUID } from 'node:crypto';
 import {
   existsSync,
   mkdirSync,
-  mkdtempSync,
   readFileSync,
   realpathSync,
   rmSync,
@@ -21,16 +34,13 @@ import {
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import {
   createDeskStore,
-  deskBridgePaths,
   deskRepoPaths,
   repoKeyFor,
 } from '../plugin/server/desk-store.ts';
-import { createDeskBridge, DESK_TOOL_CATALOG } from '../plugin/server/desk-bridge.ts';
+import { DESK_TOOL_CATALOG } from '../plugin/server/desk-bridge.ts';
 import { sha256Hex } from '../plugin/server/config-view.ts';
 import {
   DESK_BRIDGE_PROTOCOL,
@@ -39,223 +49,40 @@ import {
   WIRE_LIMITS,
 } from '../plugin/shared/enforcement.ts';
 
-const ROOT = fileURLToPath(new URL('..', import.meta.url));
-const BIN_SOURCE = join(ROOT, 'bin', 'slp-desk-mcp.mjs');
 const REQUEST_CAP = WIRE_LIMITS.deskBridgeRequestBytes;
 const RESPONSE_CAP = WIRE_LIMITS.deskBridgeResponseBytes;
 const FIXED_AT = '2026-01-01T00:00:00.000Z';
 const PROVIDER = 'slp-codex-peer';
+// Real pin: these fixtures verify packaged-binary graft integrity.
 const PIN = sha256Hex(readFileSync(BIN_SOURCE));
 
-function tmp(t, prefix) {
-  const dir = mkdtempSync(join(tmpdir(), prefix));
-  t.after(() => rmSync(dir, { recursive: true, force: true, maxRetries: 3 }));
-  return dir;
-}
-
-function gitRepo(t) {
-  const dir = tmp(t, 'slp-bridge-repo-');
-  execFileSync('git', ['init', '-q', dir]);
-  return { dir, gitCommonDir: realpathSync(join(dir, '.git')) };
-}
+const gitRepo = t => deskGitRepo(t, 'slp-bridge-repo-');
 
 /** A tmp daemon home whose launch-set directory exists (the verify double
  *  realpaths it) and whose candidate ships the real packaged binary. */
 function bridgeFixture(t, over = {}) {
-  const dir = tmp(t, 'slp-bridge-home-');
-  const home = realpathSync(mkdirSync(join(dir, 'home'), { recursive: true }) ?? join(dir, 'home'));
-  const stableRoot = join(home, 'slp-runtime');
-  const launchSetSha = 'a'.repeat(64);
-  const candidateSha = 'b'.repeat(64);
-  const runtimePath = join(stableRoot, candidateSha);
-  mkdirSync(join(stableRoot, 'launchers', launchSetSha), { recursive: true });
-  mkdirSync(join(runtimePath, 'bin'), { recursive: true });
-  writeFileSync(join(runtimePath, 'bin', 'slp-desk-mcp.mjs'), readFileSync(BIN_SOURCE));
-
-  const warnings = [];
-  const paseoRef = over.paseoRef ?? { current: null };
-  const journal =
-    over.journal ??
-    {
-      read: () => ({
-        binding: {
-          launchSetSha256: launchSetSha,
-          runtimePath,
-          node: { path: process.execPath },
-          candidateSha256: candidateSha,
-        },
-      }),
-    };
-  const launchers =
-    over.launchers ??
-    {
-      verify: async dir => ({
-        directory: realpathSync(dir),
-        files: [],
-        launchSetSha256: launchSetSha,
-        launchManifestSha256: launchSetSha,
-        bridgeSha256: PIN,
-        bridgeProtocolVersion: DESK_BRIDGE_PROTOCOL,
-      }),
-    };
-  const payload =
-    over.payload ?? { files: [{ path: 'bin/slp-desk-mcp.mjs', sha256: PIN }] };
-  const bridge = createDeskBridge({
-    journal,
-    launchers,
-    payload,
-    paseoRef,
-    detectDaemonHome: () => ({ daemonHome: home, source: 'env' }),
-    realpath: realpathSync,
-    createStore: over.createStore ?? (root => createDeskStore({ stableRoot: root })),
-    kill: over.kill,
-    platform: over.platform,
-    now: over.now,
-    uuid: over.uuid,
-    warn: line => warnings.push(line),
-  });
-  return {
-    home,
-    stableRoot,
-    launchSetSha,
-    candidateSha,
-    runtimePath,
-    bridge,
-    warnings,
-    paseoRef,
-    paths: deskBridgePaths(stableRoot),
-  };
+  return deskBridgeFixture(t, 'slp-bridge-home-', PIN, over);
 }
 
 async function started(t, over = {}) {
-  const f = bridgeFixture(t, over);
-  void f.bridge.start();
-  const outcome = await f.bridge.whenReady();
-  t.after(() => f.bridge.stop());
-  return { ...f, outcome };
+  const f = await startBridge(t, bridgeFixture(t, over));
+  return f;
 }
 
 // ---------------------------------------------------------------------------
 // store + membership fixtures
 // ---------------------------------------------------------------------------
 
-const repoOf = git => ({ hostId: 'local', gitCommonDir: git.gitCommonDir });
+const memberRow = (handle, over = {}) =>
+  deskMemberRow(handle, { provider: PROVIDER, at: FIXED_AT }, over);
 
-const memberRow = (handle, over = {}) => ({
-  membershipId: randomUUID(),
-  state: 'host-confirmed',
-  bindingHandleSha256: sha256Hex(handle),
-  provider: PROVIDER,
-  family: 'codex',
-  role: 'peer',
-  createCwd: '/repo',
-  openGeneration: 1,
-  agentId: 'agent-1',
-  workspaceId: 'wks-1',
-  createdAt: FIXED_AT,
-  hostConfirmedAt: FIXED_AT,
-  registeredAt: FIXED_AT,
-  revokedAt: null,
-  revokeReason: null,
-  ...over,
-});
-
-async function seedMembership(store, repo, row) {
-  const repoKey = repoKeyFor(repo);
-  const result = await store.transact(
-    repoKey,
-    {
-      repo,
-      actorKey: 'desk:hook',
-      assignmentId: 'unassigned',
-      requestId: randomUUID(),
-      command: { kind: 'seed' },
-    },
-    () => ({ ok: true, events: [], memberships: [row] }),
-  );
-  assert.ok(result.ok, `seed commit failed: ${JSON.stringify(result)}`);
-  return repoKey;
-}
-
-const seedStore = f => createDeskStore({ stableRoot: f.stableRoot });
+const seedMembership = (store, repo, row) => seedMemberships(store, repo, [row]);
 
 // ---------------------------------------------------------------------------
 // socket client helpers — one parsed NDJSON frame at a time
 // ---------------------------------------------------------------------------
 
-class LineReader {
-  constructor(sock) {
-    this.sock = sock;
-    this.buf = Buffer.alloc(0);
-    this.queue = [];
-    this.waiters = [];
-    sock.on('data', chunk => {
-      this.buf = this.buf.length === 0 ? chunk : Buffer.concat([this.buf, chunk]);
-      this.pump();
-    });
-  }
-  pump() {
-    for (;;) {
-      const i = this.buf.indexOf(0x0a);
-      if (i === -1) return;
-      const line = this.buf.subarray(0, i);
-      this.buf = this.buf.subarray(i + 1);
-      const resolve = this.waiters.shift();
-      if (resolve) resolve(line);
-      else this.queue.push(line);
-    }
-  }
-  next() {
-    if (this.queue.length > 0) return Promise.resolve(this.queue.shift());
-    return new Promise((resolve, reject) => {
-      const waiter = line => {
-        clearTimeout(timer);
-        resolve(line);
-      };
-      const timer = setTimeout(
-        () => reject(new Error('desk frame read timed out')),
-        5000,
-      );
-      timer.unref?.();
-      this.waiters.push(waiter);
-    });
-  }
-}
-
-const connect = path =>
-  new Promise((resolve, reject) => {
-    const sock = net.createConnection(path);
-    sock.once('connect', () => resolve(sock));
-    sock.once('error', reject);
-  });
-
-const writeFrame = (conn, value) =>
-  conn.write(typeof value === 'string' ? value : JSON.stringify(value) + '\n');
-
-const HELLO = (handle, over = {}) => ({
-  schemaVersion: 1,
-  protocol: DESK_BRIDGE_PROTOCOL,
-  handle,
-  bridgeSha256: PIN,
-  ...over,
-});
-
-async function handshake(socketPath, hello) {
-  const conn = await connect(socketPath);
-  const reader = new LineReader(conn);
-  writeFrame(conn, hello);
-  const ack = JSON.parse((await reader.next()).toString('utf8'));
-  return { conn, reader, ack };
-}
-
-/** Read frames until one carries `id`; error frames and results both match. */
-async function rpc(reader, conn, frame) {
-  writeFrame(conn, frame);
-  for (;;) {
-    const line = JSON.parse((await reader.next()).toString('utf8'));
-    if ('id' in line && line.id === frame.id) return line;
-  }
-}
+const HELLO = (handle, over = {}) => hello(PIN, handle, over);
 
 const livePaseo = agent => ({
   agents: { ref: () => ({ refresh: async () => ({ agent }) }) },

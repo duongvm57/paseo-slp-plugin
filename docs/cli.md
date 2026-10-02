@@ -13,7 +13,11 @@ The optional offline path: `prepare` accepts role, repository, workspaceId
 and assignment. Supervisor/Lead additionally take the `profiles`/`providers`
 inventory; a Peer takes `providers` and `route: {optionId, catalogSha256}`
 from `routes`. Profiles may accompany a Peer request for discovery, but they
-never replace the pool. Three more optional fields, all also honored by
+never replace the pool. The [mixed-Peer request](../examples/mixed-peer.request.json)
+is a template: replace its paths/hash and the entire illustrative `providers`
+array with the current daemon's live `list_providers` array, preserving every
+returned field. Example availability values are not launch evidence.
+Three more optional fields, all also honored by
 `prepare-handoff`:
 
 - `inventoryFile`: absolute path to a JSON object carrying

@@ -42,7 +42,7 @@ Supervisor, who decides within its own assignment.
 
 | Upstream behavior | SLP behavior and reason |
 | --- | --- |
-| Fixed providers `codex-lead`/`codex-peer`/`codex-supervisor` ([`server/config.ts`](https://github.com/hoangnb24/paseo-supervision/blob/1bad19b8ee6c58482494f56a3d8c6edb4f969ee1/server/config.ts)). | Roles derive from [`plugin/shared/families.ts`](../../plugin/shared/families.ts) — the twelve exact `slp-<family>-<role>` ids. Providers outside the registry are never auto-classified. |
+| Fixed providers `codex-lead`/`codex-peer`/`codex-supervisor` ([`server/config.ts`](https://github.com/hoangnb24/paseo-supervision/blob/1bad19b8ee6c58482494f56a3d8c6edb4f969ee1/server/config.ts)). | Roles derive from [`plugin/shared/runtime/families.ts`](../../plugin/shared/runtime/families.ts) — the twelve exact `slp-<family>-<role>` ids. Providers outside the registry are never auto-classified. |
 | Every discovered Lead routes to one UI-selected Supervisor. | Same outcome, opt-in: **daemon defaults** apply to every discovered SLP Lead without an explicit route; explicit per-Lead routes override (an explicit `off` wins). Defaults are off until the Human selects a mode. Rooms never mix: each case is judged against its own Lead's communication. |
 | Semantic three-question rubric ([`server/jev.ts`](https://github.com/hoangnb24/paseo-supervision/blob/1bad19b8ee6c58482494f56a3d8c6edb4f969ee1/server/jev.ts)). | Restored as rubric 2 with SLP terms, plus `no_action_required` and code-offered link questions (below). |
 | All-axis veto: any unknown axis makes the whole decision unknown. | Not copied. Findings are independent per axis; an unknown axis never erases another axis's supported finding. |

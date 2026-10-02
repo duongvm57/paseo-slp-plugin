@@ -6,6 +6,7 @@ import { roles, orchestrates } from './profiles.ts';
 import { files, hash, readJson } from './package.ts';
 import { spawnKit } from './spawn-kit.ts';
 import { readWorkTrackerSetting, workTrackerBlock } from './work-tracker.ts';
+import { SLP_ROLE_PREFIX, ROLE_PREFIX_TERMINAL, SPAWN_KIT_PREFIX, POLICY_LOCATORS_PREFIX, SESSION_LOCATOR_CAPTION } from '../../../shared/runtime/session-delivery.ts';
 
 // A Role bundle is the exact policy bytes a role receives at session entry.
 // This module owns the load-path contract that docs/reports/guide-coverage.md documents:
@@ -134,15 +135,11 @@ export function carrierBlock(kit: ReturnType<typeof spawnKit>, locators: ReturnT
   const lines = locators.map(entry => entry.missing
     ? `- ${entry.path} — declared but missing on disk`
     : `- ${entry.path} — ${entry.bytes} bytes, sha256 ${entry.sha256}`);
-  return `\nSpawn kit — role-scoped Paseo MCP signatures (${kit.note}):\n`
+  return `\n${SPAWN_KIT_PREFIX}role-scoped Paseo MCP signatures (${kit.note}):\n`
     + kit.tools.map(tool => `- ${tool}`).join('\n')
-    + `\nPolicy locators — ${caption}:\n`
+    + `\n${POLICY_LOCATORS_PREFIX}${caption}:\n`
     + lines.join('\n') + '\n';
 }
-
-// Session-entry locators are measured when the bundle renders, not at plan
-// time, so the caption must not borrow the prepare path's wording.
-const sessionLocatorCaption = 'absolute paths; size/sha256 were measured when these role instructions loaded; verify the file found is the one measured';
 
 // Freeze policy from the verified candidate; only managed language state is live.
 // Entry and re-anchor share the same core, never independently summarized rules.
@@ -160,19 +157,18 @@ export function roleDelivery(root: string, role: string, env: Environment = proc
   // path — so the skill/policy locators derive from policyRoot, not root.
   const policyRoot = managed ? managed.runtimeRoot : root;
   const policyDir = join(policyRoot, 'src');
-  const core = `SLP role=${role}\n` + parts.map(path => read(path) + '\n').join('');
+  const core = `${SLP_ROLE_PREFIX}${role}\n` + parts.map(path => read(path) + '\n').join('');
   const recoveryCli = managed
     ? `env SLP_MANAGED_RUNTIME=1 SLP_NODE_BIN=${shq(managed.node)} SLP_RUNTIME_ROOT=${shq(managed.runtimeRoot)} SLP_DAEMON_HOME=${shq(managed.daemonHome)} ${cli}`
     : cli;
   const recovery = `Installed policy directory: ${policyDir}\nPolicy recovery command: ${recoveryCli} instructions ${role}\n`;
-  const assignment = `Use the current authorized Human or delegated assignment and its Paseo workspace. Notifications and heartbeat prompts do not replace that assignment.\n`;
   const entryPrefix = core +
     (orchestrates(role) ? `For repo setup/update, use ${join(policyRoot, 'skills/paseo-slp-onboarding/SKILL.md')}.\n` : '') +
     recovery + `Snapshot command: ${cli} snapshot <repository>\n` +
     (managed ? managedHelpers(cli, managed.daemonHome) : '');
   // Compute the measured carrier once, alongside the immutable core. launch.ts
   // opts out when it owns the carrier so the initial prompt never duplicates it.
-  const carrier = options.carrier === false ? '' : carrierBlock(spawnKit(role), policyLocators(policyRoot, role, env), sessionLocatorCaption);
+  const carrier = options.carrier === false ? '' : carrierBlock(spawnKit(role), policyLocators(policyRoot, role, env), SESSION_LOCATOR_CAPTION);
   return {
     role, parts, orchestrates: orchestrates(role),
     // The work-tracker pointer is an entry-time helper like managedHelpers:
@@ -180,8 +176,8 @@ export function roleDelivery(root: string, role: string, env: Environment = proc
     // Disabled/absent settings emit nothing — the render stays byte-identical
     // to the pre-feature one. anchor() never carries it.
     entry: ({ explicitLanguageState = false } = {}) => entryPrefix + communicationLanguage(env, explicitLanguageState)
-      + (managed ? workTrackerBlock(managed.daemonHome, { cli, policyDir, shq }) : '') + assignment + carrier,
-    anchor: () => core + recovery + communicationLanguage(env, true) + assignment,
+      + (managed ? workTrackerBlock(managed.daemonHome, { cli, policyDir, shq }) : '') + ROLE_PREFIX_TERMINAL + carrier,
+    anchor: () => core + recovery + communicationLanguage(env, true) + ROLE_PREFIX_TERMINAL,
   };
 }
 

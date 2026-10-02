@@ -66,6 +66,7 @@ import {
 import { SETTLEMENT_VIA } from "./desk-records.ts";
 import { ROLES } from "../shared/runtime/families.ts";
 import { canonicalJson, canonicalSha256, sha256Hex } from "./config-view.ts";
+import { classifyLockHolderProcess, parseLockHolder, type LockHolder } from "./runtime/lock-holder.ts";
 import {
   ensurePrivateDirectory,
   fsyncDirectory,
@@ -810,136 +811,105 @@ const LedgerBodyFields = {
   requests: z.array(RequestRecordSchema).max(LEDGER_LIMITS.requests),
 } as const;
 
-/** v1 — the P2-a shape, kept only so `read`/`transact` can migrate it
- *  in-memory (MIGRATIONS[1]). Never written again. */
-const LedgerSchemaV1 = z
-  .object({ ...LedgerBodyFields, schemaVersion: z.literal(1) })
-  .strict();
-
-/** v2 — the P2-c shape: body fields plus `memberships`. Kept so `read` can
- *  migrate it in-memory (MIGRATIONS[2]); never written again. */
-const LedgerSchemaV2 = z
-  .object({
-    ...LedgerBodyFields,
-    schemaVersion: z.literal(2),
-    memberships: z.array(MembershipSchema).max(LEDGER_LIMITS.memberships),
-  })
-  .strict();
-
-/** v3 — the P3-a shape: body, memberships and the handback surface
- *  (assignments/candidates/handbacks). Kept so `read` can migrate it
- *  in-memory (MIGRATIONS[3]); never written again. */
-const LedgerSchemaV3 = z
-  .object({
-    ...LedgerBodyFields,
-    schemaVersion: z.literal(3),
-    memberships: z.array(MembershipSchema).max(LEDGER_LIMITS.memberships),
+/** Tables in durable introduction order. This registry owns each table's
+ * schema/cap and first persisted version; historical schemas, additive
+ * migrations, replacement channels and rejected-write projection reuse it. */
+const TABLE_FIELDS_BY_VERSION = {
+  2: { memberships: z.array(MembershipSchema).max(LEDGER_LIMITS.memberships) },
+  3: {
     assignments: z.array(AssignmentSchema).max(LEDGER_LIMITS.assignments),
     candidates: z.array(CandidateSchema).max(LEDGER_LIMITS.candidates),
     handbacks: z.array(HandbackSchema).max(LEDGER_LIMITS.handbacks),
-  })
-  .strict();
-
-/** v4 — the P3-b shape: v3 plus the `settlements` mirror. Kept so `read`
- *  can migrate it in-memory (MIGRATIONS[4]); never written again. */
-const LedgerSchemaV4 = z
-  .object({
-    ...LedgerBodyFields,
-    schemaVersion: z.literal(4),
-    memberships: z.array(MembershipSchema).max(LEDGER_LIMITS.memberships),
-    assignments: z.array(AssignmentSchema).max(LEDGER_LIMITS.assignments),
-    candidates: z.array(CandidateSchema).max(LEDGER_LIMITS.candidates),
-    handbacks: z.array(HandbackSchema).max(LEDGER_LIMITS.handbacks),
-    settlements: z.array(SettlementSchema).max(LEDGER_LIMITS.settlements),
-  })
-  .strict();
-
-/** v5 — the P4 shape: v4 plus `scopes`, `scopeReviews`, `scopeTransitions`.
- *  Kept so `read` can migrate it in-memory (MIGRATIONS[5]); never written
- *  again. */
-const LedgerSchemaV5 = z
-  .object({
-    ...LedgerBodyFields,
-    schemaVersion: z.literal(5),
-    memberships: z.array(MembershipSchema).max(LEDGER_LIMITS.memberships),
-    assignments: z.array(AssignmentSchema).max(LEDGER_LIMITS.assignments),
-    candidates: z.array(CandidateSchema).max(LEDGER_LIMITS.candidates),
-    handbacks: z.array(HandbackSchema).max(LEDGER_LIMITS.handbacks),
-    settlements: z.array(SettlementSchema).max(LEDGER_LIMITS.settlements),
+  },
+  4: { settlements: z.array(SettlementSchema).max(LEDGER_LIMITS.settlements) },
+  5: {
     scopes: z.array(ScopeSchema).max(LEDGER_LIMITS.scopes),
     scopeReviews: z.array(ScopeReviewSchema).max(LEDGER_LIMITS.scopeReviews),
     scopeTransitions: z.array(ScopeTransitionSchema).max(LEDGER_LIMITS.scopeTransitions),
-  })
-  .strict();
-
-/** v6 — adds the P5 rollout machinery: `checkDefinitions`, `checkRuns`,
- *  `rollouts`, `rolloutTransitions`. Every other field is untouched. */
-const LedgerSchema = z
-  .object({
-    ...LedgerBodyFields,
-    schemaVersion: z.literal(LEDGER_SCHEMA_VERSION),
-    memberships: z.array(MembershipSchema).max(LEDGER_LIMITS.memberships),
-    assignments: z.array(AssignmentSchema).max(LEDGER_LIMITS.assignments),
-    candidates: z.array(CandidateSchema).max(LEDGER_LIMITS.candidates),
-    handbacks: z.array(HandbackSchema).max(LEDGER_LIMITS.handbacks),
-    settlements: z.array(SettlementSchema).max(LEDGER_LIMITS.settlements),
-    scopes: z.array(ScopeSchema).max(LEDGER_LIMITS.scopes),
-    scopeReviews: z.array(ScopeReviewSchema).max(LEDGER_LIMITS.scopeReviews),
-    scopeTransitions: z.array(ScopeTransitionSchema).max(LEDGER_LIMITS.scopeTransitions),
+  },
+  6: {
     checkDefinitions: z.array(CheckDefinitionSchema).max(LEDGER_LIMITS.checkDefinitions),
     checkRuns: z.array(CheckRunSchema).max(LEDGER_LIMITS.checkRuns),
     rollouts: z.array(RolloutSchema).max(LEDGER_LIMITS.rollouts),
     rolloutTransitions: z.array(RolloutTransitionSchema).max(LEDGER_LIMITS.rolloutTransitions),
-  })
-  .strict();
+  },
+} as const;
+
+const LedgerTableFields = {
+  ...TABLE_FIELDS_BY_VERSION[2],
+  ...TABLE_FIELDS_BY_VERSION[3],
+  ...TABLE_FIELDS_BY_VERSION[4],
+  ...TABLE_FIELDS_BY_VERSION[5],
+  ...TABLE_FIELDS_BY_VERSION[6],
+};
+type LedgerTableName = keyof typeof LedgerTableFields;
+type LedgerTables = Pick<LedgerValue, LedgerTableName>;
+const LEDGER_TABLE_NAMES = Object.keys(LedgerTableFields) as LedgerTableName[];
+
+/** Strict historical schemas remain explicit: a version accepts only the
+ * tables that existed then. No historical shape is written on success. */
+const LedgerSchemaV1 = z.object({ ...LedgerBodyFields, schemaVersion: z.literal(1) }).strict();
+const LedgerSchemaV2 = LedgerSchemaV1.extend({ schemaVersion: z.literal(2), ...TABLE_FIELDS_BY_VERSION[2] });
+const LedgerSchemaV3 = LedgerSchemaV2.extend({ schemaVersion: z.literal(3), ...TABLE_FIELDS_BY_VERSION[3] });
+const LedgerSchemaV4 = LedgerSchemaV3.extend({ schemaVersion: z.literal(4), ...TABLE_FIELDS_BY_VERSION[4] });
+const LedgerSchemaV5 = LedgerSchemaV4.extend({ schemaVersion: z.literal(5), ...TABLE_FIELDS_BY_VERSION[5] });
+const LedgerSchema = LedgerSchemaV5.extend({ schemaVersion: z.literal(LEDGER_SCHEMA_VERSION), ...TABLE_FIELDS_BY_VERSION[6] });
+const LEDGER_SCHEMAS = {
+  1: LedgerSchemaV1, 2: LedgerSchemaV2, 3: LedgerSchemaV3,
+  4: LedgerSchemaV4, 5: LedgerSchemaV5, 6: LedgerSchema,
+} as const;
 
 type LedgerValueV2 = z.infer<typeof LedgerSchemaV2>;
 type LedgerValueV3 = z.infer<typeof LedgerSchemaV3>;
 type LedgerValueV4 = z.infer<typeof LedgerSchemaV4>;
 type LedgerValueV5 = z.infer<typeof LedgerSchemaV5>;
 
-/** Additive ledger migrations keyed by the on-disk schemaVersion. Pure: the
- *  input is never mutated; the output reuses the frozen input's records
- *  verbatim. v1 → v2 adds the empty memberships table (C2); v2 → v3 adds
- *  the empty P3-a tables (assignments/candidates/handbacks); v3 → v4 adds
- *  the empty settlements table; v4 → v5 adds the empty P4 scope tables;
- *  v5 → v6 adds the empty P5 check-runner/rollout tables. Requests and
- *  events are untouched by every hop; read() chains the whole chain for an
- *  older file. */
+function emptyTables<Fields extends Record<string, z.ZodArray>>(fields: Fields): { [K in keyof Fields]: z.infer<Fields[K]> } {
+  // Every registered field is an array; every call creates distinct empties.
+  return Object.fromEntries(Object.keys(fields).map(name => [name, []])) as { [K in keyof Fields]: z.infer<Fields[K]> };
+}
+
+/** Pure additive hops: existing rows, requests and events are carried
+ * verbatim. read() chains these hops in memory; a rejection keeps its
+ * persisted version, and only the next successful commit writes the bump. */
 export const MIGRATIONS = {
   1: (ledger: z.infer<typeof LedgerSchemaV1>): LedgerValueV2 => ({
-    ...ledger,
-    schemaVersion: 2,
-    memberships: [],
+    ...ledger, schemaVersion: 2, ...emptyTables(TABLE_FIELDS_BY_VERSION[2]),
   }),
   2: (ledger: LedgerValueV2): LedgerValueV3 => ({
-    ...ledger,
-    schemaVersion: 3,
-    assignments: [],
-    candidates: [],
-    handbacks: [],
+    ...ledger, schemaVersion: 3, ...emptyTables(TABLE_FIELDS_BY_VERSION[3]),
   }),
   3: (ledger: LedgerValueV3): LedgerValueV4 => ({
-    ...ledger,
-    schemaVersion: 4,
-    settlements: [],
+    ...ledger, schemaVersion: 4, ...emptyTables(TABLE_FIELDS_BY_VERSION[4]),
   }),
   4: (ledger: LedgerValueV4): LedgerValueV5 => ({
-    ...ledger,
-    schemaVersion: 5,
-    scopes: [],
-    scopeReviews: [],
-    scopeTransitions: [],
+    ...ledger, schemaVersion: 5, ...emptyTables(TABLE_FIELDS_BY_VERSION[5]),
   }),
   5: (ledger: LedgerValueV5): LedgerValue => ({
-    ...ledger,
-    schemaVersion: LEDGER_SCHEMA_VERSION,
-    checkDefinitions: [],
-    checkRuns: [],
-    rollouts: [],
-    rolloutTransitions: [],
+    ...ledger, schemaVersion: LEDGER_SCHEMA_VERSION, ...emptyTables(TABLE_FIELDS_BY_VERSION[6]),
   }),
 } as const;
+
+function tableSnapshot(ledger: LedgerValue): LedgerTables {
+  return Object.fromEntries(LEDGER_TABLE_NAMES.map(name => [name, ledger[name]])) as LedgerTables;
+}
+
+function replaceTable<K extends LedgerTableName>(tables: LedgerTables, name: K, value: unknown): z.ZodError | null {
+  const parsed = LedgerTableFields[name].safeParse(value);
+  if (!parsed.success) return parsed.error;
+  // Indexing the schema and destination by the same registry key preserves
+  // the row type even though TypeScript widens the schema union's output.
+  tables[name] = parsed.data as LedgerTables[K];
+  return null;
+}
+
+function persistedLedgerShape(ledger: LedgerValue, version: keyof typeof LEDGER_SCHEMAS): Record<string, unknown> {
+  const shape: Record<string, unknown> = { ...ledger, schemaVersion: version };
+  for (const [introduced, fields] of Object.entries(TABLE_FIELDS_BY_VERSION)) {
+    if (Number(introduced) > version) for (const name of Object.keys(fields)) delete shape[name];
+  }
+  return shape;
+}
 
 const EnvelopeSchema = z
   .object({
@@ -994,32 +964,13 @@ export type TransactReceipt = {
 export type TransactResult = { ok: true; receipt: TransactReceipt } | DeskRejectionValue;
 
 export type DecideOutcome =
-  | {
+  | ({
       ok: true;
       events: { kind: string; payload: Record<string, unknown> }[];
-      /** §2.2 decide → state channel: when present, the FULL replacement
-       *  table for that collection. When absent, the snapshot's table
-       *  carries over verbatim (P2-a behavior). Schema- and
-       *  refinement-checked by the store; seat semantics stay in the
-       *  decide. The P3-a channels (assignments/candidates/handbacks)
-       *  obey exactly the same rule. */
-      memberships?: MembershipValue[];
-      assignments?: AssignmentValue[];
-      candidates?: CandidateValue[];
-      handbacks?: HandbackValue[];
-      /** P3-b — the settlement mirror table; identical channel rule: full
-       *  replacement table, schema- and refinement-checked by the store. */
-      settlements?: SettlementValue[];
-      /** P4 — the scope machinery tables; identical channel rule. */
-      scopes?: ScopeValue[];
-      scopeReviews?: ScopeReviewValue[];
-      scopeTransitions?: ScopeTransitionValue[];
-      /** P5 — the check-runner/rollout tables; identical channel rule. */
-      checkDefinitions?: CheckDefinitionValue[];
-      checkRuns?: CheckRunValue[];
-      rollouts?: RolloutValue[];
-      rolloutTransitions?: RolloutTransitionValue[];
-    }
+      /** §2.2 decide → state channels: each present collection is a FULL
+       * replacement table; absent collections carry over verbatim. Store
+       * schema/refinements enforce safety; seat semantics stay in decide. */
+    } & Partial<LedgerTables>)
   | DeskRejectionValue;
 export type DecideFunction = (ledger: Readonly<LedgerValue>, command: Record<string, unknown>) => DecideOutcome;
 
@@ -2072,48 +2023,37 @@ export function createDeskStore(deps: DeskStoreDeps): DeskStore {
         // Expired: classify the holder. kill(pid, 0) success or EPERM means
         // the process is alive; ESRCH means dead; an unreadable lock means
         // unknown — the lock is never removed either way.
-        let holder: { pid?: unknown; instanceNonce?: unknown } | null = null;
+        let holder: LockHolder | null = null;
         try {
-          const parsed: unknown = JSON.parse(readFileSync(path, "utf8"));
-          if (isRecord(parsed)) holder = parsed;
+          holder = parseLockHolder(readFileSync(path));
         } catch {
           holder = null;
         }
-        const pid = typeof holder?.pid === "number" ? holder.pid : null;
-        if (pid !== null) {
-          try {
-            process.kill(pid, 0);
+        if (holder !== null) {
+          const { pid, instanceNonce: holderNonce } = holder;
+          const state = classifyLockHolderProcess(pid, pid => process.kill(pid, 0));
+          if (state === "alive" || state === "eperm") {
             return {
               rejection: rejection(
                 "CAPABILITY_GAP",
-                `desk lock held by live pid ${pid} (instance ${String(holder!.instanceNonce)})`,
+                `desk lock held by live pid ${pid} (instance ${holderNonce})`,
                 "desk-busy: another instance holds the repo lock",
               ),
             };
-          } catch (killError) {
-            if ((killError as NodeJS.ErrnoException).code === "EPERM") {
-              return {
-                rejection: rejection(
-                  "CAPABILITY_GAP",
-                  `desk lock held by live pid ${pid} (instance ${String(holder!.instanceNonce)})`,
-                  "desk-busy: another instance holds the repo lock",
-                ),
-              };
-            }
-            // ESRCH or an undetermined kill → recovery-required.
-            return {
-              rejection: rejection(
-                "RECOVERY_REQUIRED",
-                `desk lock holder pid ${pid} is dead or undetermined (instance ${String(holder!.instanceNonce)}) — stale lock, recovery is P2-e`,
-                "manual desk-lock recovery under maintenance authority",
-              ),
-            };
           }
+          // ESRCH or an undetermined kill → recovery-required.
+          return {
+            rejection: rejection(
+              "RECOVERY_REQUIRED",
+              `desk lock holder pid ${pid} is dead or undetermined (instance ${holderNonce}) — stale lock, recovery is P2-e`,
+              "manual desk-lock recovery under maintenance authority",
+            ),
+          };
         }
         return {
           rejection: rejection(
             "RECOVERY_REQUIRED",
-            `desk lock is unreadable or unparseable (pid ${String(holder?.pid)}, instance ${String(holder?.instanceNonce)}) — stale lock, recovery is P2-e`,
+            "desk lock is unreadable or unparseable — stale lock, recovery is P2-e",
             "manual desk-lock recovery under maintenance authority",
           ),
         };
@@ -2132,14 +2072,8 @@ export function createDeskStore(deps: DeskStoreDeps): DeskStore {
     } catch (error) {
       throw new OperationConflict("IO_FAILURE", `cannot read desk lock for release: ${summarize(error)}`);
     }
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(content);
-    } catch {
-      parsed = null;
-    }
-    const holder = isRecord(parsed) ? parsed : {};
-    if (holder.pid !== process.pid || holder.instanceNonce !== instanceNonce) {
+    const holder = parseLockHolder(content);
+    if (holder?.pid !== process.pid || holder.instanceNonce !== instanceNonce) {
       throw new OperationConflict("IO_FAILURE", `desk lock at ${path} is not owned by this instance — left in place`);
     }
     try {
@@ -2190,18 +2124,7 @@ export function createDeskStore(deps: DeskStoreDeps): DeskStore {
       lastEventSeq: 0,
       lastEventSha256: null,
       requests: [],
-      memberships: [],
-      assignments: [],
-      candidates: [],
-      handbacks: [],
-      settlements: [],
-      scopes: [],
-      scopeReviews: [],
-      scopeTransitions: [],
-      checkDefinitions: [],
-      checkRuns: [],
-      rollouts: [],
-      rolloutTransitions: [],
+      ...emptyTables(LedgerTableFields),
     };
   }
 
@@ -2341,171 +2264,22 @@ export function createDeskStore(deps: DeskStoreDeps): DeskStore {
       // pass the same refinements read() applies. A violation is a
       // consumer error — INVALID_RECORD, nothing recorded (the
       // decide-threw branch of P2-a step 5).
-      let nextMemberships = ledger.memberships;
-      let nextAssignments = ledger.assignments;
-      let nextCandidates = ledger.candidates;
-      let nextHandbacks = ledger.handbacks;
-      let nextSettlements = ledger.settlements;
-      let nextScopes = ledger.scopes;
-      let nextScopeReviews = ledger.scopeReviews;
-      let nextScopeTransitions = ledger.scopeTransitions;
-      let nextCheckDefinitions = ledger.checkDefinitions;
-      let nextCheckRuns = ledger.checkRuns;
-      let nextRollouts = ledger.rollouts;
-      let nextRolloutTransitions = ledger.rolloutTransitions;
+      const nextTables = tableSnapshot(ledger);
       if (decided.ok === true) {
-        const proposed: string[] = [];
-        if (decided.memberships !== undefined) {
-          proposed.push("memberships");
-          const parsed = z.array(MembershipSchema).max(LEDGER_LIMITS.memberships).safeParse(decided.memberships);
-          if (!parsed.success) {
+        const proposed: LedgerTableName[] = [];
+        for (const name of LEDGER_TABLE_NAMES) {
+          if (decided[name] === undefined) continue;
+          proposed.push(name);
+          const error = replaceTable(nextTables, name, decided[name]);
+          if (error !== null) {
             return invalidRecord(
-              `decide returned invalid memberships: ${firstIssue(parsed.error)}`,
-              "fix the decide function to return a schema-valid memberships table",
+              `decide returned invalid ${name}: ${firstIssue(error)}`,
+              `fix the decide function to return a schema-valid ${name} table`,
             );
           }
-          nextMemberships = parsed.data;
-        }
-        if (decided.assignments !== undefined) {
-          proposed.push("assignments");
-          const parsed = z.array(AssignmentSchema).max(LEDGER_LIMITS.assignments).safeParse(decided.assignments);
-          if (!parsed.success) {
-            return invalidRecord(
-              `decide returned invalid assignments: ${firstIssue(parsed.error)}`,
-              "fix the decide function to return a schema-valid assignments table",
-            );
-          }
-          nextAssignments = parsed.data;
-        }
-        if (decided.candidates !== undefined) {
-          proposed.push("candidates");
-          const parsed = z.array(CandidateSchema).max(LEDGER_LIMITS.candidates).safeParse(decided.candidates);
-          if (!parsed.success) {
-            return invalidRecord(
-              `decide returned invalid candidates: ${firstIssue(parsed.error)}`,
-              "fix the decide function to return a schema-valid candidates table",
-            );
-          }
-          nextCandidates = parsed.data;
-        }
-        if (decided.handbacks !== undefined) {
-          proposed.push("handbacks");
-          const parsed = z.array(HandbackSchema).max(LEDGER_LIMITS.handbacks).safeParse(decided.handbacks);
-          if (!parsed.success) {
-            return invalidRecord(
-              `decide returned invalid handbacks: ${firstIssue(parsed.error)}`,
-              "fix the decide function to return a schema-valid handbacks table",
-            );
-          }
-          nextHandbacks = parsed.data;
-        }
-        if (decided.settlements !== undefined) {
-          proposed.push("settlements");
-          const parsed = z.array(SettlementSchema).max(LEDGER_LIMITS.settlements).safeParse(decided.settlements);
-          if (!parsed.success) {
-            return invalidRecord(
-              `decide returned invalid settlements: ${firstIssue(parsed.error)}`,
-              "fix the decide function to return a schema-valid settlements table",
-            );
-          }
-          nextSettlements = parsed.data;
-        }
-        if (decided.scopes !== undefined) {
-          proposed.push("scopes");
-          const parsed = z.array(ScopeSchema).max(LEDGER_LIMITS.scopes).safeParse(decided.scopes);
-          if (!parsed.success) {
-            return invalidRecord(
-              `decide returned invalid scopes: ${firstIssue(parsed.error)}`,
-              "fix the decide function to return a schema-valid scopes table",
-            );
-          }
-          nextScopes = parsed.data;
-        }
-        if (decided.scopeReviews !== undefined) {
-          proposed.push("scopeReviews");
-          const parsed = z.array(ScopeReviewSchema).max(LEDGER_LIMITS.scopeReviews).safeParse(decided.scopeReviews);
-          if (!parsed.success) {
-            return invalidRecord(
-              `decide returned invalid scopeReviews: ${firstIssue(parsed.error)}`,
-              "fix the decide function to return a schema-valid scopeReviews table",
-            );
-          }
-          nextScopeReviews = parsed.data;
-        }
-        if (decided.scopeTransitions !== undefined) {
-          proposed.push("scopeTransitions");
-          const parsed = z.array(ScopeTransitionSchema).max(LEDGER_LIMITS.scopeTransitions).safeParse(decided.scopeTransitions);
-          if (!parsed.success) {
-            return invalidRecord(
-              `decide returned invalid scopeTransitions: ${firstIssue(parsed.error)}`,
-              "fix the decide function to return a schema-valid scopeTransitions table",
-            );
-          }
-          nextScopeTransitions = parsed.data;
-        }
-        if (decided.checkDefinitions !== undefined) {
-          proposed.push("checkDefinitions");
-          const parsed = z.array(CheckDefinitionSchema).max(LEDGER_LIMITS.checkDefinitions).safeParse(decided.checkDefinitions);
-          if (!parsed.success) {
-            return invalidRecord(
-              `decide returned invalid checkDefinitions: ${firstIssue(parsed.error)}`,
-              "fix the decide function to return a schema-valid checkDefinitions table",
-            );
-          }
-          nextCheckDefinitions = parsed.data;
-        }
-        if (decided.checkRuns !== undefined) {
-          proposed.push("checkRuns");
-          const parsed = z.array(CheckRunSchema).max(LEDGER_LIMITS.checkRuns).safeParse(decided.checkRuns);
-          if (!parsed.success) {
-            return invalidRecord(
-              `decide returned invalid checkRuns: ${firstIssue(parsed.error)}`,
-              "fix the decide function to return a schema-valid checkRuns table",
-            );
-          }
-          nextCheckRuns = parsed.data;
-        }
-        if (decided.rollouts !== undefined) {
-          proposed.push("rollouts");
-          const parsed = z.array(RolloutSchema).max(LEDGER_LIMITS.rollouts).safeParse(decided.rollouts);
-          if (!parsed.success) {
-            return invalidRecord(
-              `decide returned invalid rollouts: ${firstIssue(parsed.error)}`,
-              "fix the decide function to return a schema-valid rollouts table",
-            );
-          }
-          nextRollouts = parsed.data;
-        }
-        if (decided.rolloutTransitions !== undefined) {
-          proposed.push("rolloutTransitions");
-          const parsed = z.array(RolloutTransitionSchema).max(LEDGER_LIMITS.rolloutTransitions).safeParse(decided.rolloutTransitions);
-          if (!parsed.success) {
-            return invalidRecord(
-              `decide returned invalid rolloutTransitions: ${firstIssue(parsed.error)}`,
-              "fix the decide function to return a schema-valid rolloutTransitions table",
-            );
-          }
-          nextRolloutTransitions = parsed.data;
         }
         if (proposed.length > 0) {
-          const candidateInvalid = checkRefinements(
-            {
-              ...ledger,
-              memberships: nextMemberships,
-              assignments: nextAssignments,
-              candidates: nextCandidates,
-              handbacks: nextHandbacks,
-              settlements: nextSettlements,
-              scopes: nextScopes,
-              scopeReviews: nextScopeReviews,
-              scopeTransitions: nextScopeTransitions,
-              checkDefinitions: nextCheckDefinitions,
-              checkRuns: nextCheckRuns,
-              rollouts: nextRollouts,
-              rolloutTransitions: nextRolloutTransitions,
-            },
-            repoKey,
-          );
+          const candidateInvalid = checkRefinements({ ...ledger, ...nextTables }, repoKey);
           if (candidateInvalid !== null) {
             return invalidRecord(
               `decide returned invalid ${proposed.length === 1 ? proposed[0] : "state tables"} (refinement failed)`,
@@ -2571,18 +2345,7 @@ export function createDeskStore(deps: DeskStoreDeps): DeskStore {
         lastEventSeq,
         lastEventSha256,
         requests: [...ledger.requests, record],
-        memberships: nextMemberships,
-        assignments: nextAssignments,
-        candidates: nextCandidates,
-        handbacks: nextHandbacks,
-        settlements: nextSettlements,
-        scopes: nextScopes,
-        scopeReviews: nextScopeReviews,
-        scopeTransitions: nextScopeTransitions,
-        checkDefinitions: nextCheckDefinitions,
-        checkRuns: nextCheckRuns,
-        rollouts: nextRollouts,
-        rolloutTransitions: nextRolloutTransitions,
+        ...nextTables,
       };
       // The pre-commit refinement pass is the same one read() applies — a
       // ledger that would read as unsafe/corrupt is never written.
@@ -2597,46 +2360,8 @@ export function createDeskStore(deps: DeskStoreDeps): DeskStore {
       // instead.
       let nextBytes: string;
       if (migratedFrom !== null && decided.ok === false) {
-        // Every migrated shape strips the newest tables first: the P5
-        // tables come off for any source version, then the P4 tables for
-        // sources older than v5, then the P3-b table for sources older
-        // than v4, then the P3-a tables (and memberships) for v1/v2
-        // bodies.
-        const {
-          checkDefinitions: _cd,
-          checkRuns: _cr,
-          rollouts: _r,
-          rolloutTransitions: _rt,
-          ...v5Body
-        } = candidate;
-        let persistedShape: unknown;
-        let persistedParses: boolean;
-        if (migratedFrom === 5) {
-          persistedShape = { ...v5Body, schemaVersion: 5 };
-          persistedParses = LedgerSchemaV5.safeParse(persistedShape).success;
-        } else {
-          const { scopes: _sc, scopeReviews: _sr, scopeTransitions: _st, ...v4Body } = v5Body;
-          if (migratedFrom === 4) {
-            persistedShape = { ...v4Body, schemaVersion: 4 };
-            persistedParses = LedgerSchemaV4.safeParse(persistedShape).success;
-          } else {
-            const { settlements: _s, ...rest } = v4Body;
-            if (migratedFrom === 1) {
-              const { memberships: _m, assignments: _a, candidates: _c, handbacks: _h, ...v1Body } = rest;
-              persistedShape = { ...v1Body, schemaVersion: 1 };
-              persistedParses = LedgerSchemaV1.safeParse(persistedShape).success;
-            } else if (migratedFrom === 2) {
-              const { assignments: _a, candidates: _c, handbacks: _h, ...v2Body } = rest;
-              persistedShape = { ...v2Body, schemaVersion: 2 };
-              persistedParses = LedgerSchemaV2.safeParse(persistedShape).success;
-            } else {
-              // migratedFrom === 3: drop only the P3-b table; the v3 shape keeps
-              // its assignments/candidates/handbacks verbatim.
-              persistedShape = { ...rest, schemaVersion: 3 };
-              persistedParses = LedgerSchemaV3.safeParse(persistedShape).success;
-            }
-          }
-        }
+        const persistedShape = persistedLedgerShape(candidate, migratedFrom);
+        const persistedParses = LEDGER_SCHEMAS[migratedFrom].safeParse(persistedShape).success;
         if (!persistedParses) {
           throw new OperationConflict("IO_FAILURE", "refusing to commit a ledger that would not read back cleanly");
         }

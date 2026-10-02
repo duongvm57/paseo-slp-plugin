@@ -710,6 +710,21 @@ test('lock: live holder → CAPABILITY_GAP; dead or unparseable holder → RECOV
   assert.equal(garbage.code, 'RECOVERY_REQUIRED');
 });
 
+test('lock: pid zero is a malformed holder, never the caller process group', async t => {
+  const dir = fixture(t);
+  const root = join(dir, 'stable');
+  const store = freshStore(root);
+  mkdirSync(repoDir(root), { recursive: true });
+  const bytes = JSON.stringify({ pid: 0, instanceNonce: 'invalid', startedAt: FIXED_NOW });
+  writeFileSync(lockPath(root), bytes);
+
+  const result = await store.transact(REPO_KEY, envelope(), decideCommit());
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'RECOVERY_REQUIRED');
+  assert.equal(readFileSync(lockPath(root), 'utf8'), bytes, 'the store cannot recover a malformed lock');
+  assert.equal(existsSync(ledgerPath(root)), false, 'no mutation can pass the malformed holder');
+});
+
 test('lock: unsafe ancestors yield STATE_UNREADABLE without touching the path', async t => {
   const dir = fixture(t);
   const root = join(dir, 'stable');

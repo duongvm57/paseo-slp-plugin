@@ -9,9 +9,10 @@
 // card state and client navigation. The header bell
 // (supervision-controls.ts) writes through the same server-side CAS writer
 // and opens the Manager.
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { Text, View } from "react-native";
+import { useTargetSnapshot } from "../target-async.ts";
 import { usePaseo } from "@getpaseo/plugin/client";
 import type { TargetValue } from "../../shared/contracts.ts";
 import { SUPERVISION_CONFIDENCE_MAX, SUPERVISION_CONFIDENCE_MIN, SUPERVISION_PENDING_DELAY_MAX_MS } from "../../shared/supervision.ts";
@@ -59,14 +60,14 @@ export function useSupervisionCard({ target, targetKey, isCurrentKey, callGetSup
   update: (patch: { lastError: string | null }, target: TargetValue) => void;
 }) {
   const paseo = usePaseo();
-  const [data, setData] = useState<GetSupervisionResult | null>(null);
+  const snapshot = useTargetSnapshot(target, targetKey, target => callGetSupervision({ schemaVersion: 2, target }));
+  const { data, replace: setData, error: readError, capture } = snapshot;
   const [form, setForm] = useState<SupervisionForm>(emptySupervisionForm);
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const [reloading, setReloading] = useState(false);
   const [saved, setSaved] = useState(false);
   const [unverified, setUnverified] = useState<SupervisionUnverified[]>([]);
-  const [readError, setReadError] = useState<string | null>(null);
   const [cardError, setCardError] = useState<{ message: string; cas: boolean } | null>(null);
   const [agents, setAgents] = useState<AgentChoice[] | null>(null);
   const [agentsError, setAgentsError] = useState<string | null>(null);
@@ -81,7 +82,6 @@ export function useSupervisionCard({ target, targetKey, isCurrentKey, callGetSup
     setReloading(false);
     setSaved(false);
     setUnverified([]);
-    setReadError(null);
     setCardError(null);
     setAgents(null);
     setAgentsError(null);
@@ -90,50 +90,26 @@ export function useSupervisionCard({ target, targetKey, isCurrentKey, callGetSup
 
   // The pickers list the app's own active agents — the same list the
   // sidebar shows — so a thread is chosen by name, never by typed id.
-  const loadAgents = async (issueKey: string) => {
+  const loadAgents = async () => {
+    const ticket = capture();
     try {
       const result = await paseo.agents.list({ scope: "active", page: { limit: 200 } });
-      if (!isCurrentKey(issueKey)) return;
+      if (!ticket.isCurrent()) return;
       setAgents(agentChoices(result.entries as unknown as AgentDirectoryEntry[]));
       setAgentsError(null);
     } catch (error) {
-      if (!isCurrentKey(issueKey)) return;
+      if (!ticket.isCurrent()) return;
       setAgentsError(errorMessage(error));
     }
   };
 
-  // Fetch once per target. data === null is ambiguous between "loading" and
-  // "the read failed" — readError separates the two so a failed read never
-  // paints as an empty config, and Save requires a successful snapshot
-  // rather than silently sending expectedSha256:null.
-  const loadedFor = useRef<string | null>(null);
   useEffect(() => {
-    if (!target || !targetKey || loadedFor.current === targetKey) return;
-    loadedFor.current = targetKey;
-    const issueKey = targetKey;
-    let cancelled = false;
-    void loadAgents(issueKey);
-    void (async () => {
-      try {
-        const result = await callGetSupervision({ schemaVersion: 2, target });
-        if (cancelled || !isCurrentKey(issueKey)) return;
-        setData(result);
-        setReadError(null);
-        setForm(formFromConfig(result.config));
-      } catch (error) {
-        if (cancelled || !isCurrentKey(issueKey)) return;
-        setReadError(errorMessage(error));
-      }
-    })();
-    return () => {
-      cancelled = true;
-      // A cancelled read never landed — release the guard so a re-run for
-      // the same key (StrictMode replay, key round-trip) retries instead
-      // of painting "loading" forever with data === null.
-      if (loadedFor.current === issueKey) loadedFor.current = null;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- targetKey captures target; the shell mints a fresh target object every render, so keying on it would cancel every pending read
+    if (target && targetKey) void loadAgents();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- target identity
   }, [targetKey]);
+  useEffect(() => {
+    if (data && !dirty) setForm(formFromConfig(data.config));
+  }, [data, dirty]);
 
   const edit = (change: (current: SupervisionForm) => SupervisionForm) => {
     setDirty(true);
@@ -149,7 +125,7 @@ export function useSupervisionCard({ target, targetKey, isCurrentKey, callGetSup
       setCardError({ message: built.error, cas: false });
       return;
     }
-    const issueKey = targetKey;
+    const ticket = capture();
     setSaving(true);
     try {
       const result = await callSetSupervision({
@@ -158,7 +134,7 @@ export function useSupervisionCard({ target, targetKey, isCurrentKey, callGetSup
         config: built.config,
         expectedSha256: data?.sha256 ?? null,
       });
-      if (!isCurrentKey(issueKey)) return;
+      if (!ticket.isCurrent()) return;
       setData(result);
       setForm(formFromConfig(result.config));
       setDirty(false);
@@ -171,24 +147,23 @@ export function useSupervisionCard({ target, targetKey, isCurrentKey, callGetSup
       // again instead of re-entering everything.
       const message = errorMessage(error);
       update({ lastError: message }, target);
-      if (isCurrentKey(issueKey)) {
+      if (ticket.isCurrent()) {
         setCardError({ message: translateError(message), cas: /changed since|changed during/i.test(message) });
       }
     } finally {
-      if (isCurrentKey(issueKey)) setSaving(false);
+      if (ticket.isCurrent()) setSaving(false);
     }
   };
 
   const reload = async () => {
     if (!target || !targetKey) return;
-    const issueKey = targetKey;
+    const ticket = capture();
     setReloading(true);
-    void loadAgents(issueKey);
+    void loadAgents();
     try {
       const result = await callGetSupervision({ schemaVersion: 2, target });
-      if (!isCurrentKey(issueKey)) return;
+      if (!ticket.isCurrent()) return;
       setData(result);
-      setReadError(null);
       setCardError(null);
       setForm(formFromConfig(result.config));
       setDirty(false);
@@ -198,9 +173,9 @@ export function useSupervisionCard({ target, targetKey, isCurrentKey, callGetSup
     } catch (error) {
       const message = errorMessage(error);
       update({ lastError: message }, target);
-      if (isCurrentKey(issueKey)) setCardError({ message: translateError(message), cas: false });
+      if (ticket.isCurrent()) setCardError({ message: translateError(message), cas: false });
     } finally {
-      if (isCurrentKey(issueKey)) setReloading(false);
+      if (ticket.isCurrent()) setReloading(false);
     }
   };
 
@@ -225,7 +200,7 @@ export function useSupervisionCard({ target, targetKey, isCurrentKey, callGetSup
     save,
     reload,
     restore,
-    refreshAgents: () => { if (targetKey) void loadAgents(targetKey); },
+    refreshAgents: () => { if (targetKey) void loadAgents(); },
   };
 }
 export type SupervisionCardState = ReturnType<typeof useSupervisionCard>;

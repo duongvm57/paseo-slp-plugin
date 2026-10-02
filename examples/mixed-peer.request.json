@@ -9,9 +9,9 @@
     "catalogSha256": "replace-with-current-routes-sha256"
   },
   "providers": [
-    { "id": "slp-codex-peer", "extends": "codex" },
-    { "id": "slp-pi-peer", "extends": "pi" },
-    { "id": "slp-devin-peer", "extends": "acp" },
-    { "id": "slp-claude-peer", "extends": "claude" }
+    { "id": "slp-codex-peer", "extends": "codex", "enabled": true, "status": "available" },
+    { "id": "slp-pi-peer", "extends": "pi", "enabled": true, "status": "available" },
+    { "id": "slp-devin-peer", "extends": "acp", "enabled": true, "status": "available" },
+    { "id": "slp-claude-peer", "extends": "claude", "enabled": true, "status": "available" }
   ]
 }

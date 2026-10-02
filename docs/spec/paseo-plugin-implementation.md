@@ -19,7 +19,7 @@ The following citation prefixes identify the installed **0.8.0** sources examine
 
 Repository citations are relative to this repository. The source snapshot inspected for this spec is HEAD `c98db2aa9e21d121093dced554da338dbcc90781` plus the existing corrections in `docs/paseo-plugin-feasibility.md`. The audit's baseline runtime identity is `3ac1192b12099d98ce49e5aeab1ccbfa8b6dd03965120e3432a9448ba18a1e64`, containing 35 files. The implementation will change runtime bytes and therefore must generate a **new** identity and file count; 35 is not an acceptance constant.
 
-**DECISION: preserve SLP's behavioral contract.** Maintain 12 providers (four families × Supervisor/Lead/Peer), exactly two saved profiles, independent policy injection, complete launch bindings, and authority boundaries. Rationale: packaging must not change role semantics or turn plugin RPCs into agent tools. Sources: `docs/contract.md:44–85`; `plugin/server/runtime/cli/profiles.ts`; `plugin/server/runtime/cli/binding.ts:10–18,31–49`; `plugin/server/runtime/cli/role-bundle.ts:10–29`; [audit](paseo-plugin-feasibility.md):636–638,726–735.
+**DECISION: preserve SLP's behavioral contract.** Maintain 12 providers (four families × Supervisor/Lead/Peer), exactly two saved profiles, independent policy injection, complete launch bindings, and authority boundaries. Rationale: packaging must not change role semantics or turn plugin RPCs into agent tools. Sources: [contract ownership and authority](../contract.md#authority-and-role-policy); `plugin/server/runtime/cli/profiles.ts`; `plugin/server/runtime/cli/binding.ts:10–18,31–49`; `plugin/server/runtime/cli/role-bundle.ts:10–29`; [audit](paseo-plugin-feasibility.md):636–638,726–735.
 
 Mandatory invariants:
 
@@ -74,7 +74,7 @@ plugin/
   server/launchers.ts
   server/executables.ts
   server/generated/runtime-payload.ts
-  client/SettingsScreen.tsx
+  client/ManagerSurface.tsx
 scripts/generate-plugin-payload.mjs
 bin/slp-shim.mjs
 tests/plugin-*.test.mjs
@@ -705,7 +705,7 @@ One management surface (opened from the sidebar or command palette) shows select
 
 ## 11. Exact proposed contract reconciliation
 
-**DECISION: land these contract edits with implementation, without changing the accepted global role policy.** Rationale: the current text describes the CLI binding location and falsely denies its routing scaffold; Option A has explicit restoration/ownership limits. Sources: `docs/contract.md:44–71`; `plugin/server/runtime/cli/paseo-install.ts:22–27,80–82,112–117,156`; [audit](paseo-plugin-feasibility.md):679–684,721–744.
+**DECISION: land these contract edits with implementation, without changing the accepted global role policy.** Rationale: the current text describes the CLI binding location and falsely denies its routing scaffold; Option A has explicit restoration/ownership limits. Sources: [installation and restoration](../contract.md#installation-and-restoration); `plugin/server/runtime/cli/paseo-install.ts:22–27,80–82,112–117,156`; [audit](paseo-plugin-feasibility.md):679–684,721–744.
 
 This spec proposes the following replacements/additions; authoring this spec does not apply them.
 
@@ -733,7 +733,7 @@ The existing standalone uninstall warning remains applicable to standalone insta
 
 ## 12. Implementation assignments and handbacks
 
-**DECISION: use the repository's Supervisor → Lead → Peer protocol with one writer per scope.** Rationale: dogfooding must follow the same authority/evidence rules it packages. Sources: `AGENTS.md:3–22,24–31`; `.paseo-slp/workspace-protocol.md:35–66,76–98`; `docs/contract.md:78–90`.
+**DECISION: use the repository's Supervisor → Lead → Peer protocol with one writer per scope.** Rationale: dogfooding must follow the same authority/evidence rules it packages. Sources: `AGENTS.md:3–22,24–31`; `.paseo-slp/workspace-protocol.md:35–66,76–98`; [authority and role policy](../contract.md#authority-and-role-policy).
 
 These are future assignments, not permission to start agents in this documentation task. When authorized, delegate through Paseo `create_agent`, never native Codex subagents. Read current profiles, routing catalog, repository protocol, and assignment authority. Peer does not delegate. Parallel writers require distinct worktrees and explicit non-overlapping ownership; otherwise serialize. This freeze supplies the architecture: reviewers check conformance and unresolved gates, not a new Option A/B selection exercise.
 
@@ -744,7 +744,7 @@ These are future assignments, not permission to start agents in this documentati
 | Peer — materializer | `plugin/server/materializer.ts`, `plugin/server/generated/runtime-payload.ts`, `scripts/generate-plugin-payload.mjs`, `tests/plugin-materializer.test.mjs` | Embedded manifest, candidate/mode verification, atomic publication and fault tests. Yield generated module ownership to Lead for final regeneration. |
 | Peer — launch/runtime | `plugin/server/executables.ts`, `plugin/server/launchers.ts`, `bin/slp-shim.mjs`, `tests/plugin-launchers.test.mjs` | Node/Electron resolver, real argv0 probes, immutable launch manifests, no-env and signal/stdio tests, Windows blocked status. Existing family transport behavior must remain unchanged. |
 | Peer — transaction | `plugin/server/manager.ts`, `plugin/server/config-view.ts`, `plugin/server/config-transaction.ts`, `plugin/server/journal.ts`, `tests/plugin-transaction.test.mjs`, `tests/plugin-recovery.test.mjs` | Pure persisted-shape plan, durable journal, idempotency/mutex, activation/deactivation/reconcile and crash matrix. |
-| Peer — helpers/UI | `plugin/client/SettingsScreen.tsx`, `plugin/server/runtime/cli/role-bundle.ts`, `plugin/server/runtime/cli/inventory.ts`, `tests/plugin-helpers.test.mjs`, `tests/plugin-ui.test.mjs` | Stable explicit-node/home helper paths, static/live provenance separation, selected-host UI/start+poll, profile preference preservation display. |
+| Peer — helpers/UI | `plugin/client/ManagerSurface.tsx`, `plugin/server/runtime/cli/role-bundle.ts`, `plugin/server/runtime/cli/inventory.ts`, `tests/plugin-helpers.test.mjs`, `tests/plugin-ui.test.mjs` | Stable explicit-node/home helper paths, static/live provenance separation, selected-host UI/start+poll, profile preference preservation display. |
 | Independent Reviewer | Read-only stable integrated candidate | Findings linked to exact files/SHAs and this spec's requirements; distinguish offline evidence from live acceptance. Reuse the review session for corrections, with a new stable candidate identity. |
 
 No peer may opportunistically edit another lane's files. If `plugin/server/runtime/cli/package.ts`, `bin/slp.mjs`, another helper, or an existing wrapper needs a small integration change, hand back the exact requested change to Lead, who owns that additional scope only after serializing it against other writers. Existing policy Markdown remains out of implementation scope unless a separately accepted requirement demands a change.
@@ -753,7 +753,7 @@ Module seams: materializer accepts embedded payload/verified store paths and ret
 
 ## 13. Offline verification before any live gate
 
-**DECISION: require offline fault and protocol tests before authorized S1/S2, then run the relevant live gates separately.** Rationale: prior fixture passes did not load a live plugin or establish behavioral acceptance. Sources: [audit](paseo-plugin-feasibility.md):398–510,586–595,686–695; `AGENTS.md:11–22`; `docs/contract.md:73–75`.
+**DECISION: require offline fault and protocol tests before authorized S1/S2, then run the relevant live gates separately.** Rationale: prior fixture passes did not load a live plugin or establish behavioral acceptance. Sources: [audit](paseo-plugin-feasibility.md):398–510,586–595,686–695; `AGENTS.md:11–22`; [policy delivery](../contract.md#runtime-lifetime-and-policy-delivery).
 
 Required offline suites and assertions:
 

@@ -8,47 +8,38 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import net from 'node:net';
-import { execFileSync } from 'node:child_process';
+import {
+  bridgeFixture as deskBridgeFixture,
+  gitRepo as deskGitRepo,
+  startBridge,
+  memberRow as deskMemberRow,
+  repoOf,
+  seedMemberships,
+  seedStore,
+  hello,
+  handshake,
+  rpc,
+} from './helpers/desk-bridge-fixture.mjs';
 import { randomUUID } from 'node:crypto';
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { createDeskBridge } from '../plugin/server/desk-bridge.ts';
-import { createDeskStore, deskBridgePaths, repoKeyFor } from '../plugin/server/desk-store.ts';
 import { sha256Hex } from '../plugin/server/config-view.ts';
 import {
-  DESK_BRIDGE_PROTOCOL,
   DeskAssignmentResult,
   DeskScopeDeclareResult,
-  DeskScopeReviewResult,
   DeskScopeTransitionResult,
   DeskSeatStatus,
   WIRE_LIMITS,
 } from '../plugin/shared/enforcement.ts';
 
+// Literal pin: wire/state-machine fixtures deliberately do not graft the binary.
 const PIN = 'f'.repeat(64);
 const PROVIDER = 'slp-codex-peer';
-const ROOT = fileURLToPath(new URL('..', import.meta.url));
-const BIN_SOURCE = join(ROOT, 'bin', 'slp-desk-mcp.mjs');
 const FIXED_AT = '2026-01-02T00:00:00.000Z';
 const CAPTURED_AT = '2026-01-02T00:00:01.000Z';
 const CAPTURED_SNAP = 'c'.repeat(64);
 const CAPTURED_HEAD = 'd'.repeat(40);
 const DECL_SHA = 'e'.repeat(64);
 
-function tmp(t, prefix) {
-  const dir = mkdtempSync(join(tmpdir(), prefix));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
-  return dir;
-}
-
-function gitRepo(t) {
-  const dir = tmp(t, 'slp-scope-repo-');
-  execFileSync('git', ['init', '-q', dir]);
-  return { dir, gitCommonDir: realpathSync(join(dir, '.git')) };
-}
+const gitRepo = t => deskGitRepo(t, 'slp-scope-repo-');
 
 const captureOk = async ({ repository }) => ({
   status: 'ok',
@@ -60,156 +51,22 @@ const captureOk = async ({ repository }) => ({
 });
 
 function bridgeFixture(t, over = {}) {
-  const dir = tmp(t, 'slp-scope-home-');
-  const home = realpathSync(mkdirSync(join(dir, 'home'), { recursive: true }) ?? join(dir, 'home'));
-  const stableRoot = join(home, 'slp-runtime');
-  const launchSetSha = 'a'.repeat(64);
-  const candidateSha = 'b'.repeat(64);
-  const runtimePath = join(stableRoot, candidateSha);
-  mkdirSync(join(stableRoot, 'launchers', launchSetSha), { recursive: true });
-  mkdirSync(join(runtimePath, 'bin'), { recursive: true });
-  writeFileSync(join(runtimePath, 'bin', 'slp-desk-mcp.mjs'), readFileSync(BIN_SOURCE));
-
-  const warnings = [];
-  const paseoRef = over.paseoRef ?? { current: null };
-  const journal = over.journal ?? {
-    read: () => ({
-      binding: {
-        launchSetSha256: launchSetSha,
-        runtimePath,
-        node: { path: process.execPath },
-        candidateSha256: candidateSha,
-      },
-    }),
-  };
-  const launchers = over.launchers ?? {
-    verify: async dir => ({
-      directory: realpathSync(dir),
-      files: [],
-      launchSetSha256: launchSetSha,
-      launchManifestSha256: launchSetSha,
-      bridgeSha256: PIN,
-      bridgeProtocolVersion: DESK_BRIDGE_PROTOCOL,
-    }),
-  };
-  const payload = over.payload ?? { files: [{ path: 'bin/slp-desk-mcp.mjs', sha256: PIN }] };
-  const bridge = createDeskBridge({
-    journal,
-    launchers,
-    payload,
-    paseoRef,
-    detectDaemonHome: () => ({ daemonHome: home, source: 'env' }),
-    realpath: realpathSync,
-    createStore: over.createStore ?? (root => createDeskStore({ stableRoot: root })),
+  return deskBridgeFixture(t, 'slp-scope-home-', PIN, {
+    ...over,
     capture: over.capture ?? captureOk,
-    verifyExport: over.verifyExport,
-    platform: over.platform,
-    now: over.now,
-    uuid: over.uuid,
-    warn: line => warnings.push(line),
   });
-  return { home, stableRoot, bridge, warnings, paseoRef, paths: deskBridgePaths(stableRoot) };
 }
 
 async function started(t, over = {}) {
-  const f = bridgeFixture(t, over);
-  void f.bridge.start();
-  const outcome = await f.bridge.whenReady();
-  t.after(() => f.bridge.stop());
-  assert.equal(outcome, 'listening');
-  return { ...f, outcome };
+  const f = await startBridge(t, bridgeFixture(t, over));
+  assert.equal(f.outcome, 'listening');
+  return f;
 }
 
-const repoOf = git => ({ hostId: 'local', gitCommonDir: git.gitCommonDir });
+const memberRow = (handle, over = {}) =>
+  deskMemberRow(handle, { provider: PROVIDER, at: FIXED_AT }, over);
 
-const memberRow = (handle, over = {}) => ({
-  membershipId: randomUUID(),
-  state: 'host-confirmed',
-  bindingHandleSha256: sha256Hex(handle),
-  provider: PROVIDER,
-  family: 'codex',
-  role: 'peer',
-  createCwd: '/repo',
-  openGeneration: 1,
-  agentId: 'agent-1',
-  workspaceId: 'wks-1',
-  createdAt: FIXED_AT,
-  hostConfirmedAt: FIXED_AT,
-  registeredAt: FIXED_AT,
-  revokedAt: null,
-  revokeReason: null,
-  ...over,
-});
-
-async function seedMemberships(store, repo, rows) {
-  const repoKey = repoKeyFor(repo);
-  const result = await store.transact(
-    repoKey,
-    {
-      repo,
-      actorKey: 'desk:hook',
-      assignmentId: 'unassigned',
-      requestId: randomUUID(),
-      command: { kind: 'seed' },
-    },
-    () => ({ ok: true, events: [], memberships: rows }),
-  );
-  assert.ok(result.ok, `seed commit failed: ${JSON.stringify(result)}`);
-  return repoKey;
-}
-
-const seedStore = f => createDeskStore({ stableRoot: f.stableRoot });
-
-class LineReader {
-  constructor(sock) {
-    this.buf = Buffer.alloc(0);
-    this.queue = [];
-    this.waiters = [];
-    sock.on('data', chunk => {
-      this.buf = this.buf.length === 0 ? chunk : Buffer.concat([this.buf, chunk]);
-      for (;;) {
-        const i = this.buf.indexOf(0x0a);
-        if (i === -1) break;
-        const line = this.buf.subarray(0, i);
-        this.buf = this.buf.subarray(i + 1);
-        const resolve = this.waiters.shift();
-        if (resolve) resolve(line);
-        else this.queue.push(line);
-      }
-    });
-  }
-  next() {
-    if (this.queue.length > 0) return Promise.resolve(this.queue.shift());
-    return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error('desk frame read timed out')), 5000);
-      timer.unref?.();
-      this.waiters.push(line => { clearTimeout(timer); resolve(line); });
-    });
-  }
-}
-
-const writeFrame = (conn, value) => conn.write(JSON.stringify(value) + '\n');
-const HELLO = (handle, over = {}) => ({ schemaVersion: 1, protocol: DESK_BRIDGE_PROTOCOL, handle, bridgeSha256: PIN, ...over });
-
-async function handshake(socketPath, hello) {
-  const conn = await new Promise((resolve, reject) => {
-    const sock = net.createConnection(socketPath);
-    sock.once('connect', () => resolve(sock));
-    sock.once('error', reject);
-  });
-  const reader = new LineReader(conn);
-  writeFrame(conn, hello);
-  const ack = JSON.parse((await reader.next()).toString('utf8'));
-  return { conn, reader, ack };
-}
-
-async function rpc(reader, conn, frame) {
-  writeFrame(conn, frame);
-  for (;;) {
-    const line = JSON.parse((await reader.next()).toString('utf8'));
-    if ('id' in line && line.id === frame.id) return line;
-  }
-}
+const HELLO = (handle, over = {}) => hello(PIN, handle, over);
 
 let rpcSeq = 0;
 async function call(reader, conn, name, args) {

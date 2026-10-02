@@ -752,7 +752,7 @@ test('prepare --check runs the same receipt stages offline — no network anywhe
 // ---------------------------------------------------------------------------
 
 test('optionExclusions names closed-vocabulary tokens; catalogBinding echoes them', t => {
-  const { repo } = fixture(t);
+  const { repo, home } = fixture(t);
   const catalog = testCatalog();
   const [code, , paused, off, lead] = catalog.options;
   assert.deepEqual(optionExclusions(code, 'peer'), []);
@@ -762,9 +762,9 @@ test('optionExclusions names closed-vocabulary tokens; catalogBinding echoes the
   assert.deepEqual(optionExclusions({ ...off, availability: 'quota-exhausted', roles: ['lead'] }, 'peer'), ['disabled', 'availability:quota-exhausted', 'role-not-listed']);
   catalogFixture(repo);
   const sha256 = readCatalog(repo).sha256;
-  assert.throws(() => catalogBinding(repo, 'peer', providers, { optionId: 'off-seat', catalogSha256: sha256 }), /excluded for peer: disabled/);
-  assert.throws(() => catalogBinding(repo, 'peer', providers, { optionId: 'paused-seat', catalogSha256: sha256 }), /excluded for peer: availability:paused/);
-  assert.throws(() => catalogBinding(repo, 'peer', providers, { optionId: 'lead-only', catalogSha256: sha256 }), /excluded for peer: role-not-listed/);
+  assert.throws(() => catalogBinding(repo, 'peer', providers, { optionId: 'off-seat', catalogSha256: sha256 }, home), /excluded for peer: disabled/);
+  assert.throws(() => catalogBinding(repo, 'peer', providers, { optionId: 'paused-seat', catalogSha256: sha256 }, home), /excluded for peer: availability:paused/);
+  assert.throws(() => catalogBinding(repo, 'peer', providers, { optionId: 'lead-only', catalogSha256: sha256 }, home), /excluded for peer: role-not-listed/);
 });
 
 // ---------------------------------------------------------------------------

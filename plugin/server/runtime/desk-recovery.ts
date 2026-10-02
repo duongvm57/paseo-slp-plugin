@@ -6,6 +6,7 @@ import { closeSync, fsyncSync, openSync, readFileSync, unlinkSync, writeSync } f
 import { DESK_RECOVERY_LIMITS, type DeskRecoveryResultValue } from "../../shared/runtime/desk-contract.ts";
 import { deskRepoPaths } from "./desk-paths.ts";
 import { fsyncDirectory, lstatOrNull, PRIVATE_FILE_MODE } from "./filesystem.ts";
+import { classifyLockHolderProcess, parseLockHolder, type LockHolder } from "./lock-holder.ts";
 
 export interface DeskRecoveryReceipt {
   schemaVersion: 1;
@@ -68,38 +69,6 @@ export interface DeskRecoveryDeps {
 function summarize(error: unknown, max = 200): string {
   const text = error instanceof Error ? error.message : String(error);
   return text.length > max ? `${text.slice(0, max - 1)}…` : text;
-}
-
-interface LockHolder { pid: number; instanceNonce: string; }
-
-/** Strict holder record: positive-integer pid + bounded nonce. Anything else
- *  (unparseable, pid ≤ 0, oversized nonce) is not a holder — the caller maps
- *  it to `unreadable`/`recover-lock-orphan` per §3.2. */
-function parseHolder(bytes: Buffer): LockHolder | null {
-  try {
-    const parsed: unknown = JSON.parse(bytes.toString("utf8"));
-    if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
-      const rec = parsed as Record<string, unknown>;
-      if (typeof rec.pid === "number" && Number.isInteger(rec.pid) && rec.pid > 0 &&
-          typeof rec.instanceNonce === "string" && rec.instanceNonce !== "" &&
-          rec.instanceNonce.length <= DESK_RECOVERY_LIMITS.recoverNonce) {
-        return { pid: rec.pid, instanceNonce: rec.instanceNonce };
-      }
-    }
-  } catch { /* unparseable */ }
-  return null;
-}
-
-type KillOutcome = "alive" | "esrch" | "eperm" | "undetermined";
-
-function classifyKill(pid: number, kill: (pid: number) => void): KillOutcome {
-  try { kill(pid); return "alive"; }
-  catch (error) {
-    const code = (error as NodeJS.ErrnoException).code;
-    if (code === "ESRCH") return "esrch";
-    if (code === "EPERM") return "eperm";
-    return "undetermined";
-  }
 }
 
 /** §3.1 — the recovery algorithm driven by both CLI and RPC adapters.
@@ -217,7 +186,7 @@ export function* recoverLockSteps(
       // Group B — RL exists; classify its holder.
       let rlHolder: LockHolder | null;
       try {
-        rlHolder = parseHolder(io.readFileSync(paths.recoverLockPath));
+        rlHolder = parseLockHolder(io.readFileSync(paths.recoverLockPath));
       } catch (readError) {
         if ((readError as NodeJS.ErrnoException).code === "ENOENT") {
           return reject("busy", "CAPABILITY_GAP",
@@ -228,7 +197,7 @@ export function* recoverLockSteps(
           manualRl, null, null, false);
       }
       if (rlHolder !== null) {
-        const alive = classifyKill(rlHolder.pid, kill);
+        const alive = classifyLockHolderProcess(rlHolder.pid, kill);
         if (alive === "alive" || alive === "eperm") {
           return reject("busy", "CAPABILITY_GAP",
             `busy: recover.lock held by live pid ${rlHolder.pid} (instance ${rlHolder.instanceNonce})`,
@@ -260,14 +229,14 @@ export function* recoverLockSteps(
           return reject("unreadable", "RECOVERY_REQUIRED",
             `unreadable: cannot read lock: ${summarize(readError)}`, lockPtr, null, null, false);
         }
-        const holder = parseHolder(lockBytes);
+        const holder = parseLockHolder(lockBytes);
         if (holder === null) {
           return reject("unreadable", "RECOVERY_REQUIRED",
             "unreadable: lock content is not a valid holder record", lockPtr, null, null, false);
         }
 
         // Step 4 — classify the holder.
-        const alive = classifyKill(holder.pid, kill);
+        const alive = classifyLockHolderProcess(holder.pid, kill);
         if (alive === "alive" || alive === "eperm") {
           return reject("held", "CAPABILITY_GAP",
             `held: lock holder pid ${holder.pid} is alive (instance ${holder.instanceNonce})`,
@@ -342,7 +311,7 @@ export function* recoverLockSteps(
         // Group E — always try to release our own recover.lock: re-read it,
         // unlink only when pid + nonce still match ours.
         try {
-          const rlNow = parseHolder(io.readFileSync(paths.recoverLockPath));
+          const rlNow = parseLockHolder(io.readFileSync(paths.recoverLockPath));
           if (rlNow !== null && rlNow.pid === pidOfSelf && rlNow.instanceNonce === instanceNonce) {
             io.unlinkSync(paths.recoverLockPath);
             ctx.rlReleased = true;

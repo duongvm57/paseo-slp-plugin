@@ -140,7 +140,7 @@ import type { RuntimeError } from './types.ts';
 // practice (required in the OpenAPI) — the receipt records them when present
 // and tolerates their absence rather than failing an otherwise valid answer.
 
-import { existsSync, lstatSync, readFileSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
 import { hash } from './package.ts';
 import { JEV_TRANSPORTS as transports, assertRedacted as checkRedaction, sanitizeRemoteText } from "../../../shared/runtime/jev-transport.ts";
@@ -166,8 +166,10 @@ const jevError = (code: string, message: string, details?: JevError['details']) 
 // Per-daemon config + key
 // ---------------------------------------------------------------------------
 
-export const jevConfigPath = (home: string) => join(home, 'slp-runtime', 'state', 'jev.json');
-export const jevKeyPath = (home: string, kind: string) => join(home, 'slp-runtime', 'state', `jev-${kind}.key`);
+// CLI retains its daemon-home interface; the Node disk owner takes stableRoot.
+import { jevConfigPath as configPath, jevKeyPath as keyPath, readJevConfigFile, readJevKeyFile } from '../jev-state.ts';
+export const jevConfigPath = (home: string) => configPath(join(home, 'slp-runtime'));
+export const jevKeyPath = (home: string, kind: string) => keyPath(join(home, 'slp-runtime'), kind);
 
 export function readJevConfig(home: string): JevConfig | null {
   if (typeof home !== 'string' || !isAbsolute(home)) throw jevError('jev-config-invalid', 'Jev config requires an absolute daemon home');
@@ -175,12 +177,17 @@ export function readJevConfig(home: string): JevConfig | null {
   if (!existsSync(path)) return null;
   let parsed: unknown;
   try {
-    parsed = JSON.parse(readFileSync(path, 'utf8'));
+    const observed = readJevConfigFile(join(home, 'slp-runtime'));
+    if (!observed.ok) throw observed.error;
+    parsed = observed.value;
   } catch (error) {
     throw jevError('jev-config-invalid', `Jev config at ${path} is not valid JSON: ${(error as RuntimeError).message}`);
   }
   if (!record(parsed) || parsed.schemaVersion !== 1) throw jevError('jev-config-invalid', `Jev config at ${path} requires schemaVersion=1`);
   if (typeof parsed.enabled !== 'boolean') throw jevError('jev-config-invalid', `Jev config at ${path}: enabled must be a boolean`);
+  // Historical CLI dialect: unknown top/provider keys are ignored, and
+  // provider-less OFF files stay readable. Plugin persisted/RPC parsing is
+  // deliberately strict; do not silently normalize either adapter.
   // The OFF path must stay readable: capabilities/provider only gate Jev while
   // it is in use, and catalogBinding reads this file on every Peer prepare —
   // a coherent "disabled, not configured yet" config must not block unrelated
@@ -222,20 +229,18 @@ export function readJevConfig(home: string): JevConfig | null {
 
 export function readJevKey(home: string, kind: string) {
   const path = jevKeyPath(home, kind);
-  let stat;
-  try {
-    stat = lstatSync(path);
-  } catch (error) {
-    if ((error as RuntimeError).code === 'ENOENT') throw jevError('jev-key-missing', `Jev ${kind} key missing: expected ${path} (0600) — set it via the SLP Manager Jev card`);
-    throw error;
+  const observed = readJevKeyFile(join(home, 'slp-runtime'), kind);
+  if (!observed.ok) {
+    if (observed.reason === 'missing') throw jevError('jev-key-missing', `Jev ${kind} key missing: expected ${path} (0600) — set it via the SLP Manager Jev card`);
+    if (observed.reason === 'not-regular') throw jevError('jev-key-invalid', `Jev ${kind} key at ${path} must be a regular file`);
+    if (observed.reason === 'permissions') {
+      throw jevError('jev-key-permissions', `Jev ${kind} key at ${path} is group/other-accessible (mode ${observed.mode!.toString(8).padStart(4, '0')}); chmod 600 required`);
+    }
+    // Preserve raw filesystem errors from either lstat or the later read.
+    throw observed.error;
   }
-  if (!stat.isFile()) throw jevError('jev-key-invalid', `Jev ${kind} key at ${path} must be a regular file`);
-  if ((stat.mode & 0o077) !== 0) {
-    throw jevError('jev-key-permissions', `Jev ${kind} key at ${path} is group/other-accessible (mode ${(stat.mode & 0o777).toString(8).padStart(4, '0')}); chmod 600 required`);
-  }
-  const key = readFileSync(path, 'utf8').trim();
-  if (key.length === 0 || /\s/.test(key)) throw jevError('jev-key-invalid', `Jev ${kind} key at ${path} is empty or contains whitespace`);
-  return key;
+  if (!observed.valid) throw jevError('jev-key-invalid', `Jev ${kind} key at ${path} is empty or contains whitespace`);
+  return observed.key;
 }
 
 // Fail-closed resolution for a capability call: config must exist, be enabled

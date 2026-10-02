@@ -5,6 +5,7 @@ import * as fs from 'node:fs';
 import { createHash } from 'node:crypto';
 import { TextDecoder } from 'node:util';
 import { credentialShaped } from './jev.ts';
+import { ASSIGNMENT_FILE_PREFIX, ASSIGNMENT_SNAPSHOT_PREFIX, ASSIGNMENT_SNAPSHOT_OPEN, ASSIGNMENT_SNAPSHOT_CLOSE } from '../../../shared/runtime/session-delivery.ts';
 
 // How request.assignmentFile reaches the seat's prompt. Pointer mode (default)
 // names the file and never opens it; snapshot mode reads a guarded,
@@ -32,8 +33,6 @@ const ASSIGNMENT_SNAPSHOT_CAP = 16_384;
 const ASSIGNMENT_POINTER_LINE = /^[ \t]*Assignment file:[ \t]*\S/m;
 const ASSIGNMENT_SNAPSHOT_MARKER = /^[ \t]*<<<(?:SLP assignment snapshot|end SLP assignment snapshot)>>>[ \t]*$/m;
 const ASSIGNMENT_CONTROL = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/u;
-const ASSIGNMENT_SNAPSHOT_OPEN = '<<<SLP assignment snapshot>>>';
-const ASSIGNMENT_SNAPSHOT_CLOSE = '<<<end SLP assignment snapshot>>>';
 
 function snapshotError(code: string, message: string) {
   return Object.assign(new Error(`${code}: ${message}`), { code });
@@ -148,7 +147,7 @@ export function assignmentFileSelection(request: { repository: string; assignmen
 export function assignmentCarrier({ file, snapshot }: { file?: string | null; snapshot?: { path: string; text: string; bytes: number; sha256: string } } = {}) {
   if (snapshot) {
     const separator = snapshot.text.endsWith('\n') ? '' : '\n';
-    return `\nAssignment snapshot: ${snapshot.path} — sha256 ${snapshot.sha256}, ${snapshot.bytes} bytes; the inline text below is authoritative, do not re-read the file.\n${ASSIGNMENT_SNAPSHOT_OPEN}\n${snapshot.text}${separator}${ASSIGNMENT_SNAPSHOT_CLOSE}`;
+    return `\n${ASSIGNMENT_SNAPSHOT_PREFIX} ${snapshot.path} — sha256 ${snapshot.sha256}, ${snapshot.bytes} bytes; the inline text below is authoritative, do not re-read the file.\n${ASSIGNMENT_SNAPSHOT_OPEN}\n${snapshot.text}${separator}${ASSIGNMENT_SNAPSHOT_CLOSE}`;
   }
-  return file ? `\nAssignment file: ${file} — read it first; it is authoritative for scope details.` : '';
+  return file ? `\n${ASSIGNMENT_FILE_PREFIX} ${file} — read it first; it is authoritative for scope details.` : '';
 }

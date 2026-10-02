@@ -183,7 +183,9 @@ test('Jev routing procedure is conditional and unreadable mode fails closed', ()
   assert.match(jev, /Shadow evaluation is the gate before arming/);
   assert.match(provider, /references\/jev-routing\.md/);
   const conditionalJevPointer = /When `routes` reports\s+`jevRouting\.routing` as\s+`shadow`, `armed` or\s+`error`, read `references\/jev-routing\.md`; skip it for `unconfigured` or\s+`off`\. `error` blocks the dependent routing branch\./;
-  assert.match(execution, conditionalJevPointer);
+  assert.match(provider, conditionalJevPointer);
+  assert.match(execution, /Read `references\/provider-routing\.md` before runtime selection/);
+  assert.doesNotMatch(execution, /When `routes` reports\s+`jevRouting\.routing`/);
   const onboardingJevPointer = /When `routes` reports\s+`jevRouting\.routing` as\s+`shadow`, `armed` or\s+`error`, read installed `src\/references\/jev-routing\.md`; skip it for `unconfigured` or\s+`off`\. `error` blocks the dependent routing branch\./;
   assert.match(onboarding, onboardingJevPointer);
   assert.doesNotMatch(provider, /Shadow evaluation is the gate before arming/);

@@ -55,6 +55,8 @@ import {
   alertMessageId, buildAlertPrompt, checkRecipient, createDeliveryStore, deliveryKey,
   type FindingAxis,
 } from "./delivery.ts";
+import { supervisionPath } from "./state.ts";
+import { jevConfigPath, jevKeyPath } from "../jev.ts";
 import { askJevDecision, assertRedacted, resolveSupervision, JevRequestError, type SupervisionGate } from "../jev.ts";
 
 // Gate reasons that mean the Human has supervision (or Jev) switched off —
@@ -375,7 +377,7 @@ export function createSupervisionObserver(deps: ObserverDeps) {
 
   // --- config + gate reads (mtime-cached; hooks must stay cheap) -----------
 
-  const configFile = join(stableRoot, "state", "supervision.json");
+  const configFile = supervisionPath(stableRoot);
   // invalid = the file exists but cannot be read or validated (a visible
   // Manager error) — distinct from an absent file or a removed route.
   let configCache: { stamp: string; config: SupervisionConfig | null; invalid: boolean } | null = null;
@@ -436,7 +438,7 @@ export function createSupervisionObserver(deps: ObserverDeps) {
   /** Daemon-global Jev gate — a failed capability/key/target pauses capture
    *  for every route (the gate is per-daemon, so all routes pause together). */
   const jevGate = (): SupervisionGate => {
-    const stamp = statStamp(join(stableRoot, "state", "jev.json")) + "|" + keyStamps();
+    const stamp = statStamp(jevConfigPath(stableRoot)) + "|" + keyStamps();
     if (gateCache === null || gateCache.stamp !== stamp) {
       gateCache = { stamp, gate: gateOf(stableRoot) };
     }
@@ -454,7 +456,7 @@ export function createSupervisionObserver(deps: ObserverDeps) {
     }
   };
   const keyStamps = (): string =>
-    ["openrouter", "typesafe"].map(kind => statStamp(join(stableRoot, "state", `jev-${kind}.key`))).join("|");
+    ["openrouter", "typesafe"].map(kind => statStamp(jevKeyPath(stableRoot, kind))).join("|");
 
   // The ONE gate-down reaction — every detection point funnels through
   // observeGate(). Purge = flag `capture-paused` + clear bodies on EVERY

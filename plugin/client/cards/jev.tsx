@@ -1,9 +1,8 @@
-// Jev-card ownership (wave 11 S3b/D): the card owns the stored view, every
-// draft field and pending flag, the once-per-target load, prefill, the
-// target-switch reset and the save/key/test handlers. The shell supplies
-// the target, its stale-guard predicate (`sameTarget` wraps the shell-owned
-// keyRef/targetKey mechanism), the RPC callers and the lastError plumbing.
-import { useCallback, useEffect, useRef, useState } from "react";
+// Jev owns provider drafts, reset/prefill and save/key/test/capability actions.
+// Target async owns snapshot reads and session tickets; RPC callables remain
+// the adapter seam. The shell supplies target-bound lastError plumbing.
+import { useEffect, useState } from "react";
+import { useTargetSnapshot } from "../target-async.ts";
 import { Text, View } from "react-native";
 import { JevProvider } from "../../shared/contracts.ts";
 import type {
@@ -48,7 +47,9 @@ export function useJevCard({ target, targetKey, sameTarget, callGetJev, callSetJ
   // Save, is cleared right after, and status reports hasKey only. Provider
   // kind is selectable (OpenRouter relay vs TypeSafe first-party);
   // model/baseUrl default per kind, baseUrl editable for custom endpoints.
-  const [jevView, setJevView] = useState<JevViewValue | null>(null);
+  const snapshot = useTargetSnapshot(target, targetKey, async target =>
+    (await callGetJev({ schemaVersion: 1, target })).jev);
+  const { data: jevView, replace: setJevView, error: jevLoadError, reload: loadJev, capture } = snapshot;
   const [jevKind, setJevKind] = useState<JevKind>("openrouter");
   const [jevModel, setJevModel] = useState("");
   const [jevBaseUrl, setJevBaseUrl] = useState("");
@@ -64,7 +65,6 @@ export function useJevCard({ target, targetKey, sameTarget, callGetJev, callSetJ
   const [jevTestBusy, setJevTestBusy] = useState(false);
   // Jev load state split (mockup recovery finding): a get-jev failure is a
   // distinct error branch with Retry, not an eternal "loading…".
-  const [jevLoadError, setJevLoadError] = useState<string | null>(null);
   // Per-field validation errors — the model rule sits at the Model field and
   // the URL rule at Base URL, never pooled into one message (mockup Jev
   // field-error finding). Sourced from the shared JevProvider schema so the
@@ -82,39 +82,6 @@ export function useJevCard({ target, targetKey, sameTarget, callGetJev, callSetJ
     setJevUrlError(null);
   };
 
-  // Fetch the Jev view once per target — the config is plugin-owned and
-  // independent of any binding, so it loads with the first status. loadJev
-  // is also the Retry path after a failed load (the loadError branch in
-  // the card JSX).
-  const jevLoadedFor = useRef<string | null>(null);
-  const loadJev = useCallback(async (forTarget: TargetValue) => {
-    setJevLoadError(null);
-    // Stale-write guard (the same issueKey discipline the pool ops use): a
-    // response issued for the previous target must never paint its config
-    // over the displayed target's view — an unguarded write would let a
-    // late A-config seed B's fields, and saveJev would then write A's
-    // provider settings to B.
-    try {
-      const result = await callGetJev({ schemaVersion: 1, target: forTarget });
-      if (!sameTarget(forTarget)) return;
-      setJevView(result.jev);
-    } catch (error) {
-      if (!sameTarget(forTarget)) return;
-      setJevView(null);
-      setJevLoadError(errorMessage(error));
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- sameTarget wraps the shell's key guard
-  }, [callGetJev]);
-  useEffect(() => {
-    if (!target || !targetKey || jevLoadedFor.current === targetKey) return;
-    jevLoadedFor.current = targetKey;
-    setJevView(null);
-    setJevModelError(null);
-    setJevUrlError(null);
-    void loadJev(target);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- targetKey captures target
-  }, [targetKey]);
-
   // Target switch drops the draft and every pending flag — a draft authored
   // against home A must not Apply into home B, and a stale op's guarded
   // finally skips its busy clear, so the switch itself is what releases the
@@ -125,7 +92,6 @@ export function useJevCard({ target, targetKey, sameTarget, callGetJev, callSetJ
     setJevSaved(false);
     setJevKeyInput("");
     setJevTest(null);
-    setJevLoadError(null);
     setJevModelError(null);
     setJevUrlError(null);
     setJevBusy(false);
@@ -153,6 +119,7 @@ export function useJevCard({ target, targetKey, sameTarget, callGetJev, callSetJ
   // its error AT that field instead of one pooled message.
   const save = async () => {
     if (!target) return;
+    const ticket = capture();
     const provider = {
       kind: jevKind,
       baseUrl: jevBaseUrl.trim() === "" ? JEV_KIND_DEFAULT[jevKind].baseUrl : jevBaseUrl.trim(),
@@ -199,7 +166,7 @@ export function useJevCard({ target, targetKey, sameTarget, callGetJev, callSetJ
       // previous target must not paint its config over the displayed view,
       // clear the dirty gate (which would let the prefill seed A's fields
       // into B's draft), or flash "Saved." for a write B never saw.
-      if (!sameTarget(target)) return;
+      if (!ticket.isCurrent()) return;
       setJevView(result.jev);
       setJevDirty(false);
       setJevSaved(true);
@@ -209,12 +176,13 @@ export function useJevCard({ target, targetKey, sameTarget, callGetJev, callSetJ
       // A stale op must not clear the busy flag of a NEWER op already
       // in-flight on the displayed target — the key-change reset releases
       // the flag for the abandoned view instead.
-      if (sameTarget(target)) setJevBusy(false);
+      if (ticket.isCurrent()) setJevBusy(false);
     }
   };
 
   const saveKey = async (key: string | null) => {
     if (!target) return;
+    const ticket = capture();
     setJevKeyBusy(true);
     try {
       await callSetJevKey({ schemaVersion: 1, target, key });
@@ -223,30 +191,31 @@ export function useJevCard({ target, targetKey, sameTarget, callGetJev, callSetJ
       // stale resolution never touches the new target's pending key input
       // or test result (the mutation already landed server-side; the guard
       // only blocks the view/state paint).
-      if (!sameTarget(target)) return;
+      if (!ticket.isCurrent()) return;
       setJevKeyInput("");
       setJevTest(null);
       setJevView(result.jev);
     } catch (error) {
       update({ lastError: errorMessage(error) }, target);
     } finally {
-      if (sameTarget(target)) setJevKeyBusy(false);
+      if (ticket.isCurrent()) setJevKeyBusy(false);
     }
   };
 
   const runTest = async () => {
     if (!target) return;
+    const ticket = capture();
     setJevTestBusy(true);
     setJevTest(null);
     try {
       const result = await callTestJev({ schemaVersion: 1, target });
-      if (!sameTarget(target)) return;
+      if (!ticket.isCurrent()) return;
       setJevTest({ ok: result.ok, detail: result.detail });
     } catch (error) {
-      if (!sameTarget(target)) return;
+      if (!ticket.isCurrent()) return;
       setJevTest({ ok: false, detail: errorMessage(error) });
     } finally {
-      if (sameTarget(target)) setJevTestBusy(false);
+      if (ticket.isCurrent()) setJevTestBusy(false);
     }
   };
 
@@ -267,6 +236,7 @@ export function useJevCard({ target, targetKey, sameTarget, callGetJev, callSetJ
   // from the refreshed view.
   const setSupervisionCapability = async (next: boolean): Promise<string | null> => {
     if (!target || jevView === null || jevView.provider === null) return "Jev settings are not loaded";
+    const ticket = capture();
     setCapabilityBusy(true);
     try {
       const result = await callSetJev({
@@ -280,7 +250,7 @@ export function useJevCard({ target, targetKey, sameTarget, callGetJev, callSetJ
           provider: jevView.provider,
         },
       });
-      if (!sameTarget(target)) return null;
+      if (!ticket.isCurrent()) return null;
       setJevView(result.jev);
       return null;
     } catch (error) {
@@ -288,7 +258,7 @@ export function useJevCard({ target, targetKey, sameTarget, callGetJev, callSetJ
       update({ lastError: message }, target);
       return message;
     } finally {
-      if (sameTarget(target)) setCapabilityBusy(false);
+      if (ticket.isCurrent()) setCapabilityBusy(false);
     }
   };
   const setKeyInput = (text: string) => { setJevKeyInput(text); setJevTest(null); };

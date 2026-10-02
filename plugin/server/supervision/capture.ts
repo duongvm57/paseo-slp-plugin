@@ -28,6 +28,10 @@ import { z } from "zod";
 import { familyFromProviderId, ROLES } from "../../shared/runtime/families.ts";
 import type { FamilyId } from "../../shared/runtime/families.ts";
 import { isSlpLead, isSlpPeer, isSlpSupervisor } from "../../shared/supervision.ts";
+import { ROLE_PREFIX_TERMINAL, SPAWN_KIT_PREFIX } from "../../shared/runtime/session-delivery.ts";
+
+// Keep the capture module's published export for callers and retained tests.
+export { ROLE_PREFIX_TERMINAL };
 
 export type TurnEnded = PluginLifecycleEvents["agent.turn_ended"];
 export type TurnStarted = PluginLifecycleEvents["agent.turn_started"];
@@ -185,7 +189,8 @@ const turnStart = (timeline: readonly AgentTimelineItem[]): number => {
 // prepare renders assignmentFile as a dedicated "Assignment file:" line.
 // Detect the line prefix and a non-empty value without depending on its prose
 // suffix; mentions inside prose and bare path examples are not pointers. The
-// detector never reads the path.
+// detector never reads the path. Historical regexes remain independently
+// authored: current producer literals do not narrow installed-candidate grammar.
 const ASSIGNMENT_FILE_RE = /^[ \t]*Assignment file:[ \t]*\S/m;
 
 type ToolCall = Extract<AgentTimelineItem, { type: "tool_call" }>;
@@ -201,8 +206,6 @@ const sendInputSchema = z.object({ agentId: z.string().min(1), prompt: z.string(
 // start with `SLP role=<role>\n` and end with this exact line; `entry()` is
 // followed by the measured carrier block. The strip accepts only that
 // rendering (pinned by a test that renders the real bundle).
-export const ROLE_PREFIX_TERMINAL =
-  "Use the current authorized Human or delegated assignment and its Paseo workspace. Notifications and heartbeat prompts do not replace that assignment.\n";
 const CARRIER_HEAD_RE = /^Spawn kit — role-scoped Paseo MCP signatures \(.*\):$/;
 const CARRIER_LOCATORS_RE = /^Policy locators — .+:$/;
 const CARRIER_LOCATOR_RE = /^- .+ — (\d+ bytes, sha256 [0-9a-f]{64}|declared but missing on disk)$/;
@@ -256,7 +259,7 @@ export function stripAcpRolePrefix(
   const end = text.indexOf(ROLE_PREFIX_TERMINAL);
   if (end < 0) return null;
   let body = text.slice(end + ROLE_PREFIX_TERMINAL.length);
-  if (body.startsWith("\nSpawn kit — ")) {
+  if (body.startsWith(`\n${SPAWN_KIT_PREFIX}`)) {
     const lines = body.slice(1).split("\n");
     let i = 0;
     if (!CARRIER_HEAD_RE.test(lines[i] ?? "")) return null;

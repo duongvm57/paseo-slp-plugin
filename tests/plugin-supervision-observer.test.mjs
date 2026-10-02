@@ -16,8 +16,9 @@ import { capture } from '../plugin/server/supervision/capture.ts';
 import {
   axisGates, buildQuestions, judge, localGate, parseAssessmentResponse, SUPERVISION_QUESTIONS,
 } from '../plugin/server/supervision/assessment.ts';
-import { resolveSupervision, askJevDecision, assertRedacted, JevRequestError } from '../plugin/server/jev.ts';
-import { makeHome } from './helpers/plugin-doubles.mjs';
+import { createJev, jevConfigPath, jevKeyPath, resolveSupervision, askJevDecision, assertRedacted, JevRequestError } from '../plugin/server/jev.ts';
+import { makeHome, targetOf } from './helpers/plugin-doubles.mjs';
+import { createSupervisionState, supervisionPath } from '../plugin/server/supervision/state.ts';
 import { install, json } from '../plugin/server/runtime/cli/package.ts';
 import { readCatalog } from '../plugin/server/runtime/cli/routing.ts';
 import { roleDelivery } from '../plugin/server/runtime/cli/role-bundle.ts';
@@ -2888,4 +2889,48 @@ test('observer: suspension-site × invalidation matrix — unified basis validat
   }
   assert.equal(cells, MATRIX_SITES.length * MATRIX_INVS.length,
     `executed ${cells} cells — expected ${MATRIX_SITES.length}×${MATRIX_INVS.length}`);
+});
+
+test('writer-owned files drive observer reloads: supervision CAS, Jev toggles, provider keys and chmod-only gate changes', async t => {
+  const home = makeHome(t), stableRoot = join(home, 'slp-runtime');
+  const paseo = makePaseo(liveAgents());
+  let networkCalls = 0;
+  const jev = createJev({ fetchImpl: async () => { networkCalls++; throw new Error('no network expected'); } });
+  const state = createSupervisionState({ servedHome: () => ({ daemonHome: home, source: 'env' }) });
+  const observer = createSupervisionObserver({ stableRoot, ask: async () => { networkCalls++; throw new Error('no assessment expected'); } });
+  t.after(() => observer.stop());
+  const request = { schemaVersion: 2, target: targetOf(home) };
+  const cfg = {
+    schemaVersion: 3, confidenceThreshold: 0.9,
+    defaults: { mode: 'off', supervisorAgentId: null, supervisorWorkspaceId: null, pendingDelayMs: 60000 },
+    routes: [route({ pendingDelayMs: 60000 })],
+  };
+  const saved = await state.setSupervision({ ...request, config: cfg, expectedSha256: null }, paseo);
+  // Literal location oracles stay independent of production exports.
+  assert.equal(supervisionPath(stableRoot), join(home, 'slp-runtime', 'state', 'supervision.json'));
+  assert.equal(jevConfigPath(stableRoot), join(home, 'slp-runtime', 'state', 'jev.json'));
+  assert.equal(jevKeyPath(stableRoot, 'openrouter'), join(home, 'slp-runtime', 'state', 'jev-openrouter.key'));
+  observer.onCreated(leadHook(), paseo);
+  await observer.idle();
+  const gate = () => observer.shadow(stableRoot).gates[LEAD];
+  assert.equal(gate(), 'jev-unconfigured', 'observer reads the supervision writer route');
+  let updated = await jev.setJev({ schemaVersion: 1, target: targetOf(home), jev: JEV_CFG, expectedSha256: null });
+  assert.equal(gate(), 'jev-key-missing', 'Jev config writer invalidates gate stamp');
+  await jev.setJevKey({ schemaVersion: 1, target: targetOf(home), key: 'test-observer-key' });
+  assert.equal(gate(), null, 'Jev key writer invalidates stamp');
+  chmodSync(join(home, 'slp-runtime', 'state', 'jev-openrouter.key'), 0o644);
+  assert.equal(gate(), 'jev-key-permissions', 'mode-only change invalidates gate cache');
+  chmodSync(join(home, 'slp-runtime', 'state', 'jev-openrouter.key'), 0o600);
+  assert.equal(gate(), null);
+  updated = await jev.setJev({ schemaVersion: 1, target: targetOf(home), jev: { ...JEV_CFG, enabled: false }, expectedSha256: updated.jev.sha256 });
+  assert.equal(gate(), 'jev-disabled');
+  const native = { ...JEV_CFG, provider: { kind: 'typesafe', baseUrl: 'https://api.typesafe.ai', model: 'jev-1.13.0' } };
+  await jev.setJev({ schemaVersion: 1, target: targetOf(home), jev: native, expectedSha256: updated.jev.sha256 });
+  assert.equal(gate(), 'jev-key-missing', 'provider switch watches the new provider key');
+  await jev.setJevKey({ schemaVersion: 1, target: targetOf(home), key: 'test-typesafe-observer-key' });
+  assert.equal(jevKeyPath(stableRoot, 'typesafe'), join(home, 'slp-runtime', 'state', 'jev-typesafe.key'));
+  assert.equal(gate(), null, 'both provider-key stamp locations are consumed');
+  await state.setSupervision({ ...request, config: { ...cfg, routes: [{ ...cfg.routes[0], mode: 'off' }] }, expectedSha256: saved.sha256 }, paseo);
+  assert.deepEqual(observer.shadow(stableRoot).gates, {}, 'supervision writer removes active route demand');
+  assert.equal(networkCalls, 0, 'observing writer changes never sends credentials or assessment traffic');
 });

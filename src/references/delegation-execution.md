@@ -22,58 +22,22 @@ Read/re-read policy text under the common core's freshness rule.
    spec or evidence the seat must read — stage via repeated
    `--include <repo-path>` flags: verbatim copies, deduped by target path,
    preserved when already present.
-   Supervisor/Lead runtime settings come from slp-supervisor/slp-lead saved profiles.
-   Peer runtime settings come from this repository's .paseo-slp/slp-routing.json,
-   or the plugin-owned user-scope pool
-   ($PASEO_HOME/slp-runtime/state/peer-pool.json, default ~/.paseo) when
-   the repository has none.
-   Disposition belongs to the assignment, not a fixed profile or option mapping.
-   Discover provider availability and exact model/settings for the selected bundle.
-   Missing setup goes through paseo-slp-onboarding; never invent a model or read
-   another repository's pool as fallback.
+   Resolve runtime sources through references/provider-routing.md; disposition
+   belongs to the assignment. Complete its setup checks before the dependent
+   preparation branch.
    Before parallel writers, use references/orchestration.md for isolation and
    integration ownership. Complete preflight with an owner map and available route,
    or report the exact missing prerequisite for the dependent branch.
-2. Before creating Supervisor/Lead, refresh list_profiles and copy the selected
-   role profile's complete bundle. Before creating a Peer, read routes for the
-   assigned repository, choose an enabled ready option eligible for peer using
-   suitableFor, avoidFor, notes and the task budget. Record why it fits.
-   Refresh the catalog hash before launch.
-   Use prepare with role=peer, route.optionId, route.catalogSha256, repository,
-   workspaceId, assignment and fresh providers to validate the selection and obtain
-   create arguments. Profile inventory never overrides a Peer pool selection.
+2. Read `references/provider-routing.md` before runtime selection and follow
+   its saved-profile or Peer-pool procedure, conditional Jev read trigger,
+   provider inventory rules and complete-bundle/mode precedence. Refresh the
+   selected profile or catalog hash and live provider discovery before prepare.
+   Use prepare with the selected role, repository, workspaceId, assignment and
+   fresh inventory; Peer requests carry route.optionId/catalogSha256.
    State in the brief that candidate/check handbacks require the `slp-record`
    block; the record does not replace prose.
-   When `routes` reports `jevRouting.routing` as `shadow`, `armed` or
-   `error`, read `references/jev-routing.md`; skip it for `unconfigured` or
-   `off`. `error` blocks the dependent routing branch.
-   For any role, discovery can arrive by file: the installed `slp.mjs inventory`
-   helper emits {providers, profiles} for the exact daemon home (managed seats
-   carry the verified invocation in their runtime helper block) — pass its
-   absolute path as request.inventoryFile; an explicit inline array, including
-   [], always wins. Managed-runtime inventory providers are labeled provenance
-   configured — static config, not live evidence — so pass live list_providers
-   output from the same daemon inline as providers instead, each provider
-   object verbatim from that array: never the tool response envelope, never a
-   configured or hand-edited entry, no added, removed or renamed fields.
-   An inventory shows configuration completeness, never provider health or
-   readiness.
-   All catalog settings are complete; do not overlay model/effort/features from
-   slp-peer, the Lead or a different option. No saved slp-peer profile is required.
-   Map catalog provider pi/codex/devin/claude to slp-pi-peer/slp-codex-peer/slp-devin-peer/slp-claude-peer. Combine the wrapper
-   ID with the exact model ID, preserving embedded slashes. Copy modeId,
-   thinkingOptionId and features to settings, omitting absent fields; saved
-   profiles use featureValues as settings.features. `settings.modeId` resolves
-   by precedence: the prepare plan's resolved `modeId` — emitted top-level
-   with `modeIdSource` (`binding` | `bundle` | `agent_mode` | `none`) and
-   copied into `create.settings.modeId` — then, for direct spawns
-   (Human→Supervisor), the protocol frontmatter `agent_mode`. A saved-profile
-   or catalog-option pin reports `bundle`; an explicit binding reports
-   `binding`. When nothing resolves (`none`) the plan warns: pin modeId in
-   the Human-owned option/profile or ask the Human — an agent must never
-   silently inherit the caller's default, and cross-family inheritance fails
-   at the host. Record selected profile ID or
-   catalog option ID/hash and exact bundle with the launch arguments.
+   Record selected profile ID or catalog option ID/hash and the exact runtime
+   bundle with the launch arguments.
    Use agent-scoped Paseo create_agent for every seat joining the team —
    Supervisor→Lead and Lead→Peer alike; it has no profile parameter. Only
    agent-scoped creation gives the host the parent link, report route and

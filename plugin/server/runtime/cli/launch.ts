@@ -28,6 +28,7 @@ import { bindingCheck, dispositionPattern, verifyProvider } from './binding.ts';
 import { roleInstructions, orchestrates, policyLocators, carrierBlock } from './role-bundle.ts';
 import { spawnKit } from './spawn-kit.ts';
 import { assignmentFileSelection, assignmentCarrier } from './assignment-file.ts';
+import { SLP_ROLE_PREFIX, LAUNCH_BINDING_PREFIX, ASSIGNMENT_HEADER, PLAN_LOCATOR_CAPTION } from '../../../shared/runtime/session-delivery.ts';
 
 // Every Binding source normalises to { binding, routing? } right here, so nothing
 // downstream unwraps a source-specific shape. Order is precedence, highest first.
@@ -72,8 +73,8 @@ export function prompt(root: string, role: string, assignment: string, binding: 
   // Stock providers carry role instructions inside the prompt; the carrier is
   // appended by plan(), so the inline copy opts out to avoid a duplicate block.
   const instructions = binding.provider === roleProvider(role, binding.provider)
-    ? roleInstructions(root, role, process.env, { carrier: false }) : `SLP role=${role}\n`;
-  return `${instructions}\nLaunch binding: ${JSON.stringify(binding)}\nAssignment:\n${assignment}\n`;
+    ? roleInstructions(root, role, process.env, { carrier: false }) : `${SLP_ROLE_PREFIX}${role}\n`;
+  return `${instructions}\n${LAUNCH_BINDING_PREFIX} ${JSON.stringify(binding)}\n${ASSIGNMENT_HEADER}\n${assignment}\n`;
 }
 
 // Provider switching creates a new session; it never mutates provider identity
@@ -188,7 +189,6 @@ function orientation(root: string, role: string, routing?: ResolvedBinding['rout
 // locators (missing markers included) and the approximate kit signatures —
 // with no file contents inlined. This caption is pinned by contract: the
 // values are plan-time, measured where prepare ran.
-const planLocatorCaption = 'absolute paths; size/sha256 are plan-time values for verifying the file found is the one prepare checked';
 
 // The prompt-side carrier is dropped only when the target is this package's
 // canonical role wrapper for the requested role AND the request's provider
@@ -286,7 +286,7 @@ function plan(root: string, request: LaunchRequest, packet: HandoffPacket | null
       provider: `${binding.provider}/${binding.model}`,
       workspaceId: request.workspaceId,
       initialPrompt: prompt(root, role, assignment, binding)
-        + (targetInjectsCarrier(role, binding, request.providers) ? '' : carrierBlock(kit, manifest.policyBytes, planLocatorCaption))
+        + (targetInjectsCarrier(role, binding, request.providers) ? '' : carrierBlock(kit, manifest.policyBytes, PLAN_LOCATOR_CAPTION))
         + (packet ? handoffNotice(role, packet) : ''),
       settings: {
         ...(modeId != null ? { modeId } : {}),

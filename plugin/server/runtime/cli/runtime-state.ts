@@ -65,12 +65,13 @@ interface RuntimeChecks {
   };
 }
 import type { RuntimeError } from './types.ts';
-import { existsSync, readFileSync, readdirSync, lstatSync, realpathSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
 import { join, resolve, isAbsolute } from 'node:path';
 import { homedir } from 'node:os';
 import { hash, readJson, verifyInstall } from './package.ts';
 import { isManagedRuntime, managedHome } from './managed-home.ts';
-import { readJevConfig, jevKeyPath } from './jev.ts';
+import { readJevConfig } from './jev.ts';
+import { observeJevKey } from '../jev-state.ts';
 
 // H13: the plugin's RPC surface (status, local-target, ...) is reachable only
 // through the Manager UI or a hand-rolled WS frame — no `paseo plugin invoke`
@@ -120,14 +121,7 @@ function ownedConfigScan(config: HostConfig) {
 // jev-<kind>.key; keyPermissionsOk reports whether the file denies group/other
 // access. A corrupt jev.json is reported as an error string, not silently OFF.
 const jevStatus = (home: string) => {
-  const keyFileProbe = (kind: string) => {
-    try {
-      const stat = lstatSync(jevKeyPath(home, kind));
-      return { hasKey: stat.isFile(), keyPermissionsOk: stat.isFile() ? (stat.mode & 0o077) === 0 : null };
-    } catch {
-      return { hasKey: false, keyPermissionsOk: null };
-    }
-  };
+  const keyFileProbe = (kind: string) => observeJevKey(join(home, 'slp-runtime'), kind);
   try {
     const config = readJevConfig(home);
     const kind = config?.provider?.kind ?? 'openrouter';

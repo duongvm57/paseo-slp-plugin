@@ -10,12 +10,13 @@
 //
 // Config/key readers retain their plugin schema and observational view —
 // absent config = unconfigured (Jev OFF), corrupt config = error surfaced,
-// key group/other-accessible = reported. Keep the two validators aligned.
+// key group/other-accessible = reported. CLI intentionally accepts historical
+// provider-less OFF/unknown-key files; plugin persisted/RPC schemas stay strict.
 // test-jev is the ONLY Jev RPC that touches the network (explicit human
 // action — per kind: GET {origin}/api/v1/auth/key for openrouter, GET
 // {baseUrl}/v1/models for typesafe); the fetch seam is injectable.
 
-import { lstatSync, readFileSync, rmSync } from "node:fs";
+import { rmSync } from "node:fs";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import {
@@ -33,13 +34,16 @@ import {
   type SetJevKeyResult,
   type TestJevResult,
 } from "../shared/contracts.ts";
-import { sha256Hex } from "./config-view.ts";
 import { resolveDaemonHome } from "./daemon-home.ts";
 import { writePrivate } from "./state-store.ts";
 import { JEV_TRANSPORTS, assertRedacted as checkRedaction, sanitizeRemoteText } from "../shared/runtime/jev-transport.ts";
 
-const JEV_FILE = join("state", "jev.json");
-const keyFileName = (kind: string) => join("state", `jev-${kind}.key`);
+import {
+  JEV_CONFIG_FILE as JEV_FILE, jevKeyFile as keyFileName,
+  observeJevKey as keyProbe, readJevConfigFile, readJevKeyFile,
+} from "./runtime/jev-state.ts";
+// Writer-owned locations for readers such as the observer (stableRoot input).
+export { jevConfigPath, jevKeyPath } from "./runtime/jev-state.ts";
 const DEFAULT_KIND = "openrouter";
 const KIND_LABEL: Record<string, string> = { openrouter: "OpenRouter", typesafe: "TypeSafe" };
 
@@ -71,31 +75,25 @@ const resolveHome = (target: { hostId: string; daemonHome: string }): { canonica
 // sha256 is the raw-file CAS token: present whenever the file exists, even
 // broken, so a stale client can still overwrite it under CAS.
 function readConfig(stableRoot: string): { config: JevConfigValue | null; sha256: string | null; error: string | null } {
-  const file = join(stableRoot, JEV_FILE);
-  let raw: string;
+  let observed: ReturnType<typeof readJevConfigFile>;
   try {
-    raw = readFileSync(file, "utf8");
+    observed = readJevConfigFile(stableRoot);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return { config: null, sha256: null, error: null };
     throw error;
   }
-  const sha256 = sha256Hex(raw);
+  const { sha256 } = observed;
+  if (!observed.ok) return { config: null, sha256, error: `jev.json is not valid JSON: ${observed.error.message}` };
+  // The strict persisted/RPC dialect deliberately validates OFF documents too.
+  // Do not substitute the CLI reader: provider-less OFF must remain visible as
+  // configured-but-broken here, while it cannot block CLI routing while OFF.
   try {
-    const parsed = JevConfig.safeParse(JSON.parse(raw));
+    const parsed = JevConfig.safeParse(observed.value);
     return parsed.success
       ? { config: parsed.data, sha256, error: null }
       : { config: null, sha256, error: `jev.json failed schema validation: ${parsed.error.issues[0]?.message ?? "schema"}` };
   } catch (error) {
     return { config: null, sha256, error: `jev.json is not valid JSON: ${(error as Error).message}` };
-  }
-}
-
-function keyProbe(stableRoot: string, kind: string): { hasKey: boolean; keyPermissionsOk: boolean | null } {
-  try {
-    const stat = lstatSync(join(stableRoot, keyFileName(kind)));
-    return { hasKey: stat.isFile(), keyPermissionsOk: stat.isFile() ? (stat.mode & 0o077) === 0 : null };
-  } catch {
-    return { hasKey: false, keyPermissionsOk: null };
   }
 }
 
@@ -188,15 +186,15 @@ export function createJev(deps: JevDeps = {}) {
     const { config, error } = readConfig(ctx.stableRoot);
     const fail = (detail: string, latencyMs = 0): TestJevResult => ({ schemaVersion: 1, ok: false, detail, latencyMs });
     if (config === null) return fail(error ?? "Jev is not configured for this daemon");
-    const probe = keyProbe(ctx.stableRoot, config.provider.kind);
-    if (!probe.hasKey) return fail(`no key stored — set the ${KIND_LABEL[config.provider.kind] ?? config.provider.kind} key first`);
-    if (probe.keyPermissionsOk === false) return fail("key file is group/other-accessible — chmod 600 the jev key file");
-    let key: string;
-    try {
-      key = readFileSync(join(ctx.stableRoot, keyFileName(config.provider.kind)), "utf8").trim();
-    } catch (readError) {
-      return fail(`key file unreadable: ${(readError as Error).message}`);
+    const read = readJevKeyFile(ctx.stableRoot, config.provider.kind);
+    if (!read.ok) {
+      if (read.reason === "permissions") return fail("key file is group/other-accessible — chmod 600 the jev key file");
+      if (read.stage === "stat") return fail(`no key stored — set the ${KIND_LABEL[config.provider.kind] ?? config.provider.kind} key first`);
+      return fail(`key file unreadable: ${read.error?.message}`);
     }
+    // Preserve the auth probe's existing policy: it sends the trimmed stored
+    // token to the provider; CLI/decision use additionally requires valid=true.
+    const key = read.key;
     const started = now();
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 5000);
@@ -269,16 +267,13 @@ export function resolveSupervision(stableRoot: string): SupervisionGate {
   if (config.capabilities.supervision !== true) return { ok: false, reason: "jev-capability-off" };
   const transport = JEV_TRANSPORTS[config.provider.kind];
   if (transport === undefined) return { ok: false, reason: "jev-provider-unsupported" };
-  const probe = keyProbe(stableRoot, config.provider.kind);
-  if (!probe.hasKey) return { ok: false, reason: "jev-key-missing" };
-  if (probe.keyPermissionsOk !== true) return { ok: false, reason: "jev-key-permissions" };
-  let key: string;
-  try {
-    key = readFileSync(join(stableRoot, keyFileName(config.provider.kind)), "utf8").trim();
-  } catch {
-    return { ok: false, reason: "jev-key-unreadable" };
+  const readKey = readJevKeyFile(stableRoot, config.provider.kind);
+  if (!readKey.ok) {
+    if (readKey.reason === "permissions") return { ok: false, reason: "jev-key-permissions" };
+    return { ok: false, reason: readKey.stage === "stat" ? "jev-key-missing" : "jev-key-unreadable" };
   }
-  if (key === "" || /\s/.test(key)) return { ok: false, reason: "jev-key-invalid" };
+  if (!readKey.valid) return { ok: false, reason: "jev-key-invalid" };
+  const key = readKey.key;
   return { ok: true, provider: config.provider, authorization: `Bearer ${key}` };
 }
 

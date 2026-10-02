@@ -53,6 +53,7 @@ import {
   type MembershipValue,
 } from "./desk-store.ts";
 import { assertRealComponents, ensurePrivateDirectory } from "./kept-files.ts";
+import { classifyLockHolderProcess, parseLockHolder, type LockHolder } from "./runtime/lock-holder.ts";
 import { detectDaemonHome } from "./daemon-home.ts";
 import { sha256Hex } from "./config-view.ts";
 import type { Journal } from "./journal.ts";
@@ -395,12 +396,6 @@ const rejection = (code: DeskErrorCode, message: string, recovery: string): Desk
 /** MCP protocol version echoed when the caller declares none. */
 const MCP_PROTOCOL_FALLBACK = "2024-11-05";
 
-interface LockHolder {
-  pid: number;
-  instanceNonce: string;
-  startedAt?: string;
-}
-
 /** The production artifact seam for settlement transcript exports (P3-b
  *  R1). The allowed evidence domain is the bound repository's worktree —
  *  `realpath(dirname(repo.gitCommonDir))`, derived server-side from the
@@ -515,34 +510,9 @@ export function createDeskBridge(deps: DeskBridgeDeps) {
     }
   };
 
-  const pidAlive = (pid: number): boolean => {
-    try {
-      kill(pid);
-      return true;
-    } catch {
-      return false;
-    }
-  };
-
-  function parseHolder(bytes: Buffer): LockHolder | null {
-    try {
-      const value: unknown = JSON.parse(bytes.toString("utf8"));
-      if (!isRecord(value)) return null;
-      const { pid, instanceNonce, startedAt } = value;
-      if (
-        typeof pid === "number" && Number.isInteger(pid) && pid > 0 &&
-        typeof instanceNonce === "string" &&
-        instanceNonce.length > 0 && instanceNonce.length <= WIRE_LIMITS.recoverNonce
-      ) {
-        return {
-          pid,
-          instanceNonce,
-          ...(typeof startedAt === "string" ? { startedAt } : {}),
-        };
-      }
-    } catch { /* unparseable */ }
-    return null;
-  }
+  // Bridge readiness requires a successful probe; EPERM keeps it closed.
+  // Store/recovery instead preserve an EPERM holder as potentially live.
+  const pidAlive = (pid: number): boolean => classifyLockHolderProcess(pid, kill) === "alive";
 
   // ---------------------------------------------------------------------
   // stable-root provenance (D7) — receipt → verified launch set → the
@@ -629,7 +599,7 @@ export function createDeskBridge(deps: DeskBridgeDeps) {
       }
       let holder: LockHolder | null = null;
       try {
-        holder = parseHolder(readFileSync(lockPath));
+        holder = parseLockHolder(readFileSync(lockPath));
       } catch {
         return { ok: false, code: "RECOVERY_REQUIRED", reason: "bridge lock is unreadable" };
       }
@@ -676,7 +646,7 @@ export function createDeskBridge(deps: DeskBridgeDeps) {
     const path = paths.lockPath;
     let holder: LockHolder | null = null;
     try {
-      holder = parseHolder(readFileSync(path));
+      holder = parseLockHolder(readFileSync(path));
     } catch {
       warn("release-unreadable", `slp: desk bridge lock at ${path} is unreadable — left in place`);
       return;
@@ -933,7 +903,7 @@ export function createDeskBridge(deps: DeskBridgeDeps) {
     if (existsSync(lockPath)) {
       let holder: LockHolder | null = null;
       try {
-        holder = parseHolder(readFileSync(lockPath));
+        holder = parseLockHolder(readFileSync(lockPath));
       } catch {
         return "recovery-required";
       }

@@ -5,8 +5,37 @@ task-specific topology, supervision and evidence-based acceptance.
 Behavioral authority is the operating guide and current Human assignment.
 Local installation/transport checks do not constitute workflow acceptance.
 
+## File ownership
+
+This map covers owners of package behavior and its verification, at file or
+module-family granularity. Documentation, examples, release records, licenses
+and dependency locks are supporting artifacts, not additional runtime owners.
+
 | Files | Responsibility |
 |---|---|
+| plugin/paseo-plugin.json, plugin/index.server.ts | Plugin identity/host requirement and synchronous server contribution: register RPCs, construct the owned stores and lifecycle hooks, and return cleanup. No runtime installation at plugin load. |
+| plugin/index.client.tsx | Register the Manager surface, its navigation entries and recipient-workspace supervision bell; return contribution cleanup. |
+| plugin/shared/contracts.ts | Strict RPC, receipt, intent and persisted-view schemas plus erased module interfaces used by the server, client and verification adapters. |
+| plugin/shared/supervision.ts | Supervision store migrations, role predicates, effective routes, bounded communication evidence/findings and RPC schemas. |
+| plugin/shared/archetypes.ts, plugin/shared/snapshot-catalog.ts | Package seat presets derived from the routing vocabulary, and UI catalog snapshot projections. |
+| plugin/client/ManagerSurface.tsx, plugin/client/manager-state.ts | Displayed host/target, operation start/recovery/polling and bounded status; pure routing/pool form construction and comparisons stay in manager-state. |
+| plugin/client/target-async.ts | Displayed-target async generation and load lifecycle, including effect replay and stale-result guards; cards retain their own reset, dirty-form and CAS policies. |
+| plugin/client/catalog-demand.ts | Target-bound catalog/feature demand, deduplication, cache, retry and invalidation. Manager/card consumers request observations without owning cache lifecycle. |
+| plugin/client/cards/ | Language, saved-role routing, Peer pool, Jev, tracker and supervision editors. Each card owns its RPC workflow, draft semantics, errors and save confirmations. |
+| plugin/client/ui-kit.tsx, plugin/client/supervision-form.ts, plugin/client/supervision-controls.ts | Shared Manager presentation primitives, pure supervision form/projection logic and recipient-workspace bell actions through the single supervision writer. |
+| plugin/server/manager.ts | Administrator mutation mutex, accepted intents, durable phase/recovery transitions, fresh binding verification and bounded status. No generic transaction executor or cached verification. |
+| plugin/server/journal.ts | Private receipt read/CAS/durable replacement, strict receipt refinements and operation lookup; sidecar state stays outside immutable candidates. |
+| plugin/server/config-view.ts, plugin/server/config-transaction.ts | Raw/live configuration observations, canonical hashes, owned-slot projections and pinned persisted-schema planning for activation, reconciliation and semantic restoration. |
+| plugin/server/state-store.ts | Atomic private language/routing/Peer-pool state, CAS and legacy-pool import. Exports its own state locations; host configuration remains outside this writer. |
+| plugin/server/provider-catalog.ts | Fresh host provider/model/mode/feature observations and bounded catalog projection; provider presence does not establish health. |
+| plugin/server/materializer.ts | Immutable payload stage/verify/fsync/rename and retained-candidate receipt anchoring. Owns candidate integrity and publication decisions. |
+| plugin/server/launchers.ts | Immutable launcher publication and verification, node/family binding, gate-vs-shim manifests and path ancestry. Owns launch-set integrity and collision decisions. |
+| plugin/server/publication-files.ts | Shared asynchronous private-directory, exclusive-write, staging-path and durability mechanics for candidate/launcher publication; domain verification and recovery stay with their callers. |
+| plugin/server/executables.ts | Verified ordinary Node and family executable resolution, daemon PATH aliases and forbidden-prefix/symlink rules. |
+| plugin/server/role-injection.ts | Bind agent.create to the verified installed candidate's role bundle and runtime helpers, applying transport-specific instruction/environment overlays and minting desk membership through its assigned seam. |
+| plugin/server/supervision/state.ts | Served-home supervision file location, schema migration view and the single CAS writer shared by the card and bell. |
+| plugin/server/supervision/capture.ts, plugin/server/supervision/assessment.ts | Fixture-backed per-family brief/handback/send capture, provenance gates, strict Jev rubric/link parsing and independent communication findings. Neither reads an assignment pointer file. |
+| plugin/server/supervision/observer.ts, plugin/server/supervision/delivery.ts | Lifecycle capture, serialized case/assessment queue and bounded metadata rings; route/recipient revalidation, durable mark-before-send attempts and no uncertain retry. |
 | install.sh | One-command local install into the selected destination and Paseo home; reload configuration. |
 | plugin/server/runtime/cli/paseo-install.ts | Merge owned provider/profile entries, preserve existing preferences, record rollback binding, initialize repository protocol and Supervisor notebook scaffold; materialize clones a source checkout's protocol, catalog and protocol references into a target checkout with frontmatter paths rebased (Supervisor notebook excluded). |
 | plugin/server/runtime/cli/types.ts | Erased CLI contracts for binding, profiles, raw observations, snapshots and launch requests; validation stays with each runtime owner. |
@@ -20,7 +49,7 @@ Local installation/transport checks do not constitute workflow acceptance.
 | src/common.md, src/roles/*.md | Authority, role behavior, conditional policy-text reuse and context-recovery rules; no repository tactics or model IDs. |
 | src/delegation.md | Always-loaded Supervisor/Lead delegation core: required review-gate, parentage/placement and ambiguous-create invariants, with conditional pointers to formation and execution procedures. |
 | src/references/delegation-formation.md | Conditional delegation classification and formation record: new team, continuation or observe-existing. |
-| src/references/delegation-execution.md | Conditional delegation preparation, runtime selection, creation verification, ambiguous-create recovery, notification and report retrieval. |
+| src/references/delegation-execution.md | Conditional delegation preparation, pointer to the routing-rule owner, creation verification, ambiguous-create recovery, notification and report retrieval. |
 | src/references/orchestration.md | Lead's conditional topology, independent review/council, dependency and integration procedure. |
 | src/references/monitoring.md | Supervisor/Lead event observation, heartbeat ownership and bounded-task resource settlement. |
 | src/references/report-records.md | Handback and settlement record fields, extraction semantics, failure codes, durable sinks and provider-native timeline handles. |
@@ -61,12 +90,15 @@ Local installation/transport checks do not constitute workflow acceptance.
 | plugin/server/enforcement.ts, plugin/server/limitations.ts | Read-only `readView` for installation state, capability evidence and membership projection. Reads bounded `repos/*/ledger.json` under the verified served home, emits `SeatBindingView` rows for memberships carrying an `agentId`, and accounts elisions in the completeness ledger. `limitations.ts` owns the shared limitation literals. The unused P0 `dispatch` placeholder is retired; desk mutations enter through `desk-bridge.ts` and the feature runners. |
 | plugin/server/desk-store.ts, plugin/server/kept-files.ts | Durable desk store kernel (ledger v6): header-first absent/ok/corrupt/future/unsafe reads, in-memory v1→v2→v3→v4→v5→v6 migrations and `schema-migrated` on the first post-bump commit. Per-repo `O_EXCL` locks plus an in-process mutex protect idempotent `transact` replay keyed by canonical `bodySha256` of `{repo, command}`. Decide outputs replace complete tables across P2–P5; the store checks schemas, cross-table identities and refinements while features own command semantics. Immutable hash-chained event segments precede the `ledger.json` rename commit point; the ledger byte cap rejects before either write. Live holders yield `CAPABILITY_GAP`, dead/unknown holders `RECOVERY_REQUIRED`; operator-only unlink belongs to recovery. Imports the canonical namespace layout from `runtime/desk-paths.ts`; `kept-files.ts` supplies policy-aware directory guards and re-exports the shared syscall primitives. |
 | plugin/server/runtime/report-records.ts | Canonical typed v1 validator and frozen record vocabulary; evidence and realpath are injected capabilities. No schema or host dependencies. CLI and desk facades use this implementation directly. |
+| plugin/server/runtime/lock-holder.ts | One interpretation of desk/bridge/recover-lock holder bytes and process-probe outcomes. Callers retain waiting, re-entry, release, audit and recovery authority. |
 | plugin/server/runtime/desk-recovery.ts | Canonical operator recovery state machine, sync CLI driver, async plugin driver and strict output projection. Two checkpoints preserve race barriers; thrown/rejected hooks re-enter the generator so recover-lock cleanup runs. |
 | plugin/server/runtime/desk-paths.ts, plugin/server/runtime/filesystem.ts | Desk namespace derivation, path layout, bridge sentinel and low-level filesystem primitives shared by CLI recovery and plugin durable stores. No schema or host dependencies. |
 | plugin/server/runtime/work-tracker.ts | One read-only tracker setting validator, absolute-PATH executable scan, version parser and bounded diagnostic formatter. The shared reader takes the stable runtime root and includes `configured`; CLI projection omits that field. |
 | plugin/shared/runtime/jev-transport.ts | Dependency-free Jev provider defaults, model patterns, URL path rules and POST extras; one ordered credential detector/preflight and scrub-before-cap sanitizer. Adapters retain their error classes and config/HTTP lifecycle policies. |
+| plugin/shared/runtime/session-delivery.ts | Published session-entry/launch/snapshot literals and carrier captions shared by producers and capture. Recognizer grammar stays explicit in its parser; historical wire bytes remain compatible. |
 | plugin/server/work-tracker.ts | Verified-home tracker get/set RPCs, plugin `bd version` detection and the hook-only `beadsSeatEnv` overlay; setting writes remain atomic 0600 and plugin-owned. Uses shared read-only primitives. |
-| plugin/server/jev.ts | Jev state/key RPCs and single-shot supervision requests. Plugin Zod config validation, CAS, key observations, auth probe and stop cancellation stay here; provider/credential rules come from the shared runtime. |
+| plugin/server/jev.ts | Jev state/key RPCs and single-shot supervision requests. Strict plugin Zod config validation, CAS, auth-probe policy and stop cancellation stay here; disk/key observations and locations come from runtime/jev-state, provider/credential rules from the shared runtime. |
+| plugin/server/runtime/jev-state.ts | Jev config/key namespace, uncached raw config/hash observations, stat-only key presence and private regular-file checks before secure key reads. CLI retains historical OFF/unknown-key tolerance; plugin persisted/RPC schemas remain strict. Each adapter owns its diagnostics and capability policy. |
 | plugin/shared/runtime/desk-contract.ts, plugin/shared/runtime/node-version.mjs | Plain recovery-result vocabulary and diagnostic bounds; bootstrap-safe supported Node range/check shared by resolver, shim and CLI. Shared runtime has no Node imports or types. |
 | plugin/server/runtime/cli/ | Standalone CLI runtime: command parsing, installer/identity, verifier/snapshot, policy rendering, routing, agent observations and role transport. Source is colocated with plugin-owned core, but remains an adapter tier; core cannot import CLI modules. `src/` contains only policy/template assets. `bin/` bootstraps and development-only `scripts/` call this runtime directly. |
 | scripts/generate-plugin-payload.mjs, scripts/runtime-graph.mjs | `installUnitPaths()` owns the exact source-byte install unit, including only the two selected plugin runtime subtrees. Legacy identities allow absent runtime roots. The generator encodes bytes/modes and rejects missing, external and reverse-tier dependencies, including erased type imports; graph analysis is development-only. |
@@ -88,7 +120,9 @@ Local installation/transport checks do not constitute workflow acceptance.
 | e2e/ledger.mjs, e2e/report.mjs | The ledger owns evidence storage, byte verification and per-kind discharge inspection, including the run context and capture provenance; reports consume that inspection to render attempt status, run summaries and the cross-run index without opening evidence records. |
 | e2e/ | Development-only scenario manifest, fixture, external outcome check, evidence collector and repository E2E protocol. Collector commands do not create agents or judge behavioral evidence. |
 | tests/helpers.mjs | Synthetic E2E fixture construction and evidence-kind dispatch; collectAll can omit kinds under test, while tests keep raw/invalid capture and provenance assertions explicit. |
-| tests/*.test.mjs, tests/helpers/plugin-doubles.mjs | Local installer, rollback, transport, envelope, snapshot and plugin checks; the shared plugin doubles own temporary daemon/binary fixtures and their matching dependency wiring, including named recovery fault points that concentrate characterized UUID sequencing; tests own manager creation, explicit filesystem blocker choice and durable-phase assertions. |
+| tests/*.test.mjs, tests/helpers/plugin-doubles.mjs, tests/helpers/desk-bridge-fixture.mjs | Local installer, rollback, transport, envelope, snapshot and plugin checks; the shared plugin doubles own temporary daemon/binary fixtures and their matching dependency wiring, including named recovery fault points that concentrate characterized UUID sequencing; the desk bridge fixture owns socket framing, handshake and membership wiring with explicit PIN/fault variants; tests own assertions, manager creation, filesystem blockers and durable-phase checks. |
+
+## Installed bytes and storage
 
 The install unit is package.json, install.sh, bin/, skills/, src/ and the
 plugin/server/runtime/ and plugin/shared/runtime/ source subtrees. installed.json binds their
@@ -99,6 +133,8 @@ outside immutable candidates and plugin settings; its payload manifest
 additionally verifies file modes. The shell installer and installed CLI share
 the standalone installation code. The plugin uses the documented config.patch
 transaction and stable executable shims.
+
+## Installation and restoration
 
 Managed family binaries use validated daemon PATH aliases when available, so
 Codex, Pi, Devin and Claude updates can reach future launches. Existing
@@ -157,6 +193,8 @@ already be enabled. Human profile preferences are preserved during rebind and
 may be acknowledged by reconcile; conflicting managed entries stop
 deactivation.
 
+## Configuration transactions
+
 SLP management operations are administrator-only and require an exclusive
 administrative edit window for the selected daemon. Do not edit daemon
 configuration through the app, another plugin, a CLI, or a file while
@@ -165,6 +203,8 @@ own operations and verifies persisted and live results. Paseo 0.8.0 provides
 no compare-and-swap for these patches; this plugin cannot guarantee
 preservation against concurrent external writers. A detected mismatch stops
 automatic mutation and requires reconciliation.
+
+## Runtime lifetime and policy delivery
 
 Plugin disable/remove is not SLP deactivation. Raw removal leaves verified
 stable transports operational and correctly roled, with ownership recoverable
@@ -180,6 +220,8 @@ Policy is injected independently of the ordinary task prompt. Provider labels
 and agent self-reports are not proof of loading: E2E evidence must correlate the
 provider command, installed bytes, actual session instructions and host parentage.
 Permissions and role boundaries remain distinct: policy is not tool isolation.
+
+## Authority and role policy
 
 Assignment supplies objective, repository/workspace, owned/excluded scope,
 authority, verification and handback. Supervisor and Lead read the repository
@@ -231,6 +273,8 @@ is a tool-delivery gate, not shell or direct-CLI isolation. No lifecycle runner
 or schedule adapter is added. Missing capabilities remain explicit before any fallback. See
 [guide coverage](reports/guide-coverage.md) for requirement mapping, load paths and host gaps.
 
+## Runtime selection
+
 Codex, Pi, Devin and Claude share role bytes through their respective adapters. Human configures
 slp-supervisor/slp-lead with matching role providers and chosen models/settings.
 Supervisor/Lead launches refresh these saved profiles and copy their complete
@@ -257,6 +301,8 @@ a saved slp-peer limits the pool. No catalog in either scope, or an
 empty/no-eligible pool, blocks Peer creation until setup is completed — never a
 saved profile, another repository's catalog or inherited Lead settings. An empty
 repository catalog remains authoritative and disables the fallback.
+
+## Jev routing
 
 Jev-assisted routing is an opt-in per-daemon capability, configured under
 <daemonHome>/slp-runtime/state/jev.json with the provider key beside it in
@@ -288,8 +334,10 @@ and receipts prove consistency, not cryptographic authenticity. Accepted
 risk (recorded): the key file is 0600 inside the daemon home, yet any
 same-user process can read it — daemon-home integrity is the boundary.
 
+## Communication supervision
+
 Communication supervision is a second opt-in capability configured in
-<daemonHome>/slp-runtime/state/supervision.json (schema 2, 0600, whole-file
+<daemonHome>/slp-runtime/state/supervision.json (schema 3, 0600, whole-file
 sha256 CAS through one server-side writer shared by the supervision card and
 the recipient-workspace bell).
 Off by default; configuring Jev never enables it. The store holds a
@@ -374,6 +422,8 @@ widening of transmission: config schema 3 reads schema-1/2 files with every
 route and the defaults off until the Human re-saves. Live E2E validation and
 model evaluation have not run; see docs/spec/supervision-integration.md.
 
+## Launch planning and delegation
+
 prepare accepts repository, workspaceId, assignment and role. Supervisor/Lead use
 fresh profiles/providers; Peer uses providers and route.optionId/catalogSha256.
 A profiles inventory can accompany Peer discovery but does not select its runtime;
@@ -407,12 +457,16 @@ workspace unless a declared worktree, repository or lane-isolation reason is
 recorded with its paths — a second workspace on the same checkout is not
 isolation. Source selection is shared by prepare-handoff.
 
+## Repository initialization
+
 init creates missing protocol and Supervisor notebook files
 without overwriting existing files, and writes .paseo-slp/slp-routing.json only
 when --routing-from names an explicitly chosen catalog — a repository without
 its own catalog resolves the user-scope pool. Host upgrade archives retired Peer
 profiles but neither creates
 nor edits project catalogs, so setup never silently imports host choices.
+
+## E2E evidence
 
 New basic manifests use runtimeSource=profiles-and-peer-pool. Supervisor/Lead
 profiles and eligible Peer options match the selected basic family. begin records
@@ -433,6 +487,8 @@ readable as UNVERIFIED_LEGACY without automatic resealing. Their verdicts remain
 visible but do not qualify dependency or retry gates. A new addendum cannot
 retroactively verify an unsigned original. Summary exposes gateReady separately
 from historical status; its CLI returns success only for a fully qualified PASS.
+
+## Handoff and snapshots
 
 Provider switching creates a new session: prepare-handoff requires old-owner settlement
 evidence and transfers state/resources without inventing new parentage or acceptance.
@@ -460,6 +516,8 @@ record it as an evidence gap instead of claiming full-candidate coverage.
 Listed directories that are not repositories remain unsupported. Before/after
 snapshots detect drift while Peer is paused, not transient or malicious writes.
 
+## Quota fallback
+
 Peer quota fallback is configured by catalog quotaFallback.enabled and optionId —
 one designated option, not an ordered list. Missing/disabled means stop; the
 target must be an existing eligible pool bundle.
@@ -468,7 +526,7 @@ Raw Paseo create/update calls remain host capabilities: the package supplies pol
 and validation, not a host security boundary. Evidence must verify actual settings
 on start/resume/update; availability flags alone do not prove quota recovery.
 
-### ACP context recovery
+## ACP context recovery
 
 ACP role delivery is conversation text, not a persistent system-instruction channel.
 The adapter reasserts the same role core on every session/prompt; it does not infer
@@ -482,7 +540,7 @@ Task context must be recovered from evidence: role recovery never guesses an
 assignment or restores missing ownership. Transport tests prove delivered bytes;
 actual compaction resilience requires separate live provider evidence.
 
-### Tiny procedure and policy-text reuse
+## Tiny procedure and policy-text reuse
 
 Lead classifies clear, reversible work with clear verification and no change to
 authority/delegation/lifecycle/integrity as tiny, recording its reason. Workspace

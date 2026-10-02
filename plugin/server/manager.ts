@@ -349,6 +349,43 @@ export function createManager(deps: ManagerDeps): Manager {
     return canonicalSha256({ method, input });
   }
 
+  /** Acceptance vocabulary; admission and inspect's subject selection stay at their sites. */
+  function acceptedIntent(
+    operationId: string,
+    requestSha: string,
+    entry:
+      | { kind: "activate" | "deactivate"; candidateSha256: string; priorState: StateValue }
+      | { kind: "reconcile"; action: "inspect"; priorState: StateValue }
+      | {
+          kind: "reconcile";
+          action: "complete" | "restore-before";
+          subject: Pick<IntentValue, "operationId" | "candidateSha256"> & { plan: PlanValue };
+        },
+  ): IntentValue {
+    const subject = "subject" in entry ? entry.subject : null;
+    return {
+      operationId,
+      requestSha256: requestSha,
+      kind: entry.kind,
+      bootId,
+      phase: "accepted",
+      outcome: "pending",
+      candidateSha256:
+        "candidateSha256" in entry ? entry.candidateSha256 : subject?.candidateSha256 ?? null,
+      recoveryOf: subject?.operationId ?? null,
+      recoveryAction: entry.kind === "reconcile" ? entry.action : null,
+      acceptedAt: now(),
+      updatedAt: now(),
+      completedAt: null,
+      plan: subject?.plan ?? null,
+      // Normal operations/inspect restore their admission state. Complete and
+      // restore-before enter recovery bookkeeping even with an intact binding.
+      priorState: "priorState" in entry ? entry.priorState : "RECOVERY_REQUIRED",
+      patchAttempts: [],
+      conflicts: [],
+    };
+  }
+
   /** Prior steady state to restore after a prepatch failure. */
   function priorState(receipt: ReceiptValue): StateValue {
     return receipt.binding ? "ACTIVE" : "INACTIVE";
@@ -550,12 +587,23 @@ export function createManager(deps: ManagerDeps): Manager {
     transition(ctx, receipt => {
       const op = findOperation(receipt, opId);
       if (!op) return;
+      requireRecovery(receipt, op, conflicts);
+    });
+  }
+
+  /** Recovery workers retain the state verdict even if their op is no longer present. */
+  function requireRecovery(
+    receipt: ReceiptValue,
+    op: IntentValue | undefined,
+    conflicts: ConflictValue[],
+  ): void {
+    if (op) {
       op.outcome = "recovery-required";
       op.updatedAt = now();
       op.conflicts = [...op.conflicts, ...conflicts].slice(0, MAX_CONFLICTS);
-      receipt.state = "RECOVERY_REQUIRED";
-      receipt.activeOperationId = null;
-    });
+    }
+    receipt.state = "RECOVERY_REQUIRED";
+    receipt.activeOperationId = null;
   }
 
   /**
@@ -818,26 +866,11 @@ export function createManager(deps: ManagerDeps): Manager {
       // treats each role's prefs as an explicit edit applied over the live
       // entries (absent = preserve, null = clear, family = repoint provider)
       // under the same serialized operation and receipt as any other verify.
-      const intent: IntentValue = {
-        operationId: request.operationId,
-        requestSha256: requestSha,
+      const intent = acceptedIntent(request.operationId, requestSha, {
         kind: "activate",
-        bootId,
-        phase: "accepted",
-        outcome: "pending",
         candidateSha256: request.candidateSha256,
-        recoveryOf: null,
-        recoveryAction: null,
-        acceptedAt: now(),
-        updatedAt: now(),
-        completedAt: null,
-        plan: null,
-        // Pre-acceptance receipt state — the honest restore target if this op
-        // fails before any patch settlement becomes ambiguous.
         priorState: state,
-        patchAttempts: [],
-        conflicts: [],
-      };
+      });
       const next = transitionOrInit(ctx, request.target.hostId, r => {
         r.state = "ACTIVATING";
         r.activeOperationId = intent.operationId;
@@ -922,10 +955,7 @@ export function createManager(deps: ManagerDeps): Manager {
       let payloadSha256: string;
       let activeCandidateSha256: string;
       if (binding && sameCandidate && sameResolution) {
-        await deps.materializer.verifyPublished(binding.runtimePath, binding.candidateSha256, binding.payloadSha256);
-        launchSet = await deps.launchers.verify(
-          join(ctx.stableRoot, "launchers", binding.launchSetSha256),
-        );
+        launchSet = await verifyBindingFiles(ctx, binding);
         runtimePath = binding.runtimePath;
         payloadSha256 = binding.payloadSha256;
         activeCandidateSha256 = binding.candidateSha256;
@@ -1005,21 +1035,12 @@ export function createManager(deps: ManagerDeps): Manager {
           throw new OperationConflict("IO_FAILURE", "config.patch threw before dispatch");
         }
         if (settlement === "outcome-unknown") {
-          transition(ctx, r => {
-            const op = findOperation(r, opId);
-            if (!op) return;
-            op.outcome = "recovery-required";
-            op.updatedAt = now();
-            op.conflicts = [
-              ...op.conflicts,
-              conflictOf(
-                "PATCH_OUTCOME_UNKNOWN",
-                "config.patch settlement unknown; the daemon operation may still be running — reconcile after quiescing",
-              ),
-            ].slice(0, MAX_CONFLICTS);
-            r.state = "RECOVERY_REQUIRED";
-            r.activeOperationId = null;
-          });
+          markRecovery(ctx, opId, [
+            conflictOf(
+              "PATCH_OUTCOME_UNKNOWN",
+              "config.patch settlement unknown; the daemon operation may still be running — reconcile after quiescing",
+            ),
+          ]);
           return;
         }
         // 6a. A dispatched patch needs endpoint classification: 'after' →
@@ -1131,24 +1152,11 @@ export function createManager(deps: ManagerDeps): Manager {
         ]);
       }
 
-      const intent: IntentValue = {
-        operationId: request.operationId,
-        requestSha256: requestSha,
+      const intent = acceptedIntent(request.operationId, requestSha, {
         kind: "deactivate",
-        bootId,
-        phase: "accepted",
-        outcome: "pending",
         candidateSha256: receipt.binding.candidateSha256,
-        recoveryOf: null,
-        recoveryAction: null,
-        acceptedAt: now(),
-        updatedAt: now(),
-        completedAt: null,
-        plan: null,
         priorState: state,
-        patchAttempts: [],
-        conflicts: [],
-      };
+      });
       const next = transition(ctx, r => {
         r.state = "DEACTIVATING";
         r.activeOperationId = intent.operationId;
@@ -1209,8 +1217,7 @@ export function createManager(deps: ManagerDeps): Manager {
       const binding = receipt.binding;
 
       // §8.3.1 — runtime integrity is part of the deactivation contract.
-      await deps.materializer.verifyPublished(binding.runtimePath, binding.candidateSha256, binding.payloadSha256);
-      await deps.launchers.verify(join(ctx.stableRoot, "launchers", binding.launchSetSha256));
+      await verifyBindingFiles(ctx, binding);
 
       const raw = readRawConfig(ctx.configPath);
       const liveConfig = (await daemon.config.get()).config;
@@ -1237,21 +1244,12 @@ export function createManager(deps: ManagerDeps): Manager {
           throw new OperationConflict("IO_FAILURE", "config.patch threw before dispatch");
         }
         if (settlement === "outcome-unknown") {
-          transition(ctx, r => {
-            const op = findOperation(r, opId);
-            if (!op) return;
-            op.outcome = "recovery-required";
-            op.updatedAt = now();
-            op.conflicts = [
-              ...op.conflicts,
-              conflictOf(
-                "PATCH_OUTCOME_UNKNOWN",
-                "config.patch settlement unknown; the daemon operation may still be running — reconcile after quiescing",
-              ),
-            ].slice(0, MAX_CONFLICTS);
-            r.state = "RECOVERY_REQUIRED";
-            r.activeOperationId = null;
-          });
+          markRecovery(ctx, opId, [
+            conflictOf(
+              "PATCH_OUTCOME_UNKNOWN",
+              "config.patch settlement unknown; the daemon operation may still be running — reconcile after quiescing",
+            ),
+          ]);
           return;
         }
         const livePost = (await daemon.config.get()).config;
@@ -1295,24 +1293,11 @@ export function createManager(deps: ManagerDeps): Manager {
         // Inspect is journaled like every other operation: the intent lands
         // before execution so status(operationId) resolves and an identical
         // retry replays the recorded reply (idempotency).
-        const intent: IntentValue = {
-          operationId: request.operationId,
-          requestSha256: requestSha,
+        const intent = acceptedIntent(request.operationId, requestSha, {
           kind: "reconcile",
-          bootId,
-          phase: "accepted",
-          outcome: "pending",
-          candidateSha256: null,
-          recoveryOf: null,
-          recoveryAction: "inspect",
-          acceptedAt: now(),
-          updatedAt: now(),
-          completedAt: null,
-          plan: null,
+          action: "inspect",
           priorState: state,
-          patchAttempts: [],
-          conflicts: [],
-        };
+        });
         const fresh = !receipt;
         const next = transitionOrInit(ctx, request.target.hostId, r => {
           // The recovery subject is the pending op, or — when none is
@@ -1426,27 +1411,15 @@ export function createManager(deps: ManagerDeps): Manager {
         ]);
       }
 
-      const intent: IntentValue = {
-        operationId: request.operationId,
-        requestSha256: requestSha,
+      const intent = acceptedIntent(request.operationId, requestSha, {
         kind: "reconcile",
-        bootId,
-        phase: "accepted",
-        outcome: "pending",
-        candidateSha256: original.candidateSha256,
-        recoveryOf: original.operationId,
-        recoveryAction: request.action,
-        acceptedAt: now(),
-        updatedAt: now(),
-        completedAt: null,
-        plan: original.plan,
-        // Acceptance unconditionally enters recovery bookkeeping below — the
-        // honest restore target on failure is RECOVERY_REQUIRED regardless of
-        // what the binding currently records.
-        priorState: "RECOVERY_REQUIRED",
-        patchAttempts: [],
-        conflicts: [],
-      };
+        action: request.action,
+        subject: {
+          operationId: original.operationId,
+          candidateSha256: original.candidateSha256,
+          plan: original.plan,
+        },
+      });
       const next = transition(ctx, r => {
         const target = findOperation(r, original.operationId);
         if (target && target.outcome === "pending") {
@@ -1686,8 +1659,7 @@ export function createManager(deps: ManagerDeps): Manager {
         // transitions the receipt to RECOVERY_REQUIRED (same pattern as
         // OWNERSHIP_DRIFT above).
         try {
-          await deps.materializer.verifyPublished(binding.runtimePath, binding.candidateSha256, binding.payloadSha256);
-          const boundSet = await deps.launchers.verify(join(ctx.stableRoot, "launchers", binding.launchSetSha256));
+          const boundSet = await verifyBindingFiles(ctx, binding);
           // The verified identity must BE the recorded one — a verify that
           // resolves to a different valid set is not proof of this binding.
           if (boundSet.launchSetSha256 !== binding.launchSetSha256) {
@@ -1871,9 +1843,7 @@ export function createManager(deps: ManagerDeps): Manager {
           }
         }
         try {
-          await deps.materializer.verifyPublished(binding.runtimePath, binding.candidateSha256, binding.payloadSha256);
-          await deps.launchers.verify(join(ctx.stableRoot, "launchers", binding.launchSetSha256));
-          await probeRecordedExecutables(ctx, binding, "binding");
+          await verifyBindingAssets(ctx, binding, "binding");
           // Retained assets get the same verification the healthy inspect
           // applies — a deleted retained launch set is integrity evidence
           // whether or not a durable plan exists.
@@ -2040,6 +2010,21 @@ export function createManager(deps: ManagerDeps): Manager {
   // -------------------------------------------------------------------------
   // reconcile worker — complete / restore-before
   // -------------------------------------------------------------------------
+
+  /** Fresh recorded-file observations, in runtime → launch-set order. */
+  async function verifyBindingFiles(
+    ctx: HomeContext,
+    binding: Pick<BindingValue, "runtimePath" | "candidateSha256" | "payloadSha256" | "launchSetSha256">,
+  ) {
+    await deps.materializer.verifyPublished(binding.runtimePath, binding.candidateSha256, binding.payloadSha256);
+    return deps.launchers.verify(join(ctx.stableRoot, "launchers", binding.launchSetSha256));
+  }
+
+  /** Endpoint proof for keeping/reinstating a binding, including its explicit binaries. */
+  async function verifyBindingAssets(ctx: HomeContext, binding: BindingValue, what: string): Promise<void> {
+    await verifyBindingFiles(ctx, binding);
+    await probeRecordedExecutables(ctx, binding, what);
+  }
 
   /** §6 — re-probe the executables recorded on a binding: the recorded node
    *  path and every recorded family binary go in as EXPLICIT inputs, so the
@@ -2228,22 +2213,14 @@ export function createManager(deps: ManagerDeps): Manager {
 
       if (direction === "forward" && cls.class === "after") {
         if (rootKind === "activate" && plan.nextBinding) {
-          await deps.materializer.verifyPublished(plan.nextBinding.runtimePath, plan.nextBinding.candidateSha256, plan.nextBinding.payloadSha256);
-          await deps.launchers.verify(
-            join(ctx.stableRoot, "launchers", plan.nextBinding.launchSetSha256),
-          );
-          await probeRecordedExecutables(ctx, plan.nextBinding, "next binding");
+          await verifyBindingAssets(ctx, plan.nextBinding, "next binding");
         }
         finalizeIntended();
         return;
       }
       if (direction === "before" && cls.class === "before") {
         if (plan.previousBinding) {
-          await deps.materializer.verifyPublished(plan.previousBinding.runtimePath, plan.previousBinding.candidateSha256, plan.previousBinding.payloadSha256);
-          await deps.launchers.verify(
-            join(ctx.stableRoot, "launchers", plan.previousBinding.launchSetSha256),
-          );
-          await probeRecordedExecutables(ctx, plan.previousBinding, "previous binding");
+          await verifyBindingAssets(ctx, plan.previousBinding, "previous binding");
         }
         finalizePrevious();
         return;
@@ -2257,11 +2234,7 @@ export function createManager(deps: ManagerDeps): Manager {
           if (live.enabled !== true) {
             throw new OperationConflict("MCP_DISABLED", "daemon.mcp.enabled is not true");
           }
-          await deps.materializer.verifyPublished(plan.nextBinding.runtimePath, plan.nextBinding.candidateSha256, plan.nextBinding.payloadSha256);
-          await deps.launchers.verify(
-            join(ctx.stableRoot, "launchers", plan.nextBinding.launchSetSha256),
-          );
-          await probeRecordedExecutables(ctx, plan.nextBinding, "next binding");
+          await verifyBindingAssets(ctx, plan.nextBinding, "next binding");
         } else {
           // Deactivate-forward removes providers; new dependents may have
           // appeared since the original plan was prepared. The plugin never
@@ -2278,10 +2251,7 @@ export function createManager(deps: ManagerDeps): Manager {
           // binaries to still be installed — runtime and launch-set
           // integrity are the removal prerequisites, not availability.
           if (plan.previousBinding) {
-            await deps.materializer.verifyPublished(plan.previousBinding.runtimePath, plan.previousBinding.candidateSha256, plan.previousBinding.payloadSha256);
-            await deps.launchers.verify(
-              join(ctx.stableRoot, "launchers", plan.previousBinding.launchSetSha256),
-            );
+            await verifyBindingFiles(ctx, plan.previousBinding);
           }
         }
         const patch = patchForDirection(plan, rootKind, "forward", raw.json);
@@ -2291,17 +2261,9 @@ export function createManager(deps: ManagerDeps): Manager {
         }
         if (settlement === "outcome-unknown") {
           transition(ctx, r => {
-            const recovery = findOperation(r, opId);
-            if (recovery) {
-              recovery.outcome = "recovery-required";
-              recovery.updatedAt = now();
-              recovery.conflicts = [
-                ...recovery.conflicts,
-                conflictOf("PATCH_OUTCOME_UNKNOWN", "redispatched patch outcome unknown"),
-              ].slice(0, MAX_CONFLICTS);
-            }
-            r.state = "RECOVERY_REQUIRED";
-            r.activeOperationId = null;
+            requireRecovery(r, findOperation(r, opId), [
+              conflictOf("PATCH_OUTCOME_UNKNOWN", "redispatched patch outcome unknown"),
+            ]);
           });
           return;
         }
@@ -2311,11 +2273,7 @@ export function createManager(deps: ManagerDeps): Manager {
         // the endpoint's runtime/launch assets must still be intact — a file
         // lost in the crash window turns finalize into recovery evidence.
         if (rootKind === "activate" && plan.nextBinding) {
-          await deps.materializer.verifyPublished(plan.nextBinding.runtimePath, plan.nextBinding.candidateSha256, plan.nextBinding.payloadSha256);
-          await deps.launchers.verify(
-            join(ctx.stableRoot, "launchers", plan.nextBinding.launchSetSha256),
-          );
-          await probeRecordedExecutables(ctx, plan.nextBinding, "next binding");
+          await verifyBindingAssets(ctx, plan.nextBinding, "next binding");
         }
         finalizeIntended();
         return;
@@ -2341,11 +2299,7 @@ export function createManager(deps: ManagerDeps): Manager {
           assertNoDependentReferences(raw.json, removedByInverse);
         }
         if (plan.previousBinding) {
-          await deps.materializer.verifyPublished(plan.previousBinding.runtimePath, plan.previousBinding.candidateSha256, plan.previousBinding.payloadSha256);
-          await deps.launchers.verify(
-            join(ctx.stableRoot, "launchers", plan.previousBinding.launchSetSha256),
-          );
-          await probeRecordedExecutables(ctx, plan.previousBinding, "previous binding");
+          await verifyBindingAssets(ctx, plan.previousBinding, "previous binding");
         }
         const patch = patchForDirection(plan, rootKind, "inverse", raw.json);
         const settlement = await dispatchPatch(ctx, daemon, opId, patch);
@@ -2354,17 +2308,9 @@ export function createManager(deps: ManagerDeps): Manager {
         }
         if (settlement === "outcome-unknown") {
           transition(ctx, r => {
-            const recovery = findOperation(r, opId);
-            if (recovery) {
-              recovery.outcome = "recovery-required";
-              recovery.updatedAt = now();
-              recovery.conflicts = [
-                ...recovery.conflicts,
-                conflictOf("PATCH_OUTCOME_UNKNOWN", "inverse patch outcome unknown"),
-              ].slice(0, MAX_CONFLICTS);
-            }
-            r.state = "RECOVERY_REQUIRED";
-            r.activeOperationId = null;
+            requireRecovery(r, findOperation(r, opId), [
+              conflictOf("PATCH_OUTCOME_UNKNOWN", "inverse patch outcome unknown"),
+            ]);
           });
           return;
         }
@@ -2378,11 +2324,7 @@ export function createManager(deps: ManagerDeps): Manager {
         }
         // Post-patch verify before publishing the restored binding as ACTIVE.
         if (plan.previousBinding) {
-          await deps.materializer.verifyPublished(plan.previousBinding.runtimePath, plan.previousBinding.candidateSha256, plan.previousBinding.payloadSha256);
-          await deps.launchers.verify(
-            join(ctx.stableRoot, "launchers", plan.previousBinding.launchSetSha256),
-          );
-          await probeRecordedExecutables(ctx, plan.previousBinding, "previous binding");
+          await verifyBindingAssets(ctx, plan.previousBinding, "previous binding");
         }
         finalizePrevious();
         return;
@@ -2397,57 +2339,72 @@ export function createManager(deps: ManagerDeps): Manager {
   // status — read-only; never waits on config I/O, never mutates
   // -------------------------------------------------------------------------
 
+  /** Status vocabulary and binding projection; callers supply only observed values. */
+  function statusReply(observed: Pick<StatusResult, "target" | "state" | "conflicts"> & {
+    binding?: BindingValue | null;
+    managedProfiles?: StatusResult["managedProfiles"];
+    operation?: OperationViewValue | null;
+    retainedRuntimeCount?: number;
+    communicationLanguage?: string | null;
+  }): StatusResult {
+    const binding = observed.binding ?? null;
+    return bounded({
+      schemaVersion: 1,
+      target: observed.target,
+      state: observed.state,
+      embeddedCandidateSha256: deps.payload.candidate.sha256,
+      managedProfiles: observed.managedProfiles ?? [],
+      binding: binding
+        ? {
+            bindingSha256: binding.bindingSha256,
+            candidateSha256: binding.candidateSha256,
+            payloadSha256: binding.payloadSha256,
+            launchSetSha256: binding.launchSetSha256,
+            runtimePath: binding.runtimePath,
+            nodePath: binding.node.path,
+            baseline: binding.baseline,
+          }
+        : null,
+      families: FAMILIES.map(family => {
+        const binary = binding?.binaries[family];
+        return {
+          family,
+          availability: binary
+            ? (binary.available ? "available" as const : "unavailable" as const)
+            : "unresolved" as const,
+          binaryPath: binary?.available ? binary.path : null,
+          observedVersion: binary?.available ? binary.version : null,
+        };
+      }),
+      operation: observed.operation ?? null,
+      conflicts: boundConflicts(observed.conflicts),
+      verifiedAt: binding?.verifiedAt ?? null,
+      retainedRuntimeCount: observed.retainedRuntimeCount ?? 0,
+      communicationLanguage: observed.communicationLanguage ?? null,
+      liveAcceptance: "not-established-by-this-rpc",
+    });
+  }
+
   async function status(input: StatusRequest, _daemon: ConnectedDaemon): Promise<StatusResult> {
     const parsed = StatusInput.safeParse(input);
     if (!parsed.success) {
-      return bounded({
-        schemaVersion: 1,
+      return statusReply({
         target: { hostId: "unknown", daemonHome: "/" },
         state: "INACTIVE",
-        embeddedCandidateSha256: deps.payload.candidate.sha256,
-        binding: null,
-        managedProfiles: [],
-        families: FAMILIES.map(family => ({
-          family,
-          availability: "unresolved" as const,
-          binaryPath: null,
-          observedVersion: null,
-        })),
-        operation: null,
         conflicts: [
           conflictOf("INVALID_REQUEST", `invalid status input: ${parsed.error.issues[0]?.message ?? "schema"}`),
         ],
-        verifiedAt: null,
-        retainedRuntimeCount: 0,
-        communicationLanguage: null,
-        liveAcceptance: "not-established-by-this-rpc",
       });
     }
     const request = parsed.data;
-    const unresolvedFamilies = FAMILIES.map(family => ({
-      family,
-      availability: "unresolved" as const,
-      binaryPath: null,
-      observedVersion: null,
-    }));
     let ctx: HomeContext;
     try {
       ctx = resolveHome(request.target);
     } catch (error) {
-      return bounded({
-        schemaVersion: 1,
+      return statusReply({
         target: request.target,
         state: "INACTIVE",
-        embeddedCandidateSha256: deps.payload.candidate.sha256,
-        binding: null,
-        managedProfiles: [],
-        families: unresolvedFamilies,
-        operation: null,
         conflicts: [toConflict(error)],
-        verifiedAt: null,
-        retainedRuntimeCount: 0,
-        communicationLanguage: null,
-        liveAcceptance: "not-established-by-this-rpc",
       });
     }
     // Advisory field: a language read failure must not degrade the status.
@@ -2462,20 +2419,11 @@ export function createManager(deps: ManagerDeps): Manager {
     try {
       receipt = journal.read(ctx.stableRoot);
     } catch (error) {
-      return bounded({
-        schemaVersion: 1,
+      return statusReply({
         target: { hostId: request.target.hostId, daemonHome: ctx.canonicalHome },
         state: "RECOVERY_REQUIRED",
-        embeddedCandidateSha256: deps.payload.candidate.sha256,
-        binding: null,
-        managedProfiles: [],
-        families: unresolvedFamilies,
-        operation: null,
         conflicts: [toConflict(error)],
-        verifiedAt: null,
-        retainedRuntimeCount: 0,
         communicationLanguage: language,
-        liveAcceptance: "not-established-by-this-rpc",
       });
     }
     if (!receipt) {
@@ -2498,20 +2446,11 @@ export function createManager(deps: ManagerDeps): Manager {
       if (request.operationId) {
         conflicts.push(conflictOf("NOT_FOUND", `no operation ${request.operationId} in this journal`));
       }
-      return bounded({
-        schemaVersion: 1,
+      return statusReply({
         target: { hostId: request.target.hostId, daemonHome: ctx.canonicalHome },
         state: ownedPresent ? "RECOVERY_REQUIRED" : "INACTIVE",
-        embeddedCandidateSha256: deps.payload.candidate.sha256,
-        binding: null,
-        managedProfiles: [],
-        families: unresolvedFamilies,
-        operation: null,
-        conflicts: boundConflicts(conflicts),
-        verifiedAt: null,
-        retainedRuntimeCount: 0,
+        conflicts,
         communicationLanguage: language,
-        liveAcceptance: "not-established-by-this-rpc",
       });
     }
 
@@ -2592,47 +2531,15 @@ export function createManager(deps: ManagerDeps): Manager {
         conflicts.push(toConflict(error));
       }
     }
-    return bounded({
-      schemaVersion: 1,
+    return statusReply({
       target: { hostId: request.target.hostId, daemonHome: ctx.canonicalHome },
       state,
-      embeddedCandidateSha256: deps.payload.candidate.sha256,
       managedProfiles,
-      binding: binding
-        ? {
-            bindingSha256: binding.bindingSha256,
-            candidateSha256: binding.candidateSha256,
-            payloadSha256: binding.payloadSha256,
-            launchSetSha256: binding.launchSetSha256,
-            runtimePath: binding.runtimePath,
-            nodePath: binding.node.path,
-            baseline: binding.baseline,
-          }
-        : null,
-      families: binding
-        ? FAMILIES.map(family => {
-            const binary = binding.binaries[family];
-            return binary.available
-              ? {
-                  family,
-                  availability: "available" as const,
-                  binaryPath: binary.path,
-                  observedVersion: binary.version,
-                }
-              : {
-                  family,
-                  availability: "unavailable" as const,
-                  binaryPath: null,
-                  observedVersion: null,
-                };
-          })
-        : unresolvedFamilies,
+      binding,
       operation,
-      conflicts: boundConflicts(conflicts),
-      verifiedAt: binding?.verifiedAt ?? null,
+      conflicts,
       retainedRuntimeCount: receipt.retained.length,
       communicationLanguage: language,
-      liveAcceptance: "not-established-by-this-rpc",
     });
   }
 

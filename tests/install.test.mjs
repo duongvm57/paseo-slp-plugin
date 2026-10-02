@@ -4,8 +4,8 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
-import { install, update, verifyInstall, json, readJson } from '../plugin/server/runtime/cli/package.ts';
-import { installPaseo, uninstallPaseo, initWorkspace, installHome } from '../plugin/server/runtime/cli/paseo-install.ts';
+import { install, update, verifyInstall, json, readJson, hash } from '../plugin/server/runtime/cli/package.ts';
+import { installPaseo, upgradePaseo, uninstallPaseo, initWorkspace, installHome } from '../plugin/server/runtime/cli/paseo-install.ts';
 import { configFile, writeConfig } from '../plugin/server/runtime/cli/host-config.ts';
 import { emptyCatalog } from '../plugin/server/runtime/cli/routing.ts';
 import { roleInstructions, roleBundle } from '../plugin/server/runtime/cli/role-bundle.ts';
@@ -304,6 +304,116 @@ function fakeSource(dir, marker) {
   writeFileSync(join(source, 'src', 'roles.md'), marker);
   return source;
 }
+
+test('update and upgrade preserve the original MCP baseline and accumulate exact retired profile rows', t => {
+  for (const operation of ['update', 'upgrade']) {
+    const { dir, home, destination } = fixture(t);
+    const source = fakeSource(dir, 'old');
+    const before = { version: 1, privateSetting: 'keep out of receipt', daemon: {
+      mcp: { enabled: false, injectIntoAgents: false, humanFlag: 'keep' },
+      agentProfiles: [{ id: 'personal', provider: 'codex', model: 'personal-model' }],
+    } };
+    config(home, before);
+    installPaseo(source, destination, home, true);
+    const bindingPath = join(destination, 'paseo-binding.json');
+    const prior = readJson(bindingPath);
+    assert.equal(Object.hasOwn(prior, 'retiredProfiles'), false, 'fresh receipts omit the archive');
+    assert.deepEqual(prior.mcpBefore, { enabled: false, injectIntoAgents: false });
+    const archived = { id: 'slp-peer-scout', provider: 'slp-codex-peer', notes: 'already archived' };
+    const legacy = { id: 'slp-peer', provider: 'slp-pi-peer', model: 'old-peer-model', featureValues: { old: true } };
+    prior.retiredProfiles = [archived];
+    prior.profiles.push(legacy);
+    writeFileSync(bindingPath, json(prior));
+    const manifestPath = join(destination, 'installed.json');
+    writeFileSync(manifestPath, json({ ...readJson(manifestPath), paseoBindingSha256: hash(json(prior)) }));
+    const current = readJson(join(home, 'config.json'));
+    const tuned = current.daemon.agentProfiles.find(p => p.id === 'slp-lead');
+    Object.assign(tuned, { provider: 'slp-pi-lead', model: 'human-model', modeId: 'full-access', thinkingOptionId: 'high', featureValues: { human: true } });
+    current.daemon.agentProfiles.push(legacy);
+    current.newHumanSetting = 'keep';
+    config(home, current);
+    const originalConfig = readFileSync(join(home, 'config.json'), 'utf8');
+    const originalManifest = readFileSync(manifestPath, 'utf8');
+    const next = operation === 'upgrade' ? join(dir, 'next') : destination;
+    const source2 = fakeSource(dir, 'new');
+    const rebind = apply => operation === 'upgrade'
+      ? upgradePaseo(source2, next, destination, apply)
+      : installPaseo(source2, next, home, apply);
+    const preview = rebind(false);
+    assert.deepEqual(preview.retiredProfiles, ['slp-peer'], operation);
+    assert.deepEqual(preview.profiles.find(p => p.id === 'slp-lead'), tuned);
+    assert.equal(readFileSync(join(home, 'config.json'), 'utf8'), originalConfig);
+    assert.equal(readFileSync(manifestPath, 'utf8'), originalManifest);
+    rebind(true);
+    const receiptBytes = readFileSync(join(next, 'paseo-binding.json'), 'utf8');
+    const receipt = JSON.parse(receiptBytes);
+    assert.deepEqual(receipt.mcpBefore, { enabled: false, injectIntoAgents: false });
+    assert.deepEqual(receipt.retiredProfiles, [archived, legacy]);
+    assert.deepEqual(receipt.profiles.find(p => p.id === 'slp-lead'), tuned);
+    assert.equal(receiptBytes.includes('keep out of receipt'), false);
+    assert.equal(verifyInstall(next).paseoBindingSha256, hash(receiptBytes));
+    const after = readJson(join(home, 'config.json'));
+    assert.deepEqual(after.daemon.agentProfiles, [before.daemon.agentProfiles[0], ...receipt.profiles]);
+    assert.equal(after.newHumanSetting, 'keep');
+    assert.equal(after.daemon.mcp.humanFlag, 'keep');
+    assert.equal(after.agents.providers['slp-codex-lead'].command[1], join(next, 'bin/codex-role.mjs'));
+    if (operation === 'upgrade') assert.equal(readFileSync(manifestPath, 'utf8'), originalManifest, 'retained candidate untouched');
+  }
+});
+
+test('host config commit failure rolls back fresh install, in-place swap and side-by-side upgrade independently', t => {
+  for (const operation of ['install', 'update', 'upgrade']) {
+    const { dir, home, destination } = fixture(t);
+    const source = fakeSource(dir, 'old');
+    config(home, { version: 1, privateSetting: 'keep', daemon: { mcp: { enabled: true, injectIntoAgents: true } } });
+    if (operation !== 'install') installPaseo(source, destination, home, true);
+    const configBytes = readFileSync(join(home, 'config.json'), 'utf8');
+    const priorManifest = operation === 'install' ? null : readFileSync(join(destination, 'installed.json'), 'utf8');
+    const priorBinding = operation === 'install' ? null : readFileSync(join(destination, 'paseo-binding.json'), 'utf8');
+    const next = operation === 'upgrade' ? join(dir, 'next') : destination;
+    // A real exclusive-write blocker at the host-config seam, before the operation.
+    const blocker = join(home, `config.json.slp-${process.pid}.tmp`);
+    writeFileSync(blocker, 'Human blocker');
+    const source2 = fakeSource(dir, 'new');
+    assert.throws(() => operation === 'upgrade'
+      ? upgradePaseo(source2, next, destination, true)
+      : installPaseo(source2, next, home, true), error => error.code === 'EEXIST', operation);
+    assert.equal(readFileSync(join(home, 'config.json'), 'utf8'), configBytes);
+    assert.equal(readFileSync(blocker, 'utf8'), 'Human blocker');
+    assert.equal(existsSync(`${next}.staging-${process.pid}`), false);
+    assert.equal(existsSync(`${next}.replaced-${process.pid}`), false);
+    if (operation === 'install') assert.equal(existsSync(destination), false);
+    else {
+      assert.equal(readFileSync(join(destination, 'installed.json'), 'utf8'), priorManifest);
+      assert.equal(readFileSync(join(destination, 'paseo-binding.json'), 'utf8'), priorBinding);
+      verifyInstall(destination);
+      if (operation === 'upgrade') assert.equal(existsSync(next), false);
+    }
+  }
+});
+
+test('rebind guards preserve operation-specific MCP and provider failure precedence', t => {
+  const { dir, home, destination } = fixture(t);
+  const source = fakeSource(dir, 'old');
+  installPaseo(source, destination, home, true);
+  const current = readJson(join(home, 'config.json'));
+  current.daemon.mcp.enabled = false;
+  config(home, current);
+  const bytes = readFileSync(join(home, 'config.json'), 'utf8');
+  const missingSource = join(dir, 'missing-source');
+  assert.throws(() => installPaseo(missingSource, destination, home, true), /requires Paseo MCP enabled/, 'update gates MCP before probing source identity');
+  const next = join(dir, 'next');
+  assert.equal(upgradePaseo(source, next, destination).applied, false, 'upgrade preview does not gate MCP');
+  assert.throws(() => upgradePaseo(missingSource, next, destination, true), error => error.code === 'ENOENT', 'upgrade installs before gating MCP');
+  assert.throws(() => upgradePaseo(source, next, destination, true), /requires Paseo MCP enabled/);
+  assert.equal(existsSync(next), false);
+  assert.equal(readFileSync(join(home, 'config.json'), 'utf8'), bytes);
+  current.agents.providers['slp-codex-lead'].command = ['human-wrapper'];
+  config(home, current);
+  assert.throws(() => installPaseo(missingSource, destination, home, true), /Modified provider slp-codex-lead; preserve installation/);
+  assert.throws(() => upgradePaseo(missingSource, next, destination, true), /Modified provider slp-codex-lead; preserve previous installation/);
+  verifyInstall(destination);
+});
 
 test('an intact installation updates in place, preserving tuned settings', t => {
   const { dir, home, destination } = fixture(t);

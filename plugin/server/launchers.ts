@@ -29,7 +29,6 @@ import {
   chmod,
   lstat,
   mkdir,
-  open,
   readdir,
   readFile,
   realpath,
@@ -50,6 +49,17 @@ import type {
   LaunchSetRequest,
 } from "../shared/contracts.ts";
 import { FAMILY_IDS, HOOK_FAMILY_IDS, ROLES, type RoleName } from "../shared/runtime/families.ts";
+import {
+  PRIVATE_DIR_MODE,
+  PrivateDirectoryCreationError,
+  ensurePrivateDirectory as ensurePublicationDirectory,
+  fsyncDirectory,
+  inspectDirectoryChain,
+  isSafeStagingOperationId,
+  lstatOrNull,
+  openExclusiveFile,
+  publicationStagingPaths,
+} from "./publication-files.ts";
 
 // The family/role axes derive from the shared registry (families.ts) — the
 // exports keep their historical names so existing imports keep working.
@@ -58,7 +68,6 @@ export { ROLES };
 type Role = RoleName;
 export const LAUNCHER_MODE = 0o755;
 export const MANIFEST_MODE = 0o644;
-const PRIVATE_DIR_MODE = 0o700;
 const MANIFEST_NAME = "launch.json";
 const SHIM_RELATIVE_PATH = join("bin", "slp-shim.mjs");
 const GATE_RELATIVE_PATH = join("bin", "slp-gate.mjs");
@@ -312,7 +321,7 @@ function parseManifest(bytes: Buffer): LaunchManifest {
 }
 
 async function writeExclusive(path: string, bytes: Buffer, mode: number): Promise<void> {
-  const handle = await open(path, "wx", 0o600);
+  const handle = await openExclusiveFile(path);
   try {
     await handle.writeFile(bytes);
     await handle.sync();
@@ -321,15 +330,6 @@ async function writeExclusive(path: string, bytes: Buffer, mode: number): Promis
   }
   // Modes are applied explicitly after writing; creation mode is umask-bound.
   await chmod(path, mode);
-}
-
-async function fsyncDir(path: string): Promise<void> {
-  const handle = await open(path, "r");
-  try {
-    await handle.sync();
-  } finally {
-    await handle.close();
-  }
 }
 
 async function readPlanned(directory: string, file: PlannedFile): Promise<void> {
@@ -397,13 +397,7 @@ function validateRequest(request: LaunchSetRequest): void {
   if (!isAbsolute(request.node.path)) {
     throw new OperationConflict("INVALID_REQUEST", "node.path must be absolute");
   }
-  // Same operation-id space as materializer.ts OPERATION_ID_RE — both modules
-  // stage under .staging/<operationId>/.
-  if (
-    !/^[A-Za-z0-9][A-Za-z0-9._-]{0,255}$/.test(request.operationId) ||
-    request.operationId === "." ||
-    request.operationId === ".."
-  ) {
+  if (!isSafeStagingOperationId(request.operationId)) {
     throw new OperationConflict("INVALID_REQUEST", "operationId is not a safe staging name");
   }
 }
@@ -416,30 +410,14 @@ async function pathIsDirectory(path: string): Promise<boolean> {
   }
 }
 
-const lstatOrNull = async (path: string) => {
-  try {
-    return await lstat(path);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
-    throw error;
-  }
-};
-
-/** mkdir(0700) if absent; whatever exists must be a real directory, never a
- * symlink — same staging discipline as materializer.ts. */
+/** Launcher diagnostics intentionally omit the underlying mkdir failure. */
 async function ensurePrivateDirectory(directory: string, what: string): Promise<void> {
-  try {
-    await mkdir(directory, { mode: PRIVATE_DIR_MODE });
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
+  try { await ensurePublicationDirectory(directory, what); }
+  catch (error) {
+    if (error instanceof PrivateDirectoryCreationError) {
       throw new OperationConflict("IO_FAILURE", `cannot create ${what}`, { path: directory });
     }
-  }
-  const info = await lstatOrNull(directory);
-  if (!info || info.isSymbolicLink() || !info.isDirectory()) {
-    throw new OperationConflict("RUNTIME_INTEGRITY", `${what} is not a real directory`, {
-      path: directory,
-    });
+    throw error;
   }
 }
 
@@ -459,20 +437,15 @@ export function createLauncherBuilder(deps: { platform?: string } = {}): Launche
    * different launch set (§4 symlink rejection). */
   async function assertRealSetPath(directory: string): Promise<void> {
     const levels = [directory, dirname(directory), dirname(dirname(directory))];
-    for (const level of levels) {
-      const info = await lstatOrNull(level);
-      if (info === null) {
-        throw new OperationConflict("RUNTIME_INTEGRITY", `launch set path ${level} does not exist`, {
-          path: level,
-        });
-      }
-      if (info.isSymbolicLink() || !info.isDirectory()) {
-        throw new OperationConflict(
-          "RUNTIME_INTEGRITY",
-          `launch set path ${level} is not a real directory`,
-          { path: level },
-        );
-      }
+    const refusal = await inspectDirectoryChain(levels);
+    if (refusal) {
+      throw new OperationConflict(
+        "RUNTIME_INTEGRITY",
+        refusal.kind === "missing"
+          ? `launch set path ${refusal.path} does not exist`
+          : `launch set path ${refusal.path} is not a real directory`,
+        { path: refusal.path },
+      );
     }
   }
 
@@ -563,11 +536,10 @@ export function createLauncherBuilder(deps: { platform?: string } = {}): Launche
         // authoritative, a mismatch is integrity drift — never overwrite.
         return verifyDirectory(directory);
       }
-      const stagingRoot = join(request.stableRoot, ".staging");
+      const { root: stagingRoot, operation: opStaging, launchSet: staging } =
+        publicationStagingPaths(request.stableRoot, request.operationId);
       await ensurePrivateDirectory(stagingRoot, "staging root");
-      const opStaging = join(stagingRoot, request.operationId);
       await ensurePrivateDirectory(opStaging, "operation staging directory");
-      const staging = join(opStaging, "launch-set");
       const leftover = await lstatOrNull(staging);
       if (leftover) {
         // A pre-placed symlink or non-directory is never traversed or removed.
@@ -591,7 +563,7 @@ export function createLauncherBuilder(deps: { platform?: string } = {}): Launche
       for (const file of planned) {
         await writeExclusive(join(staging, file.name), file.bytes, file.mode);
       }
-      await fsyncDir(staging);
+      await fsyncDirectory(staging);
       for (const file of planned) {
         await readPlanned(staging, file);
       }
@@ -608,7 +580,7 @@ export function createLauncherBuilder(deps: { platform?: string } = {}): Launche
         }
         throw error;
       }
-      await fsyncDir(launchersRoot);
+      await fsyncDirectory(launchersRoot);
       return verifyDirectory(directory);
     },
 
