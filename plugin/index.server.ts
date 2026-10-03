@@ -5,7 +5,7 @@
 import type { PluginServerContribution } from "@getpaseo/plugin/server";
 import { realpathSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { activate, reconcile, deactivate, status, localTarget, catalog, setLanguage, getRoleRouting, setRoleRouting, getPeerPool, setPeerPool, getJev, setJev, setJevKey, testJev, getWorkTracker, setWorkTracker } from "./shared/contracts.ts";
+import { activate, reconcile, deactivate, status, localTarget, catalog, setLanguage, getRoleRouting, setRoleRouting, getPeerPool, setPeerPool, getJev, setJev, setJevKey, testJev } from "./shared/contracts.ts";
 import { disableSupervisionNotifications, getSupervision, getSupervisionStatus, setSupervision } from "./shared/supervision.ts";
 import { enforcementStatus, enforcementRecoverLock, enforcementRuntimePin } from "./shared/enforcement.ts";
 import type { Manager } from "./shared/contracts.ts";
@@ -24,11 +24,12 @@ import { createExecutableResolver } from "./server/executables.ts";
 import { createLauncherBuilder } from "./server/launchers.ts";
 import { createJournal } from "./server/journal.ts";
 import { createRoleInjection } from "./server/role-injection.ts";
-import { createWorkTracker, readWorkTrackerEnabled } from "./server/work-tracker.ts";
 import { createEnforcement } from "./server/enforcement.ts";
 import { recoverLockView } from "./server/desk-recovery.ts";
 import { readRuntimePinView } from "./server/runtime-pin.ts";
 import { createDeskBridge } from "./server/desk-bridge.ts";
+import { getWorkspaceWorkflow } from "./shared/workflow-view.ts";
+import { readWorkspaceWorkflow } from "./server/workflow-view.ts";
 // Host note: this must stay a hoisted function declaration, not a const —
 // the daemon compiler's Hermes interop eagerly copies export values before
 // module bodies run, so `export default const` evaluates to undefined.
@@ -45,6 +46,7 @@ export default function contribute(server: Parameters<PluginServerContribution>[
   server.handle(deactivate, (input, { paseo }) => manager.deactivate(input, paseo));
   server.handle(status, (input, { paseo }) => manager.status(input, paseo));
   server.handle(localTarget, () => detectDaemonHome());
+  server.handle(getWorkspaceWorkflow, (input, { paseo }) => readWorkspaceWorkflow(input, paseo));
   server.handle(catalog, (input, { paseo }) => loadCatalog(input, paseo));
   // Plugin-owned state files under slp-runtime/state — same class of
   // operation as jev: no journal, no mutex, no authority gate.
@@ -61,11 +63,6 @@ export default function contribute(server: Parameters<PluginServerContribution>[
   server.handle(setJev, input => jev.setJev(input));
   server.handle(setJevKey, input => jev.setJevKey(input));
   server.handle(testJev, input => jev.testJev(input));
-  // Beads work tracker — same plugin-owned state class (no journal/mutex/
-  // authority gate); bd detection is read-only and never fails the RPC.
-  const tracker = createWorkTracker();
-  server.handle(getWorkTracker, input => tracker.getWorkTracker(input));
-  server.handle(setWorkTracker, input => tracker.setWorkTracker(input));
   // Supervision config (spec supervision-integration.md §Configuration):
   // private supervision.json under the SERVED daemon home — the store binds
   // the state path to the home this process actually serves (PASEO_HOME env),
@@ -160,11 +157,6 @@ export default function contribute(server: Parameters<PluginServerContribution>[
   });
   const injection = createRoleInjection({
     readActiveBinding: () => readActiveBinding(journal),
-    // Same daemon-home resolution as readActiveBinding: the setting lives at
-    // <canonical home>/slp-runtime/state/work-tracker.json. A throw here is
-    // converted to "disabled" inside sessionOpen — never aborts an open.
-    readWorkTrackerEnabled: () =>
-      readWorkTrackerEnabled(join(realpathSync(detectDaemonHome().daemonHome), "slp-runtime")),
     // O1: the create-hook re-verifies the published candidate (cached once
     // per sha) before importing its role bundle — same verifyPublished the
     // management plane uses; covers the gate transitively (see

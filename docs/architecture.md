@@ -95,18 +95,25 @@ coordination attention free.
 drifting scope, weak evidence. It may observe assigned workspaces, ask
 the bound Lead why a strategy was chosen, report risk to the Human, relay
 a recorded Human decision, propose profile or protocol revisions, and
-record causal evidence in the notebook. It does not hold implementation
-scope, architecture or acceptance; it messages only a bound Lead — never
-Peers — and never acts as a substitute Lead.
+record causal evidence in the notebook. It can discuss architecture and
+direction with the Human; the Lead retains project technical decisions and
+acceptance. Ordinary observation addresses the bound Lead. A specific
+Human recovery mandate can permit direct Peer contact, with material
+steering reconciled into the Lead's shared state. Observation alone grants
+no implementation scope.
 
 **Lead — project authority.** Turns an objective into a trustworthy
 project-level result: framing, topology, decomposition, ownership,
 dependencies, checkpoints, review, integration, verdict. It reconstructs
 the task without pre-solving it, assigns exactly one owner per moving
 scope, writes neutral bounded briefs, and grants Peers the right to
-reopen, request dependencies or stop blocked. All implementation writes,
-including tiny work, belong to a Peer Engineer; tiny work uses one Peer
-Engineer. Difficult acceptance goes to an independent Reviewer;
+reopen, request dependencies or stop blocked. Implementation normally
+belongs to a Peer Engineer so the Lead can retain the coordination view.
+An explicit Human assignment or effective protocol grant can authorize a
+bounded direct Lead write on clear, reversible work. That grant retains
+one writer per moving scope, candidate proof and every required independent
+review; tiny work alone supplies no exemption. Difficult acceptance goes to
+an independent Reviewer;
 subjective or product decisions go to the Human with evidence, not a
 simulated proof.
 
@@ -145,12 +152,12 @@ Six rules fall out of the role model and shape everything below:
   would share no ledger and review/cleanup would become unreliable.
 - **Independent judgment needs an independent seat.** A reviewer created
   from the author's context inherits its framing. Reviewers are fresh
-  seats briefed neutrally against an exact candidate — the split-axis
-  gate (a spec reviewer and a standards reviewer in parallel) is the
-  package default for work that needs review, the workspace protocol
-  owns the rule — a fixed shape or a bounded selection rule under which
-  the Lead chooses minimum sufficient seats — and a required gate never
-  bypasses its declared rule.
+  seats briefed neutrally against an exact candidate. Lead selects the
+  minimum sufficient mandates for material questions and Human/protocol
+  requirements. Related questions can share a mandate; extra seats need
+  distinct questions or required separation. A reasoned no-trigger decision
+  still needs candidate proof and Lead adjudication. Mandatory review keeps
+  its declared obligations; unavailable required seats leave it blocked.
 - **Workspace isolation is explicit.** One workspace ID is not
   filesystem isolation. The minimum safe rule is one writer per moving
   scope; same-team seats share the assignment workspace by default, and
@@ -457,7 +464,7 @@ the host plugin. `bin/` contains executable bootstraps and transport relays;
 `scripts/` contains development-only payload generation and graph checks.
 Bootstrap scripts stay JavaScript so the Node version check runs before loading
 TypeScript. The installed CLI and host plugin use the same dependency-free core
-for report validation, desk recovery and tracker reads. Canonical Node
+for report validation, desk recovery and handoff recaps. Canonical Node
 core lives in `plugin/server/runtime/`; routing vocabulary, Jev provider and
 credential rules, the family/role registry, recovery constants and the
 bootstrap-safe Node version check live in `plugin/shared/runtime/`. The Manager
@@ -491,8 +498,15 @@ RPC provenance and output bounds stay in the plugin adapter; CLI home and
 operator identity resolution stay in the CLI adapter.
 
 Legacy runtime receipts remain verifiable without the new subtrees. Ledger
-v1–v6 migration support remains in the store because deployed older ledgers
+v1–v7 migration support remains in the v8 store because deployed older ledgers
 have not been ruled out.
+
+Assignment registration is immutable; planned owner succession appends an
+offer and the exact receiving Lead's acknowledgment on the same assignment.
+Current command guards resolve the accepted agent/membership tuple; historical
+refinements resolve ownership at each committed event. Scope and rollout gates
+share current review qualification, while history retains reviews that no
+longer qualify under the new owner. See [assignment continuity](work-continuity.md).
 
 ## Boundaries
 
@@ -526,9 +540,10 @@ have not been ruled out.
   desk's authority, state and evidence invariants; workflow acceptance
   remains with the receiving owner and required review seats.
 
-`src/` still owns executable CLI behavior: installation/update, launch planning,
-provider transports, report capture, monitoring and the policy documents shipped
-to seats. These modules have production callers. Shared logic moves into the
+`plugin/server/runtime/cli/` owns executable CLI behavior: installation/update,
+launch planning, provider transports, report capture and monitoring. Policy
+documents shipped to seats live in `src/`. These modules have production
+callers. Shared logic moves into the
 runtime tiers when CLI and plugin need the same implementation; a CLI-only
-module keeps its own implementation. Routing no longer has a JS/TS mirror, and
-the hook-only tracker env overlay has no unused CLI copy.
+module keeps its own implementation. Routing no longer has a JS/TS mirror. External work trackers remain a
+workspace/harness concern, outside plugin settings and session delivery.

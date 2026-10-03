@@ -60,9 +60,12 @@ issue, record only the observation checkpoint needed to avoid repeated work.
 
 First collect evidence, ask Lead an open question and allow a bounded re-reasoning
 attempt. Distinguish external blockers from recoverable framing/coordination failures.
-Relay an owner decision where that is the missing prerequisite. A recovery mandate
-may allow intervention, but ordinary observation never grants implementation scope
-or permission to direct the Peer independently of its Lead.
+Relay an owner decision where that is the missing prerequisite. Human may explicitly
+grant Supervisor recovery contact with a named Peer for a bounded purpose. Keep the
+contact within that grant, preserve Lead as the task owner, and reconcile the exchange,
+evidence and any proposed change into Lead's current brief or checkpoint before the
+work direction changes. Contact alone grants no Peer write scope or authority to
+change objective, technical decisions, priority, integration or acceptance.
 
 If Lead cannot recover, propose a replacement with evidence and the concrete handoff.
 Lead may also propose a handoff when context loss or degradation makes task state
@@ -92,4 +95,7 @@ Update the repository .paseo-slp/workspace-protocol.md only with the relevant wr
 Human approves material authority changes. Record owner, version/review date, evidence
 and change history; observe later effects and reversal conditions. Proposals to
 global role/profile policy belong to its maintained source and authorized release
-workflow, not an ad hoc installed-file edit. Keep core Paseo primitives generic.
+workflow, not an ad hoc installed-file edit. A reasoned not-required review selection
+is not a waiver of a required Human/protocol gate. Seat availability, adverse
+findings or exhausted effort do not grant policy relaxation; take the unresolved
+obligation or resource decision to its authority owner. Keep core Paseo primitives generic.

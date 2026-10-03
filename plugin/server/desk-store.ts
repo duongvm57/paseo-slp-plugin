@@ -47,6 +47,12 @@ import {
   CHECK_CLASSES,
   CHECK_RUN_STATUSES,
   DeskRejection,
+  DeskDecisionBody,
+  DeskOperativeBrief,
+  DeskReviewPlan,
+  DeskScopeDischarge,
+  DeskScopeOwnership,
+  DeskSettlementResource,
   ROLLOUT_CHECK_GATED_COMMANDS,
   ROLLOUT_COHORT_GATED_COMMANDS,
   ROLLOUT_REVIEW_GATED_COMMANDS,
@@ -98,6 +104,8 @@ export const LEDGER_LIMITS = {
   // bounded by the same 60s/32MiB budget VERIFY_LIMITS pins for probes.
   assignments: 1024,
   assignmentSeats: 128,
+  briefRevisions: 4096,
+  decisionEntries: 4096,
   candidates: 4096,
   handbacks: 4096,
   handbackRecordBytes: 262144,
@@ -135,10 +143,14 @@ export const LEDGER_LIMITS = {
   checkTimeoutMs: 60000,
   checkOutputBytes: 1048576,
   cohortMembers: 32,
+  // Continuity — the planned-succession lineage tables. Field caps read
+  // the WIRE_LIMITS.desk* keys directly (the F-STD-4 rule).
+  ownershipOffers: 2048,
+  ownershipAccepts: 1024,
 } as const;
 
 const LEDGER_FORMAT = "paseo-slp/enforcement";
-const LEDGER_SCHEMA_VERSION = 6;
+const LEDGER_SCHEMA_VERSION = 8;
 const CANONICALIZATION = "slp-canonical-json/1";
 const SEGMENT_NAME = /^(\d+)-(\d+)\.jsonl$/;
 const LOCK_RETRY_MS = 25;
@@ -533,6 +545,12 @@ const ScopeSchema = z
   })
   .strict();
 
+const ScopeSchemaV7 = ScopeSchema.extend({
+  briefRevision: z.number().int().min(0),
+  ownership: DeskScopeOwnership.nullable(),
+  reviewPlan: DeskReviewPlan.nullable(),
+});
+
 /** P4 — one immutable reviewer observation revision, bound to
  *  (assignmentId, scopeId, scopeRevision, candidateSnapshot, axis,
  *  reviewerAgentId, reviewerSeatId). An observation is durable evidence,
@@ -555,6 +573,13 @@ const ScopeReviewSchema = z
     findingsRef: z.string().min(1).max(WIRE_LIMITS.deskScopePointer).nullable(),
   })
   .strict();
+
+const ScopeReviewSchemaV7 = ScopeReviewSchema.extend({
+  axis: z.enum(SCOPE_REVIEW_AXES).nullable(),
+  lensId: BoundedId.nullable(),
+  briefRevision: z.number().int().min(0),
+  mandateSha256: Sha.nullable(),
+});
 
 /** P4 — one accepted transition of the scope state machine. `revision`
  *  streams per (assignmentId, scopeId); `from`/`to`/`command` must form a
@@ -589,6 +614,12 @@ const ScopeTransitionSchema = z
     actorAgentId: z.string().min(1).max(WIRE_LIMITS.agentId),
   })
   .strict();
+
+const ScopeTransitionSchemaV7 = ScopeTransitionSchema.extend({
+  briefRevision: z.number().int().min(0),
+  mandateSha256: Sha.nullable(),
+  discharged: z.array(DeskScopeDischarge).max(WIRE_LIMITS.deskBriefItems),
+});
 
 // ---------------------------------------------------------------------------
 // P5 — independent check runner, canary cohort and rollout state. Four
@@ -800,6 +831,104 @@ const RolloutTransitionSchema = z
   })
   .strict();
 
+const RolloutTransitionSchemaV7 = RolloutTransitionSchema.extend({
+  dischargedReviews: z.array(DeskScopeDischarge).max(WIRE_LIMITS.deskBriefItems).default([]),
+});
+
+/** v8 — the canary cohort pin gains the ownership revision it was taken
+ *  at. Optional: pre-continuity rows keep their {members, assignmentRevision}
+ *  digest recipe and are never recomputed under today's recipe. */
+const RolloutTransitionSchemaV8 = RolloutTransitionSchemaV7.extend({
+  cohort: z
+    .object({
+      members: z.array(z.string().min(1).max(WIRE_LIMITS.agentId)).max(LEDGER_LIMITS.cohortMembers),
+      digest: Sha,
+      assignmentRevision: z.number().int().min(1),
+      ownershipRevision: z.number().int().min(0).optional(),
+    })
+    .strict()
+    .nullable(),
+});
+
+// ---------------------------------------------------------------------------
+// Continuity — planned succession on one assignment identity. Two
+// append-only lineage tables: `ownershipOffers` records a current owner's
+// nomination of one exact live lead membership (it binds both tuples and
+// the base ownership revision, and transfers no authority);
+// `ownershipAccepts` records the exact nominee's observed acknowledgment —
+// each accept advances the assignment's ownership revision by exactly one.
+// The assignment row's original registration tuple is immutable history.
+// ---------------------------------------------------------------------------
+
+const OwnershipOfferSchema = z
+  .object({
+    offerId: BoundedId,
+    assignmentId: BoundedId,
+    requestId: BoundedId,
+    /** The ownership revision the offer was written at — the base the
+     *  nominee pins when accepting. */
+    ownershipRevision: z.number().int().min(0),
+    fromAgentId: z.string().min(1).max(WIRE_LIMITS.agentId),
+    fromMembershipId: z.string().uuid(),
+    toAgentId: z.string().min(1).max(WIRE_LIMITS.agentId),
+    toMembershipId: z.string().uuid(),
+    authorityRef: z.string().min(1).max(WIRE_LIMITS.deskAuthorityRef),
+    contextRef: z.string().min(1).max(WIRE_LIMITS.deskAuthorityRef),
+  })
+  .strict();
+
+const OwnershipAcceptSchema = z
+  .object({
+    acceptId: BoundedId,
+    offerId: BoundedId,
+    assignmentId: BoundedId,
+    requestId: BoundedId,
+    /** The new ownership revision — always the offer's base revision + 1. */
+    ownershipRevision: z.number().int().min(1),
+    fromAgentId: z.string().min(1).max(WIRE_LIMITS.agentId),
+    fromMembershipId: z.string().uuid(),
+    toAgentId: z.string().min(1).max(WIRE_LIMITS.agentId),
+    toMembershipId: z.string().uuid(),
+    acknowledgment: z.string().min(1).max(WIRE_LIMITS.deskDecisionText),
+    settlementRef: z.string().min(1).max(WIRE_LIMITS.deskSettlementPointer).nullable(),
+    resources: z.array(DeskSettlementResource).max(WIRE_LIMITS.deskSettlementResources),
+    gaps: z.array(z.string().min(1).max(WIRE_LIMITS.gapLen)).max(WIRE_LIMITS.deskStatusGaps),
+    ledgerRevision: z.number().int().min(0),
+    briefRevision: z.number().int().min(0),
+  })
+  .strict();
+
+const BriefRevisionSchema = z.object({
+  assignmentId: BoundedId,
+  revision: z.number().int().min(1),
+  priorRevision: z.number().int().min(0),
+  priorEntrySha256: Sha.nullable(),
+  body: DeskOperativeBrief,
+  bodySha256: Sha,
+  entrySha256: Sha,
+  authorityRef: z.string().min(1).max(LEDGER_LIMITS.authorityRefLen),
+  changeReason: z.string().min(1).max(WIRE_LIMITS.deskDecisionText),
+  affectedOwners: z.array(z.string().min(1).max(WIRE_LIMITS.agentId)).max(WIRE_LIMITS.deskDecisionOwners),
+  actorMembershipId: z.string().uuid(),
+  actorAgentId: z.string().min(1).max(WIRE_LIMITS.agentId),
+  requestId: BoundedId,
+}).strict();
+
+const DecisionEntrySchema = z.object({
+  decisionId: BoundedId,
+  assignmentId: BoundedId,
+  revision: z.number().int().min(1),
+  priorDecisionId: BoundedId.nullable(),
+  priorEntrySha256: Sha.nullable(),
+  body: DeskDecisionBody,
+  bodySha256: Sha,
+  entrySha256: Sha,
+  authorityRef: z.string().min(1).max(LEDGER_LIMITS.authorityRefLen),
+  actorMembershipId: z.string().uuid(),
+  actorAgentId: z.string().min(1).max(WIRE_LIMITS.agentId),
+  requestId: BoundedId,
+}).strict();
+
 const LedgerBodyFields = {
   format: z.literal(LEDGER_FORMAT),
   repo: RepoSchema,
@@ -833,6 +962,25 @@ const TABLE_FIELDS_BY_VERSION = {
     rollouts: z.array(RolloutSchema).max(LEDGER_LIMITS.rollouts),
     rolloutTransitions: z.array(RolloutTransitionSchema).max(LEDGER_LIMITS.rolloutTransitions),
   },
+  8: {
+    ownershipOffers: z.array(OwnershipOfferSchema).max(LEDGER_LIMITS.ownershipOffers),
+    ownershipAccepts: z.array(OwnershipAcceptSchema).max(LEDGER_LIMITS.ownershipAccepts),
+  },
+} as const;
+
+const TABLE_FIELDS_V7 = {
+  ...TABLE_FIELDS_BY_VERSION[6],
+  scopes: z.array(ScopeSchemaV7).max(LEDGER_LIMITS.scopes),
+  scopeReviews: z.array(ScopeReviewSchemaV7).max(LEDGER_LIMITS.scopeReviews),
+  scopeTransitions: z.array(ScopeTransitionSchemaV7).max(LEDGER_LIMITS.scopeTransitions),
+  rolloutTransitions: z.array(RolloutTransitionSchemaV7).max(LEDGER_LIMITS.rolloutTransitions),
+  briefRevisions: z.array(BriefRevisionSchema).max(LEDGER_LIMITS.briefRevisions),
+  decisionEntries: z.array(DecisionEntrySchema).max(LEDGER_LIMITS.decisionEntries),
+} as const;
+
+const TABLE_FIELDS_V8 = {
+  ...TABLE_FIELDS_V7,
+  rolloutTransitions: z.array(RolloutTransitionSchemaV8).max(LEDGER_LIMITS.rolloutTransitions),
 } as const;
 
 const LedgerTableFields = {
@@ -840,7 +988,8 @@ const LedgerTableFields = {
   ...TABLE_FIELDS_BY_VERSION[3],
   ...TABLE_FIELDS_BY_VERSION[4],
   ...TABLE_FIELDS_BY_VERSION[5],
-  ...TABLE_FIELDS_BY_VERSION[6],
+  ...TABLE_FIELDS_V8,
+  ...TABLE_FIELDS_BY_VERSION[8],
 };
 type LedgerTableName = keyof typeof LedgerTableFields;
 type LedgerTables = Pick<LedgerValue, LedgerTableName>;
@@ -853,16 +1002,25 @@ const LedgerSchemaV2 = LedgerSchemaV1.extend({ schemaVersion: z.literal(2), ...T
 const LedgerSchemaV3 = LedgerSchemaV2.extend({ schemaVersion: z.literal(3), ...TABLE_FIELDS_BY_VERSION[3] });
 const LedgerSchemaV4 = LedgerSchemaV3.extend({ schemaVersion: z.literal(4), ...TABLE_FIELDS_BY_VERSION[4] });
 const LedgerSchemaV5 = LedgerSchemaV4.extend({ schemaVersion: z.literal(5), ...TABLE_FIELDS_BY_VERSION[5] });
-const LedgerSchema = LedgerSchemaV5.extend({ schemaVersion: z.literal(LEDGER_SCHEMA_VERSION), ...TABLE_FIELDS_BY_VERSION[6] });
+const LedgerSchemaV6 = LedgerSchemaV5.extend({ schemaVersion: z.literal(6), ...TABLE_FIELDS_BY_VERSION[6] });
+const LedgerSchemaV7 = LedgerSchemaV6.extend({ schemaVersion: z.literal(7), ...TABLE_FIELDS_V7 });
+const LedgerSchema = LedgerSchemaV7.extend({
+  schemaVersion: z.literal(LEDGER_SCHEMA_VERSION),
+  rolloutTransitions: TABLE_FIELDS_V8.rolloutTransitions,
+  ...TABLE_FIELDS_BY_VERSION[8],
+});
 const LEDGER_SCHEMAS = {
   1: LedgerSchemaV1, 2: LedgerSchemaV2, 3: LedgerSchemaV3,
-  4: LedgerSchemaV4, 5: LedgerSchemaV5, 6: LedgerSchema,
+  4: LedgerSchemaV4, 5: LedgerSchemaV5, 6: LedgerSchemaV6, 7: LedgerSchemaV7,
+  8: LedgerSchema,
 } as const;
 
 type LedgerValueV2 = z.infer<typeof LedgerSchemaV2>;
 type LedgerValueV3 = z.infer<typeof LedgerSchemaV3>;
 type LedgerValueV4 = z.infer<typeof LedgerSchemaV4>;
 type LedgerValueV5 = z.infer<typeof LedgerSchemaV5>;
+type LedgerValueV6 = z.infer<typeof LedgerSchemaV6>;
+type LedgerValueV7 = z.infer<typeof LedgerSchemaV7>;
 
 function emptyTables<Fields extends Record<string, z.ZodArray>>(fields: Fields): { [K in keyof Fields]: z.infer<Fields[K]> } {
   // Every registered field is an array; every call creates distinct empties.
@@ -885,8 +1043,24 @@ export const MIGRATIONS = {
   4: (ledger: LedgerValueV4): LedgerValueV5 => ({
     ...ledger, schemaVersion: 5, ...emptyTables(TABLE_FIELDS_BY_VERSION[5]),
   }),
-  5: (ledger: LedgerValueV5): LedgerValue => ({
-    ...ledger, schemaVersion: LEDGER_SCHEMA_VERSION, ...emptyTables(TABLE_FIELDS_BY_VERSION[6]),
+  5: (ledger: LedgerValueV5): LedgerValueV6 => ({
+    ...ledger, schemaVersion: 6, ...emptyTables(TABLE_FIELDS_BY_VERSION[6]),
+  }),
+  6: (ledger: LedgerValueV6): LedgerValueV7 => ({
+    ...ledger,
+    schemaVersion: 7,
+    scopes: ledger.scopes.map(row => ({ ...row, briefRevision: 0, ownership: null, reviewPlan: null })),
+    scopeReviews: ledger.scopeReviews.map(row => ({ ...row, axis: row.axis, lensId: null, briefRevision: 0, mandateSha256: null })),
+    scopeTransitions: ledger.scopeTransitions.map(row => ({ ...row, briefRevision: 0, mandateSha256: null })),
+    rolloutTransitions: ledger.rolloutTransitions.map(row => ({ ...row, dischargedReviews: row.dischargedReviews.map(item => ({ ...item })) })),
+    briefRevisions: [],
+    decisionEntries: [],
+  }),
+  // v8 is purely additive: the ownership lineage tables arrive empty and
+  // every existing table (including cohort pins with their original digest
+  // recipe) carries over verbatim.
+  7: (ledger: LedgerValueV7): LedgerValue => ({
+    ...ledger, schemaVersion: 8, ...emptyTables(TABLE_FIELDS_BY_VERSION[8]),
   }),
 } as const;
 
@@ -907,6 +1081,44 @@ function persistedLedgerShape(ledger: LedgerValue, version: keyof typeof LEDGER_
   const shape: Record<string, unknown> = { ...ledger, schemaVersion: version };
   for (const [introduced, fields] of Object.entries(TABLE_FIELDS_BY_VERSION)) {
     if (Number(introduced) > version) for (const name of Object.keys(fields)) delete shape[name];
+  }
+  if (version < 7) {
+    delete shape.briefRevisions;
+    delete shape.decisionEntries;
+    const legacyRows = (value: unknown): unknown => Array.isArray(value)
+      ? value.map(row => {
+          if (typeof row !== "object" || row === null || Array.isArray(row)) return row;
+          const { briefRevision: _briefRevision, ownership: _ownership, reviewPlan: _reviewPlan,
+            lensId: _lensId, mandateSha256: _mandateSha256, ...legacy } = row as Record<string, unknown>;
+          if (Array.isArray(legacy.discharged)) {
+            legacy.discharged = legacy.discharged.filter(item =>
+              typeof item === "object" && item !== null && "axis" in item,
+            );
+          }
+          if (Array.isArray(legacy.dischargedReviews)) {
+            legacy.dischargedReviews = legacy.dischargedReviews.filter(item =>
+              typeof item === "object" && item !== null && "axis" in item,
+            );
+          }
+          return legacy;
+        })
+      : value;
+    if (version >= 5) {
+      shape.scopes = legacyRows(shape.scopes);
+      shape.scopeReviews = legacyRows(shape.scopeReviews);
+      shape.scopeTransitions = legacyRows(shape.scopeTransitions);
+    }
+    if (version >= 6) shape.rolloutTransitions = legacyRows(shape.rolloutTransitions);
+  }
+  if (version >= 6 && version < 8 && Array.isArray(shape.rolloutTransitions)) {
+    // The v8 cohort pin field never persists below schema 8.
+    shape.rolloutTransitions = (shape.rolloutTransitions as unknown[]).map(row => {
+      if (typeof row !== "object" || row === null || Array.isArray(row)) return row;
+      const cohort = (row as Record<string, unknown>).cohort;
+      if (typeof cohort !== "object" || cohort === null || Array.isArray(cohort)) return row;
+      const { ownershipRevision: _ownershipRevision, ...rest } = cohort as Record<string, unknown>;
+      return { ...(row as Record<string, unknown>), cohort: rest };
+    });
   }
   return shape;
 }
@@ -934,15 +1146,105 @@ export type AssignmentValue = z.infer<typeof AssignmentSchema>;
 export type CandidateValue = z.infer<typeof CandidateSchema>;
 export type HandbackValue = z.infer<typeof HandbackSchema>;
 export type SettlementValue = z.infer<typeof SettlementSchema>;
-export type ScopeValue = z.infer<typeof ScopeSchema>;
-export type ScopeReviewValue = z.infer<typeof ScopeReviewSchema>;
-export type ScopeTransitionValue = z.infer<typeof ScopeTransitionSchema>;
+export type ScopeValue = z.infer<typeof ScopeSchemaV7>;
+export type ScopeReviewValue = z.infer<typeof ScopeReviewSchemaV7>;
+export type ScopeTransitionValue = z.infer<typeof ScopeTransitionSchemaV7>;
 export type CheckDefinitionValue = z.infer<typeof CheckDefinitionSchema>;
 export type CheckRunValue = z.infer<typeof CheckRunSchema>;
 export type RolloutValue = z.infer<typeof RolloutSchema>;
-export type RolloutTransitionValue = z.infer<typeof RolloutTransitionSchema>;
+export type RolloutTransitionValue = z.infer<typeof RolloutTransitionSchemaV8>;
+export type OwnershipOfferValue = z.infer<typeof OwnershipOfferSchema>;
+export type OwnershipAcceptValue = z.infer<typeof OwnershipAcceptSchema>;
+export type BriefRevisionValue = z.infer<typeof BriefRevisionSchema>;
+export type DecisionEntryValue = z.infer<typeof DecisionEntrySchema>;
 export type RequestRecordValue = z.infer<typeof RequestRecordSchema>;
 export type EventValue = z.infer<typeof EventSchema>;
+
+// ---------------------------------------------------------------------------
+// Ownership lineage — the pure row-domain primitives every owner check
+// resolves through. The assignment's immutable registration tuple heads the
+// lineage at revision 0; each accepted row advances the revision by exactly
+// one and names the successor's exact (agentId, membershipId) tuple.
+// ---------------------------------------------------------------------------
+
+/** The exact agent+membership pin custody requires. Comparing tuples (not
+ *  agentIds) is what keeps a rebound or revoked membership from inheriting
+ *  custody — the pin names the row that held authority. */
+export type DeskOwnerTuple = { agentId: string; membershipId: string };
+
+/** Immutable registration content; state and attached seats may evolve. */
+export function assignmentRegistrationSha256(assignment: AssignmentValue): string {
+  return canonicalSha256({
+    assignmentId: assignment.assignmentId, requestId: assignment.requestId,
+    authorityRef: assignment.authorityRef, objective: assignment.objective,
+    ownerAgentId: assignment.ownerAgentId, ownerMembershipId: assignment.ownerMembershipId,
+    workspaceId: assignment.workspaceId,
+  });
+}
+
+/** The effective current owner: the latest accepted successor's to-tuple,
+ *  or the original registration tuple at ownership revision 0. Resolution
+ *  sorts the assignment's accepts by revision and walks the contiguous
+ *  1..N chain — table order is never significant, and a gap (which row
+ *  refinement already rejects) can never skip ahead to a later successor. */
+export function effectiveOwner(
+  ledger: Readonly<Pick<LedgerValue, "ownershipAccepts">>,
+  assignment: AssignmentValue,
+): { agentId: string; membershipId: string; ownershipRevision: number } {
+  let owner = { agentId: assignment.ownerAgentId, membershipId: assignment.ownerMembershipId, ownershipRevision: 0 };
+  const accepts = ledger.ownershipAccepts
+    .filter(row => row.assignmentId === assignment.assignmentId)
+    .sort((a, b) => a.ownershipRevision - b.ownershipRevision);
+  for (const row of accepts) {
+    if (row.ownershipRevision !== owner.ownershipRevision + 1) break;
+    owner = { agentId: row.toAgentId, membershipId: row.toMembershipId, ownershipRevision: row.ownershipRevision };
+  }
+  return owner;
+}
+
+/** Every owner tuple in custody order — index i is the owner at ownership
+ *  revision i (0 = registered owner). */
+export function lineageOwners(
+  assignment: AssignmentValue,
+  accepts: readonly OwnershipAcceptValue[],
+): DeskOwnerTuple[] {
+  const sorted = [...accepts].sort((a, b) => a.ownershipRevision - b.ownershipRevision);
+  return [
+    { agentId: assignment.ownerAgentId, membershipId: assignment.ownerMembershipId },
+    ...sorted.map(row => ({ agentId: row.toAgentId, membershipId: row.toMembershipId })),
+  ];
+}
+
+/** The owner tuple in force immediately BEFORE event sequence `seq` — the
+ *  last accept whose event seq precedes `seq`, else the registered owner.
+ *  Event-time owner (historical validity) deliberately differs from the
+ *  current-owner guard (fresh mutations). */
+export function ownerAtEventSeq(
+  assignment: AssignmentValue,
+  accepts: readonly { seq: number; toAgentId: string; toMembershipId: string }[],
+  seq: number,
+): DeskOwnerTuple {
+  let owner = { agentId: assignment.ownerAgentId, membershipId: assignment.ownerMembershipId };
+  for (const entry of [...accepts].sort((a, b) => a.seq - b.seq)) {
+    if (entry.seq >= seq) break;
+    owner = { agentId: entry.toAgentId, membershipId: entry.toMembershipId };
+  }
+  return owner;
+}
+
+function scopePlanReviewKeys(plan: ScopeValue["reviewPlan"]): string[] {
+  if (plan === null) return SCOPE_REVIEW_AXES.map(axis => `axis:${axis}`);
+  if (plan.kind === "exempt" || plan.kind === "not-required") return [];
+  return plan.lenses.map(lens => `lens:${lens.id}`);
+}
+
+function scopeDischargeKey(discharge: ScopeTransitionValue["discharged"][number]): string {
+  return "axis" in discharge ? `axis:${discharge.axis}` : `lens:${discharge.lensId}`;
+}
+
+function scopeMandateSha256(plan: ScopeValue["reviewPlan"]): string | null {
+  return plan === null ? null : sha256Hex(canonicalJson(plan));
+}
 export type DeskStoreEnvelope = z.infer<typeof EnvelopeSchema>;
 
 /** Read outcomes — `diagnostics.code` is a closed vocabulary, never a free
@@ -952,7 +1254,7 @@ export type DeskStoreEnvelope = z.infer<typeof EnvelopeSchema>;
  *  repo-key-invalid | repo-mismatch). */
 export type DeskStoreRead =
   | { state: "absent" }
-  | { state: "ok"; ledger: LedgerValue; persistedSchemaVersion: 1 | 2 | 3 | 4 | 5 | 6 }
+  | { state: "ok"; ledger: LedgerValue; persistedSchemaVersion: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 }
   | { state: "corrupt" | "future" | "unsafe"; diagnostics: { code: string; schemaVersion: number | null } };
 
 export type TransactReceipt = {
@@ -1075,14 +1377,30 @@ export function createDeskStore(deps: DeskStoreDeps): DeskStore {
     return false;
   }
 
+  /** Binding is checked as soon as the persisted ledger has passed its
+   *  current-schema parse (and migration, for legacy versions). A foreign
+   *  namespace must be classified unsafe before its event directory is
+   *  inspected; otherwise a missing or damaged foreign chain can mask the
+   *  repository-binding violation as corruption. Successful reads still
+   *  verify their complete event history before applying the refinements. */
+  function checkRepoBinding(ledger: LedgerValue, repoKey: string): DeskStoreRead | null {
+    if (ledger.repo.repoKey !== repoKeyFor(ledger.repo) || ledger.repo.repoKey !== repoKey) {
+      return { state: "unsafe", diagnostics: { code: "repo-mismatch", schemaVersion: ledger.schemaVersion } };
+    }
+    return null;
+  }
+
   /** §2 cross-field refinement — everything the body schema cannot express.
    *  Returns the read-state classification: repo/namespace violations are
    *  unsafe, the rest are corrupt. The algorithm label is pinned by the
    *  z.literal in RepoSchema — a divergent value never reaches this layer. */
-  function checkRefinements(ledger: LedgerValue, repoKey: string): DeskStoreRead | null {
-    if (ledger.repo.repoKey !== repoKeyFor(ledger.repo) || ledger.repo.repoKey !== repoKey) {
-      return { state: "unsafe", diagnostics: { code: "repo-mismatch", schemaVersion: ledger.schemaVersion } };
-    }
+  function checkRefinements(
+    ledger: LedgerValue,
+    repoKey: string,
+    eventHistory?: readonly EventValue[],
+  ): DeskStoreRead | null {
+    const bindingError = checkRepoBinding(ledger, repoKey);
+    if (bindingError !== null) return bindingError;
     const keys = new Set<string>();
     for (const record of ledger.requests) {
       const key = JSON.stringify([record.actorKey, record.assignmentId, record.requestId]);
@@ -1168,6 +1486,33 @@ export function createDeskStore(deps: DeskStoreDeps): DeskStore {
         seatAgents.add(seat.agentId);
       }
     }
+    // Ownership lineage — the append-only succession chain. The immutable
+    // registration tuple heads every assignment's lineage at revision 0;
+    // each accepted row advances the revision exactly once. Every
+    // owner-linked row below resolves its recorded owner through these
+    // sets — never against the original tuple alone.
+    const acceptsByAssignment = new Map<string, OwnershipAcceptValue[]>();
+    for (const row of ledger.ownershipAccepts) {
+      const list = acceptsByAssignment.get(row.assignmentId) ?? [];
+      list.push(row);
+      acceptsByAssignment.set(row.assignmentId, list);
+    }
+    const lineageTupleKeysByAssignment = new Map<string, Set<string>>();
+    const lineageAgentsByAssignment = new Map<string, Set<string>>();
+    const lineageTuplesByAssignment = new Map<string, DeskOwnerTuple[]>();
+    for (const assignment of ledger.assignments) {
+      const tuples = lineageOwners(assignment, acceptsByAssignment.get(assignment.assignmentId) ?? []);
+      lineageTuplesByAssignment.set(assignment.assignmentId, tuples);
+      lineageTupleKeysByAssignment.set(
+        assignment.assignmentId,
+        new Set(tuples.map(tuple => JSON.stringify([tuple.agentId, tuple.membershipId]))),
+      );
+      lineageAgentsByAssignment.set(assignment.assignmentId, new Set(tuples.map(tuple => tuple.agentId)));
+    }
+    const inLineageTuple = (assignmentId: string, agentId: string, membershipId: string): boolean =>
+      lineageTupleKeysByAssignment.get(assignmentId)?.has(JSON.stringify([agentId, membershipId])) === true;
+    const inLineageAgent = (assignmentId: string, agentId: string): boolean =>
+      lineageAgentsByAssignment.get(assignmentId)?.has(agentId) === true;
     const candidatesById = new Map<string, CandidateValue>();
     for (const row of ledger.candidates) {
       if (candidatesById.has(row.candidateId)) return corrupt();
@@ -1244,7 +1589,7 @@ export function createDeskStore(deps: DeskStoreDeps): DeskStore {
       if (assignment === undefined) return corrupt();
       const owner = membershipsById.get(row.ownerMembershipId);
       if (owner === undefined || owner.agentId !== row.ownerAgentId || owner.role !== "lead") return corrupt();
-      if (assignment.ownerAgentId !== row.ownerAgentId) return corrupt();
+      if (!inLineageTuple(row.assignmentId, row.ownerAgentId, row.ownerMembershipId)) return corrupt();
       const seat = assignment.seats.find(s => s.agentId === row.seatAgentId);
       if (seat === undefined || seat.membershipId !== row.seatMembershipId) return corrupt();
       const seatRow = membershipsById.get(row.seatMembershipId);
@@ -1306,7 +1651,7 @@ export function createDeskStore(deps: DeskStoreDeps): DeskStore {
       if (assignment === undefined) return corrupt();
       const owner = membershipsById.get(row.ownerMembershipId);
       if (owner === undefined || owner.agentId !== row.ownerAgentId || owner.role !== "lead") return corrupt();
-      if (assignment.ownerAgentId !== row.ownerAgentId) return corrupt();
+      if (!inLineageTuple(row.assignmentId, row.ownerAgentId, row.ownerMembershipId)) return corrupt();
       if (row.seatAgentId !== null && !assignment.seats.some(seat => seat.agentId === row.seatAgentId)) {
         return corrupt();
       }
@@ -1349,7 +1694,7 @@ export function createDeskStore(deps: DeskStoreDeps): DeskStore {
       if (reviewIds.has(row.reviewId)) return corrupt();
       reviewIds.add(row.reviewId);
       reviewsById.set(row.reviewId, row);
-      const streamKey = JSON.stringify([row.assignmentId, row.scopeId, row.axis, row.reviewerAgentId]);
+      const streamKey = JSON.stringify([row.assignmentId, row.scopeId, row.axis ?? `lens:${row.lensId}`, row.reviewerAgentId]);
       const revisions = reviewStreams.get(streamKey) ?? [];
       revisions.push(row.revision);
       reviewStreams.set(streamKey, revisions);
@@ -1358,7 +1703,12 @@ export function createDeskStore(deps: DeskStoreDeps): DeskStore {
       reviewRequestKeys.add(requestKey);
       const assignment = assignmentsById.get(row.assignmentId);
       if (assignment === undefined) return corrupt();
-      if (assignment.ownerAgentId === row.reviewerAgentId) return corrupt();
+      // Self-review is corruption — but only the owner AT THE REVIEW'S
+      // EVENT TIME can be established without events. A succession ledger
+      // defers the check to the event pass; a pre-succession lineage still
+      // proves reviewer === registered owner invalid here.
+      if ((acceptsByAssignment.get(row.assignmentId) ?? []).length === 0 &&
+          assignment.ownerAgentId === row.reviewerAgentId) return corrupt();
       const seat = assignment.seats.find(s => s.agentId === row.reviewerAgentId);
       if (seat === undefined || seat.membershipId !== row.reviewerSeatId) return corrupt();
       const seatRow = membershipsById.get(row.reviewerSeatId);
@@ -1367,15 +1717,19 @@ export function createDeskStore(deps: DeskStoreDeps): DeskStore {
       if (stream === undefined) return corrupt();
       const declaration = stream.find(s => s.revision === row.scopeRevision);
       if (declaration === undefined) return corrupt();
-      const latestDeclaration = stream.reduce((max, s) => (s.revision > max.revision ? s : max));
-      if (latestDeclaration.seatAgentId !== null && latestDeclaration.seatAgentId === row.reviewerAgentId) {
+      if ((row.axis === null) === (row.lensId === null)) return corrupt();
+      const reviewKey = row.axis === null ? `lens:${row.lensId}` : `axis:${row.axis}`;
+      if (!scopePlanReviewKeys(declaration.reviewPlan).includes(reviewKey)) return corrupt();
+      if (row.briefRevision !== declaration.briefRevision || row.mandateSha256 !== scopeMandateSha256(declaration.reviewPlan)) return corrupt();
+      if ((declaration.seatAgentId !== null && declaration.seatAgentId === row.reviewerAgentId) ||
+          declaration.ownership?.writerAgentId === row.reviewerAgentId) {
         return corrupt();
       }
       const candidate = ledger.candidates.find(
         c => c.snapshotSha256 === row.candidateSnapshot && c.assignmentId === row.assignmentId,
       );
       if (candidate === undefined) return corrupt();
-      if (latestDeclaration.seatAgentId !== null && candidate.seatAgentId !== latestDeclaration.seatAgentId) {
+      if (declaration.seatAgentId !== null && candidate.seatAgentId !== declaration.seatAgentId) {
         return corrupt();
       }
     }
@@ -1390,10 +1744,9 @@ export function createDeskStore(deps: DeskStoreDeps): DeskStore {
     // exactly — the first edge is (none → declared) by `declare`, every
     // later row continues from its predecessor's `to`. The round pin the
     // latest submit-for-review established tracks through the walk; a
-    // gated command's `discharged` must name real review rows bound to
-    // exactly that pin (scopeRevision and candidateSnapshot of the ROUND,
-    // which the gate transition's own scopeRevision may already have
-    // passed when a mid-round amendment landed).
+    // gated command's `discharged` must name the exact authority-derived
+    // review set for its round pin. Legacy plans remain Spec+Standards;
+    // v7 plans use their named lenses or an explicitly empty exemption.
     const transitionIds = new Set<string>();
     const transitionRequestKeys = new Set<string>();
     const transitionsByScope = new Map<string, ScopeTransitionValue[]>();
@@ -1409,10 +1762,12 @@ export function createDeskStore(deps: DeskStoreDeps): DeskStore {
       transitionRequestKeys.add(requestKey);
       const assignment = assignmentsById.get(row.assignmentId);
       if (assignment === undefined) return corrupt();
-      if (assignment.ownerAgentId !== row.actorAgentId) return corrupt();
+      if (!inLineageAgent(row.assignmentId, row.actorAgentId)) return corrupt();
       const declStream = scopeStreams.get(streamKey);
       if (declStream === undefined) return corrupt();
-      if (!declStream.some(s => s.revision === row.scopeRevision)) return corrupt();
+      const rowDeclaration = declStream.find(s => s.revision === row.scopeRevision);
+      if (rowDeclaration === undefined || row.briefRevision !== rowDeclaration.briefRevision ||
+          row.mandateSha256 !== scopeMandateSha256(rowDeclaration.reviewPlan)) return corrupt();
       if (row.command !== "submit-for-review") {
         if (row.candidateSnapshot !== null || row.candidateHead !== null) return corrupt();
       } else if (row.candidateSnapshot === null) {
@@ -1421,12 +1776,15 @@ export function createDeskStore(deps: DeskStoreDeps): DeskStore {
     }
     for (const stream of transitionsByScope.values()) {
       stream.sort((a, b) => a.revision - b.revision);
+      const declarationStreamForTransitions = scopeStreams.get(JSON.stringify([stream[0]!.assignmentId, stream[0]!.scopeId]));
+      if (declarationStreamForTransitions === undefined) return corrupt();
       const set = new Set(stream.map(row => row.revision));
       if (set.size !== stream.length || stream[stream.length - 1]!.revision !== stream.length) {
         return corrupt();
       }
       let previousTo: ScopeStateValue | null = null;
-      let roundPin: { scopeRevision: number; candidateSnapshot: string } | null = null;
+      let roundPin: { scopeRevision: number; candidateSnapshot: string; briefRevision: number; mandateSha256: string | null } | null = null;
+      let observedDischarge: ScopeTransitionValue["discharged"] | null = null;
       for (const row of stream) {
         if (row.revision === 1) {
           if (row.command !== "declare" || row.from !== null || row.to !== "declared") return corrupt();
@@ -1437,38 +1795,152 @@ export function createDeskStore(deps: DeskStoreDeps): DeskStore {
           if (scopeTransitionEdge(row.from, row.command)!.to !== row.to) return corrupt();
         }
         if (row.command === "submit-for-review") {
-          roundPin = { scopeRevision: row.scopeRevision, candidateSnapshot: row.candidateSnapshot as string };
+          roundPin = {
+            scopeRevision: row.scopeRevision,
+            candidateSnapshot: row.candidateSnapshot as string,
+            briefRevision: row.briefRevision,
+            mandateSha256: row.mandateSha256,
+          };
+          observedDischarge = null;
         }
+        if (row.command === "review-observed") observedDischarge = row.discharged;
         const gated = (SCOPE_REVIEW_GATED_COMMANDS as readonly string[]).includes(row.command);
         if (!gated) {
           if (row.discharged.length > 0) return corrupt();
+        } else if (row.command === "approve" && row.discharged.length === 0 && observedDischarge !== null && observedDischarge.length > 0) {
+          // Pre-v7 approvals did not copy the gate's discharge onto the
+          // approval row. Preserve those immutable migrated records here;
+          // event-time refinement below distinguishes legacy events from
+          // modern approvals and requires the latter to carry their own set.
         } else if (roundPin === null) {
           // No gated command is legal before a round exists — the edge
           // table carries no pre-round gated edge at all (early close is
           // not an edge since B4). Any such row is corruption.
           return corrupt();
         } else {
-          const axes = new Set<string>();
+          const roundDeclaration = declarationStreamForTransitions.find(declaration => declaration.revision === roundPin!.scopeRevision);
+          if (roundDeclaration === undefined) return corrupt();
+          const required = new Set(scopePlanReviewKeys(roundDeclaration.reviewPlan));
+          const observed = new Set<string>();
           for (const entry of row.discharged) {
-            if (axes.has(entry.axis)) return corrupt();
-            axes.add(entry.axis);
+            const key = scopeDischargeKey(entry);
+            if (observed.has(key) || !required.has(key)) return corrupt();
+            observed.add(key);
             const review = reviewsById.get(entry.reviewId);
             if (
               review === undefined ||
               review.assignmentId !== row.assignmentId ||
               review.scopeId !== row.scopeId ||
-              review.axis !== entry.axis ||
+              review.axis !== ("axis" in entry ? entry.axis : null) ||
+              review.lensId !== ("lensId" in entry ? entry.lensId : null) ||
               review.scopeRevision !== roundPin.scopeRevision ||
-              review.candidateSnapshot !== roundPin.candidateSnapshot
+              review.candidateSnapshot !== roundPin.candidateSnapshot ||
+              review.briefRevision !== roundPin.briefRevision ||
+              review.mandateSha256 !== roundPin.mandateSha256
             ) {
               return corrupt();
             }
           }
-          for (const axis of SCOPE_REVIEW_AXES) {
-            if (!axes.has(axis)) return corrupt();
-          }
+          if (observed.size !== required.size || [...required].some(key => !observed.has(key))) return corrupt();
         }
         previousTo = row.to;
+      }
+    }
+    // Recheck the current declared ownership graph from stored rows. Decide
+    // rejects these conditions in the same transaction; this second pass
+    // makes the durable ledger fail closed if a producer or imported record
+    // bypasses those checks. Legacy declarations have null ownership and
+    // therefore remain valid after the additive v7 migration.
+    const latestScopesByAssignment = new Map<string, Map<string, ScopeValue>>();
+    const currentScopeState = new Map<string, ScopeStateValue>();
+    for (const [streamKey, stream] of scopeStreams) {
+      const [assignmentId, scopeId] = JSON.parse(streamKey) as [string, string];
+      const ordered = [...stream].sort((a, b) => a.revision - b.revision);
+      const latest = ordered.at(-1)!;
+      const latestById = latestScopesByAssignment.get(assignmentId) ?? new Map<string, ScopeValue>();
+      latestById.set(scopeId, latest);
+      latestScopesByAssignment.set(assignmentId, latestById);
+      currentScopeState.set(streamKey, transitionsByScope.get(streamKey)?.at(-1)?.to ?? "declared");
+    }
+    for (const [assignmentId, latestById] of latestScopesByAssignment) {
+      const assignment = assignmentsById.get(assignmentId);
+      if (assignment === undefined) return corrupt();
+      for (const [scopeId, declaration] of latestById) {
+        const ownership = declaration.ownership;
+        if (ownership === null) continue;
+        // The declared graph is pinned against the owner who DECLARED the
+        // revision (row.ownerAgentId) — a successor's declarations bind the
+        // successor, and a pre-succession declaration stays valid on its own
+        // terms after custody moves.
+        const writerIsOwner = ownership.writerAgentId === declaration.ownerAgentId;
+        const writerIsSeat = assignment.seats.some(seat => seat.agentId === ownership.writerAgentId);
+        if ((writerIsOwner && ownership.writerAuthorityRef === null) ||
+            (!writerIsOwner && (!writerIsSeat || ownership.writerAuthorityRef !== null))) return corrupt();
+        for (const notification of ownership.notifications) {
+          if (notification.recipientAgentId !== declaration.ownerAgentId &&
+              !assignment.seats.some(seat => seat.agentId === notification.recipientAgentId)) return corrupt();
+        }
+        for (const dependency of ownership.dependsOnScopeIds) {
+          if (dependency === scopeId || !latestById.has(dependency)) return corrupt();
+        }
+      }
+      const visiting = new Set<string>();
+      const visited = new Set<string>();
+      const visitDependency = (scopeId: string): boolean => {
+        if (visiting.has(scopeId)) return false;
+        if (visited.has(scopeId)) return true;
+        visiting.add(scopeId);
+        for (const dependency of [...(latestById.get(scopeId)?.ownership?.dependsOnScopeIds ?? [])].sort()) {
+          if (!visitDependency(dependency)) return false;
+        }
+        visiting.delete(scopeId);
+        visited.add(scopeId);
+        return true;
+      };
+      for (const scopeId of [...latestById.keys()].sort()) if (!visitDependency(scopeId)) return corrupt();
+    }
+    const activeMovingScopes = [...latestScopesByAssignment].flatMap(([assignmentId, latestById]) => {
+      const assignment = assignmentsById.get(assignmentId);
+      if (assignment === undefined || assignment.state !== "open") return [];
+      return [...latestById.values()].filter(declaration => {
+        const state = currentScopeState.get(JSON.stringify([assignmentId, declaration.scopeId]));
+        return declaration.ownership !== null && state !== "advanced" && state !== "closed";
+      });
+    }).sort((left, right) => left.assignmentId.localeCompare(right.assignmentId) || left.scopeId.localeCompare(right.scopeId));
+    const pathOwners = new Map<string, string>();
+    const resourceOwners = new Map<string, string>();
+    const stateOwners = new Map<string, string>();
+    const moduleOwners = new Map<string, string>();
+    for (const declaration of activeMovingScopes) {
+      const ownership = declaration.ownership!;
+      const key = JSON.stringify([declaration.assignmentId, declaration.scopeId]);
+      for (const path of [...ownership.paths].sort()) {
+        const priorOwner = pathOwners.get(path);
+        if (priorOwner !== undefined && priorOwner !== key) return corrupt();
+        pathOwners.set(path, key);
+      }
+      for (const resource of [...ownership.resources].sort()) {
+        const owner = resourceOwners.get(resource);
+        if (owner !== undefined && owner !== key) return corrupt();
+        resourceOwners.set(resource, key);
+      }
+      for (const stateOwner of [...ownership.stateOwners].sort((a, b) => a.stateRef.localeCompare(b.stateRef) || a.moduleRef.localeCompare(b.moduleRef))) {
+        const stateOwnerKey = stateOwners.get(stateOwner.stateRef);
+        const moduleOwnerKey = moduleOwners.get(stateOwner.moduleRef);
+        if ((stateOwnerKey !== undefined && stateOwnerKey !== key) ||
+            (moduleOwnerKey !== undefined && moduleOwnerKey !== key)) return corrupt();
+        stateOwners.set(stateOwner.stateRef, key);
+        moduleOwners.set(stateOwner.moduleRef, key);
+      }
+    }
+    for (const declaration of activeMovingScopes) {
+      const ownership = declaration.ownership!;
+      const key = JSON.stringify([declaration.assignmentId, declaration.scopeId]);
+      for (const path of [...ownership.paths].sort()) {
+        for (let slash = path.indexOf("/"); slash >= 0; slash = path.indexOf("/", slash + 1)) {
+          const ancestorOwner = pathOwners.get(path.slice(0, slash));
+          if (ancestorOwner !== undefined && ancestorOwner !== key) return corrupt();
+        }
       }
     }
     // P5 check-definition refinements — the same fail-closed discipline as
@@ -1494,7 +1966,7 @@ export function createDeskStore(deps: DeskStoreDeps): DeskStore {
       if (assignment === undefined) return corrupt();
       const owner = membershipsById.get(row.ownerMembershipId);
       if (owner === undefined || owner.agentId !== row.ownerAgentId || owner.role !== "lead") return corrupt();
-      if (assignment.ownerAgentId !== row.ownerAgentId) return corrupt();
+      if (!inLineageTuple(row.assignmentId, row.ownerAgentId, row.ownerMembershipId)) return corrupt();
       if (scopeStreams.get(JSON.stringify([row.assignmentId, row.scopeId])) === undefined) return corrupt();
       if (row.assignmentRevision < 1 || row.assignmentRevision > assignmentStructuralRevision(assignment)) {
         return corrupt();
@@ -1532,7 +2004,7 @@ export function createDeskStore(deps: DeskStoreDeps): DeskStore {
       if (assignment === undefined) return corrupt();
       const owner = membershipsById.get(row.ownerMembershipId);
       if (owner === undefined || owner.agentId !== row.ownerAgentId || owner.role !== "lead") return corrupt();
-      if (assignment.ownerAgentId !== row.ownerAgentId) return corrupt();
+      if (!inLineageTuple(row.assignmentId, row.ownerAgentId, row.ownerMembershipId)) return corrupt();
       if (scopeStreams.get(JSON.stringify([row.assignmentId, row.scopeId])) === undefined) return corrupt();
       if (row.assignmentRevision < 1 || row.assignmentRevision > assignmentStructuralRevision(assignment)) {
         return corrupt();
@@ -1596,7 +2068,7 @@ export function createDeskStore(deps: DeskStoreDeps): DeskStore {
         return corrupt();
       }
       if (decl.scopeId !== def.scopeId) return corrupt();
-      if (row.actorAgentId !== decl.ownerAgentId) return corrupt();
+      if (!inLineageAgent(row.assignmentId, row.actorAgentId)) return corrupt();
       const actorRow = membershipsById.get(row.actorSeatId);
       if (actorRow === undefined || actorRow.agentId !== row.actorAgentId) return corrupt();
       // A passed run on a definition that requires evidence must carry the
@@ -1662,7 +2134,7 @@ export function createDeskStore(deps: DeskStoreDeps): DeskStore {
       if (declStream === undefined) return corrupt();
       const decl = declStream.find(d => d.revision === row.rolloutRevision);
       if (decl === undefined) return corrupt();
-      if (row.actorAgentId !== decl.ownerAgentId) return corrupt();
+      if (!inLineageAgent(row.assignmentId, row.actorAgentId)) return corrupt();
       // Cohort/target/digest fields ride exactly the commands that pin
       // them — a stray payload is corruption.
       if (row.command === "start-canary") {
@@ -1682,10 +2154,13 @@ export function createDeskStore(deps: DeskStoreDeps): DeskStore {
       const cohortGated = (ROLLOUT_COHORT_GATED_COMMANDS as readonly string[]).includes(row.command);
       if (cohortGated !== (row.cohortDigestAtGate !== null)) return corrupt();
       if (row.cohort !== null) {
-        // The roster re-digests to its own stored digest and may only name
-        // the assignment's durable roster (owner + current seats — the
-        // same current-row rule the scope-review refinement applies).
-        const digest = canonicalSha256({ members: row.cohort.members, assignmentRevision: row.cohort.assignmentRevision });
+        // The roster re-digests to its own stored digest — legacy pins use
+        // the {members, assignmentRevision} recipe; v8 pins carry and digest
+        // their ownershipRevision. Members may name any lineage owner plus
+        // current seats (a successor cohorts under its own pin).
+        const digest = row.cohort.ownershipRevision === undefined
+          ? canonicalSha256({ members: row.cohort.members, assignmentRevision: row.cohort.assignmentRevision })
+          : canonicalSha256({ members: row.cohort.members, assignmentRevision: row.cohort.assignmentRevision, ownershipRevision: row.cohort.ownershipRevision });
         if (digest !== row.cohort.digest) return corrupt();
         const sorted = [...row.cohort.members].sort();
         if (row.cohort.members.length !== new Set(row.cohort.members).size) return corrupt();
@@ -1694,7 +2169,7 @@ export function createDeskStore(deps: DeskStoreDeps): DeskStore {
           return corrupt();
         }
         for (const member of row.cohort.members) {
-          if (member !== assignment.ownerAgentId && !assignment.seats.some(seat => seat.agentId === member)) {
+          if (!inLineageAgent(row.assignmentId, member) && !assignment.seats.some(seat => seat.agentId === member)) {
             return corrupt();
           }
         }
@@ -1757,51 +2232,70 @@ export function createDeskStore(deps: DeskStoreDeps): DeskStore {
           if (row.dischargedReviews.length > 0) return corrupt();
         } else {
           // The review discharge must be the exact set the scope's
-          // approved round consumed: every required axis once, each
-          // review row bound to the rollout's scope, and the review rows'
-          // shared round pin (scopeRevision, candidateSnapshot) must be
-          // the pin of an approve edge on that scope's stream — a forged,
+          // approved round consumed: every required legacy axis or named
+          // lens once (or none under its explicit exemption), each review
+          // row bound to the rollout's scope, and the review rows' shared
+          // round pin (scopeRevision, candidateSnapshot) must be the pin of
+          // an approve edge on that scope's stream — a forged,
           // foreign-candidate or unapproved discharge is corruption.
           const decl = declStream.find(d => d.revision === row.rolloutRevision)!;
-          const seenAxes = new Set<string>();
+          const seenRequirements = new Set<string>();
           const pinKeys = new Set<string>();
           for (const entry of row.dischargedReviews) {
-            if (seenAxes.has(entry.axis)) return corrupt();
-            seenAxes.add(entry.axis);
+            const key = scopeDischargeKey(entry);
+            if (seenRequirements.has(key)) return corrupt();
+            seenRequirements.add(key);
             const review = reviewsById.get(entry.reviewId);
             if (
               review === undefined ||
               review.assignmentId !== row.assignmentId ||
               review.scopeId !== decl.scopeId ||
-              review.axis !== entry.axis ||
+              review.axis !== ("axis" in entry ? entry.axis : null) ||
+              review.lensId !== ("lensId" in entry ? entry.lensId : null) ||
               review.candidateSnapshot !== decl.candidateSnapshot
             ) {
               return corrupt();
             }
-            pinKeys.add(JSON.stringify([review.scopeRevision, review.candidateSnapshot]));
+            pinKeys.add(JSON.stringify([review.scopeRevision, review.candidateSnapshot, review.briefRevision, review.mandateSha256]));
           }
-          for (const axis of SCOPE_REVIEW_AXES) {
-            if (!seenAxes.has(axis)) return corrupt();
-          }
-          if (pinKeys.size !== 1) return corrupt();
+          if (row.dischargedReviews.length > 0 && pinKeys.size !== 1) return corrupt();
           const scopeStream = transitionsByScope.get(JSON.stringify([row.assignmentId, decl.scopeId]));
           if (scopeStream === undefined) return corrupt();
-          const dischargedKey = (list: { axis: string; reviewId: string }[]) =>
-            canonicalSha256([...list].sort((a, b) => a.axis.localeCompare(b.axis)).map(e => [e.axis, e.reviewId]));
-          let scopePin: { scopeRevision: number; candidateSnapshot: string } | null = null;
-          let observedKey: string | null = null;
+          const scopeDeclarations = scopeStreams.get(JSON.stringify([row.assignmentId, decl.scopeId]));
+          if (scopeDeclarations === undefined) return corrupt();
+          const dischargedKey = (list: ScopeTransitionValue["discharged"]) =>
+            canonicalSha256([...list].sort((a, b) => scopeDischargeKey(a).localeCompare(scopeDischargeKey(b))).map(e => [scopeDischargeKey(e), e.reviewId]));
+          let scopePin: { scopeRevision: number; candidateSnapshot: string; candidateHead: string | null; briefRevision: number; mandateSha256: string | null } | null = null;
+          let observedDischarge: ScopeTransitionValue["discharged"] | null = null;
           let approvalMatched = false;
           for (const srow of scopeStream) {
             if (srow.command === "submit-for-review") {
-              scopePin = { scopeRevision: srow.scopeRevision, candidateSnapshot: srow.candidateSnapshot as string };
-              observedKey = null;
+              scopePin = {
+                scopeRevision: srow.scopeRevision,
+                candidateSnapshot: srow.candidateSnapshot as string,
+                candidateHead: srow.candidateHead,
+                briefRevision: srow.briefRevision,
+                mandateSha256: srow.mandateSha256,
+              };
+              observedDischarge = null;
             }
-            if (srow.command === "review-observed") observedKey = dischargedKey(srow.discharged);
+            if (srow.command === "review-observed") observedDischarge = srow.discharged;
+            const approvedDeclaration = scopePin === null
+              ? undefined
+              : scopeDeclarations.find(scope => scope.revision === scopePin!.scopeRevision);
+            const approvalDischarge = srow.discharged.length === 0 && observedDischarge !== null && observedDischarge.length > 0
+              ? observedDischarge
+              : srow.discharged;
+            const approvalDischargeMatches = srow.to === "approved" &&
+              dischargedKey(approvalDischarge) === dischargedKey(row.dischargedReviews);
+            const approvedRoundMatches = scopePin !== null &&
+              scopePin.candidateSnapshot === decl.candidateSnapshot &&
+              scopePin.candidateHead === decl.candidateHead &&
+              (row.dischargedReviews.length === 0
+                ? approvedDeclaration?.reviewPlan?.kind === "exempt" || approvedDeclaration?.reviewPlan?.kind === "not-required"
+                : pinKeys.has(JSON.stringify([scopePin.scopeRevision, scopePin.candidateSnapshot, scopePin.briefRevision, scopePin.mandateSha256])));
             if (
-              srow.to === "approved" &&
-              scopePin !== null &&
-              pinKeys.has(JSON.stringify([scopePin.scopeRevision, scopePin.candidateSnapshot])) &&
-              observedKey === dischargedKey(row.dischargedReviews)
+              approvalDischargeMatches && approvedRoundMatches
             ) {
               approvalMatched = true;
             }
@@ -1814,6 +2308,678 @@ export function createDeskStore(deps: DeskStoreDeps): DeskStore {
         previousTo = row.to;
       }
     }
+    // v7 assignment histories are independently digested and then tied to
+    // their immutable hash-chain event. The event history is supplied only
+    // after verifyChain has recomputed every event from sequence 1 through
+    // the current tip; callers must never substitute a cached tip here.
+    const briefStreams = new Map<string, BriefRevisionValue[]>();
+    const decisionStreams = new Map<string, DecisionEntryValue[]>();
+    const briefEventByRow = new Map<BriefRevisionValue, EventValue>();
+    const decisionEventByRow = new Map<DecisionEntryValue, EventValue>();
+    const historyCorrupt = (): DeskStoreRead => corrupt();
+    for (const row of ledger.briefRevisions) {
+      if (!inLineageTuple(row.assignmentId, row.actorAgentId, row.actorMembershipId)) return historyCorrupt();
+      const key = JSON.stringify([row.assignmentId]);
+      const stream = briefStreams.get(key) ?? [];
+      stream.push(row);
+      briefStreams.set(key, stream);
+      const bodySha256 = canonicalSha256(row.body);
+      const { entrySha256, ...entryWithoutDigest } = row;
+      if (row.bodySha256 !== bodySha256 || row.entrySha256 !== canonicalSha256(entryWithoutDigest)) return historyCorrupt();
+    }
+    for (const stream of briefStreams.values()) {
+      stream.sort((a, b) => a.revision - b.revision);
+      const seen = new Set<string>();
+      for (let i = 0; i < stream.length; i += 1) {
+        const row = stream[i]!;
+        const prior = stream[i - 1];
+        if (seen.has(row.requestId) || row.revision !== i + 1 || row.priorRevision !== i ||
+            row.priorEntrySha256 !== (prior?.entrySha256 ?? null)) return historyCorrupt();
+        seen.add(row.requestId);
+        const actorMembership = ledger.memberships.find(m => m.membershipId === row.actorMembershipId);
+        if (actorMembership === undefined || actorMembership.agentId !== row.actorAgentId) return historyCorrupt();
+      }
+    }
+    for (const row of ledger.decisionEntries) {
+      if (!inLineageTuple(row.assignmentId, row.actorAgentId, row.actorMembershipId)) return historyCorrupt();
+      const key = JSON.stringify([row.assignmentId]);
+      const stream = decisionStreams.get(key) ?? [];
+      stream.push(row);
+      decisionStreams.set(key, stream);
+      const bodySha256 = canonicalSha256(row.body);
+      const { entrySha256, ...entryWithoutDigest } = row;
+      if (row.bodySha256 !== bodySha256 || row.entrySha256 !== canonicalSha256(entryWithoutDigest)) return historyCorrupt();
+    }
+    for (const stream of decisionStreams.values()) {
+      stream.sort((a, b) => a.revision - b.revision);
+      const seen = new Set<string>();
+      for (let i = 0; i < stream.length; i += 1) {
+        const row = stream[i]!;
+        const prior = stream[i - 1];
+        if (seen.has(row.requestId) || row.revision !== i + 1 ||
+            row.priorDecisionId !== (prior?.decisionId ?? null) ||
+            row.priorEntrySha256 !== (prior?.entrySha256 ?? null)) return historyCorrupt();
+        seen.add(row.requestId);
+        const actorMembership = ledger.memberships.find(m => m.membershipId === row.actorMembershipId);
+        if (actorMembership === undefined || actorMembership.agentId !== row.actorAgentId) return historyCorrupt();
+        const briefStream = briefStreams.get(JSON.stringify([row.assignmentId]));
+        if (briefStream === undefined || row.body.affectedBriefRevision > briefStream.length) return historyCorrupt();
+      }
+    }
+    // Ownership lineage — every row's recorded tuples must agree with the
+    // assignment's succession chain. An offer's from-tuple is the owner at
+    // its base revision; an accept binds its offer's tuples verbatim, lands
+    // exactly one revision higher, and accepts stream contiguously 1..N per
+    // assignment with one accept per offer.
+    const offerIds = new Set<string>();
+    const offersById = new Map<string, OwnershipOfferValue>();
+    const offerRequestKeys = new Set<string>();
+    for (const row of ledger.ownershipOffers) {
+      if (offerIds.has(row.offerId)) return corrupt();
+      offerIds.add(row.offerId);
+      offersById.set(row.offerId, row);
+      const requestKey = JSON.stringify([row.assignmentId, row.fromAgentId, row.requestId]);
+      if (offerRequestKeys.has(requestKey)) return corrupt();
+      offerRequestKeys.add(requestKey);
+      const assignment = assignmentsById.get(row.assignmentId);
+      if (assignment === undefined) return corrupt();
+      const lineage = lineageTuplesByAssignment.get(row.assignmentId)!;
+      const accepts = acceptsByAssignment.get(row.assignmentId) ?? [];
+      // An offer may only exist at a base revision that was ever current —
+      // revision r was current exactly while r accepts existed.
+      if (row.ownershipRevision > accepts.length) return corrupt();
+      const expectedFrom = lineage[row.ownershipRevision];
+      if (expectedFrom === undefined || expectedFrom.agentId !== row.fromAgentId ||
+          expectedFrom.membershipId !== row.fromMembershipId) return corrupt();
+      const from = membershipsById.get(row.fromMembershipId);
+      if (from === undefined || from.agentId !== row.fromAgentId || from.role !== "lead") return corrupt();
+      const target = membershipsById.get(row.toMembershipId);
+      if (target === undefined || target.agentId !== row.toAgentId || target.role !== "lead") return corrupt();
+    }
+    const acceptIds = new Set<string>();
+    const acceptedOfferIds = new Set<string>();
+    const acceptRequestKeys = new Set<string>();
+    for (const row of ledger.ownershipAccepts) {
+      if (acceptIds.has(row.acceptId)) return corrupt();
+      acceptIds.add(row.acceptId);
+      if (acceptedOfferIds.has(row.offerId)) return corrupt();
+      acceptedOfferIds.add(row.offerId);
+      const requestKey = JSON.stringify([row.assignmentId, row.toAgentId, row.requestId]);
+      if (acceptRequestKeys.has(requestKey)) return corrupt();
+      acceptRequestKeys.add(requestKey);
+      const assignment = assignmentsById.get(row.assignmentId);
+      if (assignment === undefined) return corrupt();
+      const offer = offersById.get(row.offerId);
+      if (offer === undefined || offer.assignmentId !== row.assignmentId) return corrupt();
+      if (row.ownershipRevision !== offer.ownershipRevision + 1) return corrupt();
+      if (row.fromAgentId !== offer.fromAgentId || row.fromMembershipId !== offer.fromMembershipId ||
+          row.toAgentId !== offer.toAgentId || row.toMembershipId !== offer.toMembershipId) return corrupt();
+      const toMembership = membershipsById.get(row.toMembershipId);
+      if (toMembership === undefined || toMembership.agentId !== row.toAgentId || toMembership.role !== "lead") return corrupt();
+    }
+    // Per-assignment accept contiguity: revisions are exactly 1..N.
+    for (const accepts of acceptsByAssignment.values()) {
+      const revisions = accepts.map(row => row.ownershipRevision).sort((a, b) => a - b);
+      for (const [index, revision] of revisions.entries()) {
+        if (revision !== index + 1) return corrupt();
+      }
+    }
+    if (eventHistory !== undefined) {
+      const matchingEvent = <T extends BriefRevisionValue | DecisionEntryValue>(
+        row: T,
+        kind: "brief-revision-appended" | "decision-entry-appended",
+        payloadKey: "revision" | "decisionId",
+      ): EventValue | null => {
+        const matches = eventHistory.filter(event => {
+          const payload = event.payload;
+          return event.kind === kind && event.assignmentId === row.assignmentId &&
+            event.requestId === row.requestId && event.actorKey === `agent:${row.actorAgentId}` &&
+            payload[payloadKey] === (payloadKey === "revision" ? row.revision : (row as DecisionEntryValue).decisionId) &&
+            payload.entrySha256 === row.entrySha256 && payload.bodySha256 === row.bodySha256 &&
+            payload.actorMembershipId === row.actorMembershipId && payload.actorAgentId === row.actorAgentId &&
+            payload.authorityRef === row.authorityRef;
+        });
+        return matches.length === 1 ? matches[0]! : null;
+      };
+      for (const stream of briefStreams.values()) {
+        for (const row of stream) {
+          const event = matchingEvent(row, "brief-revision-appended", "revision");
+          if (event === null || event.payload.priorRevision !== row.priorRevision ||
+              event.payload.priorEntrySha256 !== row.priorEntrySha256 ||
+              event.payload.changeReason !== row.changeReason ||
+              canonicalSha256(event.payload.affectedOwners) !== canonicalSha256(row.affectedOwners)) return historyCorrupt();
+          briefEventByRow.set(row, event);
+        }
+      }
+      for (const stream of decisionStreams.values()) {
+        for (const row of stream) {
+          const event = matchingEvent(row, "decision-entry-appended", "decisionId");
+          if (event === null || event.payload.revision !== row.revision ||
+              event.payload.priorDecisionId !== row.priorDecisionId ||
+              event.payload.priorEntrySha256 !== row.priorEntrySha256) return historyCorrupt();
+          decisionEventByRow.set(row, event);
+          const briefAtDecision = [...briefStreams.get(JSON.stringify([row.assignmentId]))!]
+            .filter(brief => briefEventByRow.get(brief)!.seq < event.seq)
+            .at(-1);
+          if (briefAtDecision === undefined || briefAtDecision.revision !== row.body.affectedBriefRevision) return historyCorrupt();
+        }
+      }
+      const briefEvents = eventHistory.filter(event => event.kind === "brief-revision-appended");
+      const decisionEvents = eventHistory.filter(event => event.kind === "decision-entry-appended");
+      if (briefEvents.length !== ledger.briefRevisions.length || decisionEvents.length !== ledger.decisionEntries.length) return historyCorrupt();
+      for (const row of [...ledger.briefRevisions]) {
+        const event = briefEventByRow.get(row);
+        const request = ledger.requests.find(record => record.actorKey === `agent:${row.actorAgentId}` &&
+          record.assignmentId === row.assignmentId && record.requestId === row.requestId);
+        if (event === undefined || request === undefined || request.outcome !== "committed" || request.eventSeqs === null ||
+            event.seq < request.eventSeqs[0] || event.seq > request.eventSeqs[1]) return historyCorrupt();
+      }
+      for (const row of [...ledger.decisionEntries]) {
+        const event = decisionEventByRow.get(row);
+        const request = ledger.requests.find(record => record.actorKey === `agent:${row.actorAgentId}` &&
+          record.assignmentId === row.assignmentId && record.requestId === row.requestId);
+        if (event === undefined || request === undefined || request.outcome !== "committed" || request.eventSeqs === null ||
+            event.seq < request.eventSeqs[0] || event.seq > request.eventSeqs[1]) return historyCorrupt();
+      }
+
+      // The v7 scope columns and flexible review requirements are claims
+      // only until their append events bind them to this freshly verified
+      // full chain. Older events retain their neutral migration mapping.
+      const briefRevisionAt = (assignmentId: string, seq: number): number => {
+        let revision = 0;
+        for (const row of ledger.briefRevisions) {
+          const event = briefEventByRow.get(row);
+          if (row.assignmentId === assignmentId && event !== undefined && event.seq < seq) revision = Math.max(revision, row.revision);
+        }
+        return revision;
+      };
+      const committedEvent = (event: EventValue | null, assignmentId: string, requestId: string, actorAgentId: string): boolean => {
+        if (event === null) return false;
+        const request = ledger.requests.find(record => record.actorKey === `agent:${actorAgentId}` &&
+          record.assignmentId === assignmentId && record.requestId === requestId);
+        return request !== undefined && request.outcome === "committed" && request.eventSeqs !== null &&
+          event.seq >= request.eventSeqs[0] && event.seq <= request.eventSeqs[1];
+      };
+      const registrationEvents = eventHistory.filter(event => event.kind === "assignment-registered");
+      let matchedRegistrations = 0;
+      for (const row of ledger.assignments) {
+        const matches = registrationEvents.filter(event => event.payload.assignmentId === row.assignmentId);
+        // Retained legacy/seeded rows have no registration event to bind.
+        // Existing events never get that escape when a header is rewritten.
+        if (matches.length === 0) continue;
+        const event = matches.length === 1 ? matches[0]! : null;
+        if (event === null || event.requestId !== row.requestId ||
+            event.actorKey !== `agent:${row.ownerAgentId}` || event.payload.ownerAgentId !== row.ownerAgentId ||
+            event.payload.authorityRef !== row.authorityRef ||
+            !committedEvent(event, event.assignmentId, row.requestId, row.ownerAgentId)) return historyCorrupt();
+        if (Object.hasOwn(event.payload, "registrationSha256") &&
+            event.payload.registrationSha256 !== assignmentRegistrationSha256(row)) return historyCorrupt();
+        matchedRegistrations += 1;
+      }
+      if (matchedRegistrations !== registrationEvents.length) return historyCorrupt();
+      // Ownership lineage — every offer/accept row binds exactly one
+      // committed event of its own request. Lineage rows are v8-native: no
+      // legacy or seeded shape exists, so a missing event is corruption,
+      // never authorization.
+      const offerEvents = eventHistory.filter(event => event.kind === "ownership-offered");
+      const acceptEvents = eventHistory.filter(event => event.kind === "ownership-accepted");
+      const offerEventByRow = new Map<OwnershipOfferValue, EventValue>();
+      const acceptEventByRow = new Map<OwnershipAcceptValue, EventValue>();
+      let matchedOfferEventCount = 0;
+      let matchedAcceptEventCount = 0;
+      for (const row of ledger.ownershipOffers) {
+        const matches = offerEvents.filter(event => event.assignmentId === row.assignmentId &&
+          event.requestId === row.requestId && event.actorKey === `agent:${row.fromAgentId}` &&
+          event.payload.offerId === row.offerId &&
+          event.payload.ownershipRevision === row.ownershipRevision &&
+          event.payload.fromAgentId === row.fromAgentId && event.payload.fromMembershipId === row.fromMembershipId &&
+          event.payload.toAgentId === row.toAgentId && event.payload.toMembershipId === row.toMembershipId &&
+          event.payload.authorityRef === row.authorityRef && event.payload.contextRef === row.contextRef);
+        const event = matches.length === 1 ? matches[0]! : null;
+        if (!committedEvent(event, row.assignmentId, row.requestId, row.fromAgentId) || event === null) return historyCorrupt();
+        offerEventByRow.set(row, event);
+        matchedOfferEventCount += 1;
+      }
+      for (const row of ledger.ownershipAccepts) {
+        const matches = acceptEvents.filter(event => event.assignmentId === row.assignmentId &&
+          event.requestId === row.requestId && event.actorKey === `agent:${row.toAgentId}` &&
+          event.payload.acceptId === row.acceptId && event.payload.offerId === row.offerId &&
+          event.payload.ownershipRevision === row.ownershipRevision &&
+          event.payload.fromAgentId === row.fromAgentId && event.payload.fromMembershipId === row.fromMembershipId &&
+          event.payload.toAgentId === row.toAgentId && event.payload.toMembershipId === row.toMembershipId &&
+          event.payload.acknowledgment === row.acknowledgment &&
+          event.payload.settlementRef === row.settlementRef &&
+          event.payload.ledgerRevision === row.ledgerRevision && event.payload.briefRevision === row.briefRevision &&
+          event.payload.resourcesSha256 === sha256Hex(canonicalJson(row.resources)) &&
+          event.payload.gapsSha256 === sha256Hex(canonicalJson(row.gaps)));
+        const event = matches.length === 1 ? matches[0]! : null;
+        if (!committedEvent(event, row.assignmentId, row.requestId, row.toAgentId) || event === null) return historyCorrupt();
+        acceptEventByRow.set(row, event);
+        matchedAcceptEventCount += 1;
+      }
+      if (offerEvents.length !== matchedOfferEventCount || acceptEvents.length !== matchedAcceptEventCount) return historyCorrupt();
+      // The owner tuple in force immediately before an event sequence —
+      // built only from accepts bound to their committed events above.
+      // Historical owner-at-event checks deliberately differ from the
+      // current-owner guards: a row is valid under the owner who held
+      // custody at its own append point.
+      const acceptSeqsByAssignment = new Map<string, { seq: number; toAgentId: string; toMembershipId: string }[]>();
+      for (const row of ledger.ownershipAccepts) {
+        const event = acceptEventByRow.get(row)!;
+        const list = acceptSeqsByAssignment.get(row.assignmentId) ?? [];
+        list.push({ seq: event.seq, toAgentId: row.toAgentId, toMembershipId: row.toMembershipId });
+        acceptSeqsByAssignment.set(row.assignmentId, list);
+      }
+      const ownerAt = (assignmentId: string, seq: number): DeskOwnerTuple =>
+        ownerAtEventSeq(assignmentsById.get(assignmentId)!, acceptSeqsByAssignment.get(assignmentId) ?? [], seq);
+      for (const row of ledger.ownershipOffers) {
+        const event = offerEventByRow.get(row)!;
+        const owner = ownerAt(row.assignmentId, event.seq);
+        const prior = (acceptSeqsByAssignment.get(row.assignmentId) ?? []).filter(entry => entry.seq < event.seq);
+        if (row.fromAgentId !== owner.agentId || row.fromMembershipId !== owner.membershipId ||
+            row.ownershipRevision !== prior.length) return historyCorrupt();
+      }
+      for (const row of ledger.ownershipAccepts) {
+        const event = acceptEventByRow.get(row)!;
+        const offer = offersById.get(row.offerId)!;
+        const owner = ownerAt(row.assignmentId, event.seq);
+        const prior = (acceptSeqsByAssignment.get(row.assignmentId) ?? []).filter(entry => entry.seq < event.seq);
+        const request = ledger.requests.find(record => record.assignmentId === row.assignmentId &&
+          record.actorKey === `agent:${row.toAgentId}` && record.requestId === row.requestId)!;
+        if (offerEventByRow.get(offer)!.seq >= event.seq ||
+            row.fromAgentId !== owner.agentId || row.fromMembershipId !== owner.membershipId ||
+            row.ownershipRevision !== prior.length + 1 || row.ledgerRevision !== request.revision - 1 ||
+            row.briefRevision !== briefRevisionAt(row.assignmentId, event.seq)) return historyCorrupt();
+      }
+      // Every event-bound owner-authored row must record the owner of its
+      // own append point. Rows without a bound event keep their row-level
+      // checks only; a row claiming a successor tuple can never exist
+      // without its bound event (see the successor-required binding below).
+      for (const row of ledger.briefRevisions) {
+        const event = briefEventByRow.get(row)!;
+        const owner = ownerAt(row.assignmentId, event.seq);
+        if (owner.agentId !== row.actorAgentId || owner.membershipId !== row.actorMembershipId) return historyCorrupt();
+      }
+      for (const row of ledger.decisionEntries) {
+        const event = decisionEventByRow.get(row)!;
+        const owner = ownerAt(row.assignmentId, event.seq);
+        if (owner.agentId !== row.actorAgentId || owner.membershipId !== row.actorMembershipId) return historyCorrupt();
+      }
+      const scopeDeclarationEvents = eventHistory.filter(event => event.kind === "scope-declared");
+      const scopeTransitionEvents = eventHistory.filter(event => event.kind === "scope-transitioned");
+      const scopeReviewEvents = eventHistory.filter(event => event.kind === "scope-review-recorded");
+      let matchedDeclarationCount = 0;
+      let matchedTransitionCount = 0;
+      let matchedReviewCount = 0;
+      const declarationEventByRow = new Map<ScopeValue, EventValue>();
+      for (const row of ledger.scopes) {
+        const matches = scopeDeclarationEvents.filter(event => event.assignmentId === row.assignmentId &&
+          event.requestId === row.requestId && event.actorKey === `agent:${row.ownerAgentId}` &&
+          event.payload.scopeId === row.scopeId && event.payload.revision === row.revision &&
+          event.payload.ownerAgentId === row.ownerAgentId);
+        if (matches.length === 0 && row.briefRevision === 0 && row.ownership === null && row.reviewPlan === null) continue;
+        const event = matches.length === 1 ? matches[0]! : null;
+        if (!committedEvent(event, row.assignmentId, row.requestId, row.ownerAgentId) || event === null) return historyCorrupt();
+        matchedDeclarationCount += 1;
+        const payload = event.payload;
+        const modern = Object.hasOwn(payload, "briefRevision") || Object.hasOwn(payload, "ownershipSha256") || Object.hasOwn(payload, "reviewPlanSha256");
+        if (modern) {
+          const ownershipSha256 = row.ownership === null ? null : sha256Hex(canonicalJson(row.ownership));
+          const reviewPlanSha256 = row.reviewPlan === null ? null : sha256Hex(canonicalJson(row.reviewPlan));
+          if (payload.briefRevision !== row.briefRevision || payload.mandateSha256 !== scopeMandateSha256(row.reviewPlan) ||
+              payload.ownershipSha256 !== ownershipSha256 || payload.reviewPlanSha256 !== reviewPlanSha256 ||
+              row.briefRevision !== briefRevisionAt(row.assignmentId, event.seq)) return historyCorrupt();
+        } else if (row.briefRevision !== 0 || row.ownership !== null || row.reviewPlan !== null) {
+          return historyCorrupt();
+        }
+        declarationEventByRow.set(row, event);
+        const declarationOwner = ownerAt(row.assignmentId, event.seq);
+        if (declarationOwner.agentId !== row.ownerAgentId || declarationOwner.membershipId !== row.ownerMembershipId) {
+          return historyCorrupt();
+        }
+      }
+      if (scopeDeclarationEvents.length !== matchedDeclarationCount) return historyCorrupt();
+      const transitionEventByRow = new Map<ScopeTransitionValue, EventValue>();
+      for (const row of ledger.scopeTransitions) {
+        let event: EventValue | null;
+        if (row.command === "declare") {
+          const scope = ledger.scopes.find(candidate => candidate.assignmentId === row.assignmentId &&
+            candidate.scopeId === row.scopeId && candidate.revision === row.scopeRevision && candidate.requestId === row.requestId);
+          event = scope === undefined ? null : declarationEventByRow.get(scope) ?? null;
+        } else {
+          const matches = scopeTransitionEvents.filter(candidate => candidate.assignmentId === row.assignmentId &&
+            candidate.requestId === row.requestId && candidate.actorKey === `agent:${row.actorAgentId}` &&
+            candidate.payload.scopeId === row.scopeId && candidate.payload.revision === row.revision &&
+            candidate.payload.command === row.command);
+          event = matches.length === 1 ? matches[0]! : null;
+        }
+        if (event === null && row.briefRevision === 0 && row.mandateSha256 === null && row.discharged.every(entry => "axis" in entry)) continue;
+        if (!committedEvent(event, row.assignmentId, row.requestId, row.actorAgentId) || event === null) return historyCorrupt();
+        if (row.command !== "declare") matchedTransitionCount += 1;
+        const payload = event.payload;
+        const modern = row.command === "declare"
+          ? Object.hasOwn(payload, "briefRevision")
+          : Object.hasOwn(payload, "briefRevision") || Object.hasOwn(payload, "mandateSha256");
+        if (row.command !== "declare" && (payload.from !== row.from || payload.to !== row.to ||
+            canonicalSha256(payload.discharged) !== canonicalSha256(row.discharged))) return historyCorrupt();
+        if (modern) {
+          if (payload.briefRevision !== row.briefRevision || payload.mandateSha256 !== row.mandateSha256) return historyCorrupt();
+        } else if (row.briefRevision !== 0 || row.mandateSha256 !== null) {
+          return historyCorrupt();
+        }
+        transitionEventByRow.set(row, event);
+        if (row.actorAgentId !== ownerAt(row.assignmentId, event.seq).agentId) return historyCorrupt();
+      }
+      if (scopeTransitionEvents.length !== matchedTransitionCount) return historyCorrupt();
+      const reviewEventByRow = new Map<ScopeReviewValue, EventValue>();
+      for (const row of ledger.scopeReviews) {
+        const matches = scopeReviewEvents.filter(event => event.assignmentId === row.assignmentId &&
+          event.requestId === row.requestId && event.actorKey === `agent:${row.reviewerAgentId}` &&
+          event.payload.scopeId === row.scopeId && event.payload.reviewId === row.reviewId &&
+          event.payload.revision === row.revision);
+        if (matches.length === 0 && row.lensId === null && row.briefRevision === 0 && row.mandateSha256 === null) continue;
+        const event = matches.length === 1 ? matches[0]! : null;
+        if (!committedEvent(event, row.assignmentId, row.requestId, row.reviewerAgentId) || event === null) return historyCorrupt();
+        matchedReviewCount += 1;
+        const payload = event.payload;
+        const modern = Object.hasOwn(payload, "lensId") || Object.hasOwn(payload, "briefRevision") || Object.hasOwn(payload, "mandateSha256");
+        if (payload.axis !== row.axis || payload.verdict !== row.verdict || payload.reviewerAgentId !== row.reviewerAgentId) return historyCorrupt();
+        if (modern) {
+          if (payload.lensId !== row.lensId || payload.briefRevision !== row.briefRevision || payload.mandateSha256 !== row.mandateSha256 ||
+              row.briefRevision !== briefRevisionAt(row.assignmentId, event.seq)) return historyCorrupt();
+        } else if (row.lensId !== null || row.briefRevision !== 0 || row.mandateSha256 !== null) {
+          return historyCorrupt();
+        }
+        reviewEventByRow.set(row, event);
+        // A review recorded while its reviewer held custody is corruption —
+        // event-time owner independence, distinct from the current-owner
+        // discharge exclusion applied at approval.
+        if (row.reviewerAgentId === ownerAt(row.assignmentId, event.seq).agentId) return historyCorrupt();
+      }
+      if (scopeReviewEvents.length !== matchedReviewCount) return historyCorrupt();
+
+      const latestScopeAt = (assignmentId: string, scopeId: string, seq: number): ScopeValue | undefined =>
+        ledger.scopes.filter(row => row.assignmentId === assignmentId && row.scopeId === scopeId &&
+          (declarationEventByRow.get(row)?.seq ?? 0) < seq)
+          .sort((a, b) => b.revision - a.revision)[0];
+      const activeRoundAt = (assignmentId: string, scopeId: string, seq: number): {
+        scopeRevision: number; candidateSnapshot: string; briefRevision: number; mandateSha256: string | null;
+      } | null => {
+        const stream = ledger.scopeTransitions.filter(row => row.assignmentId === assignmentId && row.scopeId === scopeId &&
+          (transitionEventByRow.get(row)?.seq ?? Number.POSITIVE_INFINITY) < seq)
+          .sort((a, b) => a.revision - b.revision);
+        let pin: { scopeRevision: number; candidateSnapshot: string; briefRevision: number; mandateSha256: string | null } | null = null;
+        for (const transition of stream) {
+          if (transition.command === "submit-for-review") pin = {
+            scopeRevision: transition.scopeRevision,
+            candidateSnapshot: transition.candidateSnapshot as string,
+            briefRevision: transition.briefRevision,
+            mandateSha256: transition.mandateSha256,
+          };
+          else if (transition.to === "advanced" || transition.to === "closed") pin = null;
+        }
+        return pin;
+      };
+      for (const row of ledger.scopeTransitions) {
+        const event = transitionEventByRow.get(row);
+        if (event === undefined) continue;
+        const modern = row.command === "declare"
+          ? Object.hasOwn(event.payload, "briefRevision")
+          : Object.hasOwn(event.payload, "briefRevision") || Object.hasOwn(event.payload, "mandateSha256");
+        if (!modern || row.command === "declare") continue;
+        const declaration = latestScopeAt(row.assignmentId, row.scopeId, event.seq);
+        const currentBrief = briefRevisionAt(row.assignmentId, event.seq);
+        if (declaration === undefined || declaration.revision !== row.scopeRevision ||
+            declaration.briefRevision !== currentBrief || row.briefRevision !== currentBrief ||
+            row.mandateSha256 !== scopeMandateSha256(declaration.reviewPlan)) return historyCorrupt();
+        if ((SCOPE_REVIEW_GATED_COMMANDS as readonly string[]).includes(row.command)) {
+          const pin = activeRoundAt(row.assignmentId, row.scopeId, event.seq);
+          if (pin === null || pin.scopeRevision !== row.scopeRevision || pin.briefRevision !== currentBrief ||
+              pin.mandateSha256 !== row.mandateSha256) return historyCorrupt();
+          if (row.command === "approve") {
+            // Current discharge requalifies every observation against the
+            // owner/writer at THIS approval's point: a review authored by
+            // the owner who approves, or by the scope's declared writer,
+            // never discharges that owner's own gate. The review row itself
+            // stays valid history at its own event time.
+            const approver = ownerAt(row.assignmentId, event.seq);
+            const required = new Set(scopePlanReviewKeys(declaration.reviewPlan));
+            const seen = new Set<string>();
+            for (const entry of row.discharged) {
+              const key = scopeDischargeKey(entry);
+              if (seen.has(key) || !required.has(key)) return historyCorrupt();
+              seen.add(key);
+              const review = reviewsById.get(entry.reviewId);
+              const reviewEvent = review === undefined ? undefined : scopeReviewEvents.find(candidate =>
+                candidate.assignmentId === review.assignmentId && candidate.requestId === review.requestId &&
+                candidate.actorKey === `agent:${review.reviewerAgentId}` && candidate.payload.reviewId === review.reviewId,
+              );
+              if (review === undefined || reviewEvent === undefined || reviewEvent.seq >= event.seq ||
+                  review.assignmentId !== row.assignmentId || review.scopeId !== row.scopeId ||
+                  review.axis !== ("axis" in entry ? entry.axis : null) ||
+                  review.lensId !== ("lensId" in entry ? entry.lensId : null) ||
+                  review.reviewerAgentId === approver.agentId ||
+                  review.reviewerAgentId === declaration.ownership?.writerAgentId ||
+                  review.scopeRevision !== pin.scopeRevision || review.candidateSnapshot !== pin.candidateSnapshot ||
+                  review.briefRevision !== currentBrief || review.mandateSha256 !== row.mandateSha256) return historyCorrupt();
+            }
+            if (seen.size !== required.size || [...required].some(key => !seen.has(key))) return historyCorrupt();
+          }
+        }
+      }
+      for (const row of ledger.scopeReviews) {
+        const event = scopeReviewEvents.find(candidate => candidate.assignmentId === row.assignmentId &&
+          candidate.requestId === row.requestId && candidate.actorKey === `agent:${row.reviewerAgentId}` &&
+          candidate.payload.reviewId === row.reviewId);
+        if (event === undefined) continue;
+        if (!Object.hasOwn(event.payload, "briefRevision")) continue;
+        const declaration = latestScopeAt(row.assignmentId, row.scopeId, event.seq);
+        const pin = activeRoundAt(row.assignmentId, row.scopeId, event.seq);
+        const currentBrief = briefRevisionAt(row.assignmentId, event.seq);
+        if (declaration === undefined || pin === null || declaration.revision !== row.scopeRevision ||
+            pin.scopeRevision !== row.scopeRevision || pin.candidateSnapshot !== row.candidateSnapshot ||
+            row.briefRevision !== currentBrief || pin.briefRevision !== currentBrief ||
+            row.mandateSha256 !== scopeMandateSha256(declaration.reviewPlan) || pin.mandateSha256 !== row.mandateSha256) return historyCorrupt();
+      }
+
+      // New rollout transitions carry their pinned rollout revision in the
+      // event that commits them. Reconstruct promotion freshness at that
+      // event's position in the verified chain: a later brief amendment or
+      // later scope change cannot rewrite an already-valid promotion, while
+      // an approval that was already stale at promotion time is corruption.
+      const rolloutTransitionEvents = eventHistory.filter(event => event.kind === "rollout-transitioned");
+      const rolloutTransitionEventByRow = new Map<RolloutTransitionValue, EventValue>();
+      let matchedRolloutTransitionCount = 0;
+      for (const row of ledger.rolloutTransitions) {
+        if (row.command === "declare") continue;
+        const matches = rolloutTransitionEvents.filter(event => event.assignmentId === row.assignmentId &&
+          event.requestId === row.requestId && event.actorKey === `agent:${row.actorAgentId}` &&
+          event.payload.rolloutId === row.rolloutId && event.payload.command === row.command &&
+          event.payload.revision === row.revision);
+        const event = matches.length === 1 ? matches[0]! : null;
+        if (!committedEvent(event, row.assignmentId, row.requestId, row.actorAgentId) || event === null) return historyCorrupt();
+        matchedRolloutTransitionCount += 1;
+        if (event.payload.from !== row.from || event.payload.to !== row.to) return historyCorrupt();
+        if (Object.hasOwn(event.payload, "dischargedReviews") &&
+            canonicalSha256(event.payload.dischargedReviews) !== canonicalSha256(row.dischargedReviews)) return historyCorrupt();
+        const hasRevisionPin = Object.hasOwn(event.payload, "rolloutRevision");
+        if (hasRevisionPin) {
+          if (event.payload.rolloutRevision !== row.rolloutRevision || event.payload.transitionId !== row.transitionId) return historyCorrupt();
+        } else if (Object.hasOwn(event.payload, "transitionId")) {
+          return historyCorrupt();
+        }
+        rolloutTransitionEventByRow.set(row, event);
+        if (row.actorAgentId !== ownerAt(row.assignmentId, event.seq).agentId) return historyCorrupt();
+      }
+      if (rolloutTransitionEvents.length !== matchedRolloutTransitionCount) return historyCorrupt();
+
+      const approvedScopeRoundAt = (assignmentId: string, scopeId: string, seq: number): {
+        scopeRevision: number;
+        candidateSnapshot: string;
+        candidateHead: string | null;
+        briefRevision: number;
+        mandateSha256: string | null;
+        discharged: ScopeTransitionValue["discharged"];
+      } | null => {
+        const stream = ledger.scopeTransitions.filter(row => row.assignmentId === assignmentId && row.scopeId === scopeId &&
+          (transitionEventByRow.get(row)?.seq ?? Number.POSITIVE_INFINITY) < seq)
+          .sort((a, b) => a.revision - b.revision);
+        type HistoricalScopePin = {
+          scopeRevision: number;
+          candidateSnapshot: string;
+          candidateHead: string | null;
+          briefRevision: number;
+          mandateSha256: string | null;
+        };
+        let pin: HistoricalScopePin | null = null;
+        let observed: ScopeTransitionValue["discharged"] | null = null;
+        let approved: (HistoricalScopePin & { discharged: ScopeTransitionValue["discharged"] }) | null = null;
+        let state: ScopeStateValue | null = null;
+        for (const transition of stream) {
+          if (transition.command === "submit-for-review") {
+            pin = {
+              scopeRevision: transition.scopeRevision,
+              candidateSnapshot: transition.candidateSnapshot as string,
+              candidateHead: transition.candidateHead,
+              briefRevision: transition.briefRevision,
+              mandateSha256: transition.mandateSha256,
+            };
+            observed = null;
+          }
+          if (transition.command === "review-observed") observed = transition.discharged;
+          if (transition.to === "approved" && pin !== null) {
+            // Migrated pre-v7 approvals have no approval-level discharge;
+            // their immediately preceding observation remains the recorded
+            // proof. New approvals carry their own transaction-resolved set.
+            const discharge = transition.discharged.length === 0 && observed !== null && observed.length > 0
+              ? observed
+              : transition.discharged;
+            approved = { ...pin, discharged: discharge };
+          }
+          state = transition.to;
+        }
+        return state === "approved" || state === "advanced" ? approved : null;
+      };
+      for (const row of ledger.rolloutTransitions) {
+        if (row.command !== "promote") continue;
+        const event = rolloutTransitionEventByRow.get(row);
+        if (event === undefined || !Object.hasOwn(event.payload, "rolloutRevision")) continue;
+        const priorRolloutDeclarations = eventHistory.filter(candidate => candidate.kind === "rollout-declared" &&
+          candidate.assignmentId === row.assignmentId && candidate.payload.rolloutId === row.rolloutId && candidate.seq < event.seq)
+          .sort((a, b) => b.seq - a.seq);
+        const latestRolloutEvent = priorRolloutDeclarations[0];
+        if (latestRolloutEvent === undefined || latestRolloutEvent.payload.revision !== row.rolloutRevision) return historyCorrupt();
+        const declaration = rolloutStreams.get(JSON.stringify([row.assignmentId, row.rolloutId]))
+          ?.find(candidate => candidate.revision === row.rolloutRevision);
+        if (declaration === undefined || declaration.scopeId !== latestRolloutEvent.payload.scopeId ||
+            declaration.candidateSnapshot !== latestRolloutEvent.payload.candidateSnapshot) return historyCorrupt();
+        const scope = latestScopeAt(row.assignmentId, declaration.scopeId, event.seq);
+        const currentBrief = briefRevisionAt(row.assignmentId, event.seq);
+        if (scope === undefined || scope.briefRevision !== currentBrief) return historyCorrupt();
+        const mandateSha256 = scopeMandateSha256(scope.reviewPlan);
+        const approved = approvedScopeRoundAt(row.assignmentId, declaration.scopeId, event.seq);
+        if (approved === null || approved.scopeRevision !== scope.revision || approved.briefRevision !== currentBrief ||
+            approved.mandateSha256 !== mandateSha256 || approved.candidateSnapshot !== declaration.candidateSnapshot ||
+            approved.candidateHead !== declaration.candidateHead ||
+            canonicalSha256(approved.discharged) !== canonicalSha256(row.dischargedReviews)) return historyCorrupt();
+        const promotionOwner = ownerAt(row.assignmentId, event.seq);
+        for (const discharge of row.dischargedReviews) {
+          const review = reviewsById.get(discharge.reviewId);
+          if (review === undefined || review.reviewerAgentId === promotionOwner.agentId ||
+              review.reviewerAgentId === scope.ownership?.writerAgentId) return historyCorrupt();
+        }
+      }
+
+      // Owner-at-event binding for the remaining owner-authored families.
+      // A bound row must record the owner of its own append point; a row
+      // claiming a SUCCESSOR tuple is impossible without its bound event —
+      // no missing event may stand in for that authorization. Original-owner
+      // rows keep their pre-existing optional binding (legacy and seeded
+      // fixtures predate the event requirement).
+      const originalTuple = (row: { ownerAgentId: string; ownerMembershipId: string }, assignment: AssignmentValue): boolean =>
+        row.ownerAgentId === assignment.ownerAgentId && row.ownerMembershipId === assignment.ownerMembershipId;
+      const settlementEvents = eventHistory.filter(event => event.kind === "settlement-recorded");
+      let matchedSettlementEvents = 0;
+      for (const row of ledger.settlements) {
+        const assignment = assignmentsById.get(row.assignmentId)!;
+        const matches = settlementEvents.filter(event => event.assignmentId === row.assignmentId &&
+          event.requestId === row.requestId && event.actorKey === `agent:${row.ownerAgentId}` &&
+          event.payload.settlementId === row.settlementId && event.payload.revision === row.revision &&
+          event.payload.ownerAgentId === row.ownerAgentId && event.payload.seatAgentId === row.seatAgentId &&
+          event.payload.status === row.status);
+        if (matches.length === 0 && originalTuple(row, assignment)) continue;
+        const event = matches.length === 1 ? matches[0]! : null;
+        if (!committedEvent(event, row.assignmentId, row.requestId, row.ownerAgentId) || event === null) return historyCorrupt();
+        const owner = ownerAt(row.assignmentId, event.seq);
+        if (owner.agentId !== row.ownerAgentId || owner.membershipId !== row.ownerMembershipId) return historyCorrupt();
+        matchedSettlementEvents += 1;
+      }
+      if (settlementEvents.length !== matchedSettlementEvents) return historyCorrupt();
+      const checkDeclaredEvents = eventHistory.filter(event => event.kind === "check-declared");
+      let matchedCheckDeclaredEvents = 0;
+      for (const row of ledger.checkDefinitions) {
+        const assignment = assignmentsById.get(row.assignmentId)!;
+        const matches = checkDeclaredEvents.filter(event => event.assignmentId === row.assignmentId &&
+          event.requestId === row.requestId && event.actorKey === `agent:${row.ownerAgentId}` &&
+          event.payload.checkId === row.checkId && event.payload.revision === row.revision &&
+          event.payload.scopeId === row.scopeId && event.payload.checkClass === row.checkClass &&
+          event.payload.ownerAgentId === row.ownerAgentId);
+        if (matches.length === 0 && originalTuple(row, assignment)) continue;
+        const event = matches.length === 1 ? matches[0]! : null;
+        if (!committedEvent(event, row.assignmentId, row.requestId, row.ownerAgentId) || event === null) return historyCorrupt();
+        const owner = ownerAt(row.assignmentId, event.seq);
+        if (owner.agentId !== row.ownerAgentId || owner.membershipId !== row.ownerMembershipId) return historyCorrupt();
+        matchedCheckDeclaredEvents += 1;
+      }
+      if (checkDeclaredEvents.length !== matchedCheckDeclaredEvents) return historyCorrupt();
+      const checkRunEvents = eventHistory.filter(event => event.kind === "check-run-committed");
+      let matchedCheckRunEvents = 0;
+      for (const row of ledger.checkRuns) {
+        const assignment = assignmentsById.get(row.assignmentId)!;
+        const matches = checkRunEvents.filter(event => event.assignmentId === row.assignmentId &&
+          event.requestId === row.requestId && event.actorKey === `agent:${row.actorAgentId}` &&
+          event.payload.runId === row.runId && event.payload.rolloutId === row.rolloutId &&
+          event.payload.checkId === row.checkId && event.payload.attempt === row.attempt &&
+          event.payload.status === row.status && event.payload.actorAgentId === row.actorAgentId);
+        if (matches.length === 0 && row.actorAgentId === assignment.ownerAgentId) continue;
+        const event = matches.length === 1 ? matches[0]! : null;
+        if (!committedEvent(event, row.assignmentId, row.requestId, row.actorAgentId) || event === null) return historyCorrupt();
+        if (row.actorAgentId !== ownerAt(row.assignmentId, event.seq).agentId) return historyCorrupt();
+        matchedCheckRunEvents += 1;
+      }
+      if (checkRunEvents.length !== matchedCheckRunEvents) return historyCorrupt();
+      const rolloutDeclaredEvents = eventHistory.filter(event => event.kind === "rollout-declared");
+      let matchedRolloutDeclaredEvents = 0;
+      for (const row of ledger.rollouts) {
+        const assignment = assignmentsById.get(row.assignmentId)!;
+        const matches = rolloutDeclaredEvents.filter(event => event.assignmentId === row.assignmentId &&
+          event.requestId === row.requestId && event.actorKey === `agent:${row.ownerAgentId}` &&
+          event.payload.rolloutId === row.rolloutId && event.payload.revision === row.revision &&
+          event.payload.scopeId === row.scopeId && event.payload.ownerAgentId === row.ownerAgentId &&
+          event.payload.candidateSnapshot === row.candidateSnapshot);
+        if (matches.length === 0 && originalTuple(row, assignment)) continue;
+        const event = matches.length === 1 ? matches[0]! : null;
+        if (!committedEvent(event, row.assignmentId, row.requestId, row.ownerAgentId) || event === null) return historyCorrupt();
+        const owner = ownerAt(row.assignmentId, event.seq);
+        if (owner.agentId !== row.ownerAgentId || owner.membershipId !== row.ownerMembershipId) return historyCorrupt();
+        matchedRolloutDeclaredEvents += 1;
+      }
+      if (rolloutDeclaredEvents.length !== matchedRolloutDeclaredEvents) return historyCorrupt();
+      // The stream-opening `declare` transition row shares its rollout
+      // declaration's event — it was committed in the same request.
+      for (const row of ledger.rolloutTransitions) {
+        if (row.command !== "declare") continue;
+        const assignment = assignmentsById.get(row.assignmentId)!;
+        const matches = rolloutDeclaredEvents.filter(event => event.assignmentId === row.assignmentId &&
+          event.requestId === row.requestId && event.actorKey === `agent:${row.actorAgentId}` &&
+          event.payload.rolloutId === row.rolloutId && event.payload.revision === row.rolloutRevision &&
+          event.payload.ownerAgentId === row.actorAgentId);
+        if (matches.length === 0 && row.actorAgentId === assignment.ownerAgentId) continue;
+        const event = matches.length === 1 ? matches[0]! : null;
+        if (!committedEvent(event, row.assignmentId, row.requestId, row.actorAgentId) || event === null) return historyCorrupt();
+        if (row.actorAgentId !== ownerAt(row.assignmentId, event.seq).agentId) return historyCorrupt();
+      }
+    }
     return null;
   }
 
@@ -1823,8 +2989,8 @@ export function createDeskStore(deps: DeskStoreDeps): DeskStore {
    *  range straddles lastEventSeq is verified up to the tip and its tail is
    *  ignored. A missing events dir or any structural deviation breaks the
    *  chain. */
-  function verifyChain(repoKey: string, ledger: LedgerValue): boolean {
-    if (ledger.lastEventSeq === 0) return true;
+  function verifyChain(repoKey: string, ledger: LedgerValue): EventValue[] | null {
+    if (ledger.lastEventSeq === 0) return [];
     const dir = repoPaths(repoKey).eventsDir;
     let names: string[];
     try {
@@ -1833,7 +2999,7 @@ export function createDeskStore(deps: DeskStoreDeps): DeskStore {
       // Absence is structural (a chain gap → corrupt); every other fs error
       // is an unexpected I/O fault → IO_FAILURE via read()'s outer catch.
       const code = (error as NodeJS.ErrnoException).code;
-      if (code === "ENOENT" || code === "ENOTDIR") return false;
+      if (code === "ENOENT" || code === "ENOTDIR") return null;
       throw error;
     }
     const segments = names
@@ -1844,39 +3010,41 @@ export function createDeskStore(deps: DeskStoreDeps): DeskStore {
       .sort((a, b) => a.first - b.first);
     let expected = 1;
     let prevSha256: string | null = null;
+    const verified: EventValue[] = [];
     for (const segment of segments) {
       if (segment.first > ledger.lastEventSeq) continue; // orphan segment
-      if (segment.first !== expected) return false; // gap or overlap
+      if (segment.first !== expected) return null; // gap or overlap
       let bytes: string;
       try {
         bytes = readFileSync(join(dir, segment.name), "utf8");
       } catch (error) {
         const code = (error as NodeJS.ErrnoException).code;
-        if (code === "ENOENT" || code === "ENOTDIR" || code === "EISDIR") return false;
+        if (code === "ENOENT" || code === "ENOTDIR" || code === "EISDIR") return null;
         throw error;
       }
       const lines = bytes.split("\n").filter(line => line.length > 0);
-      if (lines.length !== segment.last - segment.first + 1) return false;
+      if (lines.length !== segment.last - segment.first + 1) return null;
       for (const [index, line] of lines.entries()) {
         let json: unknown;
         try {
           json = JSON.parse(line);
         } catch {
-          return false;
+          return null;
         }
         const parsed = EventSchema.safeParse(json);
-        if (!parsed.success) return false;
+        if (!parsed.success) return null;
         const event = parsed.data;
-        if (event.seq !== segment.first + index) return false;
+        if (event.seq !== segment.first + index) return null;
         const { sha256, ...rest } = event;
-        if (sha256 !== canonicalSha256(rest)) return false;
+        if (sha256 !== canonicalSha256(rest)) return null;
         if (event.seq > ledger.lastEventSeq) break; // orphan tail
-        if (event.prevSha256 !== prevSha256) return false;
+        if (event.prevSha256 !== prevSha256) return null;
         prevSha256 = sha256;
         expected += 1;
+        verified.push(event);
       }
     }
-    return expected - 1 === ledger.lastEventSeq && prevSha256 === ledger.lastEventSha256;
+    return expected - 1 === ledger.lastEventSeq && prevSha256 === ledger.lastEventSha256 ? verified : null;
   }
 
   function read(repoKey: string): DeskStoreRead {
@@ -1926,55 +3094,75 @@ export function createDeskStore(deps: DeskStoreDeps): DeskStore {
       // never touched by read — the bump happens in the next transact's
       // commit.
       let ledger: LedgerValue;
-      let persistedSchemaVersion: 1 | 2 | 3 | 4 | 5 | 6;
+      let persistedSchemaVersion: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8;
       if (schemaVersion === 1) {
         const v1 = LedgerSchemaV1.safeParse(json);
         if (!v1.success) {
           return { state: "corrupt", diagnostics: { code: "schema-invalid", schemaVersion } };
         }
-        ledger = MIGRATIONS[5](MIGRATIONS[4](MIGRATIONS[3](MIGRATIONS[2](MIGRATIONS[1](v1.data)))));
+        ledger = MIGRATIONS[7](MIGRATIONS[6](MIGRATIONS[5](MIGRATIONS[4](MIGRATIONS[3](MIGRATIONS[2](MIGRATIONS[1](v1.data)))))));
         persistedSchemaVersion = 1;
       } else if (schemaVersion === 2) {
         const v2 = LedgerSchemaV2.safeParse(json);
         if (!v2.success) {
           return { state: "corrupt", diagnostics: { code: "schema-invalid", schemaVersion } };
         }
-        ledger = MIGRATIONS[5](MIGRATIONS[4](MIGRATIONS[3](MIGRATIONS[2](v2.data))));
+        ledger = MIGRATIONS[7](MIGRATIONS[6](MIGRATIONS[5](MIGRATIONS[4](MIGRATIONS[3](MIGRATIONS[2](v2.data))))));
         persistedSchemaVersion = 2;
       } else if (schemaVersion === 3) {
         const v3 = LedgerSchemaV3.safeParse(json);
         if (!v3.success) {
           return { state: "corrupt", diagnostics: { code: "schema-invalid", schemaVersion } };
         }
-        ledger = MIGRATIONS[5](MIGRATIONS[4](MIGRATIONS[3](v3.data)));
+        ledger = MIGRATIONS[7](MIGRATIONS[6](MIGRATIONS[5](MIGRATIONS[4](MIGRATIONS[3](v3.data)))));
         persistedSchemaVersion = 3;
       } else if (schemaVersion === 4) {
         const v4 = LedgerSchemaV4.safeParse(json);
         if (!v4.success) {
           return { state: "corrupt", diagnostics: { code: "schema-invalid", schemaVersion } };
         }
-        ledger = MIGRATIONS[5](MIGRATIONS[4](v4.data));
+        ledger = MIGRATIONS[7](MIGRATIONS[6](MIGRATIONS[5](MIGRATIONS[4](v4.data))));
         persistedSchemaVersion = 4;
       } else if (schemaVersion === 5) {
         const v5 = LedgerSchemaV5.safeParse(json);
         if (!v5.success) {
           return { state: "corrupt", diagnostics: { code: "schema-invalid", schemaVersion } };
         }
-        ledger = MIGRATIONS[5](v5.data);
+        ledger = MIGRATIONS[7](MIGRATIONS[6](MIGRATIONS[5](v5.data)));
         persistedSchemaVersion = 5;
+      } else if (schemaVersion === 6) {
+        const v6 = LedgerSchemaV6.safeParse(json);
+        if (!v6.success) {
+          return { state: "corrupt", diagnostics: { code: "schema-invalid", schemaVersion } };
+        }
+        ledger = MIGRATIONS[7](MIGRATIONS[6](v6.data));
+        persistedSchemaVersion = 6;
+      } else if (schemaVersion === 7) {
+        const v7 = LedgerSchemaV7.safeParse(json);
+        if (!v7.success) {
+          return { state: "corrupt", diagnostics: { code: "schema-invalid", schemaVersion } };
+        }
+        ledger = MIGRATIONS[7](v7.data);
+        persistedSchemaVersion = 7;
       } else {
         const parsed = LedgerSchema.safeParse(json);
         if (!parsed.success) {
           return { state: "corrupt", diagnostics: { code: "schema-invalid", schemaVersion } };
         }
         ledger = parsed.data;
-        persistedSchemaVersion = 6;
+        persistedSchemaVersion = 8;
       }
-      const refinement = checkRefinements(ledger, repoKey);
-      if (refinement !== null) return refinement;
-      if (!verifyChain(repoKey, ledger)) {
+      // Classify a structurally valid ledger bound to another repo before
+      // looking into this namespace's event history. `future` ledgers have
+      // already returned above because their body schema is not known here.
+      const bindingError = checkRepoBinding(ledger, repoKey);
+      if (bindingError !== null) return bindingError;
+      const eventHistory = verifyChain(repoKey, ledger);
+      if (eventHistory === null) {
         return { state: "corrupt", diagnostics: { code: "hash-chain-broken", schemaVersion } };
       }
+      const refinement = checkRefinements(ledger, repoKey, eventHistory);
+      if (refinement !== null) return refinement;
       return { state: "ok", ledger, persistedSchemaVersion };
     } catch (error) {
       if (error instanceof OperationConflict) throw error;
@@ -2216,6 +3404,13 @@ export function createDeskStore(deps: DeskStoreDeps): DeskStore {
           },
         };
       }
+      // Re-open and verify the complete prior chain while holding the
+      // writer lock. The read performed above is not used as a cached tip:
+      // v7 entry refinements are bound to these freshly verified events.
+      const priorEventHistory = verifyChain(repoKey, ledger);
+      if (priorEventHistory === null) {
+        return rejection("STATE_UNREADABLE", "desk event history became unverifiable before commit", "restore the complete verified event chain before retrying");
+      }
       if (ledger.requests.length >= LEDGER_LIMITS.requests) {
         return invalidRecord(
           `requests table is full (${LEDGER_LIMITS.requests})`,
@@ -2349,7 +3544,7 @@ export function createDeskStore(deps: DeskStoreDeps): DeskStore {
       };
       // The pre-commit refinement pass is the same one read() applies — a
       // ledger that would read as unsafe/corrupt is never written.
-      const invalid = checkRefinements(candidate, repoKey);
+      const invalid = checkRefinements(candidate, repoKey, [...priorEventHistory, ...built]);
       if (invalid !== null) {
         throw new OperationConflict("IO_FAILURE", "refusing to commit a ledger that would not read back cleanly");
       }

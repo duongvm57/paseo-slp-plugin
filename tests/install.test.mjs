@@ -194,11 +194,18 @@ test('installed adapter injects every role over stdio while preserving host prom
     assert.ok(actual[3].params.collaborationMode.settings.developer_instructions.endsWith(instruction));
     assert.deepEqual(actual.slice(4), messages.slice(4));
     assert.equal(roleBundle(destination, role).orchestrates, role !== 'peer');
-    // The injected bytes carry the required review-gate invariant to the
-    // orchestrating roles and the re-read trigger to Lead alone; both reach
+    // Selection procedure reaches orchestrating roles; every role keeps the
+    // no-waiver invariant and Lead alone gets the selection/re-read triggers.
+    // These independent literals reach
     // the seat on thread/start and thread/resume (same instruction string).
-    assert.equal(/does not license merging\s+the axes into one seat/.test(instruction), role !== 'peer');
+    assert.match(instruction, /Review selection never waives a Human, assignment or protocol obligation/);
+    assert.equal(/Lead records an explicit review selection before the candidate round/.test(instruction), role !== 'peer');
+    assert.equal(/Required review cannot be weakened because seats are unavailable or findings are adverse/.test(instruction), role !== 'peer');
+    assert.equal(/Record the review selection and its reason before the candidate round/.test(instruction), role === 'lead');
+    assert.equal(/review-gates\.md when making or revising that decision, including a\s+not-required decision/.test(instruction), role === 'lead');
     assert.equal(/When the assignment or protocol\s+requires independent review/.test(instruction), role === 'lead');
+    assert.equal(/Reviewer and optional Auditor mandates remain independent of the writer and\s+accepting owner/.test(instruction), role === 'peer');
+    assert.doesNotMatch(instruction, /does not license merging\s+the axes into one seat|parallel seats on split axes/);
     // The C8 formation pins ride the same delegation block: the decision
     // table, formation record, placement pin and post-create verification
     // reach Supervisor and Lead, never Peer.

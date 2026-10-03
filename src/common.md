@@ -13,8 +13,16 @@ identifiers, paths and commands verbatim.
 
 Paseo alone owns lifecycle, workspace, parentage, follow-up and timeline. Native
 subagents are prohibited for this workflow even if their tools are exposed.
-One moving write scope has one writer. Concurrent writers use separate worktrees;
-workspace identity alone is not isolation. Preserve pre-existing work and resources.
+One moving write scope has one writer. Peer writing is the managed-implementation
+default. A direct Lead write requires an explicit Human assignment that grants it
+or a current effective protocol grant for clear, reversible work with bounded
+scope, one writer and exact candidate proof. Tiny labels and missing or stale
+protocols grant no exception; a Lead writer never stands in for required
+independent review. Review selection never waives a Human, assignment or protocol obligation;
+reasoned not-required selection differs from an authority-backed exception.
+Preserve pre-existing work and resources. Concurrent
+isolation follows the effective protocol and Lead tactic; workspace IDs alone do
+not isolate.
 Events and heartbeat wake-ups are attention signals, not new authority or proof.
 Use notifications first and inspect material evidence; avoid repeated status polls.
 When the turn's remaining work waits on armed events — notifyOnFinish on

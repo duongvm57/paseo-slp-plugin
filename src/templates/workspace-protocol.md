@@ -47,8 +47,12 @@ applying these tactics.
 ## Authority
 
 Lead selects methods, routes bounded work, reconciles technical decisions and
-accepts project artifacts within the assignment; every implementation write
-belongs to a Peer. Human decides product, priority and portfolio changes,
+accepts project artifacts within the assignment. Peer Engineer is the default
+implementation writer. A direct Lead write requires an explicit Human assignment
+grant or an effective protocol grant recorded below, and is limited to clear,
+reversible work with bounded scope, one writer, exact candidate proof and every
+required independent review. A Lead writer cannot fill its own independent review
+seat. Human decides product, priority and portfolio changes,
 owner-reserved architecture contracts, irreversible or material-cost trade-offs
 beyond the grant, external effects and subjective acceptance — each such
 boundary is `must_ask`, and the Repository configuration lists this repository's
@@ -89,11 +93,14 @@ feature can contain a transition phase. The larger outcome keeps its owner; each
 next phase needs its own conditions and grant, so a new recipe name never widens
 scope.
 
-Council defaults: two distinct lenses, at most one challenge/response round per
-material proposition, then Lead records one binding decision. Add a lens only for
-an unresolved decision-changing question worth the cost. In a new domain,
-establish enough Human framing to locate owner boundaries before foundational
-implementation.
+For a council, select the minimum sufficient independent lenses for unresolved
+decision-changing questions under the assignment and effective protocol; there
+is no fixed seat or provider-family count. Record a task-selected stop condition
+and authorized effort/resource bound before challenge or continued rework, then
+Lead records one binding decision. Add a lens or challenge only for an unresolved
+question worth its cost and within authority. In
+a new domain, establish enough Human framing to locate owner boundaries before
+foundational implementation.
 
 ## Review gate
 
@@ -107,20 +114,32 @@ requires an independent review gate —
   writer evidence;
 - an explicit Human or assignment request.
 
-With no trigger the default flow is owner → candidate + proof → Lead
-verdict. The trigger list itself is a Human protocol decision recorded
-under Overrides.
+With no material review question or trigger, record an explicit reasoned
+not-required selection: owner → candidate + adequate proof → reasoned Lead
+verdict. A missing selection is an open decision. Tiny classification does not
+waive review. The trigger list itself is a Human protocol decision recorded
+under Overrides; a not-required selection is not such an override or waiver.
 
 When review triggers, the Lead selects the minimum sufficient independent
 mandate(s) for the material risks: one reviewer is sufficient when one
 independent lens covers the decision-changing risk; add another independent
-seat only for a distinct unresolved risk, a separation-of-concerns need or
-a difficult council — there is no default reviewer count. Seats run on the
-frozen candidate in sessions separate from the writer and are structured by
-the installed review-gate rules; Lead adjudicates every finding. Reviewer
+seat only for a distinct unresolved risk or separation-of-concerns need —
+there is no default reviewer count. Seats run on the
+frozen candidate in sessions distinct from the writer and accepting owner,
+structured by the installed review-gate rules. One seat may cover related
+questions; Lead adjudicates every material finding with reasons,
+evidence/counterevidence and residual risk within authority. Reviewer
 seats are checkers, not implementation owners, so they never take a task
-out of Lean. This protocol lists no change classes exempt from its review
-triggers; adding one is a Human protocol decision recorded under Overrides.
+out of Lean. Seat selection cannot waive an axis or seat required by the
+declared gate, and an unavailable required seat blocks the gate. This protocol
+lists no change classes exempt from its review triggers; adding one is an
+explicit authority-backed waiver decision recorded under Overrides. Required
+Human/protocol gates remain required despite unavailable seats or adverse findings.
+Record the selected mandates, authority/rule source and reason before the candidate
+round, with candidate and operative brief/scope/plan revisions. New declarations
+choose an explicit review plan; explicit `reviewPlan: null` is only a legacy
+Spec/Standards compatibility opt-in. Omitted redeclaration plans retain the prior
+decision. Source references remain claims, not proof of authority or risk truth.
 Seat titles name the seat inside taskLabel —
 `Peer — Reviewer — <task> / <lens>`, for example
 `Peer — Reviewer — <task> / Spec` or `Peer — Reviewer — <task> / Standard`,
@@ -129,7 +148,12 @@ titles.
 
 ## Correction, verdict and delivery
 
-Every recipe ends with this procedure:
+Every recipe ends with this procedure. Record a task-selected stop condition and
+authorized effort/resource bound for correction, review and challenge; there is no universal numeric recipe.
+Stop on sufficient proof, an unresolved premise/prerequisite or exhausted effort.
+Exhaustion is not ACCEPT; resolve the dependency or escalate the resource/strategy
+decision before continuing affected work. No required proof or constraint is
+satisfied merely by recording residual risk.
 
 1. Lead freezes the owner's paused candidate, verifies it — re-runs the
    established checks and pins the snapshot before and after the gate — and runs
@@ -152,20 +176,22 @@ Lean is the tiny procedure. A task qualifies only when scope and verification
 are clear, the change is easy to reverse and it changes no authority,
 delegation, lifecycle or integrity rules; Lead records the reason in one
 sentence. Lean saves preparation — one implementation owner, no plan, brief,
-formation or report files — never a triggered review gate.
+formation or report files — never a triggered review gate. Peer is the default
+writer; Lead writes only when the direct-write grant in Authority covers the task.
 
 1. Lead supplies one short inline brief: outcome and acceptance, owned/excluded
    scope, authority, base, established checks and report recipient. Record the
    formation in the same brief or timeline entry: operation, parent/child,
    workspace/cwd and ownership. Reuse policy text under the installed core's
    freshness rule; still verify current route/runtime prerequisites.
-2. Delegate to one Peer Engineer through agent-scoped create_agent with the pinned
-   workspace and notifyOnFinish, verifying parentage and placement.
-3. Engineer runs the inner loop — edit, run the checks, read the failure, fix,
+2. Use one writer: a Peer Engineer by default, delegated through agent-scoped
+   create_agent with the pinned workspace and notifyOnFinish, verifying parentage
+   and placement; or the Lead when the direct-write grant covers the task.
+3. The writer runs the inner loop — edit, run the checks, read the failure, fix,
    recheck — inside the granted scope until a stable candidate, without handing
    back per failing check. A failed premise, missing dependency, lost authority
    or budget, or Human stop ends it with REOPEN_REQUEST, DEPENDENCY_REQUEST or
-   BLOCKED. Engineer returns the artifact/diff, candidate identity, actual checks
+   BLOCKED. The writer returns the artifact/diff, candidate identity, actual checks
    with relevant outputs and exit codes, remaining risks and resources in the
    session, then pauses writes.
 4. Lead inspects the artifact and evidence, then runs Correction, verdict and
@@ -188,7 +214,7 @@ assemble.
 | Behavior | Lead; Analyst Peer only for genuinely unclear scenarios | Acceptance scenarios, exclusions, owner questions |
 | Contract | Architect Peer for new interface/state/ownership/lifecycle; Lead decides within mandate | Decision record: contract, alternatives, failure semantics, counterargument, reversal conditions |
 | Slices | Lead | Owner, base/worktree, predecessor and readiness per slice; one integration owner |
-| Build | One Peer Engineer per slice, the Lean inner loop | Slice candidate and proof; independent slices in parallel worktrees |
+| Build | One writer per slice (Peer Engineer by default; direct Lead only under the explicit Authority grant), the Lean inner loop | Slice candidate and proof; parallel isolation follows the declared merge-safe tactic |
 | Integrate | One integration writer with merge/cherry-pick grant; Test Engineer Peer only for a distinct test/fixture/E2E artifact | Evidence for the acceptance scenarios on the integrated candidate |
 | Close | Correction, verdict and delivery on the integrated candidate; findings to the owner of the affected scope (slice Engineer or integration writer) | Feature verdict, delivery receipt and what still depends on the Human |
 
@@ -251,8 +277,10 @@ whole file.
 - Lead owns workflow and dependencies: admits, chooses the recipe and records
   predecessor and readiness — B waits until A is accepted and B's base contains
   A under the delivery policy, while an independent C runs in parallel. One
-  Engineer per Lean task or Feature slice, review seats per gate, separate
-  worktrees for concurrent writers; capacity counts review seats too.
+  writer per Lean task or Feature slice (Peer Engineer by default; direct Lead
+  only under the explicit Authority grant), review seats per gate, and isolation
+  chosen after merge-safe scopes, dependencies, shared resources and actual paths
+  are declared; capacity counts review seats too.
 - Work beyond an explicitly limited lane mandate returns to the Supervisor
   with reason and evidence; the Supervisor reroutes it under the rule above or
   asks the Human, using the lane Lead's evidence rather than repeating technical
@@ -266,8 +294,7 @@ The repository harness owns external connectors/MCP, credentials, polling or
 heartbeat setup, and source-specific queue bookkeeping. This protocol consumes
 the resulting assignment; it does not prescribe a tracker integration or intake
 pipeline. If the assignment asks Supervisor to pull work, it uses those supplied
-tools within the grant and reports missing capabilities. Use beads only when
-already enabled, following installed work-tracking policy. Task ownership,
+tools within the grant and reports missing capabilities. Task ownership,
 review and delivery acceptance still follow the rules in this protocol.
 
 A lane is continuous responsibility, not an immortal session: when its context
@@ -292,6 +319,7 @@ workflow or creates a Lead type. All four recipes remain available by default.
 | Execution scope | Per assignment: repo/base, remote, writable scopes, environments and phase grants |
 | Capacity | Record parallel task and review-seat limits before admitting concurrent work |
 | Lead topology | One Lead handling the assigned work mix; split only for explicit authority or capacity needs under a Human-granted formation mandate |
+| Direct Lead write grant | None by default; the Human may record clear, reversible scope and proof/review bounds here, or grant a bounded write explicitly in an assignment |
 | Shared-state controls | Before a Transition phase: name executor, environment, rehearsal, backup/restore, window and reconciliation evidence |
 | Work state | Task source and durable checkpoint pointer: `<source and location, or none>` |
 | Delivery and completion point | As each assignment states; the task completes when its assignment's stated outcome is accepted |
@@ -316,19 +344,21 @@ reference needs write scope for it, not a protocol decision or version bump.
 
 ## Ownership and integration
 
-Inspect existing changes and active writers. Record owned/excluded scopes and return
-recipients. Concurrent writers require separate worktrees and non-overlapping scope
-ownership; otherwise serialize handback. Review only paused, stable candidates.
-Assign one integration writer, preserve unrelated changes and reverify the integrated
-candidate. Do not infer filesystem isolation from workspace IDs.
+Inspect existing changes and active writers. For concurrent work, declare
+merge-safe scopes, dependencies, shared-resource owners, actual checkout/cwd paths,
+integration owner and candidate freeze. Use the effective tactic to choose a shared
+checkout or isolation boundary; shared checkout is valid only when the tactic makes
+nonconflicting writes and resources explicit. Workspace IDs alone do not isolate.
+One moving scope has one writer; serialize overlapping writes or decompose/isolate
+them safely. Review only paused, stable candidates. Preserve unrelated changes and
+reverify the integrated candidate.
 
 Seats join the team only through agent-scoped create_agent; a prompt to a
 standalone session carries no new delegation. One team's seats share the
-assignment's workspace by default — read-only review seats included; a separate
-workspace needs a declared worktree, repository or lane-isolation reason recorded
-with its resulting paths. Keep the team→parent→workspace→worktree owner map and
-creation receipts in the owner's timeline or an authorized notes path so the
-Human can trace every lane.
+assignment's workspace by default — read-only review seats included. Where the
+chosen tactic isolates work, record the actual paths and keep the
+team→parent→workspace→worktree owner map and creation receipts in the owner's
+timeline or an authorized notes path so the Human can trace every lane.
 
 ## Candidate, verification and acceptance
 
@@ -347,7 +377,7 @@ snapshot helper or an exact commit with all relevant working changes accounted
 for; record external proof separately. Review and verdict bind to the same
 candidate.
 
-Acceptance is not Delivery or task settlement. Keep the same Engineer and
+Acceptance is not Delivery or task settlement. Keep the same write owner and
 independent review seats available for correction or re-review. A bounded task
 settles after Delivery completes and no correction or re-review remains open;
 reconcile task resources under installed monitoring rules. Settlement does not

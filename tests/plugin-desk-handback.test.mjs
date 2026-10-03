@@ -576,10 +576,21 @@ test('seatAssignmentsView: a saturated projection stays inside the limitation ca
     seats: WIRE_LIMITS.deskStatusSeats,
     handbacks: WIRE_LIMITS.deskStatusHandbacks,
   };
+  const leadRow = {
+    membershipId: '00000000-0000-0000-0000-000000000000',
+    agentId: 'agent-lead',
+    state: 'host-confirmed',
+    registeredAt: FIXED_AT,
+    role: 'lead',
+  };
   const ledger = {
+    memberships: [leadRow],
+    ownershipOffers: [],
+    ownershipAccepts: [],
     assignments: Array.from({ length: 80 }, (_, i) => ({
       assignmentId: `asg-${i}`,
       ownerAgentId: 'agent-lead',
+      ownerMembershipId: leadRow.membershipId,
       state: 'open',
       seats: Array.from({ length: 33 }, (unused, j) => ({ agentId: `seat-${i}-${j}` })),
     })),
@@ -587,7 +598,7 @@ test('seatAssignmentsView: a saturated projection stays inside the limitation ca
   };
   const projection = seatAssignmentsView(
     ledger,
-    { role: 'lead', agentId: 'agent-lead' },
+    leadRow,
     limits,
   );
   assert.equal(projection.assignments.length, 64);
@@ -975,4 +986,202 @@ test('every mutation tool answer parses its declared wire schema — success, re
   });
   const rejection = DeskRejection.parse(denied.body);
   assert.equal(rejection.code, 'AUTHORITY_REQUIRED');
+});
+
+test('brief amendments and material decisions are owner-only, CAS-bound and exactly replayable', async t => {
+  const { f, repoKey, leadConn, peerConn } = await boundPair(t);
+  const assignmentId = await registerAndAttach(t, { leadConn, peer: { agentId: 'agent-1' } });
+  const brief = (objective, extra = {}) => ({
+    objective,
+    acceptanceCriteria: ['observable result'],
+    constraints: [{ text: 'authority constraint', authorityRef: 'grant:human-1', sourceRef: 'note:source-1' }],
+    provisionalDesign: 'provisional choice',
+    assumptions: ['assumption'],
+    unknowns: ['unknown'],
+    requiredEvidence: ['candidate and checks'],
+    ownedSurfaces: ['plugin/server/desk-assignment.ts'],
+    excludedSurfaces: ['plugin/index.server.ts'],
+    dependencies: [],
+    notifications: [{ event: 'brief-amended', recipientAgentId: 'agent-1' }],
+    ...extra,
+  });
+  const amend = (requestId, body, expectedBriefRevision = 0) => call(leadConn.reader, leadConn.conn, 'slp_assignment_amend', {
+    requestId, assignmentId, expectedBriefRevision, brief: body,
+    changeReason: 'initial operative brief', authorityRef: 'grant:human-1', affectedOwners: ['agent-lead'],
+  });
+
+  const invalidBriefs = [
+    ['empty objective', { objective: '' }],
+    ['whitespace objective', { objective: ' \t\n ' }],
+    ['empty acceptance list', { acceptanceCriteria: [] }],
+    ['whitespace acceptance criterion', { acceptanceCriteria: [' \t\n '] }],
+    ['empty provisional design', { provisionalDesign: '' }],
+    ['whitespace provisional design', { provisionalDesign: ' \t\n ' }],
+  ];
+  for (const [index, [label, invalidFields]] of invalidBriefs.entries()) {
+    const rejected = await amend(`brief-invalid-${index}`, brief('valid objective', invalidFields));
+    assert.equal(rejected.body.code, 'INVALID_RECORD', `${label}: ${JSON.stringify(rejected.body)}`);
+  }
+  const afterInvalidBriefs = ledgerOf(f, repoKey);
+  assert.equal(afterInvalidBriefs.briefRevisions.filter(row => row.assignmentId === assignmentId).length, 0);
+  assert.equal(readdirEvents(f, repoKey).filter(event => event.kind === 'brief-revision-appended').length, 0);
+
+  const denied = await call(peerConn.reader, peerConn.conn, 'slp_assignment_amend', {
+    requestId: 'peer-amend', assignmentId, expectedBriefRevision: 0, brief: brief('unauthorized'),
+    changeReason: 'attempt', authorityRef: 'grant:fake', affectedOwners: [],
+  });
+  assert.equal(denied.body.code, 'AUTHORITY_REQUIRED');
+
+  const firstBody = brief('bounded operative objective');
+  const first = await amend('brief-1', firstBody);
+  assert.equal(first.body.ok, true, JSON.stringify(first.body));
+  assert.equal(first.body.revision, 1);
+  assert.match(first.body.entrySha256, /^[a-f0-9]{64}$/);
+  const replay = await amend('brief-1', firstBody);
+  assert.equal(replay.body.receiptId, first.body.receiptId);
+  const changedReplay = await amend('brief-1', brief('changed body'));
+  assert.equal(changedReplay.body.code, 'IDEMPOTENCY_CONFLICT');
+  const stale = await amend('brief-stale', brief('stale writer'), 0);
+  assert.equal(stale.body.code, 'REVISION_CONFLICT');
+
+  const secondBody = brief('amended operative objective', { unknowns: ['unknown one', 'unknown two'] });
+  const second = await amend('brief-2', secondBody, 1);
+  assert.equal(second.body.ok, true, JSON.stringify(second.body));
+  assert.equal(second.body.revision, 2);
+
+  const decision = await call(leadConn.reader, leadConn.conn, 'slp_decision_append', {
+    requestId: 'decision-1', assignmentId, expectedBriefRevision: 2, authorityRef: 'grant:human-1',
+    decision: {
+      proposition: 'choose the provisional design', ruling: 'retain provisionally', reason: 'bounded evidence',
+      supportingEvidenceRefs: ['note:support'], contraryEvidenceRefs: ['note:counter'], unresolvedRisk: 'coverage remains unknown',
+      affectedBriefRevision: 2, affectedOwners: ['agent-1'], notificationRefs: ['notify:intent'], outcomeRefs: ['outcome:pending'],
+    },
+  });
+  assert.equal(decision.body.ok, true, JSON.stringify(decision.body));
+  assert.equal(decision.body.revision, 1);
+  const decisionArgs = {
+    requestId: 'decision-1', assignmentId, expectedBriefRevision: 2, authorityRef: 'grant:human-1',
+    decision: {
+      proposition: 'choose the provisional design', ruling: 'retain provisionally', reason: 'bounded evidence',
+      supportingEvidenceRefs: ['note:support'], contraryEvidenceRefs: ['note:counter'], unresolvedRisk: 'coverage remains unknown',
+      affectedBriefRevision: 2, affectedOwners: ['agent-1'], notificationRefs: ['notify:intent'], outcomeRefs: ['outcome:pending'],
+    },
+  };
+  const replayedDecision = await call(leadConn.reader, leadConn.conn, 'slp_decision_append', decisionArgs);
+  assert.deepEqual(replayedDecision.body, decision.body, 'an exact decision replay returns the original response');
+  const changedDecisionBody = await call(leadConn.reader, leadConn.conn, 'slp_decision_append', {
+    ...decisionArgs,
+    decision: { ...decisionArgs.decision, reason: 'different request body' },
+  });
+  assert.equal(changedDecisionBody.body.code, 'IDEMPOTENCY_CONFLICT');
+  const staleAffectedBrief = await call(leadConn.reader, leadConn.conn, 'slp_decision_append', {
+    requestId: 'decision-stale-affected', assignmentId, expectedBriefRevision: 2, authorityRef: 'grant:human-1',
+    decision: { ...decisionArgs.decision, affectedBriefRevision: 1 },
+  });
+  assert.equal(staleAffectedBrief.body.code, 'REVISION_CONFLICT');
+  const staleCurrentBrief = await call(leadConn.reader, leadConn.conn, 'slp_decision_append', {
+    requestId: 'decision-stale-current', assignmentId, expectedBriefRevision: 1, authorityRef: 'grant:human-1',
+    decision: { ...decisionArgs.decision, affectedBriefRevision: 1 },
+  });
+  assert.equal(staleCurrentBrief.body.code, 'REVISION_CONFLICT');
+  const peerDecision = await call(peerConn.reader, peerConn.conn, 'slp_decision_append', {
+    ...decisionArgs, requestId: 'peer-decision',
+  });
+  assert.equal(peerDecision.body.code, 'AUTHORITY_REQUIRED');
+
+  const read = ledgerOf(f, repoKey);
+  assert.equal(read.briefRevisions.filter(row => row.assignmentId === assignmentId).length, 2);
+  assert.equal(read.decisionEntries.filter(row => row.assignmentId === assignmentId).length, 1);
+});
+
+test('workflow read gives role-neutral access to attached live seats and pins every page', async t => {
+  const { f, git, repoKey, peer, leadConn, peerConn } = await boundPair(t);
+  const assignmentId = await registerAndAttach(t, { leadConn, peer: { agentId: 'agent-1' } });
+  const store = seedStore(f);
+  const current = ledgerOf(f, repoKey);
+  const readerLead = memberRow('receiving-lead-handle', { role: 'lead', agentId: 'agent-lead-2' });
+  const unattachedLead = memberRow('unattached-lead-handle', { role: 'lead', agentId: 'agent-lead-3' });
+  const unattachedPeer = memberRow('unattached-peer-handle', { role: 'peer', agentId: 'agent-2' });
+  await seedMemberships(store, repoOf(git), [...current.memberships, readerLead, unattachedLead, unattachedPeer]);
+  const attach = await call(leadConn.reader, leadConn.conn, 'slp_assignment_attach', {
+    requestId: 'attach-receiving-lead', assignmentId, agentId: 'agent-lead-2',
+  });
+  assert.equal(attach.body.ok, true, JSON.stringify(attach.body));
+  const receiverConn = await handshake(f.paths.socketPath, HELLO('receiving-lead-handle'));
+  t.after(() => receiverConn.conn.destroy());
+  assert.equal(receiverConn.ack.ok, true, JSON.stringify(receiverConn.ack));
+  const foreignLeadConn = await handshake(f.paths.socketPath, HELLO('unattached-lead-handle'));
+  t.after(() => foreignLeadConn.conn.destroy());
+  assert.equal(foreignLeadConn.ack.ok, true, JSON.stringify(foreignLeadConn.ack));
+  const foreignPeerConn = await handshake(f.paths.socketPath, HELLO('unattached-peer-handle'));
+  t.after(() => foreignPeerConn.conn.destroy());
+  assert.equal(foreignPeerConn.ack.ok, true, JSON.stringify(foreignPeerConn.ack));
+
+  const brief = (objective) => ({
+    objective, acceptanceCriteria: ['done'], constraints: [], provisionalDesign: 'open', assumptions: [],
+    unknowns: [], requiredEvidence: [], ownedSurfaces: [], excludedSurfaces: [], dependencies: [], notifications: [],
+  });
+  for (const [requestId, expectedBriefRevision, body] of [
+    ['b1', 0, brief('first')], ['b2', 1, brief('second')],
+  ]) {
+    const result = await call(leadConn.reader, leadConn.conn, 'slp_assignment_amend', {
+      requestId, assignmentId, expectedBriefRevision, brief: body,
+      changeReason: 'revise', authorityRef: 'grant:human-1', affectedOwners: [],
+    });
+    assert.equal(result.body.ok, true, JSON.stringify(result.body));
+  }
+
+  const firstPage = await call(receiverConn.reader, receiverConn.conn, 'slp_workflow_get', {
+    assignmentId, section: 'briefs', expectedLedgerRevision: null, expectedBriefRevision: 2, cursor: null, limit: 1,
+  });
+  assert.equal(firstPage.body.ok, true, JSON.stringify(firstPage.body));
+  assert.equal(firstPage.body.currentBrief.revision, 2);
+  assert.equal(firstPage.body.items.length, 1);
+  assert.equal(firstPage.body.total, 2);
+  assert.equal(firstPage.body.omittedAfter, 1);
+  assert.ok(firstPage.body.nextCursor);
+  assert.equal(firstPage.body.acceptance, 'not-established-by-this-view');
+
+  const peerRead = await call(peerConn.reader, peerConn.conn, 'slp_workflow_get', {
+    assignmentId, section: 'briefs', expectedLedgerRevision: firstPage.body.ledgerRevision,
+    expectedBriefRevision: 2, cursor: null, limit: 1,
+  });
+  assert.equal(peerRead.body.ok, true, JSON.stringify(peerRead.body));
+  assert.equal(peerRead.body.currentBrief.revision, 2, 'an attached live Peer can read the same private brief');
+
+  const privateRead = { assignmentId, section: 'briefs', expectedLedgerRevision: null, expectedBriefRevision: null, cursor: null, limit: 1 };
+  for (const [label, connection] of [['unattached Lead', foreignLeadConn], ['unattached Peer', foreignPeerConn]]) {
+    const deniedRead = await call(connection.reader, connection.conn, 'slp_workflow_get', privateRead);
+    assert.equal(deniedRead.body.code, 'AUTHORITY_REQUIRED', `${label}: ${JSON.stringify(deniedRead.body)}`);
+    assert.equal(deniedRead.body.currentBrief, undefined, 'the rejection carries no private brief value');
+  }
+
+  const secondPage = await call(receiverConn.reader, receiverConn.conn, 'slp_workflow_get', {
+    assignmentId, section: 'briefs', expectedLedgerRevision: firstPage.body.ledgerRevision,
+    expectedBriefRevision: 2, cursor: firstPage.body.nextCursor, limit: 1,
+  });
+  assert.equal(secondPage.body.ok, true, JSON.stringify(secondPage.body));
+  assert.equal(secondPage.body.omittedBefore, 1);
+  assert.equal(secondPage.body.omittedAfter, 0);
+  assert.equal(secondPage.body.items.length, 1);
+
+  const ownerOnly = await call(peerConn.reader, peerConn.conn, 'slp_assignment_amend', {
+    requestId: 'attached-peer-amend', assignmentId, expectedBriefRevision: 2,
+    brief: brief('peer tries'), changeReason: 'attempt', authorityRef: 'grant:fake', affectedOwners: [],
+  });
+  assert.equal(ownerOnly.body.code, 'AUTHORITY_REQUIRED');
+
+  const beforeRevocation = ledgerOf(f, repoKey);
+  const revokedMemberships = beforeRevocation.memberships.map(row => row.membershipId === peer.membershipId
+    ? { ...row, state: 'revoked', revokedAt: FIXED_AT, revokeReason: 'archived' }
+    : row);
+  const revoked = await store.transact(repoKey, {
+    repo: repoOf(git), actorKey: 'desk:hook', assignmentId: 'unassigned',
+    requestId: `revoke-peer-${randomUUID()}`, command: { kind: 'seed' },
+  }, () => ({ ok: true, events: [], memberships: revokedMemberships }));
+  assert.equal(revoked.ok, true, JSON.stringify(revoked));
+  const revokedRead = await call(peerConn.reader, peerConn.conn, 'slp_workflow_get', privateRead);
+  assert.equal(revokedRead.body.code, 'STALE_EPOCH');
+  assert.ok(ledgerOf(f, repoKey).assignments.find(row => row.assignmentId === assignmentId).seats.some(seat => seat.membershipId === peer.membershipId),
+    'revocation preserves the historical assignment seat binding');
 });

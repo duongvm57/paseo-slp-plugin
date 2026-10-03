@@ -14,11 +14,12 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { createHash, randomUUID } from 'node:crypto';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createDeskStore, LEDGER_LIMITS, MIGRATIONS, repoKeyFor } from '../plugin/server/desk-store.ts';
+import { decideDeskAssignment } from '../plugin/server/desk-assignment.ts';
 import { canonicalJson, canonicalSha256, sha256Hex } from '../plugin/server/config-view.ts';
 import { WIRE_LIMITS } from '../plugin/shared/enforcement.ts';
 
@@ -258,7 +259,7 @@ test('§2.2: decide with a valid memberships table → read returns it, same com
   const read = store.read(REPO_KEY);
   assert.equal(read.state, 'ok');
   assert.deepEqual(read.ledger.memberships, [row]);
-  assert.equal(read.persistedSchemaVersion, 6);
+  assert.equal(read.persistedSchemaVersion, 8, 'a fresh transaction persists the current additive schema');
 });
 
 test('§2.2: memberships with a bad schema → INVALID_RECORD, file bytes unchanged, no request record', async t => {
@@ -383,7 +384,7 @@ test('migration: a valid v1 ledger reads ok with persistedSchemaVersion 1', t =>
   assert.equal(readFileSync(ledgerPath(dir), 'utf8'), JSON.stringify(v1), 'read never rewrites the file');
 });
 
-test('migration: the first transact after a v1 read writes v6 + schema-migrated and keeps requests', async t => {
+test('migration: the first transact after a v1 read writes v7 + schema-migrated and keeps requests', async t => {
   const dir = fixture(t);
   const store = freshStore(dir);
   mkdirSync(repoDir(dir), { recursive: true });
@@ -395,7 +396,7 @@ test('migration: the first transact after a v1 read writes v6 + schema-migrated 
   }));
   assert.equal(result.ok, true);
   const onDisk = JSON.parse(readFileSync(ledgerPath(dir), 'utf8'));
-  assert.equal(onDisk.schemaVersion, 6);
+  assert.equal(onDisk.schemaVersion, 8);
   assert.deepEqual(onDisk.memberships, []);
   assert.deepEqual(onDisk.assignments, []);
   assert.deepEqual(onDisk.candidates, []);
@@ -404,7 +405,7 @@ test('migration: the first transact after a v1 read writes v6 + schema-migrated 
   // The migration event is in the chain: read it back from the segments.
   const read = store.read(REPO_KEY);
   assert.equal(read.state, 'ok');
-  assert.equal(read.persistedSchemaVersion, 6);
+  assert.equal(read.persistedSchemaVersion, 8);
   // Replay a pre-bump requestId — idempotency survives the bump.
   const replay = await store.transact(REPO_KEY, envelopeV2(), () => {
     throw new Error('decide must not run on a replay');
@@ -423,20 +424,20 @@ test('migration: MIGRATIONS[1] is pure and total — input untouched, output add
   assert.equal(JSON.stringify(v1), snapshot, 'the input object is never mutated');
 });
 
-test('header v7 → future', t => {
+test('header v8 → future', t => {
   const dir = fixture(t);
   const store = freshStore(dir);
   mkdirSync(repoDir(dir), { recursive: true });
-  const body = JSON.stringify({ format: 'paseo-slp/enforcement', schemaVersion: 7, anything: 'goes' });
+  const body = JSON.stringify({ format: 'paseo-slp/enforcement', schemaVersion: 9, anything: 'goes' });
   writeFileSync(ledgerPath(dir), body);
   const read = store.read(REPO_KEY);
   assert.equal(read.state, 'future');
   assert.equal(read.diagnostics.code, 'future-version');
-  assert.equal(read.diagnostics.schemaVersion, 7);
+  assert.equal(read.diagnostics.schemaVersion, 9);
   assert.equal(readFileSync(ledgerPath(dir), 'utf8'), body, 'a future ledger is never modified');
 });
 
-test('fresh commits write v6 directly with empty tables and no migration event', async t => {
+test('fresh commits write v7 directly with empty tables and no migration event', async t => {
   const dir = fixture(t);
   const store = freshStore(dir);
   const result = await store.transact(REPO_KEY, envelopeV2(), () => ({
@@ -445,13 +446,15 @@ test('fresh commits write v6 directly with empty tables and no migration event',
   }));
   assert.equal(result.ok, true);
   const onDisk = JSON.parse(readFileSync(ledgerPath(dir), 'utf8'));
-  assert.equal(onDisk.schemaVersion, 6);
+  assert.equal(onDisk.schemaVersion, 8);
   assert.deepEqual(onDisk.memberships, []);
   assert.deepEqual(onDisk.assignments, []);
   assert.deepEqual(onDisk.candidates, []);
   assert.deepEqual(onDisk.handbacks, []);
+  assert.deepEqual(onDisk.briefRevisions, []);
+  assert.deepEqual(onDisk.decisionEntries, []);
   const read = store.read(REPO_KEY);
-  assert.equal(read.persistedSchemaVersion, 6);
+  assert.equal(read.persistedSchemaVersion, 8);
   // No schema-migrated event on a fresh ledger: the first segment covers
   // exactly the decide's own event.
   assert.deepEqual(result.receipt.eventSeqs, [1, 1]);
@@ -488,13 +491,13 @@ test('E-P2C-2 (i) reject-then-success: the rejection keeps v1 with no segment; t
   }));
   assert.equal(ok.ok, true);
   const afterSuccess = JSON.parse(readFileSync(ledgerPath(dir), 'utf8'));
-  assert.equal(afterSuccess.schemaVersion, 6, 'the first successful commit migrates');
+  assert.equal(afterSuccess.schemaVersion, 8, 'the first successful commit migrates');
   assert.deepEqual(afterSuccess.memberships, []);
   assert.deepEqual(afterSuccess.assignments, []);
   // The chain carries schema-migrated before the decide's own event.
   const read = store.read(REPO_KEY);
   assert.equal(read.state, 'ok');
-  assert.equal(read.persistedSchemaVersion, 6);
+  assert.equal(read.persistedSchemaVersion, 8);
   const segment = readFileSync(join(eventsDir(dir), '1-2.jsonl'), 'utf8');
   const kinds = segment.trim().split('\n').map(line => JSON.parse(line).kind);
   assert.deepEqual(kinds, ['schema-migrated', 'test.event']);
@@ -511,11 +514,11 @@ test('E-P2C-2 (ii) success-first: migrate immediately; a later rejection adds no
   }));
   assert.equal(ok.ok, true);
   const afterSuccess = JSON.parse(readFileSync(ledgerPath(dir), 'utf8'));
-  assert.equal(afterSuccess.schemaVersion, 6);
+  assert.equal(afterSuccess.schemaVersion, 8);
   const rejected = await store.transact(REPO_KEY, envelopeV2({ requestId: 'rej-1' }), decideReject());
   assert.equal(rejected.ok, false);
   const afterRejection = JSON.parse(readFileSync(ledgerPath(dir), 'utf8'));
-  assert.equal(afterRejection.schemaVersion, 6, 'already migrated — the rejection changes nothing');
+  assert.equal(afterRejection.schemaVersion, 8, 'already migrated — the rejection changes nothing');
   assert.equal(afterRejection.requests.length, 3);
   const read = store.read(REPO_KEY);
   const last = read.ledger.requests.at(-1);
@@ -614,7 +617,7 @@ test('migration: the first commit on a v2 ledger writes v3 + schema-migrated, ta
   }));
   assert.equal(result.ok, true);
   const onDisk = JSON.parse(readFileSync(ledgerPath(dir), 'utf8'));
-  assert.equal(onDisk.schemaVersion, 6);
+  assert.equal(onDisk.schemaVersion, 8);
   assert.deepEqual(onDisk.assignments, []);
   assert.deepEqual(onDisk.candidates, []);
   assert.deepEqual(onDisk.handbacks, []);
@@ -625,7 +628,7 @@ test('migration: the first commit on a v2 ledger writes v3 + schema-migrated, ta
   const kinds = segment.trim().split('\n').map(line => JSON.parse(line).kind);
   assert.deepEqual(kinds, ['schema-migrated', 'test.event']);
   const migrated = JSON.parse(segment.trim().split('\n')[0]);
-  assert.deepEqual(migrated.payload, { from: 2, to: 6 });
+  assert.deepEqual(migrated.payload, { from: 2, to: 8 });
 });
 
 test('migration: MIGRATIONS[2] is pure and total — input untouched, output adds three empty tables', t => {
@@ -659,13 +662,13 @@ test('migration: a v1 ledger chains v1→v2→v3 on read and on commit', async t
   }));
   assert.equal(result.ok, true);
   const onDisk = JSON.parse(readFileSync(ledgerPath(dir), 'utf8'));
-  assert.equal(onDisk.schemaVersion, 6);
+  assert.equal(onDisk.schemaVersion, 8);
   assert.deepEqual(onDisk.assignments, []);
   assert.deepEqual(onDisk.settlements, []);
   const segment = readFileSync(join(eventsDir(dir), '1-2.jsonl'), 'utf8');
   const migrated = JSON.parse(segment.trim().split('\n')[0]);
   assert.equal(migrated.kind, 'schema-migrated');
-  assert.deepEqual(migrated.payload, { from: 1, to: 6 });
+  assert.deepEqual(migrated.payload, { from: 1, to: 8 });
 });
 
 // ---------------------------------------------------------------------------
@@ -872,7 +875,7 @@ test('migration: a rejection on a v2 ledger commits the v2 shape — bump waits 
   }));
   assert.equal(ok.ok, true);
   const migrated = JSON.parse(readFileSync(ledgerPath(dir), 'utf8'));
-  assert.equal(migrated.schemaVersion, 6);
+  assert.equal(migrated.schemaVersion, 8);
   assert.deepEqual(migrated.assignments, []);
   assert.deepEqual(migrated.settlements, []);
 });
@@ -1629,7 +1632,7 @@ test('migration: the first commit on a v3 ledger writes v5 + schema-migrated, ta
   }));
   assert.equal(result.ok, true);
   const onDisk = JSON.parse(readFileSync(ledgerPath(dir), 'utf8'));
-  assert.equal(onDisk.schemaVersion, 6);
+  assert.equal(onDisk.schemaVersion, 8);
   assert.deepEqual(onDisk.settlements, []);
   assert.deepEqual(onDisk.scopes, []);
   assert.deepEqual(onDisk.scopeReviews, []);
@@ -1641,7 +1644,7 @@ test('migration: the first commit on a v3 ledger writes v5 + schema-migrated, ta
   const kinds = segment.trim().split('\n').map(line => JSON.parse(line).kind);
   assert.deepEqual(kinds, ['schema-migrated', 'test.event']);
   const migrated = JSON.parse(segment.trim().split('\n')[0]);
-  assert.deepEqual(migrated.payload, { from: 3, to: 6 });
+  assert.deepEqual(migrated.payload, { from: 3, to: 8 });
 });
 
 test('migration: MIGRATIONS[3] is pure and total — input untouched, output adds the empty table', t => {
@@ -1686,13 +1689,13 @@ test('migration: a v2 ledger chains v2→v3→v4→v5 on read and on commit', as
   }));
   assert.equal(result.ok, true);
   const onDisk = JSON.parse(readFileSync(ledgerPath(dir), 'utf8'));
-  assert.equal(onDisk.schemaVersion, 6);
+  assert.equal(onDisk.schemaVersion, 8);
   assert.deepEqual(onDisk.settlements, []);
   assert.deepEqual(onDisk.scopes, []);
   const segment = readFileSync(join(eventsDir(dir), '1-2.jsonl'), 'utf8');
   const migrated = JSON.parse(segment.trim().split('\n')[0]);
   assert.equal(migrated.kind, 'schema-migrated');
-  assert.deepEqual(migrated.payload, { from: 2, to: 6 });
+  assert.deepEqual(migrated.payload, { from: 2, to: 8 });
 });
 
 test('migration: a v1 ledger chains v1→v2→v3→v4→v5 on read and on commit', async t => {
@@ -1715,16 +1718,16 @@ test('migration: a v1 ledger chains v1→v2→v3→v4→v5 on read and on commit
   }));
   assert.equal(result.ok, true);
   const onDisk = JSON.parse(readFileSync(ledgerPath(dir), 'utf8'));
-  assert.equal(onDisk.schemaVersion, 6);
+  assert.equal(onDisk.schemaVersion, 8);
   const segment = readFileSync(join(eventsDir(dir), '1-2.jsonl'), 'utf8');
   const migrated = JSON.parse(segment.trim().split('\n')[0]);
-  assert.deepEqual(migrated.payload, { from: 1, to: 6 });
+  assert.deepEqual(migrated.payload, { from: 1, to: 8 });
 });
 
 test('migration: a future-version ledger still fails closed', t => {
   const dir = fixture(t);
   mkdirSync(repoDir(dir), { recursive: true });
-  writeFileSync(ledgerPath(dir), JSON.stringify({ ...v3Ledger(), schemaVersion: 7 }));
+  writeFileSync(ledgerPath(dir), JSON.stringify({ ...v3Ledger(), schemaVersion: 9 }));
   const store = freshStore(dir);
   const read = store.read(REPO_KEY);
   assert.equal(read.state, 'future');
@@ -1752,7 +1755,7 @@ test('migration: a rejection on a v3 ledger commits the v3 shape — bump waits 
   }));
   assert.equal(ok.ok, true);
   const migrated = JSON.parse(readFileSync(ledgerPath(dir), 'utf8'));
-  assert.equal(migrated.schemaVersion, 6);
+  assert.equal(migrated.schemaVersion, 8);
   assert.deepEqual(migrated.settlements, []);
   assert.deepEqual(migrated.scopes, []);
 });
@@ -2230,7 +2233,7 @@ test('migration: a valid v4 ledger reads ok with persistedSchemaVersion 4 and em
   assert.equal(readFileSync(ledgerPath(dir), 'utf8'), JSON.stringify(v4), 'read never rewrites the file');
 });
 
-test('migration: the first commit on a v4 ledger writes v6 + schema-migrated, tables byte-preserved', async t => {
+test('migration: the first commit on a v4 ledger writes v7 + schema-migrated, tables byte-preserved', async t => {
   const dir = fixture(t);
   mkdirSync(repoDir(dir), { recursive: true });
   const v4 = v4Ledger();
@@ -2242,7 +2245,7 @@ test('migration: the first commit on a v4 ledger writes v6 + schema-migrated, ta
   }));
   assert.equal(result.ok, true);
   const onDisk = JSON.parse(readFileSync(ledgerPath(dir), 'utf8'));
-  assert.equal(onDisk.schemaVersion, 6);
+  assert.equal(onDisk.schemaVersion, 8);
   assert.deepEqual(onDisk.scopes, []);
   assert.deepEqual(onDisk.scopeReviews, []);
   assert.deepEqual(onDisk.scopeTransitions, []);
@@ -2255,7 +2258,7 @@ test('migration: the first commit on a v4 ledger writes v6 + schema-migrated, ta
   const kinds = segment.trim().split('\n').map(line => JSON.parse(line).kind);
   assert.deepEqual(kinds, ['schema-migrated', 'test.event']);
   const migrated = JSON.parse(segment.trim().split('\n')[0]);
-  assert.deepEqual(migrated.payload, { from: 4, to: 6 });
+  assert.deepEqual(migrated.payload, { from: 4, to: 8 });
 });
 
 test('migration: a rejection on a v4 ledger commits the v4 shape — the bump waits for success', async t => {
@@ -2276,7 +2279,7 @@ test('migration: a rejection on a v4 ledger commits the v4 shape — the bump wa
   }));
   assert.equal(ok.ok, true);
   const migrated = JSON.parse(readFileSync(ledgerPath(dir), 'utf8'));
-  assert.equal(migrated.schemaVersion, 6);
+  assert.equal(migrated.schemaVersion, 8);
   assert.deepEqual(migrated.scopes, []);
   assert.deepEqual(migrated.rollouts, []);
 });
@@ -2333,10 +2336,17 @@ const graphTablesV5 = g => ({
   memberships: [g.lead, g.seat, g.reviewer],
   assignments: [g.assignment],
   candidates: [g.candidate],
-  scopes: [g.scope],
-  scopeTransitions: [...g.transitions, g.gate],
-  scopeReviews: g.reviews,
+  scopes: [scopeRowV7Neutral(g.scope)],
+  scopeTransitions: [...g.transitions, g.gate].map(scopeTransitionRowV7Neutral),
+  scopeReviews: g.reviews.map(scopeReviewRowV7Neutral),
 });
+
+// These older graph fixtures predate v7 pins. When they exercise a fresh
+// current-schema transaction, supply the exact neutral values that v6→v7
+// migration would add; legacy v5/v6 fixture builders above remain unchanged.
+const scopeRowV7Neutral = row => ({ briefRevision: 0, ownership: null, reviewPlan: null, ...row });
+const scopeReviewRowV7Neutral = row => ({ lensId: null, briefRevision: 0, mandateSha256: null, ...row });
+const scopeTransitionRowV7Neutral = row => ({ briefRevision: 0, mandateSha256: null, ...row });
 
 test('channel: a valid P4 graph commits and reads back', async t => {
   const dir = fixture(t);
@@ -2378,11 +2388,11 @@ test('refinement: a scope on a foreign assignment or non-owner owner fails close
   const dir = fixture(t);
   const store = freshStore(dir);
   const g = graphV5();
-  const foreign = { ...g.scope, assignmentId: 'asg-ghost' };
+  const foreign = scopeRowV7Neutral({ ...g.scope, assignmentId: 'asg-ghost' });
   const result = await seedTables(store, { ...graphTablesV5(g), scopes: [foreign] });
   assert.equal(result.ok, false);
   assert.match(result.message, /refinement/);
-  const wrongOwner = { ...g.scope, ownerAgentId: 'agent-9' };
+  const wrongOwner = scopeRowV7Neutral({ ...g.scope, ownerAgentId: 'agent-9' });
   const result2 = await seedTables(store, { ...graphTablesV5(g), scopes: [wrongOwner] });
   assert.equal(result2.ok, false);
 });
@@ -2770,6 +2780,17 @@ function v5Ledger(over = {}) {
   };
 }
 
+function v6Ledger(over = {}) {
+  return {
+    ...v5Ledger(over),
+    schemaVersion: 6,
+    checkDefinitions: [],
+    checkRuns: [],
+    rollouts: [],
+    rolloutTransitions: [],
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Migration — additive v5→v6; old tables byte-preserved.
 // ---------------------------------------------------------------------------
@@ -2793,11 +2814,11 @@ test('migration: a valid v5 ledger reads ok with persistedSchemaVersion 5 and em
   assert.deepEqual(read.ledger.checkRuns, []);
   assert.deepEqual(read.ledger.rollouts, []);
   assert.deepEqual(read.ledger.rolloutTransitions, []);
-  assert.deepEqual(read.ledger.scopes, v5.scopes, 'P4 tables migrate verbatim');
+  assert.deepEqual(read.ledger.scopes, v5.scopes.map(row => ({ ...row, briefRevision: 0, ownership: null, reviewPlan: null })), 'legacy P4 table data is preserved with neutral v7 pins');
   assert.equal(readFileSync(ledgerPath(dir), 'utf8'), JSON.stringify(v5), 'read never rewrites the file');
 });
 
-test('migration: the first commit on a v5 ledger writes v6 + schema-migrated, tables byte-preserved', async t => {
+test('migration: the first commit on a v5 ledger writes v7 + schema-migrated, tables byte-preserved', async t => {
   const dir = fixture(t);
   mkdirSync(repoDir(dir), { recursive: true });
   const v5 = v5Ledger();
@@ -2809,7 +2830,7 @@ test('migration: the first commit on a v5 ledger writes v6 + schema-migrated, ta
   }));
   assert.equal(result.ok, true);
   const onDisk = JSON.parse(readFileSync(ledgerPath(dir), 'utf8'));
-  assert.equal(onDisk.schemaVersion, 6);
+  assert.equal(onDisk.schemaVersion, 8);
   assert.deepEqual(onDisk.checkDefinitions, []);
   assert.deepEqual(onDisk.checkRuns, []);
   assert.deepEqual(onDisk.rollouts, []);
@@ -2819,7 +2840,7 @@ test('migration: the first commit on a v5 ledger writes v6 + schema-migrated, ta
   const kinds = segment.trim().split('\n').map(line => JSON.parse(line).kind);
   assert.deepEqual(kinds, ['schema-migrated', 'test.event']);
   const migrated = JSON.parse(segment.trim().split('\n')[0]);
-  assert.deepEqual(migrated.payload, { from: 5, to: 6 });
+  assert.deepEqual(migrated.payload, { from: 5, to: 8 });
 });
 
 test('migration: a rejection on a v5 ledger commits the v5 shape — the bump waits for success', async t => {
@@ -2839,7 +2860,7 @@ test('migration: a rejection on a v5 ledger commits the v5 shape — the bump wa
   }));
   assert.equal(ok.ok, true);
   const migrated = JSON.parse(readFileSync(ledgerPath(dir), 'utf8'));
-  assert.equal(migrated.schemaVersion, 6);
+  assert.equal(migrated.schemaVersion, 8);
   assert.deepEqual(migrated.checkRuns, []);
 });
 
@@ -2855,14 +2876,369 @@ test('migration: MIGRATIONS[5] is pure and total — input untouched, output add
   assert.equal(JSON.stringify(v5), snapshot, 'the input object is never mutated');
 });
 
+test('migration: a valid v6 ledger reads with neutral v7 pins and keeps legacy two-axis rows', t => {
+  const dir = fixture(t);
+  mkdirSync(repoDir(dir), { recursive: true });
+  const graph = graphV6();
+  const reviewer = membershipRow({ agentId: 'agent-2', bindingHandleSha256: '9'.repeat(64) });
+  const assignment = { ...graph.assignment, seats: [...graph.assignment.seats, { agentId: reviewer.agentId, membershipId: reviewer.membershipId }] };
+  const legacy = v6Ledger({
+    memberships: [graph.lead, graph.seat, reviewer],
+    assignments: [assignment],
+    candidates: [graph.candidate],
+    scopes: [graph.scope],
+    scopeReviews: [scopeReviewRowV6({ reviewerSeatId: reviewer.membershipId })],
+    scopeTransitions: [scopeTransitionRowV6()],
+  });
+  writeFileSync(ledgerPath(dir), JSON.stringify(legacy));
+  const store = freshStore(dir);
+  const read = store.read(REPO_KEY);
+  assert.equal(read.state, 'ok', JSON.stringify(read));
+  assert.equal(read.persistedSchemaVersion, 6);
+  assert.deepEqual(read.ledger.briefRevisions, []);
+  assert.deepEqual(read.ledger.decisionEntries, []);
+  assert.deepEqual(read.ledger.scopes[0], { ...legacy.scopes[0], briefRevision: 0, ownership: null, reviewPlan: null });
+  assert.deepEqual(read.ledger.scopeReviews[0], { ...legacy.scopeReviews[0], lensId: null, briefRevision: 0, mandateSha256: null });
+  assert.deepEqual(read.ledger.scopeTransitions[0], { ...legacy.scopeTransitions[0], briefRevision: 0, mandateSha256: null });
+  assert.equal(readFileSync(ledgerPath(dir), 'utf8'), JSON.stringify(legacy), 'read never migrates disk bytes');
+});
+
+test('migration: the first successful v6 commit writes only the two additive v7 tables', async t => {
+  const dir = fixture(t);
+  mkdirSync(repoDir(dir), { recursive: true });
+  writeFileSync(ledgerPath(dir), JSON.stringify(v6Ledger()));
+  const store = freshStore(dir);
+  const result = await store.transact(REPO_KEY, envelope({ requestId: 'after-v6' }), () => ({
+    ok: true, events: [{ kind: 'test.event', payload: { v: 7 } }],
+  }));
+  assert.equal(result.ok, true);
+  const onDisk = JSON.parse(readFileSync(ledgerPath(dir), 'utf8'));
+  assert.equal(onDisk.schemaVersion, 8);
+  assert.deepEqual(onDisk.briefRevisions, []);
+  assert.deepEqual(onDisk.decisionEntries, []);
+  assert.deepEqual(onDisk.rollouts, []);
+  const events = readFileSync(join(eventsDir(dir), '1-2.jsonl'), 'utf8').trim().split('\n').map(line => JSON.parse(line));
+  assert.deepEqual(events.map(event => event.kind), ['schema-migrated', 'test.event']);
+  assert.deepEqual(events[0].payload, { from: 6, to: 8 });
+});
+
+test('migration: MIGRATIONS[6] is pure and total — exactly briefRevisions and decisionEntries are added', () => {
+  const v6 = v6Ledger();
+  const snapshot = JSON.stringify(v6);
+  const migrated = MIGRATIONS[6](v6);
+  assert.equal(migrated.schemaVersion, 7);
+  assert.deepEqual(migrated.briefRevisions, []);
+  assert.deepEqual(migrated.decisionEntries, []);
+  assert.deepEqual(migrated.rollouts, v6.rollouts);
+  assert.deepEqual(migrated.rolloutTransitions, v6.rolloutTransitions);
+  assert.equal(JSON.stringify(v6), snapshot, 'the input object is never mutated');
+});
+
+// ---------------------------------------------------------------------------
+// v7 immutable operative-history proof — independent hash oracle plus fresh
+// persisted reads after corruption. Tables are treated as unordered streams.
+// ---------------------------------------------------------------------------
+
+function independentCanonicalValue(value) {
+  if (Array.isArray(value)) return value.map(independentCanonicalValue);
+  if (value !== null && typeof value === 'object') {
+    return Object.fromEntries(Object.keys(value).sort().map(key => [key, independentCanonicalValue(value[key])]));
+  }
+  return value;
+}
+
+function independentCanonicalSha256(value) {
+  const bytes = `${JSON.stringify(independentCanonicalValue(value))}\n`;
+  return createHash('sha256').update(bytes, 'utf8').digest('hex');
+}
+
+function independentEventRows(dir) {
+  const names = readdirSync(eventsDir(dir))
+    .filter(name => /^\d+-\d+\.jsonl$/.test(name))
+    .sort((left, right) => Number(left.match(/^(\d+)-/)[1]) - Number(right.match(/^(\d+)-/)[1]));
+  return names.flatMap(name => readFileSync(join(eventsDir(dir), name), 'utf8')
+    .split('\n').filter(Boolean).map(line => JSON.parse(line)));
+}
+
+function independentEventFiles(dir) {
+  return readdirSync(eventsDir(dir)).sort().map(name => [name, readFileSync(join(eventsDir(dir), name), 'utf8')]);
+}
+
+function assertIndependentEventChain(events, ledger) {
+  let previousSha256 = null;
+  for (const [index, event] of events.entries()) {
+    assert.equal(event.seq, index + 1, 'event sequence is complete and contiguous from one');
+    assert.equal(event.prevSha256, previousSha256, `event ${event.seq} links to the prior event`);
+    const { sha256, ...unsigned } = event;
+    assert.equal(sha256, independentCanonicalSha256(unsigned), `event ${event.seq} has the independent canonical digest`);
+    previousSha256 = sha256;
+  }
+  assert.equal(ledger.lastEventSeq, events.length);
+  assert.equal(ledger.lastEventSha256, previousSha256);
+}
+
+function v7Brief(objective) {
+  return {
+    objective,
+    acceptanceCriteria: ['observable result'],
+    constraints: [],
+    provisionalDesign: 'retain the stated provisional choice',
+    assumptions: [],
+    unknowns: [],
+    requiredEvidence: [],
+    ownedSurfaces: [],
+    excludedSurfaces: [],
+    dependencies: [],
+    notifications: [],
+  };
+}
+
+function v7Decision(revision) {
+  return {
+    proposition: `decision proposition ${revision}`,
+    ruling: `ruling ${revision}`,
+    reason: `reason ${revision}`,
+    supportingEvidenceRefs: [`evidence:support-${revision}`],
+    contraryEvidenceRefs: [`evidence:contrary-${revision}`],
+    unresolvedRisk: `risk ${revision}`,
+    affectedBriefRevision: 2,
+    affectedOwners: ['agent-lead'],
+    notificationRefs: [`notification:${revision}`],
+    outcomeRefs: [`outcome:${revision}`],
+  };
+}
+
+async function seedV7History(t) {
+  const dir = fixture(t);
+  const store = freshStore(dir);
+  const lead = membershipRow({ role: 'lead', agentId: 'agent-lead', bindingHandleSha256: 'd'.repeat(64) });
+  const assignment = assignmentRow({ ownerMembershipId: lead.membershipId, ownerAgentId: lead.agentId, seats: [] });
+  const seed = await store.transact(REPO_KEY, envelope({
+    actorKey: 'desk:hook', assignmentId: 'unassigned', requestId: `seed-v7-${randomUUID()}`, command: { kind: 'seed' },
+  }), () => ({ ok: true, events: [], memberships: [lead], assignments: [assignment] }));
+  assert.equal(seed.ok, true, `seed persisted assignment: ${JSON.stringify(seed)}`);
+
+  const commit = async command => store.transact(REPO_KEY, envelope({
+    actorKey: `agent:${lead.agentId}`,
+    assignmentId: assignment.assignmentId,
+    requestId: command.requestId,
+    command,
+  }), decideDeskAssignment);
+  for (const revision of [1, 2]) {
+    const requestId = `v7-brief-${revision}`;
+    const result = await commit({
+      kind: 'assignment.amend', actorAgentId: lead.agentId, assignmentId: assignment.assignmentId,
+      requestId, expectedBriefRevision: revision - 1, brief: v7Brief(`structured outcome ${revision}`),
+      changeReason: `brief revision ${revision}`, authorityRef: 'grant:test', affectedOwners: [],
+    });
+    assert.equal(result.ok, true, `persist brief revision ${revision}: ${JSON.stringify(result)}`);
+  }
+  for (const revision of [1, 2]) {
+    const requestId = `v7-decision-${revision}`;
+    const result = await commit({
+      kind: 'decision.append', actorAgentId: lead.agentId, assignmentId: assignment.assignmentId,
+      requestId, expectedBriefRevision: 2, authorityRef: 'grant:test', decision: v7Decision(revision),
+    });
+    assert.equal(result.ok, true, `persist decision revision ${revision}: ${JSON.stringify(result)}`);
+  }
+  return { dir, store, lead, assignment };
+}
+
+test('v7 history: persisted brief and decision tables bind independent digests, lineage and event sequence', async t => {
+  const { dir, store, assignment } = await seedV7History(t);
+  const read = store.read(REPO_KEY);
+  assert.equal(read.state, 'ok', JSON.stringify(read));
+  const ledger = read.ledger;
+  const briefRows = ledger.briefRevisions.filter(row => row.assignmentId === assignment.assignmentId).sort((a, b) => a.revision - b.revision);
+  const decisionRows = ledger.decisionEntries.filter(row => row.assignmentId === assignment.assignmentId).sort((a, b) => a.revision - b.revision);
+  assert.deepEqual(briefRows.map(row => row.revision), [1, 2]);
+  assert.deepEqual(decisionRows.map(row => row.revision), [1, 2]);
+
+  for (const [index, row] of briefRows.entries()) {
+    assert.equal(row.bodySha256, independentCanonicalSha256(row.body));
+    const { entrySha256, ...unsigned } = row;
+    assert.equal(entrySha256, independentCanonicalSha256(unsigned));
+    assert.equal(row.priorRevision, index);
+    assert.equal(row.priorEntrySha256, index === 0 ? null : briefRows[index - 1].entrySha256);
+  }
+  for (const [index, row] of decisionRows.entries()) {
+    assert.equal(row.bodySha256, independentCanonicalSha256(row.body));
+    const { entrySha256, ...unsigned } = row;
+    assert.equal(entrySha256, independentCanonicalSha256(unsigned));
+    assert.equal(row.priorDecisionId, index === 0 ? null : decisionRows[index - 1].decisionId);
+    assert.equal(row.priorEntrySha256, index === 0 ? null : decisionRows[index - 1].entrySha256);
+    assert.equal(row.body.affectedBriefRevision, 2);
+  }
+
+  const events = independentEventRows(dir);
+  assertIndependentEventChain(events, ledger);
+  const eventFor = (kind, revision) => {
+    const matches = events.filter(event => event.kind === kind && event.assignmentId === assignment.assignmentId && event.payload.revision === revision);
+    assert.equal(matches.length, 1, `${kind} revision ${revision} has one historical event`);
+    return matches[0];
+  };
+  let lastBriefSeq = 0;
+  for (const row of briefRows) {
+    const event = eventFor('brief-revision-appended', row.revision);
+    assert.equal(event.payload.bodySha256, row.bodySha256);
+    assert.equal(event.payload.entrySha256, row.entrySha256);
+    assert.ok(event.seq > lastBriefSeq, 'brief event order follows the revision lineage');
+    lastBriefSeq = event.seq;
+  }
+  let lastDecisionSeq = lastBriefSeq;
+  for (const row of decisionRows) {
+    const event = eventFor('decision-entry-appended', row.revision);
+    assert.equal(event.payload.decisionId, row.decisionId);
+    assert.equal(event.payload.bodySha256, row.bodySha256);
+    assert.equal(event.payload.entrySha256, row.entrySha256);
+    assert.ok(event.seq > lastDecisionSeq, 'decision events follow their referenced current brief and each prior decision');
+    lastDecisionSeq = event.seq;
+  }
+});
+
+test('v7 history: changing an old brief and recomputing all row-local digests still breaks its committed event binding', async t => {
+  const { dir, store, assignment } = await seedV7History(t);
+  const before = store.read(REPO_KEY);
+  assert.equal(before.state, 'ok');
+  const beforeLedger = before.ledger;
+  const eventFilesBefore = independentEventFiles(dir);
+  const onDisk = JSON.parse(readFileSync(ledgerPath(dir), 'utf8'));
+  const briefs = onDisk.briefRevisions.filter(row => row.assignmentId === assignment.assignmentId).sort((a, b) => a.revision - b.revision);
+  assert.equal(briefs.length, 2);
+  briefs[0].body = { ...briefs[0].body, objective: 'rewritten historical objective' };
+  let previousEntrySha256 = null;
+  for (const [index, row] of briefs.entries()) {
+    row.priorRevision = index;
+    row.priorEntrySha256 = previousEntrySha256;
+    row.bodySha256 = independentCanonicalSha256(row.body);
+    const { entrySha256, ...unsigned } = row;
+    row.entrySha256 = independentCanonicalSha256(unsigned);
+    previousEntrySha256 = row.entrySha256;
+  }
+  for (const [index, row] of briefs.entries()) {
+    assert.equal(row.bodySha256, independentCanonicalSha256(row.body), 'body digest recomputed independently');
+    const { entrySha256, ...unsigned } = row;
+    assert.equal(entrySha256, independentCanonicalSha256(unsigned), 'entry digest recomputed independently');
+    assert.equal(row.priorRevision, index);
+    assert.equal(row.priorEntrySha256, index === 0 ? null : briefs[index - 1].entrySha256, 'the local revision chain is internally consistent');
+  }
+  const firstBriefEvent = independentEventRows(dir).find(event =>
+    event.kind === 'brief-revision-appended' && event.assignmentId === assignment.assignmentId && event.payload.revision === 1);
+  assert.notEqual(firstBriefEvent.payload.entrySha256, briefs[0].entrySha256, 'the committed event retains the original entry digest');
+  assert.equal(onDisk.revision, beforeLedger.revision, 'ledger revision remains unchanged');
+  assert.equal(onDisk.lastEventSeq, beforeLedger.lastEventSeq, 'ledger event sequence remains unchanged');
+  assert.equal(onDisk.lastEventSha256, beforeLedger.lastEventSha256, 'ledger chain tip remains unchanged');
+  writeFileSync(ledgerPath(dir), JSON.stringify(onDisk));
+  assert.deepEqual(independentEventFiles(dir), eventFilesBefore, 'all committed event bytes remain unchanged');
+  const after = store.read(REPO_KEY);
+  assert.equal(after.state, 'corrupt', 'fresh full-history verification rejects a row whose local hashes were recomputed');
+  assert.equal(after.diagnostics.code, 'refinement-failed');
+});
+
+test('v7 history: removing an old committed brief revision leaves its events intact but makes the ledger corrupt', async t => {
+  const { dir, store, assignment } = await seedV7History(t);
+  assert.equal(store.read(REPO_KEY).state, 'ok');
+  const beforeEvents = independentEventFiles(dir);
+  const onDisk = JSON.parse(readFileSync(ledgerPath(dir), 'utf8'));
+  const beforeCount = onDisk.briefRevisions.filter(row => row.assignmentId === assignment.assignmentId).length;
+  onDisk.briefRevisions = onDisk.briefRevisions.filter(row => !(row.assignmentId === assignment.assignmentId && row.revision === 1));
+  assert.equal(beforeCount, 2);
+  assert.equal(onDisk.briefRevisions.filter(row => row.assignmentId === assignment.assignmentId).length, 1);
+  writeFileSync(ledgerPath(dir), JSON.stringify(onDisk));
+  assert.deepEqual(independentEventFiles(dir), beforeEvents, 'committed event history is unchanged');
+  assert.equal(store.read(REPO_KEY).state, 'corrupt', 'a missing historical table revision is never pruned from committed history');
+});
+
+test('v7 history: a locally re-digested decision fork is rejected even when its row remains schema-valid', async t => {
+  const { dir, store, assignment } = await seedV7History(t);
+  assert.equal(store.read(REPO_KEY).state, 'ok');
+  const beforeEvents = independentEventFiles(dir);
+  const onDisk = JSON.parse(readFileSync(ledgerPath(dir), 'utf8'));
+  const decisions = onDisk.decisionEntries.filter(row => row.assignmentId === assignment.assignmentId).sort((a, b) => a.revision - b.revision);
+  const fork = decisions.find(row => row.revision === 2);
+  assert.ok(fork);
+  fork.priorDecisionId = 'decision-fork';
+  const { entrySha256, ...unsigned } = fork;
+  fork.entrySha256 = independentCanonicalSha256(unsigned);
+  assert.equal(fork.entrySha256, independentCanonicalSha256(unsigned), 'the forged row still carries its recomputed local entry digest');
+  writeFileSync(ledgerPath(dir), JSON.stringify(onDisk));
+  assert.deepEqual(independentEventFiles(dir), beforeEvents, 'the append events remain committed and unchanged');
+  assert.equal(store.read(REPO_KEY).state, 'corrupt', 'the prior-decision lineage cannot be forked');
+});
+
+test('v7 history: mutating an old event segment after a successful read is detected on the next read', async t => {
+  const { dir, store } = await seedV7History(t);
+  assert.equal(store.read(REPO_KEY).state, 'ok');
+  const [name] = readdirSync(eventsDir(dir)).filter(value => /^\d+-\d+\.jsonl$/.test(value))
+    .sort((left, right) => Number(left.match(/^(\d+)-/)[1]) - Number(right.match(/^(\d+)-/)[1]));
+  assert.ok(name);
+  const path = join(eventsDir(dir), name);
+  const [firstLine, ...rest] = readFileSync(path, 'utf8').split('\n');
+  const event = JSON.parse(firstLine);
+  event.sha256 = `${event.sha256[0] === '0' ? '1' : '0'}${event.sha256.slice(1)}`;
+  writeFileSync(path, [JSON.stringify(event), ...rest].join('\n'));
+  assert.equal(store.read(REPO_KEY).state, 'corrupt', 'the same store instance rechecks old segment bytes');
+});
+
+test('v7 history: deleting an old event segment after a successful read is detected on the next read', async t => {
+  const { dir, store } = await seedV7History(t);
+  assert.equal(store.read(REPO_KEY).state, 'ok');
+  const [name] = readdirSync(eventsDir(dir)).filter(value => /^\d+-\d+\.jsonl$/.test(value))
+    .sort((left, right) => Number(left.match(/^(\d+)-/)[1]) - Number(right.match(/^(\d+)-/)[1]));
+  assert.ok(name);
+  unlinkSync(join(eventsDir(dir), name));
+  assert.equal(store.read(REPO_KEY).state, 'corrupt', 'the committed prefix cannot be served from a previously read tip');
+});
+
 // ---------------------------------------------------------------------------
 // The decide → state channels — same schema+refinement gate as P4.
 // ---------------------------------------------------------------------------
 
-// Each seed gets its own requestId — a shared envelope would replay the
-// first committed request row and never reach decide.
-const seedTablesV6 = (store, tables) =>
-  store.transact(REPO_KEY, envelope({ requestId: `seed-${randomUUID()}` }), () => ({ ok: true, events: [], ...tables }));
+// These P5 fixtures predate the v7 rollout event pins. Give each seed an
+// isolated repo key when a test reuses one store, and persist old-form
+// rollout-transition events so the current reader can verify their exact
+// request and event history without inventing v7 pin fields.
+const seedV6Ordinals = new WeakMap();
+async function seedTablesV6(store, tables) {
+  const ordinal = seedV6Ordinals.get(store) ?? 0;
+  seedV6Ordinals.set(store, ordinal + 1);
+  const repo = ordinal === 0
+    ? REPO
+    : { ...REPO, gitCommonDir: `${REPO.gitCommonDir}/v6-fixture-${ordinal}-${randomUUID()}` };
+  const repoKey = repoKeyFor(repo);
+  const transitions = tables.rolloutTransitions ?? [];
+  let result = await store.transact(repoKey, envelope({
+    repo, requestId: `seed-${randomUUID()}`,
+  }), () => ({
+    ok: true,
+    events: [],
+    ...tables,
+    rolloutTransitions: transitions.filter(row => row.command === 'declare'),
+  }));
+  if (!result.ok) return result;
+
+  const ordered = transitions.filter(row => row.command !== 'declare').sort((a, b) => a.revision - b.revision);
+  for (const row of ordered) {
+    const current = store.read(repoKey);
+    if (current.state !== 'ok') return { ok: false, code: 'STATE_UNREADABLE', message: `seed repo reads ${current.state}` };
+    result = await store.transact(repoKey, envelope({
+      repo,
+      actorKey: `agent:${row.actorAgentId}`,
+      assignmentId: row.assignmentId,
+      requestId: row.requestId,
+      command: { action: 'seed-old-rollout-transition', transitionId: row.transitionId },
+    }), () => ({
+      ok: true,
+      events: [{
+        kind: 'rollout-transitioned',
+        payload: { rolloutId: row.rolloutId, command: row.command, revision: row.revision, from: row.from, to: row.to },
+      }],
+      rolloutTransitions: [...current.ledger.rolloutTransitions, row],
+    }));
+    if (!result.ok) return result;
+  }
+  return result;
+}
 
 /** A minimal VALID P5 graph: lead owner + one attached seat + the bound
  *  seat's observed candidate + scope + check definition + rollout +
@@ -2899,7 +3275,7 @@ const graphTablesV6 = g => ({
   memberships: [g.lead, g.seat],
   assignments: [g.assignment],
   candidates: [g.candidate],
-  scopes: [g.scope],
+  scopes: [scopeRowV7Neutral(g.scope)],
   checkDefinitions: [g.def],
   rollouts: [g.rollout],
   checkRuns: [g.run],
@@ -3286,9 +3662,9 @@ const promoteTables = g => ({
   memberships: [g.lead, g.seat, g.reviewer],
   assignments: [g.assignment],
   candidates: [g.candidate],
-  scopes: [g.scope],
-  scopeTransitions: g.scopeTransitions,
-  scopeReviews: g.reviews,
+  scopes: [scopeRowV7Neutral(g.scope)],
+  scopeTransitions: g.scopeTransitions.map(scopeTransitionRowV7Neutral),
+  scopeReviews: g.reviews.map(scopeReviewRowV7Neutral),
   checkDefinitions: [g.def],
   rollouts: [g.rollout],
   checkRuns: [g.run],

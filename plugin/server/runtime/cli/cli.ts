@@ -15,6 +15,7 @@ interface CliOptions {
   '--repo'?: string;
   '--kind'?: string;
   '--require'?: string;
+  '--render'?: string;
   '--emit'?: string;
   '--expect-contract'?: string;
   '--expect-parent'?: string;
@@ -48,8 +49,8 @@ import { agents } from './agents.ts';
 import { monitor } from './monitor.ts';
 import { notebook } from './notebook.ts';
 import { localTarget, runtimeStatus } from './runtime-state.ts';
-import { probeWorkTracker } from './work-tracker.ts';
 import { extractRecords, recordSchema, requireRecordKind, RECORD_KINDS } from './report-records.ts';
+import { renderSlpReport } from '../report-semantics.ts';
 import { verifyHandback, VerifyError } from './candidate-verify.ts';
 import { deskRecover, DeskRecoverUsage } from './desk-recovery.ts';
 
@@ -74,12 +75,11 @@ const commands: Record<string, CommandSpec> = {
   monitor: { flags: [], target: 'request.json', usage: 'monitor <request.json>' },
   'route-decide': { flags: ['--paseo-home', '--schema', '--out'], target: 'request.json', usage: 'route-decide <request.json> [--schema] [--out <path>] [--paseo-home <absolute-home>]' },
   notebook: { flags: ['--paseo-home'], target: 'repository', usage: 'notebook <repository> [--paseo-home <absolute-home>]' },
-  records: { flags: ['--kind', '--require', '--repo', '--schema'], target: 'path|-', usage: 'records <path|-> [--kind handback|settlement] [--require handback|settlement] [--repo <absolute-path>] [--schema]' },
+  records: { flags: ['--kind', '--require', '--repo', '--schema', '--render'], target: 'path|-', usage: 'records <path|-> [--kind handback|settlement] [--require handback|settlement] [--repo <absolute-path>] [--schema] | records --render <file|-> [--repo <absolute-path>]' },
   'verify-handback': { flags: ['--repo', '--paseo-home', '--expect-contract', '--expect-file', '--expect-parent', '--expect-workspace', '--expect-runtime'], target: 'report', usage: 'verify-handback <report-path> --repo <absolute-repo> --expect-contract <repo-path>=<sha256> [--expect-file <repo-path>=<sha256>]... [--expect-runtime <candidateSha256>] [--paseo-home [<absolute-home>]] [--expect-parent <agentId>] [--expect-workspace <workspaceId>]' },
   instructions: { target: 'role', usage: 'instructions <role>' },
   status: { flags: ['--paseo-home'], usage: 'status [--paseo-home <absolute-home>]' },
   'local-target': { flags: ['--paseo-home'], usage: 'local-target [--paseo-home <absolute-home>]' },
-  tracker: { flags: ['--paseo-home'], target: 'repository', usage: 'tracker <repository> [--paseo-home <absolute-home>]' },
   'desk-recover': { flags: ['--paseo-home', '--json', '--bridge'], target: 'repository', usage: 'desk-recover <repository|--bridge> [--paseo-home <absolute-home>] [--json]' },
 };
 const usage = `Usage: slp.mjs ${Object.values(commands).map(entry => entry.usage).join(' | ')}`;
@@ -89,6 +89,7 @@ const argv = process.argv.slice(2);
 const [command, ...rest] = argv;
 let [target, ...args] = rest[0]?.startsWith('--') ? [undefined, ...rest] : rest;
 let parsed = false; // argument parse finished — desk-recover distinguishes usage errors from operational ones
+let renderedOutput: string | undefined;
 try {
   const options: CliOptions = {};
   for (let i = 0; i < args.length; i++) {
@@ -109,6 +110,10 @@ try {
     } else if (key === '--out') {
       const value = args[++i];
       if (typeof value !== 'string' || !value.trim() || value.startsWith('-')) throw new Error('--out requires a path');
+      options[key] = value;
+    } else if (key === '--render') {
+      const value = args[++i];
+      if (typeof value !== 'string' || !value.trim() || (value.startsWith('-') && value !== '-')) throw new Error('--render requires <file|->');
       options[key] = value;
     } else if (key === '--from' || key === '--routing-from') {
       if (!args[i + 1]! || !isAbsolute(args[i + 1]!)) throw new Error(`Absolute path required for ${key}`);
@@ -144,8 +149,12 @@ try {
   // desk-recover --bridge targets the reserved desk-bridge sentinel lock —
   // it substitutes for <repository>, and the two are mutually exclusive.
   if (command === 'desk-recover' && options['--bridge'] && target) throw new Error('desk-recover takes either <repository> or --bridge, not both');
-  if (spec?.target && !target && !options['--schema'] && !(command === 'desk-recover' && options['--bridge'])) throw new Error(`${command} requires <${spec.target}>`);
+  if (spec?.target && !target && !options['--schema'] && !(command === 'records' && options['--render']) && !(command === 'desk-recover' && options['--bridge'])) throw new Error(`${command} requires <${spec.target}>`);
   if (target && !spec?.target && !spec?.optionalTarget) throw new Error(`${command} takes no arguments`);
+  if (command === 'records' && options['--render']) {
+    if (target !== undefined) throw new Error('records --render takes its report path as the --render value');
+    if (options['--schema'] || options['--kind'] || options['--require']) throw new Error('records --render is a separate mode; use only --repo with it');
+  }
   // --out persists the response bytes — never the request file. Reject early
   // when it resolves to the request path so the input record is never
   // destroyed by its own result.
@@ -158,6 +167,27 @@ try {
     if (options['--schema']) {
       if (target) throw new Error('records --schema takes no report path');
       result = recordSchema();
+    } else if (options['--render']) {
+      const renderTarget = options['--render'];
+      const input = renderTarget === '-' ? readFileSync(0, 'utf8') : readFileSync(resolve(renderTarget), 'utf8');
+      const parsedRecords = extractRecords(input, options['--repo'] ? { repo: options['--repo'] } : {});
+      const selected = parsedRecords.records.find(entry => entry.selected && (entry.record as { kind?: string } | null)?.kind === 'handback');
+      const errors = [...parsedRecords.errors];
+      if (!selected) errors.push({ code: 'structured-report-required', message: 'no selected handback slp-record block is available to render' });
+      else if (selected.valid && !(selected.record as { report?: unknown }).report) {
+        errors.push({ code: 'structured-report-required', blockIndex: selected.blockIndex, message: 'selected handback has no structured report' });
+      }
+      if (errors.length) {
+        result = { errors, warnings: parsedRecords.warnings };
+        process.exitCode = 1;
+      } else if (selected) {
+        renderedOutput = renderSlpReport(selected.record, selected.originalFence);
+        if (parsedRecords.warnings.length) {
+          renderedOutput = '## Record validation warnings\n'
+            + parsedRecords.warnings.map(warning => '- ' + warning.message).join('\n')
+            + '\n\n' + renderedOutput;
+        }
+      }
     } else {
       if (!target) throw new Error('records requires <path|->');
       const input = target === '-' ? readFileSync(0, 'utf8') : readFileSync(resolve(target!), 'utf8');
@@ -230,11 +260,6 @@ try {
   else if (command === 'init') result = initWorkspace(root, target!, Boolean(options['--apply']), options['--routing-from']);
   else if (command === 'materialize') result = materializeWorkspace(options['--from']!, target!, Boolean(options['--apply']), { includePaths: options['--include'] ?? [], home: resolveHome(options['--paseo-home']) });
   else if (command === 'monitor') result = monitor(readJson(target!) as Parameters<typeof monitor>[0]);
-  else if (command === 'tracker') {
-    // Read-only beads probe: gaps are data, so exit 0 even when the state is
-    // not ready. Without --paseo-home the setting is not read (enabled: null).
-    result = probeWorkTracker(resolve(target!), { daemonHome: options['--paseo-home'] ?? null });
-  }
   else if (command === 'instructions') {
     // Raw preview: the exact bytes roleBundle would inject, unwrapped — stdout
     // stays diffable against a live bundle; provenance goes to stderr. A
@@ -315,7 +340,8 @@ try {
     mkdirSync(dirname(out), { recursive: true });
     writeFileSync(out, json(result));
   }
-  if (result !== undefined) process.stdout.write(json(result));
+  if (renderedOutput !== undefined) process.stdout.write(renderedOutput);
+  else if (result !== undefined) process.stdout.write(json(result));
 } catch (error) {
   console.error(error instanceof VerifyError ? `${(error as RuntimeError).code}: ${(error as RuntimeError).message}` : (error as RuntimeError).message);
   // desk-recover alone reserves exit 2 for usage errors — argument-parse

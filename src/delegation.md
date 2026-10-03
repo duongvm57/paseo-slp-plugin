@@ -25,17 +25,23 @@ or assigned label is not evidence of parentage. Record unavailable host evidence
 as a visibility gap. An ambiguous create reserves its scope until reconciled;
 never retry while the original request may still create a child.
 
-A required review gate follows the rule the effective workspace protocol
-declares — a fixed seat/axis shape, or a bounded selection rule under
-which the Lead chooses the minimum sufficient independent seats; absent a
-declaration, parallel seats on split axes (Spec and Standards). A summary
-like "Engineer → Reviewer" does not license merging the axes into one seat
-or dropping below the declared rule. A task too small to require review is
-a separate judgment from loosening a required gate. Required seats that
-cannot be supplied make the gate BLOCKED, never permission to skip or merge
-it.
+Lead records an explicit review selection before the candidate round, choosing
+minimum sufficient independent mandates for material decision-changing questions
+or Human, assignment or protocol obligations. An absent explicit selection is an open decision,
+not automatic review or no-review authorization. Read references/review-gates.md
+for selection, waiver, candidate freshness and adjudication rules. With no material
+question or trigger, candidate plus adequate proof and a reasoned Lead verdict
+suffice. A reasoned not-required decision is distinct from an authority-backed
+waiver of required review; tiny labels waive neither.
+Required review cannot be weakened because seats are unavailable or findings are adverse.
+Follow all explicitly required seats/axes; an unavailable required seat makes the
+dependent gate BLOCKED. Independent judgment remains separate from its writer and
+accepting owner.
 
-Tiny work uses the repository protocol's tiny procedure with one Peer Engineer
-under Lead. Protocol may reduce ceremony, never the authority, ownership,
-parentage or required-review invariants above. Missing procedure grants no
-exemption; record the gap. Raise the class when scope or risk outgrows tiny.
+Tiny work follows the repository's effective tactic with one authorized writer,
+normally a Peer Engineer. A direct Lead write requires an explicit Human
+assignment or effective protocol grant for clear, reversible work with bounded
+scope, exact candidate proof and every required independent review. Tiny
+classification may reduce ceremony, never authority, ownership, parentage or a
+required gate. Missing or stale protocol grants no exception; raise the class
+when scope or risk outgrows tiny.

@@ -220,7 +220,7 @@ test('policyLocators validates role, tolerates absent optional paths and refuses
   assert.throws(() => policyLocators(installed, 'lead'), /is a symlink/);
 });
 
-test('Peer carrier locators are allowlisted and include work-tracking only when managed session entry enables beads', t => {
+test('Peer carrier locators are allowlisted to the required bundle; a legacy tracker artifact adds nothing', t => {
   const dir = fixture(t), installed = join(dir, 'release');
   install(root, installed);
   const home = join(dir, 'paseo');
@@ -230,31 +230,35 @@ test('Peer carrier locators are allowlisted and include work-tracking only when 
   const paths = instructions => instructions.split('\n')
     .filter(line => line.startsWith(`- ${installed}/`))
     .map(line => line.slice(2).split(' — ')[0]);
+  const peerLocators = [join(installed, 'src/common.md'), join(installed, 'src/roles/peer.md')].sort();
 
-  writeFileSync(join(state, 'work-tracker.json'), json({ schemaVersion: 1, tracker: 'beads', enabled: false }));
   const off = roleBundle(installed, 'peer', env);
-  assert.deepEqual(paths(off.instructions), [join(installed, 'src/common.md'), join(installed, 'src/roles/peer.md')].sort());
-  assert.ok(!off.instructions.includes('Work tracker: beads (enabled in SLP settings)'));
+  assert.deepEqual(paths(off.instructions), peerLocators);
+  assert.ok(!off.instructions.includes('Work tracker:'));
   for (const reference of ['governance.md', 'monitoring.md', 'orchestration.md', 'provider-routing.md', 'jev-routing.md']) {
     assert.ok(!paths(off.instructions).some(path => path.endsWith(`/references/${reference}`)), `${reference} is not a Peer locator`);
   }
 
+  // A legacy tracker artifact is inert: enabled or corrupt, it can add no
+  // prompt line and no locator — the render is byte-identical to absent.
   writeFileSync(join(state, 'work-tracker.json'), json({ schemaVersion: 1, tracker: 'beads', enabled: true }));
   const on = roleBundle(installed, 'peer', env);
-  assert.deepEqual(paths(on.instructions), [join(installed, 'src/common.md'), join(installed, 'src/roles/peer.md'), join(installed, 'src/references/work-tracking.md')].sort());
-  assert.ok(on.instructions.includes('Work tracker: beads (enabled in SLP settings)'));
-  assert.ok(on.instructions.includes(`${join(installed, 'src/references/work-tracking.md')} — `));
+  assert.equal(on.instructions, off.instructions);
+  assert.deepEqual(paths(on.instructions), peerLocators);
+  writeFileSync(join(state, 'work-tracker.json'), '{corrupt');
+  assert.equal(roleBundle(installed, 'peer', env).instructions, off.instructions);
 
   for (const role of ['supervisor', 'lead']) {
     const entries = policyLocators(installed, role, env);
-    assert.equal(entries.length, 3 + 11, `${role} retains its required bundle and all eleven references`);
+    assert.equal(entries.length, 3 + 10, `${role} retains its required bundle and all ten references`);
     assert.ok(entries.some(entry => entry.path === join(installed, 'src/references/jev-routing.md')));
   }
 
-  rmSync(join(installed, 'src/references/work-tracking.md'));
-  const missing = policyLocators(installed, 'peer', env);
-  assert.deepEqual(missing.find(entry => entry.path === join(installed, 'src/references/work-tracking.md')),
-    { path: join(installed, 'src/references/work-tracking.md'), missing: true });
+  // A receipt-declared reference deleted from disk still reports missing.
+  rmSync(join(installed, 'src/references/jev-routing.md'));
+  const missing = policyLocators(installed, 'lead', env);
+  assert.deepEqual(missing.find(entry => entry.path === join(installed, 'src/references/jev-routing.md')),
+    { path: join(installed, 'src/references/jev-routing.md'), missing: true });
 });
 
 test('instructions <role> prints the exact bundle bytes on stdout and metadata on stderr', t => {
@@ -288,7 +292,7 @@ test('instructions <role> prints the exact bundle bytes on stdout and metadata o
   assert.match(bad.stderr, /Unknown role/);
 });
 
-test('managed bundles carry the review-gate invariant and Lead trigger; Peer carries neither', t => {
+test('managed bundles deliver selected obligations and keep Lead procedure separate from Peer mandate', t => {
   const dir = fixture(t), installed = join(dir, 'release');
   install(root, installed);
   const env = {
@@ -303,7 +307,11 @@ test('managed bundles carry the review-gate invariant and Lead trigger; Peer car
       assert.ok(!instructions.includes(body), 'conditional procedure is not always-loaded');
       assert.ok(policyLocators(installed, role).some(entry => entry.path.endsWith(`/references/${reference}`) && entry.sha256 === hash(Buffer.from(body))), 'installed procedure remains integrity-addressable');
     }
-    assert.match(instructions, /does not license merging\s+the axes into one seat/, role);
+    assert.match(instructions, /Lead records an explicit review selection before the candidate round/, role);
+    assert.match(instructions, /minimum sufficient independent mandates for material decision-changing questions/, role);
+    assert.match(instructions, /Required review cannot be weakened because seats are unavailable or findings are adverse/, role);
+    assert.match(instructions, /Review selection never waives a Human, assignment or protocol obligation/, role);
+    assert.doesNotMatch(instructions, /does not license merging\s+the axes into one seat|parallel seats on split axes/, role);
     assert.match(instructions, /cannot carry a new\s+delegation/, role);
     assert.match(instructions, /New-team delegation/, role);
     assert.match(instructions, /Observe-existing-work/, role);
@@ -314,6 +322,9 @@ test('managed bundles carry the review-gate invariant and Lead trigger; Peer car
   const leadBundle = roleBundle(installed, 'lead', env).instructions;
   const supervisorBundle = roleBundle(installed, 'supervisor', env).instructions;
   assert.match(leadBundle, /When the assignment or protocol\s+requires independent review/);
+  assert.match(leadBundle, /Record the review selection and its reason before the candidate round/);
+  assert.match(leadBundle, /review-gates\.md when making or revising that decision, including a\s+not-required decision/);
+  assert.ok(!/Record the review selection and its reason before the candidate round/.test(supervisorBundle));
   assert.ok(!/When the assignment or protocol\s+requires independent review/.test(supervisorBundle));
   assert.match(supervisorBundle, /standalone session never makes\s+it your child/);
   assert.match(leadBundle, /does not adopt it/);
@@ -325,7 +336,9 @@ test('managed bundles carry the review-gate invariant and Lead trigger; Peer car
     assert.match(bundle, /second workspace\s+for the same team with no isolation reason/, 'B22 placement-defect trigger');
   }
   const peer = roleBundle(installed, 'peer', env).instructions;
-  assert.ok(!/does not license merging/.test(peer));
+  assert.match(peer, /Review selection never waives a Human, assignment or protocol obligation/);
+  assert.match(peer, /Reviewer and optional Auditor mandates remain independent of the writer and\s+accepting owner/);
+  assert.ok(!/Lead records an explicit review selection|Record the review selection and its reason|Required review cannot be weakened/.test(peer), 'Peer gets no Lead selection procedure');
   assert.ok(!/When the assignment or protocol\s+requires independent review/.test(peer));
   assert.ok(!/cannot carry a new\s+delegation/.test(peer));
   assert.ok(!/New-team delegation|Observe-existing-work|formation record/.test(peer), 'Peer gets no formation doctrine');
@@ -528,7 +541,13 @@ test('ACP delivery keeps verified core while refreshing language and restoring c
     assert.match(next, /Policy recovery command: .* instructions /);
     assert.match(next, /Human stop/);
     assert.match(next, /missing evidence is a gap/);
-    if (role !== 'peer') assert.match(next, /does not license merging/);
+    assert.match(next, /Review selection never waives a Human, assignment or protocol obligation/);
+    assert.equal(/Lead records an explicit review selection before the candidate round/.test(next), role !== 'peer');
+    assert.equal(/Required review cannot be weakened because seats are unavailable or findings are adverse/.test(next), role !== 'peer');
+    assert.equal(/Record the review selection and its reason before the candidate round/.test(next), role === 'lead');
+    assert.equal(/review-gates\.md when making or revising that decision, including a\s+not-required decision/.test(next), role === 'lead');
+    assert.equal(/Reviewer and optional Auditor mandates remain independent of the writer and\s+accepting owner/.test(next), role === 'peer');
+    assert.doesNotMatch(next, /does not license merging\s+the axes into one seat|parallel seats on split axes/);
     assert.match(send('b')[0].text, /Spawn kit —/, 'new session gets its own carrier');
     for (const method of ['session/load', 'session/resume', 'session/fork']) {
       const lifecycle = { method, params: { sessionId: 'a' } };
@@ -562,19 +581,21 @@ test('tiny policy keeps protocol-owned ceremony separate from required gates and
   const lead = roleBundle(installed, 'lead', {}).instructions;
   const protocol = readFileSync(join(installed, 'src/templates/workspace-protocol.md'), 'utf8');
   const orchestration = readFileSync(join(installed, 'src/references/orchestration.md'), 'utf8');
-  assert.match(lead, /assign one Peer Engineer/);
-  assert.match(lead, /repository protocol's tiny procedure/);
-  assert.match(lead, /raise the class before the affected work/);
-  assert.match(lead, /required independent review\s+gate .* still applies/);
-  assert.match(lead, /absent\ntiny procedure grants no ceremony exemption/);
+  assert.match(lead, /Peer writing is the managed-implementation\s+default/);
+  assert.match(lead, /A direct Lead write requires an explicit Human assignment that grants it\s+or a current effective protocol grant for clear, reversible work with bounded\s+scope, one writer and exact candidate proof/);
+  assert.match(lead, /a Lead writer never stands in for required\s+independent review/);
+  assert.match(lead, /Without an explicit direct-write grant,\s+use one Peer Engineer as writer/);
+  assert.match(lead, /Tiny\s+classification alone grants no write or review exemption/);
+  assert.match(lead, /A missing or stale\s+protocol grants no exception/);
   assert.match(lead, /full relevant text already in context/);
   assert.match(lead, /not runtime\nstate/);
   assert.match(lead, /first required full workspace-protocol read remains\nmandatory/);
   assert.match(protocol, /1\. Lead supplies one short inline brief/);
-  assert.match(protocol, /2\. Delegate to one Peer Engineer/);
-  assert.match(protocol, /3\. Engineer runs the inner loop/);
-  assert.match(protocol, /4\. Lead inspects the artifact/);
+  assert.match(protocol, /Peer Engineer is the default\s+implementation writer[\s\S]+A direct Lead write requires an explicit Human assignment\s+grant or an effective protocol grant/);
+  assert.match(protocol, /never a triggered review gate/);
+  assert.match(protocol, /2\. Use one writer: a Peer Engineer by default,[\s\S]+or the Lead when the direct-write grant covers the task/);
+  assert.match(protocol, /3\. The writer runs the inner loop/);
+  assert.match(protocol, /4\. Lead inspects the artifact and evidence/);
   assert.match(protocol, /does not\s+silently inherit\s+these exemptions/);
-  assert.match(orchestration, /One Peer Engineer under Lead/);
-  assert.ok(!orchestration.includes('Lead directly if protocol'));
+  assert.match(orchestration, /Tiny, tightly coupled \| One writer, normally a Peer Engineer; Lead may write only under an explicit Human grant or effective protocol grant for clear, reversible work\. Use the repository tactic, focused proof and any required independent review\./);
 });

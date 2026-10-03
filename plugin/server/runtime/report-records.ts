@@ -3,6 +3,7 @@
 // never grants filesystem authority to a claimed record.
 import { isAbsolute, win32 } from "node:path";
 import { createHash } from "node:crypto";
+import { validateSlpReportV1 } from "./report-semantics.ts";
 
 // ---------------------------------------------------------------------------
 // Vocabulary shared by both adapters.
@@ -276,7 +277,13 @@ export function validateReportRecordV1(record: unknown, options: ValidateOptions
     if (isObject(record.timeline) && record.timeline.sessionId !== undefined && record.timeline.sessionId !== null && !nonempty(record.timeline.sessionId)) {
       errors.push(issue("invalid-record", "timeline.sessionId", "timeline.sessionId must be a non-empty string or null"));
     }
+    if (Object.hasOwn(record, "report")) {
+      const reportValidation = validateSlpReportV1(record.report, { candidate: record.candidate });
+      errors.push(...reportValidation.errors);
+      warnings.push(...reportValidation.warnings);
+    }
   } else if (record.kind === "settlement") {
+    if (Object.hasOwn(record, "report")) errors.push(issue("invalid-record", "report", "report semantics are supported on handback records only"));
     for (const key of ["task", "seat", "timeline", "recordedBy", "at"]) {
       if (!Object.hasOwn(record, key)) errors.push(issue("invalid-record", key, `missing required field ${key}`));
     }

@@ -375,6 +375,9 @@ test('tools/list exposes the visible catalog — hidden and excluded tools absen
     'slp_assignment_register',
     'slp_assignment_attach',
     'slp_assignment_close',
+    'slp_assignment_amend',
+    'slp_decision_append',
+    'slp_workflow_get',
     'slp_settlement_record',
     'slp_settlement_export',
     'slp_scope_declare',
@@ -384,6 +387,8 @@ test('tools/list exposes the visible catalog — hidden and excluded tools absen
     'slp_check_run',
     'slp_rollout_declare',
     'slp_rollout_transition',
+    'slp_assignment_offer',
+    'slp_assignment_accept',
   ]);
   // The catalog row carries a JSON Schema derived from the zod input.
   assert.equal(reply.result.tools[0].inputSchema.type, 'object');
@@ -411,13 +416,17 @@ test('the whole desk tool catalog satisfies DeskBridgeToolEntry (all rows, centr
     DeskBridgeToolEntry.parse(row);
     if (row.visible) visible.push(row.name);
   }
-  // Sanity: the catalog enumerates the full P3-a + P3-b + P4 + P5 visible surface.
+  // Sanity: the catalog enumerates the full P3-a + P3-b + P4 + P5 + continuity visible surface.
   assert.deepEqual(visible.sort(), [
+    'slp_assignment_accept',
+    'slp_assignment_amend',
     'slp_assignment_attach',
     'slp_assignment_close',
+    'slp_assignment_offer',
     'slp_assignment_register',
     'slp_check_declare',
     'slp_check_run',
+    'slp_decision_append',
     'slp_handback_submit',
     'slp_rollout_declare',
     'slp_rollout_transition',
@@ -427,6 +436,7 @@ test('the whole desk tool catalog satisfies DeskBridgeToolEntry (all rows, centr
     'slp_settlement_export',
     'slp_settlement_record',
     'slp_status',
+    'slp_workflow_get',
   ]);
 });
 

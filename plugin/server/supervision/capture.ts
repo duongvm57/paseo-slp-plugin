@@ -310,10 +310,10 @@ const stripCompactLaunch = (text: string, family: FamilyId, role: "lead" | "peer
 // Any trace of the SLP ACP role transport or launch builder anywhere in a
 // Devin user_message — every fixed structural line the renderers emit
 // (plugin/server/runtime/cli/role-bundle.ts roleDelivery/managedHelpers/communicationLanguage/
-// carrierBlock, plugin/server/runtime/cli/work-tracker.ts workTrackerBlock, plugin/server/runtime/cli/launch.ts):
+// carrierBlock, plugin/server/runtime/cli/launch.ts):
 // the role line, either half of the terminal line, the recovery and snapshot
 // lines, the onboarding locator, the managed-runtime helper block, the
-// communication-language line, the work-tracker line, the carrier block, or
+// communication-language line, the carrier block, or
 // a launch binding. Such a message goes through the strict parser (exact
 // prefix, actor role, family); a trace in any other position — a merged or
 // truncated wrapper — therefore fails closed. Free policy prose from the
@@ -332,6 +332,7 @@ const DEVIN_TRANSPORT_MARKERS: readonly RegExp[] = [
   /upgrade\/uninstall take no home flag/,
   /init\/materialize\/snapshot\/prepare\/prepare-handoff\/verify are repo-scoped/,
   /Communication language: /,
+  // Retained runtimes emitted this marker; fragments still require strict parsing.
   /Work tracker: /,
   /Spawn kit — role-scoped Paseo MCP signatures/,
   /Policy locators — /,

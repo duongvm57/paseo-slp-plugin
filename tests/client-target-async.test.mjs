@@ -13,7 +13,6 @@ const poolResult = home => ({ schemaVersion: 1, sha256: sha, error: null, legacy
 const jevResult = home => ({ jev: { configured: true, enabled: true, sha256: sha,
   capabilities: { routing: false, supervision: true },
   provider: { kind: 'openrouter', model: 'typesafe/jev-1.13', baseUrl: 'https://openrouter.ai' }, error: home } });
-const trackerResult = home => ({ workTracker: { configured: true, enabled: false, bd: null, error: home } });
 const supervisionResult = home => ({ schemaVersion: 2, config: null, sha256: home === '/a' ? sha : Buffer.from(home).toString('hex').padEnd(64, '0').slice(0, 64),
   migration: null, observations: [], gates: {}, diagnostics: { droppedEvents: 0, reasons: [] }, unverified: [], error: null });
 const cards = {
@@ -26,9 +25,6 @@ const cards = {
   jev: { hook: 'useJevCard', get: 'callGetJev', set: 'callSetJev', result: jevResult,
     value: card => card.view?.error ?? null, expected: home => home,
     edit: card => card.setEnabledOn(false), run: card => card.save(), busy: card => card.busy },
-  tracker: { hook: 'useWorkTrackerCard', get: 'callGetWorkTracker', set: 'callSetWorkTracker', result: trackerResult,
-    value: card => card.view?.error ?? null, expected: home => home,
-    edit: () => {}, run: card => card.onToggle(true), busy: card => card.busy },
   supervision: { hook: 'useSupervisionCard', get: 'callGetSupervision', set: 'callSetSupervision', result: supervisionResult,
     value: card => card.data?.sha256 ?? null, expected: home => supervisionResult(home).sha256,
     edit: card => card.edit(current => current), run: card => card.save(), busy: card => card.busy },
@@ -150,7 +146,7 @@ test('language stale apply completion preserves dirty draft and newer busy state
   await act(async () => write.calls[1].resolve({}));
   assert.equal(state.current.busy, false);
 });
-for (const name of ['pool', 'jev', 'tracker', 'supervision']) test(`${name}: stale read rejection cannot paint an error; current rejection surfaces`, async t => {
+for (const name of ['pool', 'jev', 'supervision']) test(`${name}: stale read rejection cannot paint an error; current rejection surfaces`, async t => {
   const { state, read, update } = await setup(t, cards[name]);
   const errorFor = card => name === 'pool' ? card.poolReadError : name === 'supervision' ? card.readError : card.loadError;
   await update({ home: '/b' });

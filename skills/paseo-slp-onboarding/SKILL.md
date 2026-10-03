@@ -47,9 +47,10 @@ Done: both profiles verified, or each gap has Human fix steps.
 Start from the template and
 [configuration examples](references/repository-configuration.md); combine every applicable setting.
 The template is the full default wording; the protocol condenses it. Keep,
-condensed: recipe choice and risk triggers, the Lean tiny procedure (role
-policy defers to it), the other recipes, Gate with seat names and idle
-retention, team formation, Repository configuration, Repository references and
+condensed: recipe choice and risk triggers, the Lean procedure and the explicit
+direct-Lead-write grant boundary, the other recipes, explicit review selection,
+Gate with selected mandate names and idle retention, task-selected stop/effort
+bounds, team formation, Repository configuration, Repository references and
 Overrides. Template text that restates role policy — read timing, context
 recovery, authority invariants, reopen handling, monitoring and routing
 procedures — stays in role policy.
@@ -57,6 +58,15 @@ procedures — stays in role policy.
 Keep all recipes unless Human decides otherwise; a removed recipe needs an
 explicit route for that work. Overrides list changed meaning with
 decider/date; condensed wording with the same meaning is no Override.
+The template grants no standing direct Lead write. Surface any bounded protocol
+grant as a Human decision; Tiny classification alone never supplies one. Preserve
+required Human/protocol review obligations. Lead selects minimum sufficient
+independent mandates for material decision-changing questions; a reasoned
+not-required selection is distinct from an authority-backed waiver. Neither an
+absent selection nor unavailable seats/adverse findings waives required review.
+Point new scope declarations to an explicit review plan with source and reason;
+source references remain claims. Do not carry forward an automatic Spec/Standards
+pair, fixed round quota, family quota or permanent Auditor as package defaults.
 
 Operational facts go to `.paseo-slp/references/<topic>.md`, listed under
 Repository references with a one-line pointer from the section that applies
@@ -103,9 +113,6 @@ Preview `node <slp-cli> init <absolute-repo>`; apply within setup authority.
 Init preserves existing files. Import a chosen catalog with --routing-from only
 at this step; init has no protocol selector. Reconcile layout collisions before
 moves. Install this skill separately in native scope, outside `.paseo-slp/`.
-
-Beads already enabled → installed work-tracking policy. Human requests beads
-setup → [work tracker](references/work-tracker.md). Otherwise preserve its toggle.
 
 Done: confirmed bytes match; init preview shows protocol preserved.
 

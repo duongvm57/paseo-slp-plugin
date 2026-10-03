@@ -201,7 +201,7 @@ The store is `<daemonHome>/slp-runtime/state/supervision.json`, schema 3:
      transport anywhere in the text — the role line, either half of the
      role-prefix terminal line, the recovery and snapshot lines, the
      onboarding locator, the managed-runtime helper block, the
-     communication-language line, the work-tracker line, the carrier block
+     communication-language line, the carrier block
      or a launch binding (pinned to the renderer sources by a test) — exactly one recognized
      wrapper for the captured actor's role, or `role-prefix-unrecognized`; a
      Devin message with no trace at all is captured verbatim as a plain

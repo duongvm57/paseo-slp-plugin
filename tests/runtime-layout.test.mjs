@@ -88,7 +88,11 @@ test('installed TypeScript policy runs in a worker with empty execArgv and no bu
   t.after(() => worker.terminate());
   const policy = await new Promise((resolve, reject) => { worker.once('message', resolve); worker.once('error', reject); });
   assert.match(policy, /^SLP role=peer\n/);
-  assert.ok(identity(installed).files.some(entry => entry.path === 'plugin/server/runtime/cli/cli.ts'));
+  const installedFiles = identity(installed).files.map(entry => entry.path);
+  assert.ok(installedFiles.includes('plugin/server/runtime/cli/cli.ts'));
+  assert.ok(installedFiles.includes('plugin/server/runtime/report-semantics.ts'));
+  assert.ok(installedFiles.includes('plugin/server/runtime/handoff-recap.ts'));
+  assert.equal(candidateModulePath(installed, 'package'), join(installed, 'plugin/server/runtime/cli/package.ts'));
 });
 
 test('capture layout failure returns a bounded outcome without executing a child', async t => {

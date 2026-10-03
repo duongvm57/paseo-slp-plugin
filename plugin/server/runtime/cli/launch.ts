@@ -29,6 +29,7 @@ import { roleInstructions, orchestrates, policyLocators, carrierBlock } from './
 import { spawnKit } from './spawn-kit.ts';
 import { assignmentFileSelection, assignmentCarrier } from './assignment-file.ts';
 import { SLP_ROLE_PREFIX, LAUNCH_BINDING_PREFIX, ASSIGNMENT_HEADER, PLAN_LOCATOR_CAPTION } from '../../../shared/runtime/session-delivery.ts';
+import { buildHandoffRecap } from '../handoff-recap.ts';
 
 // Every Binding source normalises to { binding, routing? } right here, so nothing
 // downstream unwraps a source-specific shape. Order is precedence, highest first.
@@ -95,17 +96,23 @@ function handoffPacket(request: LaunchRequest) {
     collect(sub.nested, `${prefix}${sub.path}/`);
   });
   collect(candidate.nested);
+  const measurement = { repository: candidate.root, head: candidate.head, sha256: candidate.sha256,
+    ...(candidate.incomplete ? { incomplete: candidate.incomplete } : {}),
+    ...(nestedIncomplete.length ? { nestedIncomplete } : {}) };
+  const recap = buildHandoffRecap(handoff!.recapInputs, measurement);
   return { ...handoff, candidate: { head: candidate.head, sha256: candidate.sha256,
     ...(candidate.incomplete ? { incomplete: candidate.incomplete } : {}),
-    ...(nestedIncomplete.length ? { nestedIncomplete } : {}) } };
+    ...(nestedIncomplete.length ? { nestedIncomplete } : {}) }, recap };
 }
 
 const unprovenScope = (packet: HandoffPacket | null) => [...(packet?.candidate?.incomplete ?? []), ...(packet?.candidate?.nestedIncomplete ?? [])];
 
 const handoffNotice = (role: string, packet: HandoffPacket) => `\nProvider handoff evidence:\n${JSON.stringify(packet, null, 2)}\n` +
   'Before taking ownership, verify the current candidate and old-owner settlement against host/repository evidence. ' +
+  'The caller-supplied settlement entry is a request claim; settlement remains unverified and receiving-owner acknowledgment has not been observed. ' +
   'Reconcile existing Peer/workspace/resource ownership with the Human or assigned Supervisor. ' +
   'Parentage has not changed; do not claim control of old descendants or create duplicate writers. ' +
+  (packet.recap.gaps.length ? `Structured handoff context is incomplete: ${packet.recap.gaps.join(', ')}. ` : '') +
   (unprovenScope(packet).length
     ? `Snapshot evidence gap: ${unprovenScope(packet).join(', ')} ${unprovenScope(packet).length > 1 ? 'are' : 'is'} unproven submodule scope — do not claim full-candidate coverage for it. `
     : '') +
@@ -459,6 +466,19 @@ export function requestSchema(handoff = false) {
       state: 'required — the old seat’s settlement state',
       previousOwner: { settled: 'required true', evidence: 'required — settlement receipt text; quota failure or idle alone is insufficient' },
       resources: 'required array — remaining Peer IDs, wake owners and unsettled descendants',
+      recapInputs: {
+        optional: true,
+        description: 'Explicit structured source projections only; prepare-handoff does not read arbitrary host state or source files for this recap.',
+        assignment: 'source object with id, revision, sourceRef, authority claims and optional scope/objective details',
+        decisions: 'source rows with proposition/ruling/reason/sourceRef; an explicit empty array means none supplied',
+        assumptions: 'source rows with statement/sourceRef; an explicit empty array means none supplied',
+        unresolved: 'source rows with proposition/reason/ownerId/sourceRef',
+        ownerPins: 'source rows with surface/ownerId/state/basis/sourceRef',
+        dependencies: 'source rows with need/state/ownerId/sourceRef',
+        nextAction: 'source object with state/action/ownerId',
+        resources: 'source rows with kind/id/ownerId/state/sourceRef',
+        reportArtifacts: 'rows with sourceRef and an existing v1 handback record; report, candidate, checks and findings remain claims',
+      },
     },
   };
 }

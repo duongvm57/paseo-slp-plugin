@@ -327,14 +327,17 @@ test('agent.create: slp-* provider without resolvable role fails closed', async 
   }
 });
 
-test('agent.create: injected bundle carries the review-gate invariant and Lead trigger, never to Peer', async t => {
+test('agent.create: selected obligations reach each role without leaking Lead procedure to Peer', async t => {
   const { injection } = makeInjection(t);
   for (const id of HOOK_IDS) {
     const role = id.split('-')[2];
     const out = await injection.agentCreate(createReq(id));
     const prompt = out.config.systemPrompt;
+    assert.match(prompt, /Review selection never waives a Human, assignment or protocol obligation/, id);
+    assert.doesNotMatch(prompt, /does not license merging\s+the axes into one seat|parallel seats on split axes/, id);
     if (role === 'peer') {
-      assert.ok(!/does not license merging/.test(prompt), id);
+      assert.match(prompt, /Reviewer and optional Auditor mandates remain independent of the writer and\s+accepting owner/, id);
+      assert.ok(!/Lead records an explicit review selection|Record the review selection and its reason|Required review cannot be weakened/.test(prompt), id);
       assert.ok(!/When the assignment or protocol\s+requires independent review/.test(prompt), id);
       assert.ok(!/cannot carry a new\s+delegation/.test(prompt), id);
       assert.ok(!/New-team delegation|Observe-existing-work|formation record/.test(prompt), `${id} gets no formation doctrine`);
@@ -346,7 +349,11 @@ test('agent.create: injected bundle carries the review-gate invariant and Lead t
       assert.match(prompt, /names no agent\s+recipient/, id);
       continue;
     }
-    assert.match(prompt, /does not license merging\s+the axes into one seat/, id);
+    assert.match(prompt, /Lead records an explicit review selection before the candidate round/, id);
+    assert.match(prompt, /minimum sufficient independent mandates for material decision-changing questions/, id);
+    assert.match(prompt, /Required review cannot be weakened because seats are unavailable or findings are adverse/, id);
+    assert.equal(/Record the review selection and its reason before the candidate round/.test(prompt), role === 'lead', id);
+    assert.equal(/review-gates\.md when making or revising that decision, including a\s+not-required decision/.test(prompt), role === 'lead', id);
     assert.equal(/When the assignment or protocol\s+requires independent review/.test(prompt), role === 'lead', id);
     // The C8 formation pins reach both orchestrating roles through the hook too.
     assert.match(prompt, /Observe-existing-work/, id);
@@ -540,49 +547,34 @@ test('session_open: every hook id gets a fresh non-empty grant; others pass thro
 });
 
 // ---------------------------------------------------------------------------
-// agent.session_open — the work-tracker env overlay (spec §6.3)
+// agent.session_open — grant overlay only; no seat env is ever added
 // ---------------------------------------------------------------------------
 
-test('session_open: absent/disabled/throwing tracker dep emits only the grant overlay (T2)', async t => {
-  for (const [name, deps] of [
-    ['dep absent', {}],
-    ['dep returns false', { readWorkTrackerEnabled: () => false }],
-    ['dep throws (corrupt/foreign setting)', { readWorkTrackerEnabled: () => { throw new Error('EISDIR state file'); } }],
-  ]) {
-    const { injection } = makeInjection(t, { deps });
-    for (const reason of ['create', 'resume']) {
-      const out = injection.sessionOpen(openReq('slp-codex-peer', { reason }));
-      assert.ok(out.env.SLP_SESSION_OPEN_GRANT.length > 0, `${name} still grants`);
-      assert.equal(out.env.BEADS_ACTOR, undefined, `${name}: no actor overlay`);
-      assert.equal(out.env.BD_AGENT_PROFILE, undefined, `${name}: no profile overlay`);
-      assert.equal(out.env.BD_DISABLE_METRICS, undefined, `${name}: no metrics overlay`);
-      assert.equal(out.env.SLP_FAMILY_BIN, '/bin/x');
-    }
+test('session_open: emits only the grant overlay on hook ids', async t => {
+  const { injection } = makeInjection(t);
+  for (const reason of ['create', 'resume', 'refresh', 'import']) {
+    const out = injection.sessionOpen(openReq('slp-codex-peer', { reason }));
+    assert.ok(out.env.SLP_SESSION_OPEN_GRANT.length > 0, `${reason} still grants`);
+    assert.equal(out.env.BEADS_ACTOR, undefined, `${reason}: no actor overlay`);
+    assert.equal(out.env.BD_AGENT_PROFILE, undefined, `${reason}: no profile overlay`);
+    assert.equal(out.env.BD_DISABLE_METRICS, undefined, `${reason}: no metrics overlay`);
+    assert.equal(out.env.SLP_FAMILY_BIN, '/bin/x');
   }
 });
 
-test('session_open: enabled tracker overlays the seat env on hook ids only (T6 plugin)', async t => {
-  const { injection } = makeInjection(t, { deps: { readWorkTrackerEnabled: () => true } });
-  const out = injection.sessionOpen(openReq('slp-pi-peer'));
-  assert.equal(out.env.BEADS_ACTOR, 'slp-peer-agent-1');
-  assert.equal(out.env.BD_AGENT_PROFILE, 'conservative');
-  assert.equal(out.env.BD_DISABLE_METRICS, '1');
-  assert.ok(out.env.SLP_SESSION_OPEN_GRANT.length > 0, 'grant still lands');
-  // Human-set BD_* values win; BEADS_ACTOR is always SLP's per-seat identity.
-  const preset = injection.sessionOpen(openReq('slp-codex-lead', {
-    env: { SLP_SESSION_OPEN_GRANT: '', BD_AGENT_PROFILE: 'aggressive', BD_DISABLE_METRICS: '0', BEADS_ACTOR: 'daemon-wide' },
+test('session_open: Human-set tracker env passes through untouched beside the grant', async t => {
+  const { injection } = makeInjection(t);
+  const out = injection.sessionOpen(openReq('slp-codex-lead', {
+    env: { SLP_SESSION_OPEN_GRANT: '', BD_AGENT_PROFILE: 'aggressive', BD_DISABLE_METRICS: '0', BEADS_ACTOR: 'human-cli' },
   }));
-  assert.equal(preset.env.BD_AGENT_PROFILE, 'aggressive');
-  assert.equal(preset.env.BD_DISABLE_METRICS, '0');
-  assert.equal(preset.env.BEADS_ACTOR, 'slp-lead-agent-1', 'a preset actor is replaced — attribution names the seat');
-  // Wrapper transports (devin) and non-slp providers never get the overlay.
+  // User-supplied values are preserved verbatim; the retired overlay can
+  // neither overwrite them nor add new keys.
+  assert.equal(out.env.BD_AGENT_PROFILE, 'aggressive');
+  assert.equal(out.env.BD_DISABLE_METRICS, '0');
+  assert.equal(out.env.BEADS_ACTOR, 'human-cli');
+  assert.ok(out.env.SLP_SESSION_OPEN_GRANT.length > 0, 'grant still lands');
   for (const provider of ['slp-devin-peer', 'codex', 'custom-tool']) {
     assert.equal(injection.sessionOpen(openReq(provider)), undefined, `${provider} passes through`);
-  }
-  // Every open reason gets the overlay — a resumed seat keeps its actor.
-  for (const reason of ['create', 'resume', 'refresh', 'import']) {
-    const open = injection.sessionOpen(openReq('slp-claude-supervisor', { reason }));
-    assert.equal(open.env.BEADS_ACTOR, 'slp-supervisor-agent-1', `${reason} keeps the actor`);
   }
 });
 

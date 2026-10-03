@@ -25,9 +25,11 @@ Read/re-read policy text under the common core's freshness rule.
    Resolve runtime sources through references/provider-routing.md; disposition
    belongs to the assignment. Complete its setup checks before the dependent
    preparation branch.
-   Before parallel writers, use references/orchestration.md for isolation and
-   integration ownership. Complete preflight with an owner map and available route,
-   or report the exact missing prerequisite for the dependent branch.
+   Before parallel writers, use references/orchestration.md for merge-safe scope,
+   shared-resource ownership, actual paths, the protocol-selected isolation tactic
+   and integration/candidate freeze. Complete preflight with an owner map and
+   available route, or report the exact missing prerequisite for the dependent
+   branch.
 2. Read `references/provider-routing.md` before runtime selection and follow
    its saved-profile or Peer-pool procedure, conditional Jev read trigger,
    provider inventory rules and complete-bundle/mode precedence. Refresh the
@@ -70,8 +72,14 @@ Read/re-read policy text under the common core's freshness rule.
    (including discovered filename hazards and their recovery technique), any
    effort/scope bound (for example, cover the top-N highest-risk references
    first, then breadth), verification, your own agent ID as the report
-   recipient, and handback. For
-   review include the exact candidate; for sealed design include the report
+   recipient, and handback. For review, follow review-gates.md's neutral brief:
+   include the objective and acceptance, authority constraints, exact candidate,
+   reviewer mandate and lens, source paths, relevant observed facts and unknowns,
+   and focused proof questions; omit the desired verdict, writer identity and
+   prior findings on a first review. Pin the selected mandate and operative
+   brief/scope/plan revisions; the review seat stays distinct from writer and
+   accepting owner. Missing or stale rules block dependent review rather than
+   silently choosing axes or omitting judgment. For sealed design include the report
    visibility boundary. A Peer receives only relevant repository tactics and may
    propose a different solution.
    The provider supplies common/role instructions; do not paste them each time.

@@ -457,48 +457,6 @@ export const TestJevOutput = z.object({
   detail: z.string().max(512).nullable(),
   latencyMs: z.number().nonnegative(),
 }).strict();
-/** Beads work-tracker toggle — plugin-owned state at
- *  slp-runtime/state/work-tracker.json whose sole writer is set-work-tracker
- *  (atomic 0600 whole-file write, same class as jev.json). Strict so a
- *  foreign shape is rejected rather than silently coerced; the package
- *  reader (plugin/server/runtime/cli/work-tracker.ts) applies the same checks byte-for-byte. */
-export const WorkTrackerConfig = z.object({
-  schemaVersion: z.literal(1),
-  tracker: z.literal("beads"),
-  enabled: z.boolean(),
-}).strict();
-/** Wire view of the tracker state. `configured` means a valid setting file
- *  exists; `enabled` is its flag (false when absent or invalid). `error`
- *  surfaces an unparseable/foreign file — never blocks, matching the
- *  session-entry gap line. `bd`/`bdError` report live detection of `bd` on
- *  the plugin process PATH (= daemon PATH): a failure is evidence in
- *  bdError, never an RPC failure. SLP never installs or initializes bd. */
-export const WorkTrackerView = z.object({
-  configured: z.boolean(),
-  enabled: z.boolean(),
-  error: z.string().nullable(),
-  bd: z.object({
-    path: z.string().min(1),
-    version: z.string().nullable(),
-  }).strict().nullable(),
-  bdError: z.string().nullable(),
-}).strict();
-export const GetWorkTrackerInput = z.object({
-  schemaVersion: z.literal(1),
-  target: Target,
-}).strict();
-export const GetWorkTrackerOutput = z.object({
-  schemaVersion: z.literal(1),
-  workTracker: WorkTrackerView,
-}).strict();
-/** Plugin-owned state mutation, same class as set-language: writes
- *  work-tracker.json atomically (0600) and returns the post-write view. */
-export const SetWorkTrackerInput = z.object({
-  schemaVersion: z.literal(1),
-  target: Target,
-  enabled: z.boolean(),
-}).strict();
-export const SetWorkTrackerOutput = GetWorkTrackerOutput;
 export const LocalTargetInput = z.object({
   schemaVersion: z.literal(1),
 }).strict();
@@ -603,8 +561,6 @@ export const getJev = defineRpc({ name: "get-jev", input: GetJevInput, output: G
 export const setJev = defineRpc({ name: "set-jev", input: SetJevInput, output: SetJevOutput });
 export const setJevKey = defineRpc({ name: "set-jev-key", input: SetJevKeyInput, output: SetJevKeyOutput });
 export const testJev = defineRpc({ name: "test-jev", input: TestJevInput, output: TestJevOutput });
-export const getWorkTracker = defineRpc({ name: "get-work-tracker", input: GetWorkTrackerInput, output: GetWorkTrackerOutput });
-export const setWorkTracker = defineRpc({ name: "set-work-tracker", input: SetWorkTrackerInput, output: SetWorkTrackerOutput });
 
 // ---------------------------------------------------------------------------
 // §7 receipt / operation-intent journal schemas (server-internal; the client
@@ -808,12 +764,6 @@ export type SetJevKeyRequest = z.infer<typeof SetJevKeyInput>;
 export type SetJevKeyResult = z.infer<typeof SetJevKeyOutput>;
 export type TestJevRequest = z.infer<typeof TestJevInput>;
 export type TestJevResult = z.infer<typeof TestJevOutput>;
-export type WorkTrackerConfigValue = z.infer<typeof WorkTrackerConfig>;
-export type WorkTrackerViewValue = z.infer<typeof WorkTrackerView>;
-export type GetWorkTrackerRequest = z.infer<typeof GetWorkTrackerInput>;
-export type GetWorkTrackerResult = z.infer<typeof GetWorkTrackerOutput>;
-export type SetWorkTrackerRequest = z.infer<typeof SetWorkTrackerInput>;
-export type SetWorkTrackerResult = z.infer<typeof SetWorkTrackerOutput>;
 export type StartResult = z.infer<typeof StartOutput>;
 export type StatusResult = z.infer<typeof StatusOutput>;
 export type BindingViewValue = z.infer<typeof BindingView>;

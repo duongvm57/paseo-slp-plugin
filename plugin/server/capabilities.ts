@@ -379,7 +379,7 @@ const FAMILY_FACTS: Partial<Record<FamilyId, FamilyFacts>> = {
     mcpLaunchRef: src("packages/server/src/server/agent/providers/codex/codex-app-server-agent.ts"),
     mcpLaunchEvidence: "toCodexMcpConfig passes config.env verbatim into the codex MCP server config",
     resumeEvidence: "daemon record restores mcpServers; codex session config is rebuilt from stored config",
-    resumeLimitation: "seatworks @19754537 reports Codex filters MCP server env; /proc fallback forbidden — child-env delivery unproven",
+    resumeLimitation: "Codex MCP child-environment delivery is unproven; process-inspection fallback is prohibited",
   },
   pi: {
     exactPreapproval: false,

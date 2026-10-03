@@ -41,8 +41,9 @@ import {
 } from "../shared/enforcement.ts";
 import { ROLES } from "../shared/runtime/families.ts";
 import { canonicalJson, canonicalSha256 } from "./config-view.ts";
-import { deriveId, liveMembership, requireActor as requireDeskActor, requireLead as requireDeskLead } from "./desk-command.ts";
+import { deriveId, effectiveOwnerMatches as effectiveOwnerTupleMatches, liveMembership, requireActor as requireDeskActor, requireLead as requireDeskLead } from "./desk-command.ts";
 import {
+  effectiveOwner,
   LEDGER_LIMITS,
   type AssignmentValue,
   type CandidateValue,
@@ -50,6 +51,8 @@ import {
   type LedgerValue,
   type MembershipValue,
 } from "./desk-store.ts";
+import { assignmentRegistrationSha256 } from "./desk-store.ts";
+import { deskWorkflowParticipant } from "./desk-ownership.ts";
 import { isRejection, readLedger, repoEnvelope, type DeskRunnerDeps, type RunnerCtx } from "./desk-runner.ts";
 import { validateReportRecordV1 } from "./desk-records.ts";
 
@@ -228,7 +231,10 @@ export function decideDeskHandback(ledger: Readonly<LedgerValue>, command: Recor
       seats: [],
     };
     return ok(
-      [{ kind: "assignment-registered", payload: { assignmentId, ownerAgentId: row.ownerAgentId, authorityRef: row.authorityRef } }],
+      [{ kind: "assignment-registered", payload: {
+        assignmentId, ownerAgentId: row.ownerAgentId, authorityRef: row.authorityRef,
+        registrationSha256: assignmentRegistrationSha256(row),
+      } }],
       { assignments: [...ledger.assignments, row] },
     );
   }
@@ -242,8 +248,8 @@ export function decideDeskHandback(ledger: Readonly<LedgerValue>, command: Recor
     if (assignment === undefined) {
       return reject("AUTHORITY_REQUIRED", "the assignment is not registered on this desk", "assignment bindings are created by a lead register, never by peers");
     }
-    if (assignment.ownerAgentId !== actor.agentId) {
-      return reject("AUTHORITY_REQUIRED", "only the assignment owner may attach seats", "the registering lead's agentId is bound into the row");
+    if (!effectiveOwnerTupleMatches(ledger, assignment, actor)) {
+      return reject("AUTHORITY_REQUIRED", "only the current assignment owner may attach seats", "the effective owner's exact live membership tuple is bound into custody");
     }
     if (assignment.state !== "open") {
       return reject("AUTHORITY_REQUIRED", "the assignment is closed", "closed assignments take no new seat bindings");
@@ -277,8 +283,8 @@ export function decideDeskHandback(ledger: Readonly<LedgerValue>, command: Recor
     if (assignment === undefined) {
       return reject("AUTHORITY_REQUIRED", "the assignment is not registered on this desk", "close targets a registered assignment");
     }
-    if (assignment.ownerAgentId !== actor.agentId) {
-      return reject("AUTHORITY_REQUIRED", "only the assignment owner may close it", "the registering lead's agentId is bound into the row");
+    if (!effectiveOwnerTupleMatches(ledger, assignment, actor)) {
+      return reject("AUTHORITY_REQUIRED", "only the current assignment owner may close it", "the effective owner's exact live membership tuple is bound into custody");
     }
     if (assignment.state === "closed") {
       return ok([]); // idempotent
@@ -555,6 +561,7 @@ export type StatusAssignment = {
   assignmentId: string;
   state: "open" | "closed";
   ownerAgentId: string;
+  ownershipRevision: number;
   seats: string[];
   handbacks: StatusHandback[];
 };
@@ -567,17 +574,18 @@ export function seatAssignmentsView(
   // Elision is reported as one counting marker per cap class, never one line
   // per dropped row — the wire schema caps the limitations array itself, so
   // a saturated projection must still produce a schema-valid status view.
-  const owned = row.role === "lead";
-  const relevant = ledger.assignments.filter(a =>
-    owned ? a.ownerAgentId === row.agentId : a.seats.some(seat => seat.agentId === row.agentId),
-  );
+  const relevant = ledger.assignments.filter(a => deskWorkflowParticipant(ledger, row, a) !== null);
   const sliced = relevant.slice(0, limits.assignments);
   let seatTruncated = 0;
   let handbackTruncated = 0;
   const assignments = sliced.map(assignment => {
+    // Owner-family participants (current, prior, nominee) share the
+    // owner-scoped view; attached seats keep their own-row scoping.
+    const ownerScoped = deskWorkflowParticipant(ledger, row, assignment) !== "attached-seat";
+    const owner = effectiveOwner(ledger, assignment);
     const seats = assignment.seats.map(seat => seat.agentId);
     const handbackRows = ledger.handbacks.filter(
-      h => h.assignmentId === assignment.assignmentId && (owned || h.agentId === row.agentId),
+      h => h.assignmentId === assignment.assignmentId && (ownerScoped || h.agentId === row.agentId),
     );
     const handbacks = handbackRows.slice(0, limits.handbacks).map(h => ({
       handbackId: h.handbackId,
@@ -594,7 +602,8 @@ export function seatAssignmentsView(
     return {
       assignmentId: assignment.assignmentId,
       state: assignment.state,
-      ownerAgentId: assignment.ownerAgentId,
+      ownerAgentId: owner.agentId,
+      ownershipRevision: owner.ownershipRevision,
       seats: seats.slice(0, limits.seats),
       handbacks,
     };

@@ -60,8 +60,11 @@ import type { Journal } from "./journal.ts";
 import type { LauncherBuilder } from "../shared/contracts.ts";
 import {
   DESK_BRIDGE_PROTOCOL,
+  DeskAssignmentAcceptInput,
+  DeskAssignmentAmendInput,
   DeskAssignmentAttachInput,
   DeskAssignmentCloseInput,
+  DeskAssignmentOfferInput,
   DeskAssignmentRegisterInput,
   DeskBridgeAck,
   DeskBridgeFrameError,
@@ -70,8 +73,10 @@ import {
   DeskBridgeToolEntry,
   DeskCheckDeclareInput,
   DeskCheckRunInput,
+  DeskDecisionAppendInput,
   DeskErrorCode as DeskErrorCodeSchema,
   DeskHandbackSubmitInput,
+  DeskWorkflowGetInput,
   DeskRolloutDeclareInput,
   DeskRolloutTransitionInput,
   DeskScopeDeclareInput,
@@ -85,6 +90,8 @@ import {
   type DeskSeatStatusValue,
 } from "../shared/enforcement.ts";
 import { auditCapabilities, CAPABILITY_IDS } from "./capabilities.ts";
+import { canReadDeskWorkflow, projectDeskWorkflow, runAssignmentAmend, runDecisionAppend } from "./desk-assignment.ts";
+import { runAssignmentAccept, runAssignmentOffer } from "./desk-ownership.ts";
 import {
   captureSeatSnapshot,
   runAssignmentAttach,
@@ -136,6 +143,9 @@ const HANDBACK_SUBMIT_TOOL = "slp_handback_submit";
 const ASSIGNMENT_REGISTER_TOOL = "slp_assignment_register";
 const ASSIGNMENT_ATTACH_TOOL = "slp_assignment_attach";
 const ASSIGNMENT_CLOSE_TOOL = "slp_assignment_close";
+const ASSIGNMENT_AMEND_TOOL = "slp_assignment_amend";
+const DECISION_APPEND_TOOL = "slp_decision_append";
+const WORKFLOW_GET_TOOL = "slp_workflow_get";
 const SETTLEMENT_RECORD_TOOL = "slp_settlement_record";
 const SETTLEMENT_EXPORT_TOOL = "slp_settlement_export";
 const SCOPE_DECLARE_TOOL = "slp_scope_declare";
@@ -145,6 +155,8 @@ const CHECK_DECLARE_TOOL = "slp_check_declare";
 const CHECK_RUN_TOOL = "slp_check_run";
 const ROLLOUT_DECLARE_TOOL = "slp_rollout_declare";
 const ROLLOUT_TRANSITION_TOOL = "slp_rollout_transition";
+const ASSIGNMENT_OFFER_TOOL = "slp_assignment_offer";
+const ASSIGNMENT_ACCEPT_TOOL = "slp_assignment_accept";
 
 /** The bridge's own limitation literals — the seat-facing read view's
  *  bounded flag strings (kept in one table, same discipline as
@@ -204,6 +216,24 @@ export const DESK_TOOL_CATALOG = [
       "Input: {requestId, assignmentId}. Response: {ok, receiptId, assignmentId, state}.",
   },
   {
+    name: ASSIGNMENT_AMEND_TOOL,
+    visible: true,
+    mutation: true,
+    description: "Chủ assignment: thêm brief theo revision CAS. Input: {requestId, assignmentId, expectedBriefRevision, brief, changeReason, authorityRef, affectedOwners}. Pointer chỉ là claim.",
+  },
+  {
+    name: DECISION_APPEND_TOOL,
+    visible: true,
+    mutation: true,
+    description: "Chủ assignment: ghi quyết định material bất biến theo brief CAS. Input: {requestId, assignmentId, expectedBriefRevision, authorityRef, decision}. Refs chỉ là claim.",
+  },
+  {
+    name: WORKFLOW_GET_TOOL,
+    visible: true,
+    mutation: false,
+    description: "Đọc workflow theo trang: chủ hoặc seat đang gắn với membership hiện hành. Input: {assignmentId, section, expectedLedgerRevision, expectedBriefRevision, cursor, limit}. Không mở refs.",
+  },
+  {
     name: SETTLEMENT_RECORD_TOOL,
     visible: true,
     mutation: true,
@@ -224,28 +254,19 @@ export const DESK_TOOL_CATALOG = [
     name: SCOPE_DECLARE_TOOL,
     visible: true,
     mutation: true,
-    description:
-      "Owner/lead only: declare an assignment-bound scope (P4). " +
-      "Input: {requestId, assignmentId, scopeId, label, declarationSha256, refs, seatAgentId|null}. " +
-      "Redeclare appends an immutable revision. Response: {ok, scopeId, revision, receiptId}.",
+    description: "Chủ assignment: khai báo scope bất biến, ownership và review plan tùy chọn. Input có expectedBriefRevision; refs authority là claim.",
   },
   {
     name: SCOPE_TRANSITION_TOOL,
     visible: true,
     mutation: true,
-    description:
-      "Owner/lead only: move a scope along the shared state machine (P4). " +
-      "Input: {requestId, assignmentId, scopeId, transition, scopeRevision, candidateSnapshot|null, candidateHead|null}. " +
-      "Response: {ok, transitionId, state, receiptId, discharged}.",
+    description: "Chủ assignment: chuyển state scope sau khi pin declaration và brief revision hiện hành; submit-for-review pin candidate.",
   },
   {
     name: SCOPE_REVIEW_TOOL,
     visible: true,
     mutation: true,
-    description:
-      "Bound reviewer seat only (never owner or bound seat): record a review axis bound to the round pin. " +
-      "Input: {requestId, assignmentId, scopeId, scopeRevision, candidateSnapshot, axis, verdict, findingsRef|null}. " +
-      "Response: {ok, reviewId, receiptId}.",
+    description: "Reviewer seat độc lập: ghi axis legacy hoặc named lens theo scope, brief, mandate và candidate pin; refs chỉ là claim.",
   },
   {
     name: CHECK_DECLARE_TOOL,
@@ -282,6 +303,24 @@ export const DESK_TOOL_CATALOG = [
       "Owner/lead only: one explicit move along the shared rollout machine (P5). " +
       "Input: {requestId, assignmentId, rolloutId, transition, rolloutRevision, targetSnapshot, evidenceRefs}. " +
       "Response: {ok, transitionId, state, receiptId, dischargedChecks}.",
+  },
+  {
+    name: ASSIGNMENT_OFFER_TOOL,
+    visible: true,
+    mutation: true,
+    description:
+      "Owner only: nominate an exact live lead for succession (no authority transfer). " +
+      "{requestId, assignmentId, expectedOwnershipRevision, targetAgentId, targetMembershipId, authorityRef, contextRef} " +
+      "→ {ok, offerId, ownershipRevision}.",
+  },
+  {
+    name: ASSIGNMENT_ACCEPT_TOOL,
+    visible: true,
+    mutation: true,
+    description:
+      "Exact nominee only: take custody; prior liveness is no mutex. " +
+      "{requestId, assignmentId, offerId, expectedOwnershipRevision, expectedLedgerRevision, expectedBriefRevision, acknowledgment, settlementRef, resources} " +
+      "→ {ok, acceptId, ownershipRevision, gaps}.",
   },
   {
     name: HIDDEN_TOOL,
@@ -1112,6 +1151,22 @@ export function createDeskBridge(deps: DeskBridgeDeps) {
         runnerDeps(),
       );
     }),
+    [ASSIGNMENT_AMEND_TOOL]: defineTool(DeskAssignmentAmendInput, async ({ row, bound, input }) => {
+      return runAssignmentAmend({ repoKey: bound.repoKey, row }, input, runnerDeps());
+    }),
+    [DECISION_APPEND_TOOL]: defineTool(DeskDecisionAppendInput, async ({ row, bound, input }) => {
+      return runDecisionAppend({ repoKey: bound.repoKey, row }, input, runnerDeps());
+    }),
+    [WORKFLOW_GET_TOOL]: defineTool(DeskWorkflowGetInput, async ({ row, input, seatRead }) => {
+      if (seatRead === null || seatRead.state !== "ok") {
+        return rejection("STATE_UNREADABLE", "the bound repo ledger cannot supply a complete workflow view", "read the current desk ledger before requesting assignment history");
+      }
+      if (!canReadDeskWorkflow(seatRead.ledger, row, input.assignmentId)) {
+        return rejection("AUTHORITY_REQUIRED", "this live membership has no participant read access to the assignment", "use the exact live membership of a current owner, prior owner, attached seat or nominee of a still-usable ownership offer");
+      }
+      const { assignmentId, ...page } = input;
+      return projectDeskWorkflow(seatRead.ledger, assignmentId, page);
+    }),
     [SETTLEMENT_RECORD_TOOL]: defineTool(DeskSettlementRecordInput, async ({ row, bound, input }) => {
       return runSettlementRecord(
         { repoKey: bound.repoKey, row },
@@ -1170,6 +1225,20 @@ export function createDeskBridge(deps: DeskBridgeDeps) {
     }),
     [ROLLOUT_TRANSITION_TOOL]: defineTool(DeskRolloutTransitionInput, async ({ row, bound, input }) => {
       return runRolloutTransition(
+        { repoKey: bound.repoKey, row },
+        input,
+        runnerDeps(),
+      );
+    }),
+    [ASSIGNMENT_OFFER_TOOL]: defineTool(DeskAssignmentOfferInput, async ({ row, bound, input }) => {
+      return runAssignmentOffer(
+        { repoKey: bound.repoKey, row },
+        input,
+        runnerDeps(),
+      );
+    }),
+    [ASSIGNMENT_ACCEPT_TOOL]: defineTool(DeskAssignmentAcceptInput, async ({ row, bound, input }) => {
+      return runAssignmentAccept(
         { repoKey: bound.repoKey, row },
         input,
         runnerDeps(),

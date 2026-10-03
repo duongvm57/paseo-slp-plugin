@@ -6,28 +6,58 @@ are in [AGENTS.md](../AGENTS.md).
 ## Testing
 
 ```bash
-npm test
+slp_check_home=$(mktemp -d)
+trap 'rm -rf "$slp_check_home"' EXIT
+env -i HOME="$HOME" PATH="$PATH" PASEO_HOME="$slp_check_home" npm test
+npm run typecheck
 npm run check
+npm run check:plugin-payload
 ```
 
-Inside a managed session, isolate the suite from ambient runtime env —
-`env -i HOME="$HOME" PATH="$PATH" PASEO_HOME="$(mktemp -d)" npm test`, or
-unset the full `SLP_*` set (`SLP_DAEMON_HOME SLP_MANAGED_RUNTIME
-SLP_RUNTIME_ROOT SLP_NODE_BIN`); a partial unset leaks the runtime into
-the suite and fakes failures.
+The isolated home and clean environment keep managed runtime and enabled
+service settings out of test fixtures. The canonical-fixture check currently
+requires `tmpdir()` to resolve to `/tmp`; local runs here use that default.
 
 Local checks cover the manager's transaction/recovery logic, the
 materializer, launch-shim generation, config preservation, protocol and the
-stdio adapter; they do not prove role compliance with the operating guide.
-The plugin has additionally been verified live on a real Paseo 0.8.0 daemon:
+stdio adapter, native desk history, selected review, owner continuity and
+bounded workspace reads. These checks do not prove live role compliance.
+An earlier candidate was additionally verified live on a real Paseo 0.8.0 daemon:
 Git-source install, management surface, activate/deactivate/reconcile RPCs,
 provider/profile patching, collision and drift refusals, and recovery
 classification — see `.local-checks/` for the evidence ledger. Roles are
 behavioral instructions, not a filesystem/MCP sandbox. The transport supports
 Codex, Pi, Devin and Claude; routing, adapter and handoff have local checks.
 Live provider switching, heartbeat, council and the full E2E manifest are
-not yet E2E-accepted. Capability and policy-load paths are recorded in the
-trace table below.
+not yet E2E-accepted. The [candidate contract](contract.md) records capability
+and policy-load ownership; the [E2E review checklist](review-checklist.md)
+defines the evidence required for a live workflow claim.
+
+### Independent review probes
+
+For a proof audit that needs writes, materialize the frozen candidate outside
+the working checkout before probing:
+
+```bash
+node bin/slp.mjs snapshot /absolute/repository
+node scripts/review-copy.mjs /absolute/repository <snapshot-sha256>
+```
+
+The harness returns a private scratch directory, its candidate path and a
+receipt. It measures source identity before and after copying and requires the
+copy's snapshot to match the requested pin. An ordinary committed repository,
+including modified/untracked files, modes, symlinks and tracked deletions, is
+supported. Nested repositories, gitlinks and files beneath symlink ancestors
+require separate materialization; the helper refuses them before allocating a
+copy. Ignored dependencies, build
+outputs, processes and external proof are not included. Regular-file staging
+intent is not mirrored. Install any needed dependencies only within the audit's
+grant, and record those prerequisites separately.
+
+The caller owns the copy, probe resources and removal after settlement. Copying
+is neither a sandbox nor a check execution or acceptance receipt. Preserve the
+source candidate; record each probe, its changed bytes and revert. Mutation
+evidence still follows R1/R2 in `AGENTS.md`.
 
 ## E2E
 

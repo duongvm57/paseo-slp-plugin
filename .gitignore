@@ -14,7 +14,7 @@ skills-lock.json
 # Local agent tool config
 .codex/
 
-# Beads / Dolt files (added by bd init)
+# Local database and tool artifacts
 .dolt/
 *.db
 .beads-credential-key

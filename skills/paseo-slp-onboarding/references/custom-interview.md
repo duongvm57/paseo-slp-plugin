@@ -15,15 +15,23 @@ the relevant artifact and restate each decision.
    chosen work. Lead retains decisions and verification; dispositions are not
    model assignments or a mandatory pipeline.
 
-Installed authority, parentage and ownership invariants remain. A required
-gate defaults to independent Spec + Standards seats absent a protocol rule;
-the protocol may instead declare a fixed shape or a bounded selection rule
-letting the Lead choose the minimum sufficient seats per task. Template
-choices (including the shipped review-trigger list) are defaults; any Human
-change must be explicit in Overrides with decider/date, and classes
-exempted from review triggers must satisfy installed review-gate rules.
-Keep defaults until changed. Extra cross-family review is optional; its
-unavailability does not block or replace the declared gate.
+Installed authority, parentage and ownership invariants remain. Establish the
+review triggers and an explicit selection rule: Lead selects minimum sufficient
+independent mandates for material decision-changing questions or explicit
+Human/protocol obligations. One independent seat may cover related questions;
+add seats for distinct risk or separation needs, not a fixed axis/count. Reviewer
+and optional Auditor are bounded dispositions, not permanent roles. Provider
+families do not prove independence or create quotas.
+
+With no material question or trigger, record a reasoned not-required selection,
+candidate, adequate proof and Lead verdict. This is distinct from an authority-backed
+waiver of required review. An absent decision, tiny label, unavailable seat or
+adverse finding grants no waiver. Preserve any specific Human-required fixed
+shape. Record changed template triggers or waivers in Overrides with decider/date.
+Choose task-specific stop conditions and authorized effort/resource bounds rather
+than a universal correction/challenge recipe. Exhaustion is not acceptance.
+New scope declarations use an explicit review plan; compatibility null is a
+deliberate legacy opt-in. Authority/rule pointers remain claims, not grant proof.
 
 Done: every named work kind has a recipe/gate, chosen seats have skills,
 configuration fields are resolved or open, and the Human has seen the effective

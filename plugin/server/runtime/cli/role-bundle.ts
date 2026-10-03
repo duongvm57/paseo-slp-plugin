@@ -5,12 +5,11 @@ import { isAbsolute, join } from 'node:path';
 import { roles, orchestrates } from './profiles.ts';
 import { files, hash, readJson } from './package.ts';
 import { spawnKit } from './spawn-kit.ts';
-import { readWorkTrackerSetting, workTrackerBlock } from './work-tracker.ts';
 import { SLP_ROLE_PREFIX, ROLE_PREFIX_TERMINAL, SPAWN_KIT_PREFIX, POLICY_LOCATORS_PREFIX, SESSION_LOCATOR_CAPTION } from '../../../shared/runtime/session-delivery.ts';
 
 // A Role bundle is the exact policy bytes a role receives at session entry.
-// This module owns the load-path contract that docs/reports/guide-coverage.md documents:
-// which policy files reach which role, and in what order. Both transport
+// This module owns which policy files reach each role and in what order.
+// The repository contract documents this interface. Both transport
 // adapters and the create_agent planner read it from here.
 
 // orchestrates lives in profiles.ts so spawn-kit.ts can read it without a
@@ -82,7 +81,7 @@ function managedHelpers(cli: string, home: string) {
 
 // The declared locator set a role's carrier ships: required bundle parts plus
 // that role's references. Supervisor/Lead keep the full reference set; Peer
-// receives only work-tracking.md when managed session entry enables beads.
+// receives none.
 // On an installed root, references derive from candidate.files, so a selected
 // receipt-declared file deleted from disk still reports missing. A source
 // checkout falls back to a live scan. Nothing outside the install unit is
@@ -105,11 +104,7 @@ export function policyLocators(root: string, role: string, env: Environment = pr
     catch (error) { if ((error as RuntimeError).code !== 'ENOENT' && (error as RuntimeError).code !== 'ENOTDIR') throw error; }
   }
   if (role === 'peer') {
-    const daemonHome = env?.SLP_MANAGED_RUNTIME === '1' ? env.SLP_DAEMON_HOME : null;
-    const trackerEnabled = typeof daemonHome === 'string' && isAbsolute(daemonHome)
-      ? readWorkTrackerSetting(daemonHome).enabled
-      : false;
-    references = trackerEnabled ? references.filter(path => path === 'src/references/work-tracking.md') : [];
+    references = [];
   }
   return [...required, ...references].map(path => {
     const absolute = join(root, path);
@@ -171,12 +166,8 @@ export function roleDelivery(root: string, role: string, env: Environment = proc
   const carrier = options.carrier === false ? '' : carrierBlock(spawnKit(role), policyLocators(policyRoot, role, env), SESSION_LOCATOR_CAPTION);
   return {
     role, parts, orchestrates: orchestrates(role),
-    // The work-tracker pointer is an entry-time helper like managedHelpers:
-    // managed sessions only, after the language line, before the assignment.
-    // Disabled/absent settings emit nothing — the render stays byte-identical
-    // to the pre-feature one. anchor() never carries it.
     entry: ({ explicitLanguageState = false } = {}) => entryPrefix + communicationLanguage(env, explicitLanguageState)
-      + (managed ? workTrackerBlock(managed.daemonHome, { cli, policyDir, shq }) : '') + ROLE_PREFIX_TERMINAL + carrier,
+      + ROLE_PREFIX_TERMINAL + carrier,
     anchor: () => core + recovery + communicationLanguage(env, true) + ROLE_PREFIX_TERMINAL,
   };
 }

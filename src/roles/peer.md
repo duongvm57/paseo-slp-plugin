@@ -28,7 +28,10 @@ snapshot helper or an exact commit with no unrecorded relevant changes. Pause
 writes after handback; corrections resume on an authorized assignment.
 For architecture, reconstruct the problem and report ownership/lifecycle/failure
 semantics, alternatives, recommendation, strongest counterargument and reversal
-conditions. For review, falsify the assigned stable candidate and return APPROVE
+conditions. For review, falsify the assigned stable candidate within the selected mandate;
+Reviewer and optional Auditor mandates remain independent of the writer and
+accepting owner. A single seat may assess related concerns; the assignment sets
+its question, not a fixed axis or a permanent hunting role. Return APPROVE
 or FINDINGS with severity counts, top findings, artifact path(s), inspectable
 evidence, checks performed and what stayed unverifiable; note that no
 acknowledgement is needed.

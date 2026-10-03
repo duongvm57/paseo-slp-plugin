@@ -7,16 +7,17 @@ assignment; these are not repo types or alternate workflow templates.
 |---|---|
 | Execution | Repo/base, remote, scopes, environments, writer/reviewer capacity and authority boundaries |
 | Delivery | Evidence, PR or execution report; destination, publication authority and completion point |
-| Work state | Existing assigned location; beads only when enabled |
+| Work state | Existing assigned location |
 | Shared state | For applicable phases: executor, rehearsal, recovery and reconciliation |
 | Topology | One Lead selects recipes; split only for authority/capacity needs with a Human mandate |
+| Review selection | Material decision-changing questions and required Human/protocol obligations; explicit mandates or reasoned not-required selection; any waiver needs authority |
+| Effort and stop | Task-selected correction/review/challenge stop conditions and authorized resource bounds; unresolved prerequisites or exhaustion pause dependent work, never imply acceptance |
 
 External connectors/MCP, credentials, pull cadence and queue bookkeeping belong
 to the repo harness. For example, the repo can supply Backlog MCP and ask its
 Supervisor to pull tasks and delegate them to Lead. SLP onboarding does not
 configure or validate that integration. Lead receives the task, assesses
-outcome/risk and dependencies, and chooses or combines recipes. Enabled beads
-can record work state under the existing work-tracking policy; it is optional.
+outcome/risk and dependencies, and chooses or combines recipes.
 
 A new pricing feature with a database backfill uses Feature plus Transition
 under the same Lead when within mandate. Opening a PR does not grant production
@@ -45,7 +46,7 @@ The examples below illustrate engineering decisions, not mandatory setup steps.
 
 | Example | Owner, next step, evidence and stop |
 |---|---|
-| Clear date-filter fix | Lead briefs one Engineer; self-loop → frozen candidate → Spec/Standards → verdict; findings return to same owner/seats. Stop at assigned completion. |
+| Clear date-filter fix | Lead briefs one Engineer; inner loop → frozen candidate + proof → reasoned review selection → Lead verdict. No material question/trigger permits not-required; a selected independent mandate may cover related risks. Findings return to the same owner/seats within task-selected bounds. |
 | Expense approval feature | Lead resolves acceptance; Architect resolves state/permissions; Engineers build slices; authorized integration writer combines; gate integrated behavior. Backfill uses Transition with its own execution grant. |
 | Scope grows into shared API | Engineer pauses affected writes with REOPEN_REQUEST; Lead reclassifies before widening work. Beyond mandate → Supervisor/Human. |
 | B depends on A; C independent | Lead waits B until accepted A is on B's base; C may run separately within writer/reviewer capacity. |

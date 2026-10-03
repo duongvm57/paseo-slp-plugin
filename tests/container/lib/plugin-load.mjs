@@ -39,9 +39,9 @@ eq(registrations.map(r => r.name).sort(), [
   'activate', 'catalog', 'deactivate', 'disable-supervision-notifications',
   'enforcement-recover-lock', 'enforcement-runtime-pin', 'enforcement-status',
   'get-jev', 'get-peer-pool', 'get-role-routing', 'get-supervision',
-  'get-supervision-status', 'get-work-tracker', 'local-target', 'reconcile',
+  'get-supervision-status', 'get-workspace-workflow', 'local-target', 'reconcile',
   'set-jev', 'set-jev-key', 'set-language', 'set-peer-pool', 'set-role-routing',
-  'set-supervision', 'set-work-tracker', 'status', 'test-jev',
+  'set-supervision', 'status', 'test-jev',
 ], 'full RPC surface registered');
 if (registrations.some(r => typeof r.handler !== 'function')) fail('a registered RPC handler is not a function');
 ok('every RPC handler is callable');

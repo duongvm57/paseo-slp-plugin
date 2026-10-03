@@ -143,8 +143,13 @@ At task completion, cancellation, handoff or expiry review, reconcile the owner 
 with the resource receipts: task descendants, pending permissions, terminals,
 workspace scripts, schedules/heartbeats and processes. Artifact acceptance alone
 is not settlement: settle each bounded task after Delivery completes and no
-correction or re-review remains open. Keep the same Engineer and independent review
-seats available while that task has rework. Reconcile its resources at settlement;
+correction or re-review remains open. Keep the same authorized write owner and
+independent review seats available while that task has rework; each correction
+remains within its grant and re-enters the declared gate on its exact frozen
+candidate. Availability and wake signals do not change the review selection or
+waive required Human/protocol obligations. Task-selected stop/effort bounds belong
+to the assignment and protocol; exhaustion leaves unresolved obligations visible
+and is not acceptance. Reconcile its resources at settlement;
 preserve sessions and artifacts, and perform lifecycle actions only under explicit
 authority. A continuing lane or Lead mandate does not keep a completed task open.
 Human stop halts further work and follow-ups; cancel owned task agents as authorized

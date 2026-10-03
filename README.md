@@ -10,29 +10,35 @@
   that separates <i>kinds of judgment</i>, not a chain of command.
 </p>
 
-You open one **SLP Supervisor** session in Paseo and give it an objective. It observes or creates a
-**Lead** for the work; the Lead splits the work into bounded outcomes and gives each to a **Peer**
-that it picks from your Peer pool. Every seat is an ordinary Paseo agent. The plugin gives each one
-its role contract, delegation rules and policy locators at session entry, separate from your task
-prompt. You keep talking to the Supervisor in the same chat. You can also start directly with an
-**SLP Lead**; the Supervisor is an optional observer of the workflow.
+Give an **SLP Lead** a bounded objective, or work through an optional **SLP Supervisor**.
+The Lead coordinates independent Peers, integrates their work and returns a project verdict.
+Each seat is an ordinary Paseo agent with its role instructions loaded separately from your task.
+You keep control of intent, important trade-offs and final acceptance.
 
-![Paseo SLP at a glance: the Human owns intent and final acceptance; the Lead delegates bounded outcomes to independent Peers; an optional Supervisor observes workflow and relays decisions; the plugin supplies role instructions and checked preparation](docs/images/slp-overview.svg)
+The plugin also supplies a **repository desk**: durable assignments, current briefs, decisions,
+declared scopes, selected review obligations, candidate/check evidence and planned owner handoff.
+Open **Read SLP work** to inspect registered work without reconstructing it from chat.
 
-## How a task goes
+![Paseo SLP: Human intent and acceptance, Lead and independent Peers, optional Supervisor, and a durable repository desk for work, review, proof and handoff](docs/images/slp-overview.svg)
 
-1. **You set the objective.** Start a new agent with the **SLP Supervisor** profile and say what you
-   want, e.g. `Fix the checkout total rounding bug. Report back with verdict and the checks you ran.`
-2. **The Supervisor stays out of execution.** It observes an existing Lead or creates one, protects
-   the quality of the workflow (bias, repeated failure, lost momentum, drifting scope, weak evidence)
-   and relays your decisions. It never implements or accepts the work.
-3. **The Lead owns the project calls.** It frames the work, chooses the topology by risk (a single
-   Engineer for a small fix; an Architect, an independent Reviewer or several lanes when lifecycle
-   matters) and picks each Peer's provider and model from the pool.
-4. **Peers are co-workers, not function calls.** Each owns one outcome. It may challenge the
-   premise, ask for a dependency or stop as blocked. Disagreement is settled with evidence.
-5. **You come back to a report** in the same Supervisor chat. Important trade-offs, exceptional
-   grants and final acceptance stay yours.
+## How work progresses
+
+1. **Set the objective.** Start an **SLP Lead**, or an **SLP Supervisor** that observes or creates a
+   Lead. For example: `Fix the checkout total rounding bug. Report back with the candidate and
+   the checks you ran.` The Supervisor observes workflow and relays your decisions; it stays
+   outside implementation and project acceptance.
+2. **Make ownership explicit.** The Lead frames acceptance, dependencies and risks, registers
+   work in the desk when using its tools, and delegates bounded outcomes. Each moving scope has
+   one writer. Peers can challenge a premise, request a dependency or report blocked.
+3. **Select review for the work.** The Lead chooses independent mandates for material questions
+   and Human/protocol requirements. There is no fixed reviewer pair or count. Scope changes,
+   brief changes and new candidates can invalidate earlier review.
+4. **Return evidence.** The desk keeps handback claims separate from candidate observations and
+   actual check runs. The Lead resolves findings and disagreements, integrates the work and
+   reports what the proof establishes and what remains uncertain.
+5. **Continue without losing the work.** A planned handoff uses an owner offer and the receiving
+   Lead's acknowledgment under revision checks, keeping the same assignment and history.
+   Handoff and resource accounts do not establish project acceptance; that remains yours.
 
 ## Why not just subagents
 
@@ -44,7 +50,7 @@ or acceptance, and more agents can raise confidence without raising correctness.
 | Authority gradient        | The child agrees with the answer the parent already presented     | Peers may challenge the premise; evidence settles it                    |
 | Perfect-plan trap         | The coordinator pre-solves the work; the worker becomes a typist  | The Lead delegates outcomes, not file-by-file instructions              |
 | Attention dilution        | The coordinator implements and loses the project-wide view        | The Lead integrates; the Supervisor never joins execution               |
-| Unsafe parallelism        | Two agents overwrite the same moving files                        | One writer per moving scope; separate worktrees for concurrent writers  |
+| Unsafe parallelism        | Two agents overwrite the same moving files                        | One writer per moving scope; declared scopes and repo isolation tactics |
 | Biased or stale review    | The reviewer inherits the author's framing or reads moving files  | Independent review on a stable candidate                                |
 | False completion          | `idle`, "done" and green tests are taken as proof                 | Acceptance needs the right artifact reviewed by the right authority     |
 | Split control planes      | Workers spawn untracked workers                                   | Paseo is the only control plane; Peers never spawn                      |
@@ -59,7 +65,9 @@ The design rationale is in [docs/architecture.md](docs/architecture.md).
 | Loads each seat's role instructions at session entry, separate from the task prompt         | To guess when the config drifted outside its journal (`RECOVERY_REQUIRED`)        | Runs a scheduler or agent database; Paseo stays the control plane |
 | Keeps a Peer pool that the Lead picks each Peer's runtime from                               | A Peer binding outside the pool during `prepare`                                 | Writes your repository's routing catalog                          |
 | Validates launch arguments offline (`prepare`), with named failures                          | Unverified or incompatible provider inventory supplied to `prepare`              | Runs a monitoring daemon; `monitor` is a scan you invoke          |
-| Offers opt-in Jev routing, communication supervision and a beads work tracker                | A Jev routing receipt that fails offline verification (hash, model, catalog)      | Installs or initializes beads                                     |
+| Records assignments, briefs, decisions, scopes, selected review and candidate/check evidence | Stale revision pins, overlapping declared scopes and unqualified required reviews | Infers acceptance from a handback, an agent status or a green check |
+| Supports planned owner handoff and a read-only workspace work panel                         | An acknowledgment that does not match a usable offer and current revision pins  | Transfers authority through a chat message or a resource account  |
+| Offers opt-in Jev routing and communication supervision                                    | A Jev routing receipt that fails offline verification (hash, model, catalog)     | Enables external services without your configuration              |
 
 Saved role choices narrow the Supervisor/Lead providers; all four Peer providers remain
 pool-driven. Provider entries for unavailable CLIs are disabled. The pool check above belongs to
@@ -77,6 +85,10 @@ interfaces; repository and shell permissions still come from Paseo and the provi
 
 Seats run on **Codex, Pi, Devin or Claude Code**, mixed freely: two Peers in the same team can use
 different providers, models and effort levels.
+
+Peer Engineer is the default implementation writer. An explicit Human assignment or effective
+workspace protocol can grant a bounded Lead write for clear, reversible work. One writer,
+candidate proof and required independent review still apply; a tiny task grants no exemption.
 
 ## Installation
 
@@ -137,6 +149,34 @@ No skills installed? Paste this into any agent: *"Help me set up Paseo SLP. Read
 https://raw.githubusercontent.com/duongvm57/paseo-slp-plugin/main/docs/agent-guide.md first, then
 walk me through it step by step."*
 
+## Work records and review
+
+Open **Read SLP work** from the workspace command palette to see assignments registered in
+that repository's desk. The **SLP work** panel shows the current brief, decision history,
+declared owners and dependencies, review observations, and candidate/check evidence. Use
+**Reload** for fresh state; missing or older records are shown explicitly. It does not infer
+work from chats or accept a task for you.
+
+Assignment handoff keeps the same work ID and history: the current Lead offers it to an
+exact receiving Lead membership, which acknowledges responsibility under revision checks.
+The panel distinguishes current ownership and usable reviews from historical observations,
+and shows handback/settlement claims separately from measurements. See
+[assignment continuity](docs/work-continuity.md) for the sequence and its limits.
+
+The owning Lead can append brief revisions and material decisions through the desk tools.
+Brief, scope and review-plan changes make dependent reviews stale. Lead selects independent
+mandates for material questions and Human/protocol requirements, without a fixed reviewer
+pair or count. New scopes explicitly record required review, no applicable trigger, or an
+authorized exemption. A no-trigger decision does not waive a mandatory gate.
+
+Handbacks can also carry an optional structured execution, review or adjudication report.
+The renderer preserves the original evidence block; handoff recaps separate supplied claims
+from the freshly measured candidate and disclose missing context. See
+[work coordination](docs/work-coordination.md) for the tools, report and continuity contract.
+
+External trackers and project-specific automation belong to your workspace/harness. The plugin
+uses its own desk and does not add a tracker card, tracker RPC or tracker session instructions.
+
 ## Optional capabilities
 
 These capabilities are **off by default**. Configure them explicitly in the SLP manager;
@@ -148,7 +188,6 @@ quota fallback belongs to the selected Peer pool, including a repo-pinned pool.
 | [Peer quota fallback](docs/operations.md#peer-quota-fallback)               | One designated pool option the Lead may retry on once when a Peer runs out of quota                   |
 | [Jev-assisted routing](docs/operations.md#jev-assisted-routing-optional)    | A calibrated routing receipt from Jev (TypeSafe System One): shadow mode records it, armed mode binds it |
 | [Communication supervision](docs/operations.md#communication-supervision-optional) | Assesses captured Peer handbacks and Lead handling for configured Leads; records findings and optionally alerts a Supervisor |
-| [Work tracker](docs/operations.md#work-tracker-optional)                    | A beads (`bd`) work graph seats can query instead of rebuilding task state from chat                  |
 
 Jev-powered routing and supervision send the configured inputs or captured communications to
 your chosen Jev service. Review that service and its costs before enabling them.
@@ -174,7 +213,9 @@ profiles and keeps the runtime files for sessions still running), then run
 From a source checkout, install dependencies with `npm ci`, then run the local checks:
 
 ```bash
-env -i HOME="$HOME" PATH="$PATH" PASEO_HOME="$(mktemp -d)" npm test  # clear inherited SLP runtime variables
+slp_check_home=$(mktemp -d)
+trap 'rm -rf "$slp_check_home"' EXIT
+env -i HOME="$HOME" PATH="$PATH" PASEO_HOME="$slp_check_home" npm test
 npm run typecheck
 npm run check                     # inspect the install-unit identity
 npm run check:plugin-payload       # verify the generated payload is current
@@ -187,8 +228,8 @@ then repeat the payload check. Local checks establish source behavior and payloa
 To dogfood live from a source checkout, ask an open session to *run the package's full E2E*. See
 [docs/development.md](docs/development.md).
 
-The localized README diagrams share one source: `scripts/generate-readme-diagrams.mjs`.
-After editing it, run `node scripts/generate-readme-diagrams.mjs`; use `--check` to verify the SVGs.
+Both READMEs use the same overview SVG from `scripts/generate-readme-diagrams.mjs`.
+After editing it, run `node scripts/generate-readme-diagrams.mjs`; use `--check` to verify the SVG.
 
 ## Docs
 
@@ -197,12 +238,13 @@ After editing it, run `node scripts/generate-readme-diagrams.mjs`; use `--check`
 | [docs/architecture.md](docs/architecture.md)     | The role model, what the plugin adds to Paseo, role delivery and delegation   |
 | [docs/operations.md](docs/operations.md)         | Activation, upgrades, profiles, repository setup, the Peer pool, optional capabilities |
 | [docs/cli.md](docs/cli.md)                       | The offline `slp.mjs` commands: `prepare`, `routes`, `route-decide`, `monitor` and the rest |
+| [docs/work-coordination.md](docs/work-coordination.md) | Durable briefs, decisions, review mandates, reports and the read-only workspace panel |
+| [docs/work-continuity.md](docs/work-continuity.md) | Planned owner handoff, acknowledgment, historical authority and remaining obligations |
 | [docs/contract.md](docs/contract.md)             | What every file owns, before you change it                                      |
 | [docs/development.md](docs/development.md)       | Tests, verification status and the E2E harness                                  |
 | [AGENTS.md](AGENTS.md)                           | The rules contributors and agents follow in this repository                     |
 
-Specs and investigations live under [docs/spec/](docs/spec/) and [docs/reports/](docs/reports/).
-Earlier operating lessons are recorded in [Protocol experience (Vietnamese)](docs/protocol-experience.vi.md).
+Technical contracts for individual capabilities live under [docs/spec/](docs/spec/).
 
 <!-- Keep installation requirements, setup steps and examples synchronized with README.vi.md. -->
 

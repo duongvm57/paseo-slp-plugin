@@ -1,11 +1,17 @@
 ---
-version: '10'
+version: '11'
 owner: 'duongvm (Human)'
 applies_to: 'paseo-slp source repository'
-last_reviewed: '2026-09-30'
+last_reviewed: '2026-10-03'
 package_version: '0.4.0'
 template_sha256: 'c5b6db392e3d9646d931cda658c3364fe64287caf1f9717ad323681f2e860ad1'
 template_source: 'source checkout; unreleased working candidate'
+template_provenance: 'template_sha256 retains historical rendering provenance; current_source_template_sha256 records the amended source template basis'
+current_source_template_sha256: '93009c554bd28d8da782fc33d8ef7e0b5cca0cc5bb3b34bd078d8c84828688a2'
+current_source_template_measured_at: '2026-10-03'
+review_selection_decided_by: 'duongvm (Human)'
+review_selection_decided_at: '2026-10-03'
+review_selection_authority: '/tmp/paseo-slp-review-selection-20261003/assignment.md; Human-approved selection and source-protocol budget change'
 routing_intent: 'pinned'
 supervisor_notebook: '.paseo-slp/notebook.md (owner: Supervisor)'
 decided_by: 'duongvm (Human)'
@@ -34,13 +40,18 @@ not a product or task-engine contract.
   uncertainty remains about a system boundary, ownership, lifecycle, migration,
   cross-module dependency or hard-to-reverse contract. Architecture is a conditional
   route, not a required Feature phase.
-- Independent review follows material risk, uncertain proof, a hard-to-reverse
-  decision or an explicit assignment. When a gate applies, use separate Spec and
-  Standards seats under installed role policy. Do not add a cross-family seat by
-  default. For this repository, review triggers include role authority/delegation,
+- Independent review follows material decision-changing risk, uncertain proof,
+  a hard-to-reverse decision or an explicit Human/assignment/protocol obligation.
+  Lead selects the minimum sufficient independent mandates; one seat may cover
+  related questions, and added seats address distinct unresolved risk or separation
+  needs. Reviewers are distinct from writer and accepting owner. Spec/Standards
+  are optional descriptive lenses, not reserved seats; no count or family quota
+  applies. For this repository, triggers include role authority/delegation,
   runtime binding/transport, installation/upgrade/rollback, or package behavior
-  whose proof is uncertain. Seat count creates no authority; reviewers report
-  evidence and Lead adjudicates findings and issues the verdict.
+  whose proof is uncertain. No material question/trigger → explicit reasoned
+  not-required selection + candidate + adequate proof + Lead verdict. Tiny labels
+  waive no required review. Lead adjudicates each material finding with reasons,
+  evidence/counterevidence and residual risk within authority.
 - An uncertain premise or contract goes to investigation or
   `REOPEN_REQUEST`; a missing owner or prerequisite to `DEPENDENCY_REQUEST`; missing
   authority or capability to `BLOCKED`. Resume dependent writes after Lead resolves
@@ -55,15 +66,15 @@ not a product or task-engine contract.
   candidate when a new material risk appears, evidence is invalidated or the
   contract/acceptance changes. Repeated same-class findings call for root-mechanism
   analysis, not an unbounded point-fix loop.
-- After the initial review, each assignment has at most **two correction/re-check
-  rounds**; full re-review counts toward this budget. Lead records rounds used and
-  issues a verdict as soon as proof is sufficient. Changing candidate, seat,
-  session or reopening the assignment does not reset the budget. At exhaustion,
-  stop the loop and report findings, proof and options to Human; only Human may
-  grant a specific number of additional rounds. Exhaustion is not ACCEPT.
-- A disputed material proposition gets at most one challenge and one response,
-  then a Lead ruling or escalation beyond authority. Council or root-mechanism
-  analysis does not grant another correction/review round beyond the budget.
+- Correction, re-review and challenge use a task-selected stop condition and
+  authorized effort/resource bound, recorded before continued work. Lead rules as
+  soon as proof is sufficient.
+  Stop dependent work when a premise/prerequisite remains unresolved or the bound
+  is exhausted; report findings, proof and options to the authority owner for a
+  strategy, dependency or resource decision. Exhaustion is not ACCEPT. Changing
+  candidate, seat or session does not create more authority or erase obligations.
+  Council and root-mechanism work stay within the same authorized bound; repeated
+  mechanisms reopen the premise/strategy instead of an unbounded point-fix loop.
 - Parallelize independent, merge-safe scopes when dependencies and capacity allow.
   One moving write scope has one writer and integration has one owner. Sequence or
   worktree choice is a Lead tactic, not an SLP requirement.
@@ -75,10 +86,22 @@ not a product or task-engine contract.
 
 ## Gate
 
-Independent review is risk- or assignment-triggered as above. This source repo
-keeps its two-axis gate whenever review is required; this is a repository/package
-policy, not a universal SLP topology. Mutation evidence has an additional binding
-rule from `AGENTS.md`:
+Independent review is selected from the material questions and explicit obligations
+above. Record the mandates, authority/rule source, reason and operative
+brief/scope/plan revision before the candidate round. New declarations choose an
+explicit review plan; `reviewPlan: null` is a deliberate legacy Spec/Standards
+compatibility opt-in, not a new-work fallback. Omitted redeclaration plans retain
+the prior decision. A reasoned `not-required` selection is not an `exempt` waiver
+of required review; waiver needs explicit authority and exemption class. Source
+references remain claims, not grant authentication. Required Human/protocol gates
+are never weakened for unavailable seats or adverse findings; missing required
+proof/constraints cannot be accepted as recorded risk. Neutral briefs include
+objective, acceptance, actual constraints, candidate, mandate, sources and unknowns.
+Findings stay visible; Lead rules with reason, counterevidence and residual risk,
+without unanimity or reproduction-only acceptance. Brief/mandate changes invalidate
+standing reviews, never rewrite historical candidate/round receipts.
+
+Mutation evidence has an additional binding rule from `AGENTS.md`:
 
 - **R1:** every mutation log, including the acceptance owner's replay, contains
   verbatim `sha256sum <test file>` output captured immediately before mutation,

@@ -41,7 +41,6 @@ import { createHash, randomUUID } from "node:crypto";
 import { pathToFileURL } from "node:url";
 import type { PluginBeforeRequests } from "@getpaseo/plugin/server";
 import { familyFromProviderId, HOOK_PROVIDER_ID_RE, ROLES, WRAPPER_PROVIDER_ID_RE, type FamilyId } from "../shared/runtime/families.ts";
-import { beadsSeatEnv } from "./work-tracker.ts";
 import { candidateModulePath } from "./candidate-module.ts";
 
 type AgentCreateRequest = PluginBeforeRequests["agent.create"];
@@ -88,12 +87,6 @@ export interface RoleInjectionDeps {
   importModule?: (specifier: string) => Promise<RoleBundleModule>;
   /** Grant-token derivation seam for tests; must return a non-empty token. */
   grantToken?: (request: { agentId: string; reason: string }) => string;
-  /** Work-tracker enablement for the seat env overlay (spec §6.3).
-   *  Production wires work-tracker.ts readWorkTrackerEnabled against the
-   *  resolved daemon home's stable root. Absent dep or any read error →
-   *  disabled: sessionOpen emits only the grant overlay, exactly as before
-   *  the feature. */
-  readWorkTrackerEnabled?: () => boolean;
   /** P2-c desk seams — both optional and asynchronous; absent means the
    *  pre-P2-c behavior byte-for-byte. Neither promise ever rejects (the
    *  desk-seat module wraps everything fail-open); the composer still
@@ -299,23 +292,17 @@ export function createRoleInjection(deps: RoleInjectionDeps) {
      *  GATE/JOIN cells decide whether anything happens), then overlay as
      *  before. Without the seam the hook stays synchronous and returns
      *  byte-for-byte the pre-P2-c result. The overlay itself is unchanged:
-     *  per-open grant plus the beads seat env when enabled; a disabled/
-     *  absent/corrupt setting emits only the grant overlay; all other
-     *  fields return unchanged (the host rejects changes beyond env). */
+     *  a per-open grant only; all other fields return unchanged (the host
+     *  rejects changes beyond env). */
     sessionOpen(input: { request: SessionOpenRequest }) {
       const request = input.request;
       const overlay = () => {
         const owned = HOOK_FAMILY_PROVIDER.exec(request.provider);
         if (owned === null) return;
-        let enabled = false;
-        try {
-          enabled = deps.readWorkTrackerEnabled?.() === true;
-        } catch { /* a setting read failure must never abort the open */ }
         return {
           ...request,
           env: {
             ...(request.env ?? {}),
-            ...(enabled ? beadsSeatEnv({ role: owned[2], agentId: request.agentId, env: request.env ?? {} }) : {}),
             SLP_SESSION_OPEN_GRANT: grantToken(request),
           },
         };

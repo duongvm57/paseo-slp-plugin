@@ -76,6 +76,18 @@ create_agent arguments; see the
 Both commands only prepare arguments; Supervisor/Lead use Paseo to actually
 create the agent.
 
+An optional `handoff.recapInputs` supplies structured assignment/authority,
+decisions, assumptions, unresolved items, owner/dependency pins, report artifacts
+and resources. The packet retains the required free-text `handoff.state` and
+adds a recap alongside the freshly measured candidate. Missing sources and
+candidate mismatches remain visible; legacy free text is not mined for facts.
+Reported checks and settlement stay claims. Preparation never transfers
+ownership, acknowledges receipt or changes an agent's lifecycle.
+
+Native `slp_assignment_offer` / `slp_assignment_accept` are separate desk
+operations. A preparation recap does not substitute for their exact membership
+and revision checks or durable acknowledgment. See [assignment continuity](work-continuity.md).
+
 Three modes support request authoring — all side-effect free:
 
 - `prepare --schema` prints the request contract (required keys per role,
@@ -319,14 +331,27 @@ stdin. `--schema` prints the v1 JSON Schema and takes no report path:
 ```bash
 node "$SLP_RT/bin/slp.mjs" records /absolute/report.md --require handback
 node "$SLP_RT/bin/slp.mjs" records --schema
+node "$SLP_RT/bin/slp.mjs" records --render /absolute/report.md
 ```
 
 `--kind` filters returned records only; errors and warnings still cover the full
 report, and any error keeps the command's exit status non-zero. For `outputRef`,
-the per-check candidate repository takes precedence, then the record candidate;
-`--repo` supplies the fallback root. See
+`--repo` is the verifier's authoritative root and overrides record-declared
+roots. Without it, the per-check candidate repository takes precedence, then
+the record candidate. See
 [handback and settlement records](../src/references/report-records.md) for the
 record contract.
+
+A handback may include an optional `slp-report` version 1 for execution,
+review or Lead adjudication. Selecting it requires meaningful purpose-specific
+content, including unfinished work or mandate/findings and unresolved decisions.
+Legacy v1 records remain valid. `--render` emits the structured narrative plus
+the original fenced evidence block without reserializing it. Reported `read`,
+`ran`, candidate and checks remain claims; rendering establishes no execution
+or acceptance. Use structured reports when the current runtime's
+`records --schema` advertises `slp-report`, and rendering when its CLI usage
+advertises `--render`. Older retained candidates may support only the legacy
+v1 envelope; their lack of these optional modes does not invalidate it.
 
 ## `status` / `local-target`
 
@@ -355,26 +380,3 @@ availability probes are daemon-only views and are reported under `gaps`.
 Mutation RPCs (activate/reconcile/deactivate/set-language/set-role-routing)
 stay Human-authority and are not exposed. These probes retire when the host
 ships `paseo plugin invoke` or MCP `invoke_plugin_rpc`.
-
-## `tracker`
-
-`tracker <repository> [--paseo-home <absolute-home>]` is the read-only
-beads probe — the command a managed session-entry line names when the
-work tracker is enabled (see
-[Work tracker](operations.md#work-tracker-optional)):
-
-```bash
-node "$SLP_RT/bin/slp.mjs" tracker /absolute/repository [--paseo-home /absolute/paseo-home]
-```
-
-It prints `{tracker, repository, enabled, state, bd, workspace, gaps}`.
-`state` is `ready` (a working `bd` and the repository is a beads
-workspace), `uninitialized` (no beads workspace in the repository) or
-`unavailable` (no working `bd` on PATH); `bd` reports `{path, version}`
-when found and `workspace` reports `{path, prefix, redirectedFrom}`.
-Gaps are data — the command exits 0 even when the state is not `ready`,
-and without `--paseo-home` the enablement setting is not read
-(`enabled: null`). The probe runs `bd version` and `bd where --json`
-with `BD_DISABLE_METRICS=1` forced, a 5 s timeout and a bounded buffer;
-it never installs, initializes or repairs anything — a missing or broken
-tracker is a gap to report, not a fault to fix.

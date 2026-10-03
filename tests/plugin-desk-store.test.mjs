@@ -322,17 +322,17 @@ test('read: invalid JSON, wrong header, schema-invalid, and oversized ledger are
   assert.equal(result.diagnostics.code, 'oversized');
 });
 
-test('read: schemaVersion 7 is future, never corrupt and never overwritten', t => {
+test('read: schemaVersion 9 is future, never corrupt and never overwritten', t => {
   const dir = fixture(t);
   const root = join(dir, 'stable');
   const store = freshStore(root);
   mkdirSync(repoDir(root), { recursive: true });
-  const body = JSON.stringify({ format: 'paseo-slp/enforcement', schemaVersion: 7, anything: 'goes' });
+  const body = JSON.stringify({ format: 'paseo-slp/enforcement', schemaVersion: 9, anything: 'goes' });
   writeFileSync(ledgerPath(root), body);
   const result = store.read(REPO_KEY);
   assert.equal(result.state, 'future');
   assert.equal(result.diagnostics.code, 'future-version');
-  assert.equal(result.diagnostics.schemaVersion, 7);
+  assert.equal(result.diagnostics.schemaVersion, 9);
   assert.equal(readFileSync(ledgerPath(root), 'utf8'), body, 'future ledger must not be modified');
 });
 
@@ -364,6 +364,9 @@ test('read: ledger repoKey / algorithm / binding mismatches are unsafe', async t
   const store = freshStore(root);
   assert.equal((await store.transact(REPO_KEY, envelope(), decideCommit())).ok, true);
   const ledger = readLedgerFile(root);
+  const intact = store.read(REPO_KEY);
+  assert.equal(intact.state, 'ok', 'the original namespace first proves the fixture and full event chain are valid');
+  assert.equal(intact.ledger.lastEventSeq, ledger.lastEventSeq);
 
   // Path repoKey differs from the ledger's recorded repoKey.
   const other = { hostId: 'host-other', gitCommonDir: '/repo/.git' };
@@ -569,7 +572,7 @@ test('commit: first commit writes ledger, segment, chain head — and a zero-eve
 
   const ledger = readLedgerFile(root);
   assert.equal(ledger.format, 'paseo-slp/enforcement');
-  assert.equal(ledger.schemaVersion, 6);
+  assert.equal(ledger.schemaVersion, 8);
   assert.equal(ledger.revision, 2);
   assert.equal(ledger.lastEventSeq, 1);
   assert.equal(typeof ledger.lastEventSha256, 'string');

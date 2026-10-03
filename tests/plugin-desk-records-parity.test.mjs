@@ -28,6 +28,32 @@ test('CLI and desk exports use the canonical core and frozen vocabulary', () => 
   }
 });
 
+test('structured report semantics stay identical through CLI and desk adapters', t => {
+  const repo = fixtureRepo(t);
+  const record = {
+    ...baseHandback(repo),
+    report: {
+      format: 'slp-report', version: 1, purpose: 'execution',
+      assignment: {
+        id: 'asg-1', revision: 'rev-1', scopeRevision: 'scope-1', sourceRef: 'brief.md#assignment',
+        objective: 'Check semantic parity.', acceptance: ['One canonical validator.'],
+        authority: [{ claim: 'Bounded test grant.', sourceRef: 'brief.md#authority' }],
+        scope: { owned: ['test'], excluded: ['desk storage'] },
+      },
+      assumptions: [], unknowns: [], selfReport: { read: [], ran: [] },
+      execution: { result: 'Done.', completed: [], unfinished: [] }, review: null, adjudication: null,
+      findings: [], owners: [], dependencies: [], nextAction: { state: 'none', action: null, ownerId: null }, resources: [],
+    },
+  };
+  const invalid = structuredClone(record);
+  invalid.report.execution.result = '  ';
+  const cliResult = validateRecord(invalid, { repo });
+  const deskResult = validateReportRecordV1(invalid, { repo });
+  assert.deepEqual(deskResult, cliResult);
+  assert.equal(cliResult.valid, false);
+  assert.ok(cliResult.errors.some(entry => entry.field === 'report.execution.result'));
+});
+
 test('injected read faults propagate while a failing realpath comparison stays observational', t => {
   const repo = fixtureRepo(t);
   const record = {

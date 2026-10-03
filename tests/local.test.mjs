@@ -487,15 +487,18 @@ test('role bundle load paths are the contract: Peer never receives delegation po
   assert.throws(() => roleBundle(installed, 'engineer'), /Unknown role/);
 });
 
-test('decision-doctrine lines reach the standalone bundles that need them and never reach Peer', t => {
+test('standalone bundles deliver selection procedure by role and the no-waiver invariant to every seat', t => {
   const installed = join(fixture(t), 'release');
   install(root, installed);
-  // The review-gate invariant and the create_agent parentage rule ride
-  // delegation.md (Supervisor + Lead); gate applicability, freshness and
-  // fail-closed behavior live in Lead. Peer must receive none.
+  // Selection and creation procedures ride delegation.md (Supervisor + Lead).
+  // Common obligations reach every role; Peer gets its own mandate invariant.
   const [supervisor, lead] = ['supervisor', 'lead'].map(role => roleBundle(installed, role, {}).instructions);
   for (const instructions of [supervisor, lead]) {
-    assert.match(instructions, /does not license merging\s+the axes into one seat/, 'review-gate invariant');
+    assert.match(instructions, /Lead records an explicit review selection before the candidate round/, 'explicit selection procedure');
+    assert.match(instructions, /minimum sufficient independent mandates for material decision-changing questions/, 'selected mandates');
+    assert.match(instructions, /Required review cannot be weakened because seats are unavailable or findings are adverse/, 'required obligations');
+    assert.match(instructions, /Review selection never waives a Human, assignment or protocol obligation/, 'common no-waiver invariant');
+    assert.doesNotMatch(instructions, /does not license merging\s+the axes into one seat|parallel seats on split axes/);
     assert.match(instructions, /cannot carry a new\s+delegation/, 'agent-scoped create_agent rule');
     // C8 formation pins ride delegation.md into both orchestrating bundles:
     // the three-way decision table, the formation record, the placement pin
@@ -514,6 +517,9 @@ test('decision-doctrine lines reach the standalone bundles that need them and ne
     assert.match(instructions, /second workspace\s+for the same team with no isolation reason/, 'B22 placement-defect trigger');
   }
   assert.match(lead, /When the assignment or protocol\s+requires independent review, follow its gate rules and references\/review-gates\.md\.\s+While that gate applies/);
+  assert.match(lead, /Record the review selection and its reason before the candidate round/);
+  assert.match(lead, /review-gates\.md when making or revising that decision, including a\s+not-required decision/);
+  assert.ok(!/Record the review selection and its reason before the candidate round/.test(supervisor), 'selection decision trigger is Lead-scoped');
   assert.match(lead, /immediately before each\s+decision.*including after resume or compaction; a surviving summary like\s+"Engineer → Reviewer" is not the rule/s);
   assert.ok(!/When the assignment or protocol\s+requires independent review/.test(supervisor), 'the re-read trigger is Lead-scoped');
   assert.match(supervisor, /before replying to the Human/, 'B12 protocol-read timing');
@@ -526,7 +532,9 @@ test('decision-doctrine lines reach the standalone bundles that need them and ne
   assert.match(lead, /does not repair a wrong parent/, 'Lead conditional parent-label fallback');
   assert.ok(!/does not adopt it/.test(supervisor), 'Lead cue stays role-scoped');
   const peer = roleBundle(installed, 'peer', {}).instructions;
-  assert.ok(!/does not license merging/.test(peer));
+  assert.match(peer, /Review selection never waives a Human, assignment or protocol obligation/);
+  assert.match(peer, /Reviewer and optional Auditor mandates remain independent of the writer and\s+accepting owner/);
+  assert.ok(!/Lead records an explicit review selection|Record the review selection and its reason|Required review cannot be weakened/.test(peer), 'Peer gets no Lead selection procedure');
   assert.ok(!/When the assignment or protocol\s+requires independent review/.test(peer));
   assert.ok(!/cannot carry a new\s+delegation/.test(peer));
   assert.ok(!/New-team delegation|Observe-existing-work|formation record/.test(peer), 'Peer gets no formation doctrine');
@@ -546,7 +554,7 @@ test('decision-doctrine lines reach the standalone bundles that need them and ne
   const template = readFileSync(join(installed, 'src/templates/workspace-protocol.md'), 'utf8');
   assert.match(template, /when the assignment lands/);
   assert.match(template, /a fired trigger\s+requires an independent review gate/);
-  assert.match(template, /same Engineer and\s+independent review seats available for correction or re-review/);
+  assert.match(template, /same write owner and\s+independent review seats available for correction or re-review/);
   assert.match(template, /bounded task\s+settles after Delivery completes and no correction or re-review remains open/);
   assert.doesNotMatch(template, /batch archive/);
   assert.match(template, /agent-scoped create_agent/);
@@ -563,14 +571,18 @@ test('decision-doctrine lines reach the standalone bundles that need them and ne
   assert.match(monitoring, /never by cwd/, 'seat enumeration is not cwd-scoped');
   assert.match(monitoring, /empty list_agents result does not prove/, 'empty list is not nonexistence');
   assert.match(monitoring, /refs\/heads\/<lane>/, 'lane branches carry lane commits');
-  // M2: the gate rule is protocol-owned — a fixed shape or a bounded
-  // selection rule with the split-axis Spec/Standards package default; the
-  // single-seat exception stays class-listed and Lead-recorded, and a
-  // required gate never merges ad hoc.
+  // Installed selection rules preserve explicit obligations and provenance;
+  // no absent decision supplies a fallback pair or a waiver.
   const gates = readFileSync(join(installed, 'src/references/review-gates.md'), 'utf8');
-  assert.match(gates, /rule the effective workspace protocol\s+declares/, 'gate rule is protocol-declared');
-  assert.match(gates, /bounded selection rule/, 'protocol may delegate seat choice via a selection rule');
-  assert.match(gates, /change classes the\s+protocol\s+lists\s+explicitly/, 'single-seat exception is class-listed');
-  assert.match(gates, /never\s+skipped or merged ad hoc/, 'a required gate never merges ad hoc');
-  assert.match(gates, /Lead decides it and\s+records/, 'exception authority and record are pinned');
+  assert.match(gates, /minimum sufficient independent mandates for material decision-changing\s+questions/, 'question-selected mandates');
+  assert.match(gates, /New scope declarations choose an explicit review plan/);
+  assert.match(gates, /An absent explicit selection is an open decision/);
+  assert.match(gates, /including any explicitly required fixed seats or axes/, 'specific required shapes stay binding');
+  assert.match(gates, /A required seat that\s+cannot be supplied makes the dependent gate BLOCKED/);
+  assert.match(gates, /weakened because seats are unavailable or findings are adverse/);
+  assert.match(gates, /`not-required` is a reasoned selection decision[\s\S]+it never waives an otherwise required gate/);
+  assert.match(gates, /`exempt` is an authority-backed waiver of an otherwise required gate/);
+  assert.match(gates, /selected mandates or reason for no review, authority\/rule source, candidate and\s+brief\/scope\/plan revision/, 'selection is pinned in shared task state');
+  assert.match(gates, /`authorityRef`, `ruleRef` and `reason` remain claims/);
+  assert.doesNotMatch(gates, /Without a declaration, the package default is separate Peer seats/);
 });

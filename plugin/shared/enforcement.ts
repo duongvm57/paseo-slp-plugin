@@ -144,6 +144,19 @@ export const WIRE_LIMITS = {
   deskEntityId: 128,
   deskAuthorityRef: 1024,
   deskObjective: 2048,
+  deskBriefText: 4096,
+  deskBriefItems: 32,
+  deskBriefRefs: 64,
+  deskDecisionText: 4096,
+  deskDecisionOwners: 32,
+  deskWorkflowPage: 50,
+  deskWorkflowSections: 5,
+  deskWorkflowHistory: 16384,
+  deskPathSurface: 4096,
+  deskResourceSurface: 512,
+  deskStateRef: 512,
+  deskLensId: 128,
+  deskLensName: 256,
   deskStatusAssignments: 64,
   deskStatusSeats: 32,
   deskStatusHandbacks: 64,
@@ -535,6 +548,21 @@ const DeskRequestId = z.string().min(1).max(WIRE_LIMITS.deskRequestId);
 const DeskEntityId = z.string().min(1).max(WIRE_LIMITS.deskEntityId);
 const DeskRecordJson = z.record(z.string(), z.unknown());
 
+/** The closed resource-disposition vocabulary a settlement records — the
+ *  shared module owns it so the durable SettlementSchema and the wire
+ *  input can never drift apart. `unknown` is the honest disposition for a
+ *  resource whose fate the owner cannot attest; it never becomes
+ *  `released` by omission. Hoisted above the mutation inputs: the
+ *  offer/accept account fields read this same vocabulary. */
+export const SETTLEMENT_RESOURCE_DISPOSITIONS = ["released", "retained", "unknown"] as const;
+
+const DeskSettlementPointer = z.string().min(1).max(WIRE_LIMITS.deskSettlementPointer);
+
+export const DeskSettlementResource = z.object({
+  ref: DeskSettlementPointer,
+  disposition: z.enum(SETTLEMENT_RESOURCE_DISPOSITIONS),
+}).strict();
+
 /** slp_handback_submit — a bound seat's claimed report record. `recordV1`
  *  is the JSON record object itself (never prose or a fenced block);
  *  `candidateId` names a durable candidate row of the same assignment or
@@ -570,6 +598,37 @@ export const DeskAssignmentCloseInput = z.object({
   assignmentId: DeskEntityId,
 }).strict();
 
+/** slp_assignment_offer — the current effective owner nominates one exact
+ *  live registered lead membership for planned succession. An offer binds
+ *  the offerer/nominee tuples and the base ownership revision; it transfers
+ *  no authority, freezes no work and admits nobody into the execution
+ *  cohort. */
+export const DeskAssignmentOfferInput = z.object({
+  requestId: DeskRequestId,
+  assignmentId: DeskEntityId,
+  expectedOwnershipRevision: z.number().int().min(0),
+  targetAgentId: z.string().min(1).max(WIRE_LIMITS.agentId),
+  targetMembershipId: z.string().uuid(),
+  authorityRef: z.string().min(1).max(WIRE_LIMITS.deskAuthorityRef),
+  contextRef: z.string().min(1).max(WIRE_LIMITS.deskAuthorityRef),
+}).strict();
+
+/** slp_assignment_accept — the exact nominee acknowledges the assignment's
+ *  operative work and takes custody. Every expected pin is checked under the
+ *  store lock; a missing settlement account stays an explicit gap — neither
+ *  a nonnull pointer nor an empty resource list proves cleanup. */
+export const DeskAssignmentAcceptInput = z.object({
+  requestId: DeskRequestId,
+  assignmentId: DeskEntityId,
+  offerId: DeskEntityId,
+  expectedOwnershipRevision: z.number().int().min(0),
+  expectedLedgerRevision: z.number().int().min(0),
+  expectedBriefRevision: z.number().int().min(0),
+  acknowledgment: z.string().min(1).max(WIRE_LIMITS.deskDecisionText).refine(value => value.trim().length > 0),
+  settlementRef: z.string().min(1).max(WIRE_LIMITS.deskSettlementPointer).nullable(),
+  resources: z.array(DeskSettlementResource).max(WIRE_LIMITS.deskSettlementResources),
+}).strict();
+
 /** The mutation response shapes the tools answer. `revision` is the
  *  handback revision (submit) — 0 when the tool's outcome has no revision
  *  stream. Rejections keep the shared DeskRejection shape. */
@@ -596,12 +655,146 @@ export const DeskAssignmentResult = z.object({
     .optional(),
 }).strict();
 
+/** slp_assignment_offer result — `ownershipRevision` is the base revision
+ *  the offer was written at (the revision the nominee must pin to accept). */
+export const DeskAssignmentOfferResult = z.object({
+  ok: z.literal(true),
+  receiptId: z.string().min(1).max(WIRE_LIMITS.deskEntityId),
+  assignmentId: DeskEntityId,
+  offerId: DeskEntityId,
+  ownershipRevision: z.number().int().min(0),
+}).strict();
+
+/** slp_assignment_accept result — `ownershipRevision` is the new current
+ *  revision; `gaps` carries `settlement-account-missing` when neither a
+ *  settlement pointer nor a resource account was attested. */
+export const DeskAssignmentAcceptResult = z.object({
+  ok: z.literal(true),
+  receiptId: z.string().min(1).max(WIRE_LIMITS.deskEntityId),
+  assignmentId: DeskEntityId,
+  offerId: DeskEntityId,
+  acceptId: DeskEntityId,
+  ownershipRevision: z.number().int().min(1),
+  gaps: z.array(z.string().min(1).max(WIRE_LIMITS.gapLen)).max(WIRE_LIMITS.deskStatusGaps),
+}).strict();
+
 export type DeskHandbackSubmitInputValue = z.infer<typeof DeskHandbackSubmitInput>;
 export type DeskAssignmentRegisterInputValue = z.infer<typeof DeskAssignmentRegisterInput>;
 export type DeskAssignmentAttachInputValue = z.infer<typeof DeskAssignmentAttachInput>;
 export type DeskAssignmentCloseInputValue = z.infer<typeof DeskAssignmentCloseInput>;
+export type DeskAssignmentOfferInputValue = z.infer<typeof DeskAssignmentOfferInput>;
+export type DeskAssignmentAcceptInputValue = z.infer<typeof DeskAssignmentAcceptInput>;
 export type DeskHandbackSubmitResultValue = z.infer<typeof DeskHandbackSubmitResult>;
 export type DeskAssignmentResultValue = z.infer<typeof DeskAssignmentResult>;
+export type DeskAssignmentOfferResultValue = z.infer<typeof DeskAssignmentOfferResult>;
+export type DeskAssignmentAcceptResultValue = z.infer<typeof DeskAssignmentAcceptResult>;
+
+// ---------------------------------------------------------------------------
+// Revisioned operative brief, material decisions and read-only projection.
+// ---------------------------------------------------------------------------
+
+const BriefText = z.string().min(1).max(WIRE_LIMITS.deskBriefText).refine(value => value.trim().length > 0);
+const BriefRef = z.string().min(1).max(WIRE_LIMITS.deskAuthorityRef).refine(value => value.trim().length > 0);
+const BriefItems = z.array(BriefText).max(WIRE_LIMITS.deskBriefItems);
+
+export const DeskOperativeBrief = z.object({
+  objective: BriefText,
+  acceptanceCriteria: z.array(BriefText).min(1).max(WIRE_LIMITS.deskBriefItems),
+  constraints: z.array(z.object({
+    text: BriefText,
+    authorityRef: BriefRef,
+    sourceRef: BriefRef.nullable(),
+  }).strict()).max(WIRE_LIMITS.deskBriefItems),
+  provisionalDesign: z.string().min(1).max(WIRE_LIMITS.deskDecisionText).refine(value => value.trim().length > 0),
+  assumptions: BriefItems,
+  unknowns: BriefItems,
+  requiredEvidence: BriefItems,
+  ownedSurfaces: z.array(z.string().min(1).max(WIRE_LIMITS.deskPathSurface)).max(WIRE_LIMITS.deskBriefItems),
+  excludedSurfaces: z.array(z.string().min(1).max(WIRE_LIMITS.deskPathSurface)).max(WIRE_LIMITS.deskBriefItems),
+  dependencies: z.array(z.object({ assignmentId: DeskEntityId, scopeId: DeskEntityId }).strict()).max(WIRE_LIMITS.deskBriefRefs),
+  notifications: z.array(z.object({
+    event: z.string().min(1).max(WIRE_LIMITS.deskDecisionText),
+    recipientAgentId: z.string().min(1).max(WIRE_LIMITS.agentId),
+  }).strict()).max(WIRE_LIMITS.deskBriefRefs),
+}).strict();
+export type DeskOperativeBriefValue = z.infer<typeof DeskOperativeBrief>;
+
+export const DeskDecisionBody = z.object({
+  proposition: BriefText,
+  ruling: BriefText,
+  reason: BriefText,
+  supportingEvidenceRefs: z.array(BriefRef).max(WIRE_LIMITS.deskBriefRefs),
+  contraryEvidenceRefs: z.array(BriefRef).max(WIRE_LIMITS.deskBriefRefs),
+  unresolvedRisk: BriefText,
+  affectedBriefRevision: z.number().int().min(1),
+  affectedOwners: z.array(z.string().min(1).max(WIRE_LIMITS.agentId)).max(WIRE_LIMITS.deskDecisionOwners),
+  notificationRefs: z.array(BriefRef).max(WIRE_LIMITS.deskBriefRefs),
+  outcomeRefs: z.array(BriefRef).max(WIRE_LIMITS.deskBriefRefs),
+}).strict();
+export type DeskDecisionBodyValue = z.infer<typeof DeskDecisionBody>;
+
+export const DeskAssignmentAmendInput = z.object({
+  requestId: DeskRequestId,
+  assignmentId: DeskEntityId,
+  expectedBriefRevision: z.number().int().min(0),
+  brief: DeskOperativeBrief,
+  changeReason: BriefText,
+  authorityRef: BriefRef,
+  affectedOwners: z.array(z.string().min(1).max(WIRE_LIMITS.agentId)).max(WIRE_LIMITS.deskDecisionOwners),
+}).strict();
+export const DeskDecisionAppendInput = z.object({
+  requestId: DeskRequestId,
+  assignmentId: DeskEntityId,
+  expectedBriefRevision: z.number().int().min(0),
+  authorityRef: BriefRef,
+  decision: DeskDecisionBody,
+}).strict();
+export const DeskAssignmentAmendResult = z.object({
+  ok: z.literal(true), assignmentId: DeskEntityId, revision: z.number().int().min(1),
+  entrySha256: Sha, receiptId: DeskEntityId,
+}).strict();
+export const DeskDecisionAppendResult = z.object({
+  ok: z.literal(true), assignmentId: DeskEntityId, decisionId: DeskEntityId,
+  revision: z.number().int().min(1), entrySha256: Sha, receiptId: DeskEntityId,
+}).strict();
+export type DeskAssignmentAmendInputValue = z.infer<typeof DeskAssignmentAmendInput>;
+export type DeskDecisionAppendInputValue = z.infer<typeof DeskDecisionAppendInput>;
+export type DeskAssignmentAmendResultValue = z.infer<typeof DeskAssignmentAmendResult>;
+export type DeskDecisionAppendResultValue = z.infer<typeof DeskDecisionAppendResult>;
+
+export const DeskWorkflowSection = z.enum(["briefs", "decisions", "ownership", "reviews", "evidence"]);
+export type DeskWorkflowSectionValue = z.infer<typeof DeskWorkflowSection>;
+export const DeskWorkflowCursor = z.object({
+  assignmentId: DeskEntityId,
+  ledgerRevision: z.number().int().min(0),
+  section: DeskWorkflowSection,
+  offset: z.number().int().min(0),
+}).strict();
+export type DeskWorkflowCursorValue = z.infer<typeof DeskWorkflowCursor>;
+export const DeskWorkflowProjectionPageInput = z.object({
+  section: DeskWorkflowSection,
+  expectedLedgerRevision: z.number().int().min(0).nullable(),
+  expectedBriefRevision: z.number().int().min(0).nullable(),
+  cursor: DeskWorkflowCursor.nullable(),
+  limit: z.number().int().min(1).max(WIRE_LIMITS.deskWorkflowPage),
+}).strict().superRefine((value, ctx) => {
+  if (value.cursor !== null && value.expectedLedgerRevision !== value.cursor.ledgerRevision) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["expectedLedgerRevision"], message: "a continuation pins its ledger revision" });
+  }
+  if (value.cursor !== null && value.section !== value.cursor.section) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["section"], message: "a continuation keeps its section" });
+  }
+});
+export const DeskWorkflowGetInput = z.object({ assignmentId: DeskEntityId }).extend(DeskWorkflowProjectionPageInput.shape).strict().superRefine((value, ctx) => {
+  if (value.cursor !== null && value.expectedLedgerRevision !== value.cursor.ledgerRevision) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["expectedLedgerRevision"], message: "a continuation pins its ledger revision" });
+  }
+  if (value.cursor !== null && value.section !== value.cursor.section) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["section"], message: "a continuation keeps its section" });
+  }
+});
+export type DeskWorkflowProjectionPageInputValue = z.infer<typeof DeskWorkflowProjectionPageInput>;
+export type DeskWorkflowGetInputValue = z.infer<typeof DeskWorkflowGetInput>;
 
 // ---------------------------------------------------------------------------
 // Desk settlement tools (P3-b) — the durable settlement mirror. The desk is
@@ -613,20 +806,11 @@ export type DeskAssignmentResultValue = z.infer<typeof DeskAssignmentResult>;
 // dereferences.
 // ---------------------------------------------------------------------------
 
-/** The closed resource-disposition vocabulary a settlement records — the
- *  shared module owns it so the durable SettlementSchema and the wire
- *  input can never drift apart. `unknown` is the honest disposition for a
- *  resource whose fate the owner cannot attest; it never becomes
- *  `released` by omission. */
-export const SETTLEMENT_RESOURCE_DISPOSITIONS = ["released", "retained", "unknown"] as const;
-
 /** The closed settlement-status vocabulary — `completed` is reachable only
  *  through the decide's prerequisite check; it is never inferred from
  *  assignment state, idle signals or an accepted handback. */
 export const SettlementStatus = z.enum(["completed", "partial", "blocked"]);
 export type SettlementStatusValue = z.infer<typeof SettlementStatus>;
-
-const DeskSettlementPointer = z.string().min(1).max(WIRE_LIMITS.deskSettlementPointer);
 
 /** The transcript-export pointer a settlement timeline may carry — the
  *  v1 record's repository-relative export triple (path/sha256/bytes). */
@@ -647,11 +831,6 @@ export const DeskSettlementTimeline = z.object({
   via: z.string().min(1).max(WIRE_LIMITS.capabilityId),
   export: DeskSettlementExport.nullable(),
   gap: z.string().min(1).max(WIRE_LIMITS.gapLen).nullable(),
-}).strict();
-
-export const DeskSettlementResource = z.object({
-  ref: DeskSettlementPointer,
-  disposition: z.enum(SETTLEMENT_RESOURCE_DISPOSITIONS),
 }).strict();
 
 /** slp_settlement_record — the receiving owner's settlement attestation.
@@ -791,12 +970,95 @@ export const SCOPE_COMMANDS = [
 export type ScopeCommandValue = (typeof SCOPE_COMMANDS)[number];
 export const ScopeCommand = z.enum(SCOPE_COMMANDS);
 
-/** The closed review-axis vocabulary — the protocol's required Spec +
- *  Standards split. Required axes are SERVER-derived (transition type +
- *  the bound declaration): no caller field may shrink the gate. */
+/** The closed legacy review-axis vocabulary — retained null declarations
+ *  and explicit null compatibility opt-in require Spec + Standards.
+ *  Selected plans derive named lenses, a waiver or a reasoned no-review
+ *  decision from the pinned owner declaration. No transition caller can
+ *  provide or shrink the required set. */
 export const SCOPE_REVIEW_AXES = ["spec", "standards"] as const;
 export type ScopeReviewAxisValue = (typeof SCOPE_REVIEW_AXES)[number];
 export const ScopeReviewAxis = z.enum(SCOPE_REVIEW_AXES);
+
+const ScopeRef = z.string().min(1).max(WIRE_LIMITS.deskAuthorityRef).refine(value => value.trim() === value && !value.includes("\0"));
+const ScopeSurfacePath = z.string().min(1).max(WIRE_LIMITS.deskPathSurface).refine(value => canonicalWorkspacePath(value) === value, "path must be canonical relative POSIX");
+const ScopeResource = z.string().min(1).max(WIRE_LIMITS.deskResourceSurface)
+  .refine(value => value.trim() === value && !value.includes("\0") && !value.includes("\\"));
+export const DeskScopeOwnership = z.object({
+  writerAgentId: z.string().min(1).max(WIRE_LIMITS.agentId),
+  writerAuthorityRef: ScopeRef.nullable(),
+  paths: z.array(ScopeSurfacePath).max(WIRE_LIMITS.deskBriefItems),
+  resources: z.array(ScopeResource).max(WIRE_LIMITS.deskBriefItems),
+  stateOwners: z.array(z.object({
+    stateRef: z.string().min(1).max(WIRE_LIMITS.deskStateRef),
+    moduleRef: z.string().min(1).max(WIRE_LIMITS.deskPathSurface),
+  }).strict()).max(WIRE_LIMITS.deskBriefItems),
+  dependsOnScopeIds: z.array(DeskEntityId).max(WIRE_LIMITS.deskBriefRefs),
+  notifications: z.array(z.object({
+    event: z.string().min(1).max(WIRE_LIMITS.deskDecisionText),
+    recipientAgentId: z.string().min(1).max(WIRE_LIMITS.agentId),
+  }).strict()).max(WIRE_LIMITS.deskBriefRefs),
+}).strict().superRefine((ownership, ctx) => {
+  const uniqueBy = <T>(items: readonly T[], key: (item: T) => string): boolean => {
+    const keys = items.map(key);
+    return new Set(keys).size === keys.length;
+  };
+  if (!uniqueBy(ownership.paths, value => value)) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["paths"], message: "declared paths are unique" });
+  if (!uniqueBy(ownership.resources, value => value)) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["resources"], message: "declared resources are unique" });
+  if (!uniqueBy(ownership.stateOwners, value => value.stateRef) ||
+      !uniqueBy(ownership.stateOwners, value => value.moduleRef) ||
+      ownership.stateOwners.some(value => canonicalWorkspacePath(value.moduleRef) !== value.moduleRef)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["stateOwners"], message: "state owners are distinct and name canonical module paths" });
+  }
+  if (!uniqueBy(ownership.dependsOnScopeIds, value => value)) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["dependsOnScopeIds"], message: "dependencies are unique" });
+  if (!uniqueBy(ownership.notifications, value => `${value.event}\0${value.recipientAgentId}`)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["notifications"], message: "notification intents are unique" });
+  }
+});
+export type DeskScopeOwnershipValue = z.infer<typeof DeskScopeOwnership>;
+
+export const DeskReviewLens = z.object({
+  id: z.string().min(1).max(WIRE_LIMITS.deskLensId),
+  name: z.string().min(1).max(WIRE_LIMITS.deskLensName),
+  authorityRef: ScopeRef,
+  ruleRef: ScopeRef,
+}).strict();
+export const DeskReviewPlan = z.object({
+  kind: z.enum(["required", "exempt", "not-required"]),
+  authorityRef: ScopeRef,
+  ruleRef: ScopeRef,
+  reason: z.string().min(1).max(WIRE_LIMITS.deskDecisionText),
+  lenses: z.array(DeskReviewLens).max(WIRE_LIMITS.deskBriefItems),
+  exemptionClass: z.string().min(1).max(WIRE_LIMITS.deskLensName).nullable(),
+}).strict().superRefine((plan, ctx) => {
+  const ids = plan.lenses.map(lens => lens.id);
+  if (new Set(ids).size !== ids.length) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["lenses"], message: "lens ids are unique within a pinned plan" });
+  }
+  if (plan.kind === "required" && (plan.lenses.length === 0 || plan.exemptionClass !== null)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["lenses"], message: "required plan has lenses and no exemption class" });
+  }
+  if (plan.kind === "exempt" && (plan.lenses.length !== 0 || plan.exemptionClass === null || plan.exemptionClass.trim().length === 0)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["exemptionClass"], message: "exemption names a class and carries no required lenses" });
+  }
+  if (plan.kind === "not-required" && (plan.lenses.length !== 0 || plan.exemptionClass !== null || plan.reason.trim().length === 0)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["reason"], message: "no-review selection has a nonblank basis, no lenses and no exemption class" });
+  }
+});
+export type DeskReviewPlanValue = z.infer<typeof DeskReviewPlan>;
+
+export function canonicalWorkspacePath(value: string): string | null {
+  if (!value || value.startsWith("/") || /^[A-Za-z]:\//.test(value) || value.includes("\\") || value.includes("\0")) return null;
+  const parts = value.split("/");
+  if (parts.some(part => part.length === 0 || part === "." || part === "..")) return null;
+  return parts.join("/") === value ? value : null;
+}
+
+export function workspacePathsOverlap(left: string, right: string): boolean {
+  const a = canonicalWorkspacePath(left);
+  const b = canonicalWorkspacePath(right);
+  if (a === null || b === null) return false;
+  return a === b || a.startsWith(`${b}/`) || b.startsWith(`${a}/`);
+}
 
 /** A review observation's verdict. A verdict never mutates scope state by
  *  itself — only an owner transition command moves the machine. */
@@ -819,6 +1081,7 @@ export const SCOPE_TRANSITIONS = [
   { from: "submitted-for-review", command: "close", to: "closed" },
   { from: "review-observed", command: "approve", to: "approved" },
   { from: "review-observed", command: "reject", to: "rejected" },
+  { from: "approved", command: "submit-for-review", to: "submitted-for-review" },
   { from: "approved", command: "advance", to: "advanced" },
   { from: "approved", command: "close", to: "closed" },
   { from: "rejected", command: "advance", to: "advanced" },
@@ -829,16 +1092,14 @@ export const SCOPE_TRANSITIONS = [
 
 export type ScopeTransitionEdge = (typeof SCOPE_TRANSITIONS)[number];
 
-/** The review-required transition commands (contract B4): these may commit
- *  only while a candidate round is active and every required axis carries a
- *  durable observation bound exactly to the round's (scopeRevision,
- *  candidateSnapshot). `close`/`advance` are gated by B4 verbatim — an
- *  early `close` is not even an edge: closing before a round exists typed-
- *  rejects with no durable commit. `review-observed` is itself the gate
- *  transition; `approve` needs no separate gate — it is only reachable
- *  through a committed review-observed, which already discharged every
- *  axis of the round. */
-export const SCOPE_REVIEW_GATED_COMMANDS = ["review-observed", "advance", "close"] as const;
+/** Review-dependent scope transitions commit only while an active candidate
+ *  round is fresh against the current declaration, brief and mandate, and
+ *  carry the exact authority-derived discharge set. This includes `approve`:
+ *  amendments can land between `review-observed` and approval, so the second
+ *  edge must recheck the round in its own transaction. `close`/`advance` also
+ *  remain gated; an early close is not an edge and typed-rejects without a
+ *  durable commit. */
+export const SCOPE_REVIEW_GATED_COMMANDS = ["review-observed", "approve", "advance", "close"] as const;
 export type ScopeReviewGatedCommand = (typeof SCOPE_REVIEW_GATED_COMMANDS)[number];
 
 /** Legality lookup — one seam. Returns the edge or undefined. */
@@ -867,6 +1128,9 @@ export const DeskScopeDeclareInput = z.object({
   declarationSha256: Sha,
   refs: z.array(DeskScopePointer).max(WIRE_LIMITS.deskScopeRefs),
   seatAgentId: z.string().min(1).max(WIRE_LIMITS.agentId).nullable(),
+  expectedBriefRevision: z.number().int().min(0).optional(),
+  ownership: DeskScopeOwnership.nullable().optional(),
+  reviewPlan: DeskReviewPlan.nullable().optional(),
 }).strict();
 
 /** slp_scope_transition — owner-only state-machine move. `scopeRevision`
@@ -884,6 +1148,7 @@ export const DeskScopeTransitionInput = z.object({
   scopeRevision: z.number().int().min(1),
   candidateSnapshot: Sha.nullable(),
   candidateHead: z.string().regex(/^[0-9a-f]{40}$|^[0-9a-f]{64}$/).nullable(),
+  briefRevision: z.number().int().min(0).optional(),
 }).strict();
 
 /** slp_scope_review — a bound reviewer seat's observation. The review must
@@ -896,17 +1161,27 @@ export const DeskScopeReviewInput = z.object({
   scopeId: DeskEntityId,
   scopeRevision: z.number().int().min(1),
   candidateSnapshot: Sha,
-  axis: ScopeReviewAxis,
+  axis: ScopeReviewAxis.optional(),
+  lensId: z.string().min(1).max(WIRE_LIMITS.deskLensId).optional(),
+  briefRevision: z.number().int().min(0).optional(),
   verdict: ScopeReviewVerdict,
   findingsRef: DeskScopePointer.nullable(),
-}).strict();
+}).strict().superRefine((review, ctx) => {
+  if ((review.axis === undefined) === (review.lensId === undefined)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["axis"], message: "provide exactly one legacy axis or named lens id" });
+  }
+});
 
 /** The (axis, reviewId) discharge a gated transition committed with — the
  *  durable evidence of which observation satisfied which required axis. */
-export const DeskScopeDischarge = z.object({
+export const DeskScopeDischarge = z.union([z.object({
   axis: ScopeReviewAxis,
   reviewId: DeskEntityId,
-}).strict();
+}).strict(), z.object({
+  lensId: z.string().min(1).max(WIRE_LIMITS.deskLensId),
+  reviewId: DeskEntityId,
+}).strict()]);
+export type DeskScopeDischargeValue = z.infer<typeof DeskScopeDischarge>;
 
 export const DeskScopeDeclareResult = z.object({
   ok: z.literal(true),
@@ -922,14 +1197,15 @@ export const DeskScopeTransitionResult = z.object({
   revision: z.number().int().min(1),
   state: ScopeState,
   receiptId: z.string().min(1).max(WIRE_LIMITS.deskEntityId),
-  discharged: z.array(DeskScopeDischarge).max(SCOPE_REVIEW_AXES.length),
+  discharged: z.array(DeskScopeDischarge).max(WIRE_LIMITS.deskBriefItems),
 }).strict();
 
 export const DeskScopeReviewResult = z.object({
   ok: z.literal(true),
   reviewId: DeskEntityId,
   scopeId: DeskEntityId,
-  axis: ScopeReviewAxis,
+  axis: ScopeReviewAxis.nullable(),
+  lensId: z.string().min(1).max(WIRE_LIMITS.deskLensId).nullable(),
   revision: z.number().int().min(1),
   receiptId: z.string().min(1).max(WIRE_LIMITS.deskEntityId),
 }).strict();
@@ -1225,20 +1501,25 @@ export type DeskCheckRunResultValue = z.infer<typeof DeskCheckRunResult>;
 export type DeskRolloutDeclareResultValue = z.infer<typeof DeskRolloutDeclareResult>;
 export type DeskRolloutTransitionResultValue = z.infer<typeof DeskRolloutTransitionResult>;
 
-/** One review revision as projected into slp_status — identifiers, axis
- *  and verdict only; the claimed findingsRef stays in the ledger. */
+/** One review revision as projected into slp_status — identifiers, its
+ *  legacy axis or named lens, and verdict only; claimed findingsRef stays
+ *  in the ledger. */
 export const DeskStatusScopeReview = z.object({
   reviewId: DeskEntityId,
-  axis: ScopeReviewAxis,
+  axis: ScopeReviewAxis.nullable(),
+  lensId: z.string().min(1).max(WIRE_LIMITS.deskLensId).nullable(),
   verdict: ScopeReviewVerdict,
   scopeRevision: z.number().int().min(1),
+  briefRevision: z.number().int().min(0),
+  mandateSha256: Sha.nullable(),
   reviewerAgentId: z.string().min(1).max(WIRE_LIMITS.agentId),
   revision: z.number().int().min(1),
 }).strict();
 
 /** One scope as projected into slp_status (P4) — the declaration identity,
  *  the derived machine state and the active review round's pin plus its
- *  required/discharged axes. Claimed refs and the findingsRef stay in the
+ *  required/discharged legacy axes or named lenses, and whether the pinned
+ *  plan explicitly exempts review. Claimed refs and findingsRef stay in the
  *  ledger — a status view never re-serves claimed provenance. */
 export const DeskStatusScope = z.object({
   scopeId: DeskEntityId,
@@ -1254,6 +1535,11 @@ export const DeskStatusScope = z.object({
   activeCandidateSnapshot: Sha.nullable(),
   requiredAxes: z.array(ScopeReviewAxis).max(SCOPE_REVIEW_AXES.length),
   dischargedAxes: z.array(ScopeReviewAxis).max(SCOPE_REVIEW_AXES.length),
+  requiredLenses: z.array(z.string().min(1).max(WIRE_LIMITS.deskLensId)).max(WIRE_LIMITS.deskBriefItems),
+  dischargedLenses: z.array(z.string().min(1).max(WIRE_LIMITS.deskLensId)).max(WIRE_LIMITS.deskBriefItems),
+  reviewExempt: z.boolean(),
+  /** The pinned selection is a provenance claim, never authenticated authority. */
+  reviewDecision: z.enum(["legacy", "required", "exempt", "not-required"]),
   transitionCount: z.number().int().min(0),
   reviews: z.array(DeskStatusScopeReview).max(WIRE_LIMITS.deskStatusScopeReviews),
 }).strict();
@@ -1334,7 +1620,10 @@ export const DeskStatusRollout = z.object({
 export const DeskStatusAssignment = z.object({
   assignmentId: DeskEntityId,
   state: z.enum(["open", "closed"]),
+  /** The effective current owner — the registered owner at ownership
+   *  revision 0, the latest accepted successor otherwise. */
   ownerAgentId: z.string().min(1).max(WIRE_LIMITS.agentId),
+  ownershipRevision: z.number().int().min(0),
   seats: z.array(z.string().min(1).max(WIRE_LIMITS.agentId)).max(WIRE_LIMITS.deskStatusSeats),
   handbacks: z.array(DeskStatusHandback).max(WIRE_LIMITS.deskStatusHandbacks),
   settlements: z.array(DeskStatusSettlement).max(WIRE_LIMITS.deskStatusSettlements),
@@ -1640,6 +1929,230 @@ export const enforcementRuntimePin = defineRpc({
   input: GetRuntimePinInput,
   output: GetRuntimePinOutput,
 });
+
+// ---------------------------------------------------------------------------
+// Desk workflow projection. Closed variants carry complete bounded store
+// rows; no arbitrary-kind or unknown-record escape hatch is accepted.
+// ---------------------------------------------------------------------------
+
+const DeskWorkflowBriefRevisionRow = z.object({
+  assignmentId: DeskEntityId, revision: z.number().int().min(1), priorRevision: z.number().int().min(0),
+  priorEntrySha256: Sha.nullable(), body: DeskOperativeBrief, bodySha256: Sha, entrySha256: Sha,
+  authorityRef: z.string().min(1).max(WIRE_LIMITS.deskAuthorityRef),
+  changeReason: z.string().min(1).max(WIRE_LIMITS.deskDecisionText),
+  affectedOwners: z.array(z.string().min(1).max(WIRE_LIMITS.agentId)).max(WIRE_LIMITS.deskDecisionOwners),
+  actorMembershipId: z.string().uuid(), actorAgentId: z.string().min(1).max(WIRE_LIMITS.agentId), requestId: DeskRequestId,
+}).strict();
+const DeskWorkflowDecisionRow = z.object({
+  decisionId: DeskEntityId, assignmentId: DeskEntityId, revision: z.number().int().min(1),
+  priorDecisionId: DeskEntityId.nullable(), priorEntrySha256: Sha.nullable(), body: DeskDecisionBody,
+  bodySha256: Sha, entrySha256: Sha, authorityRef: z.string().min(1).max(WIRE_LIMITS.deskAuthorityRef),
+  actorMembershipId: z.string().uuid(), actorAgentId: z.string().min(1).max(WIRE_LIMITS.agentId), requestId: DeskRequestId,
+}).strict();
+const DeskWorkflowScopeDeclarationRow = z.object({
+  assignmentId: DeskEntityId, scopeId: DeskEntityId, requestId: DeskRequestId,
+  revision: z.number().int().min(1), priorRevision: z.number().int().min(1).nullable(),
+  ownerMembershipId: z.string().uuid(), ownerAgentId: z.string().min(1).max(WIRE_LIMITS.agentId),
+  assignmentRevision: z.number().int().min(1), seatAgentId: z.string().min(1).max(WIRE_LIMITS.agentId).nullable(),
+  label: z.string().min(1).max(WIRE_LIMITS.deskScopeLabel), declarationSha256: Sha,
+  refs: z.array(z.string().min(1).max(WIRE_LIMITS.deskScopePointer)).max(WIRE_LIMITS.deskScopeRefs),
+  briefRevision: z.number().int().min(0), ownership: DeskScopeOwnership.nullable(), reviewPlan: DeskReviewPlan.nullable(),
+}).strict();
+const DeskWorkflowScopeReviewRow = z.object({
+  reviewId: DeskEntityId, assignmentId: DeskEntityId, scopeId: DeskEntityId, requestId: DeskRequestId,
+  revision: z.number().int().min(1), scopeRevision: z.number().int().min(1), candidateSnapshot: Sha,
+  axis: ScopeReviewAxis.nullable(), lensId: DeskEntityId.nullable(), briefRevision: z.number().int().min(0),
+  mandateSha256: Sha.nullable(), verdict: ScopeReviewVerdict,
+  reviewerAgentId: z.string().min(1).max(WIRE_LIMITS.agentId), reviewerSeatId: z.string().uuid(),
+  findingsRef: z.string().min(1).max(WIRE_LIMITS.deskScopePointer).nullable(),
+}).strict();
+const DeskWorkflowScopeDischarge = z.union([
+  z.object({ axis: ScopeReviewAxis, reviewId: DeskEntityId }).strict(),
+  z.object({ lensId: DeskEntityId, reviewId: DeskEntityId }).strict(),
+]);
+const DeskWorkflowScopeTransitionRow = z.object({
+  transitionId: DeskEntityId, assignmentId: DeskEntityId, scopeId: DeskEntityId, requestId: DeskRequestId,
+  revision: z.number().int().min(1),
+  command: z.enum(["declare", "claim", "submit-for-review", "review-observed", "approve", "reject", "advance", "close"]),
+  from: ScopeState.nullable(), to: ScopeState, scopeRevision: z.number().int().min(1),
+  briefRevision: z.number().int().min(0), mandateSha256: Sha.nullable(), candidateSnapshot: Sha.nullable(),
+  candidateHead: z.string().regex(/^[0-9a-f]{40}$|^[0-9a-f]{64}$/).nullable(),
+  discharged: z.array(DeskWorkflowScopeDischarge).max(WIRE_LIMITS.deskBriefItems),
+  actorAgentId: z.string().min(1).max(WIRE_LIMITS.agentId),
+}).strict();
+const DeskWorkflowCandidateRow = z.object({
+  candidateId: DeskEntityId, assignmentId: DeskEntityId, kind: z.literal("observed"),
+  seatAgentId: z.string().min(1).max(WIRE_LIMITS.agentId), seatMembershipId: z.string().uuid(),
+  repository: z.string().min(1).max(WIRE_LIMITS.deskPathSurface), snapshotSha256: Sha,
+  head: z.string().regex(/^[0-9a-f]{40}$|^[0-9a-f]{64}$/).nullable(),
+  incomplete: z.array(z.string().min(1).max(WIRE_LIMITS.deskPathSurface)).max(256), measuredAt: Time,
+}).strict();
+const DeskWorkflowCheckDefinitionRow = z.object({
+  checkId: DeskEntityId, assignmentId: DeskEntityId, scopeId: DeskEntityId, requestId: DeskRequestId,
+  revision: z.number().int().min(1), priorRevision: z.number().int().min(1).nullable(),
+  ownerMembershipId: z.string().uuid(), ownerAgentId: z.string().min(1).max(WIRE_LIMITS.agentId),
+  assignmentRevision: z.number().int().min(1), checkClass: CheckClass,
+  label: z.string().min(1).max(WIRE_LIMITS.deskScopeLabel), definitionSha256: Sha,
+  limits: DeskCheckLimits, requiredEvidence: z.array(DeskCheckPointer).max(WIRE_LIMITS.deskCheckEvidence),
+  refs: z.array(DeskCheckPointer).max(WIRE_LIMITS.deskScopeRefs),
+}).strict();
+const DeskWorkflowCheckRunRow = z.object({
+  runId: DeskEntityId, assignmentId: DeskEntityId, rolloutId: DeskEntityId, checkId: DeskEntityId,
+  requestId: DeskRequestId, rolloutRevision: z.number().int().min(1), definitionRevision: z.number().int().min(1),
+  definitionSha256: Sha, candidateSnapshot: Sha,
+  candidateHead: z.string().regex(/^[0-9a-f]{40}$|^[0-9a-f]{64}$/).nullable(),
+  environment: z.object({ node: z.string().min(1).max(64), platform: z.string().min(1).max(64) }).strict(),
+  status: CheckRunStatus, attempt: z.number().int().min(1).max(2), retryOf: DeskEntityId.nullable(),
+  actorAgentId: z.string().min(1).max(WIRE_LIMITS.agentId), actorSeatId: z.string().uuid(),
+  exitCode: z.number().int().nullable(), timedOut: z.boolean(), durationMs: z.number().int().min(0).nullable(),
+  outputSha256: Sha.nullable(), outputTail: z.string().max(WIRE_LIMITS.deskCheckOutputTail).nullable(),
+  outputTruncated: z.boolean(), outputPointer: DeskCheckPointer.nullable(), evidenceRef: DeskCheckPointer.nullable(),
+  gap: z.object({ capability: z.string().min(1).max(128), detail: z.string().min(1).max(WIRE_LIMITS.gapLen) }).strict().nullable(),
+}).strict();
+
+const DeskWorkflowOwnershipOfferRow = z.object({
+  offerId: DeskEntityId, assignmentId: DeskEntityId, requestId: DeskRequestId,
+  ownershipRevision: z.number().int().min(0),
+  fromAgentId: z.string().min(1).max(WIRE_LIMITS.agentId), fromMembershipId: z.string().uuid(),
+  toAgentId: z.string().min(1).max(WIRE_LIMITS.agentId), toMembershipId: z.string().uuid(),
+  authorityRef: z.string().min(1).max(WIRE_LIMITS.deskAuthorityRef),
+  contextRef: z.string().min(1).max(WIRE_LIMITS.deskAuthorityRef),
+}).strict();
+const DeskWorkflowOwnershipAcceptRow = z.object({
+  acceptId: DeskEntityId, offerId: DeskEntityId, assignmentId: DeskEntityId, requestId: DeskRequestId,
+  ownershipRevision: z.number().int().min(1),
+  fromAgentId: z.string().min(1).max(WIRE_LIMITS.agentId), fromMembershipId: z.string().uuid(),
+  toAgentId: z.string().min(1).max(WIRE_LIMITS.agentId), toMembershipId: z.string().uuid(),
+  acknowledgment: z.string().min(1).max(WIRE_LIMITS.deskDecisionText),
+  settlementRef: z.string().min(1).max(WIRE_LIMITS.deskSettlementPointer).nullable(),
+  resources: z.array(DeskSettlementResource).max(WIRE_LIMITS.deskSettlementResources),
+  gaps: z.array(z.string().min(1).max(WIRE_LIMITS.gapLen)).max(WIRE_LIMITS.deskStatusGaps),
+  ledgerRevision: z.number().int().min(0), briefRevision: z.number().int().min(0),
+}).strict();
+
+/** Typed handback summary. The claimed record body stays ledger-only —
+ *  the summary carries its immutable digest and measured canonical size,
+ *  the declared candidate separately from the observed pending/ok/failed
+ *  capture, recorded seat identity, gaps and the claim's own supplied
+ *  output refs (with an exact omission count, never a fabricated path).
+ *  The `status`/`recordAvailability` enums mirror the durable row. */
+const DeskWorkflowHandbackSummary = z.object({
+  handbackId: DeskEntityId, assignmentId: DeskEntityId, revision: z.number().int().min(1),
+  requestId: DeskRequestId,
+  seatAgentId: z.string().min(1).max(WIRE_LIMITS.agentId), seatMembershipId: z.string().uuid(),
+  recordSha256: Sha, recordBytes: z.number().int().min(0),
+  recordAvailability: z.literal("ledger"),
+  claimedCandidateId: DeskEntityId.nullable(),
+  observed: z.object({
+    status: z.enum(["pending", "ok", "failed"]),
+    candidateId: DeskEntityId.nullable(),
+    repository: z.string().min(1).max(WIRE_LIMITS.deskPathSurface),
+    measuredAt: Time.nullable(), error: z.string().min(1).max(512).nullable(),
+  }).strict(),
+  gaps: z.array(z.string().min(1).max(WIRE_LIMITS.gapLen)).max(WIRE_LIMITS.deskStatusGaps),
+  suppliedCheckCount: z.number().int().min(0),
+  suppliedOutputRefs: z.array(z.string().min(1).max(WIRE_LIMITS.deskPathSurface)).max(WIRE_LIMITS.deskBriefRefs),
+  outputRefsOmitted: z.number().int().min(0),
+}).strict();
+
+/** Typed settlement summary. The recorded row is already fully bounded,
+ *  so the summary carries the complete account: status, gaps, every
+ *  resource ref/disposition (including `unknown`), claimed pointers and
+ *  refs verbatim, the claimed `timeline.export` triple distinct from the
+ *  measured `exportVerification` verdict, and the recordedBy tuple.
+ *  `via` mirrors the durable bounded-string shape. Nothing here is a
+ *  proof of resource release or project acceptance. */
+const DeskWorkflowSettlementSummary = z.object({
+  settlementId: DeskEntityId, assignmentId: DeskEntityId, requestId: DeskRequestId,
+  revision: z.number().int().min(1),
+  ownerMembershipId: z.string().uuid(), ownerAgentId: z.string().min(1).max(WIRE_LIMITS.agentId),
+  seatAgentId: z.string().min(1).max(WIRE_LIMITS.agentId), seatMembershipId: z.string().uuid(),
+  seatProvider: z.string().min(1).max(WIRE_LIMITS.providerLen),
+  seatTitle: z.string().min(1).max(WIRE_LIMITS.deskSettlementTitle), at: Time,
+  deliveryRef: DeskSettlementPointer.nullable(), reworkClosureRef: DeskSettlementPointer.nullable(),
+  sinkRef: DeskSettlementPointer.nullable(), decisionRef: DeskSettlementPointer.nullable(),
+  handbackRefs: z.array(DeskEntityId).max(WIRE_LIMITS.deskSettlementRefs),
+  candidateRefs: z.array(DeskEntityId).max(WIRE_LIMITS.deskSettlementRefs),
+  resources: z.array(DeskSettlementResource).max(WIRE_LIMITS.deskSettlementResources),
+  timeline: DeskSettlementTimeline,
+  exportVerification: z.object({
+    status: z.enum(["verified", "unavailable"]),
+    detail: z.string().min(1).max(WIRE_LIMITS.gapLen).nullable(),
+  }).strict().nullable(),
+  status: SettlementStatus,
+  gaps: z.array(z.string().min(1).max(WIRE_LIMITS.gapLen)).max(WIRE_LIMITS.deskStatusGaps),
+}).strict();
+
+export const DeskWorkflowProjectionItem = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("briefRevision"), row: DeskWorkflowBriefRevisionRow }).strict(),
+  z.object({ kind: z.literal("decisionEntry"), row: DeskWorkflowDecisionRow }).strict(),
+  z.object({ kind: z.literal("scopeDeclaration"), row: DeskWorkflowScopeDeclarationRow }).strict(),
+  z.object({ kind: z.literal("ownershipOffer"), row: DeskWorkflowOwnershipOfferRow }).strict(),
+  z.object({ kind: z.literal("ownershipAccept"), row: DeskWorkflowOwnershipAcceptRow }).strict(),
+  z.object({ kind: z.literal("scopeReview"), row: DeskWorkflowScopeReviewRow,
+    /** Current standing qualification under the same resolver the gates
+     *  use — `eligible` only while the row's pins match the current round
+     *  and the reviewer is neither the current owner nor the declared
+     *  writer; `discharging` marks a resolved requirement; standing
+     *  approval marks participation in a currently valid approval. All
+     *  false means immutable history only; the row is never rewritten. */
+    qualification: z.object({
+      eligible: z.boolean(), discharging: z.boolean(), standingApproval: z.boolean(),
+    }).strict() }).strict(),
+  z.object({ kind: z.literal("scopeTransition"), row: DeskWorkflowScopeTransitionRow }).strict(),
+  z.object({ kind: z.literal("reviewDisagreement"), assignmentId: DeskEntityId, scopeId: DeskEntityId,
+    scopeRevision: z.number().int().min(1), briefRevision: z.number().int().min(0), mandateSha256: Sha.nullable(),
+    candidateSnapshot: Sha, reviewIds: z.array(DeskEntityId).min(1).max(WIRE_LIMITS.deskBriefItems),
+    reason: z.enum(["unresolved-findings", "conflicting-verdicts"]) }).strict(),
+  z.object({ kind: z.literal("candidateObservation"), row: DeskWorkflowCandidateRow }).strict(),
+  z.object({ kind: z.literal("checkDefinition"), row: DeskWorkflowCheckDefinitionRow }).strict(),
+  z.object({ kind: z.literal("checkRun"), row: DeskWorkflowCheckRunRow }).strict(),
+  z.object({ kind: z.literal("handbackSummary"), summary: DeskWorkflowHandbackSummary }).strict(),
+  z.object({ kind: z.literal("settlementSummary"), summary: DeskWorkflowSettlementSummary }).strict(),
+]);
+export type DeskWorkflowProjectionItemValue = z.infer<typeof DeskWorkflowProjectionItem>;
+
+export const DeskWorkflowProjection = z.object({
+  ok: z.literal(true), assignmentId: DeskEntityId, ledgerRevision: z.number().int().min(0),
+  briefRevision: z.number().int().min(0),
+  /** Ownership header: the immutable registration tuple plus the effective
+   *  current owner and ownership revision (0 = pre-succession). */
+  ownership: z.object({
+    registeredOwnerAgentId: z.string().min(1).max(WIRE_LIMITS.agentId),
+    registeredOwnerMembershipId: z.string().uuid(),
+    ownerAgentId: z.string().min(1).max(WIRE_LIMITS.agentId),
+    ownerMembershipId: z.string().uuid(),
+    ownershipRevision: z.number().int().min(0),
+    /** The recorded ledger state of the effective owner's pinned
+     *  membership — never an observation of host-agent liveness; null
+     *  when the ledger records no such row. States mirror the durable
+     *  membership vocabulary. */
+    ownerMembership: z.object({
+      state: z.enum(["unbound-open", "host-confirmed", "revoked"]),
+      registeredAt: Time.nullable(), revokedAt: Time.nullable(),
+    }).strict().nullable(),
+    /** The accepted acknowledgment that installed the current owner and
+     *  its durable row provenance — a responsibility acknowledgment, not
+     *  a review approval or project acceptance. Null at revision 0. */
+    acceptedAcknowledgment: z.object({
+      acceptId: DeskEntityId, offerId: DeskEntityId, requestId: DeskRequestId,
+      acknowledgment: z.string().min(1).max(WIRE_LIMITS.deskDecisionText),
+      settlementRef: DeskSettlementPointer.nullable(),
+      gaps: z.array(z.string().min(1).max(WIRE_LIMITS.gapLen)).max(WIRE_LIMITS.deskStatusGaps),
+      ledgerRevision: z.number().int().min(0), briefRevision: z.number().int().min(0),
+    }).strict().nullable(),
+  }).strict(),
+  currentBrief: z.object({ revision: z.number().int().min(1), body: DeskOperativeBrief,
+    bodySha256: Sha, entrySha256: Sha, authorityRef: z.string().min(1).max(WIRE_LIMITS.deskAuthorityRef),
+    actorAgentId: z.string().min(1).max(WIRE_LIMITS.agentId) }).strict().nullable(),
+  legacyObjective: z.string().max(WIRE_LIMITS.deskObjective).nullable(),
+  section: DeskWorkflowSection, items: z.array(DeskWorkflowProjectionItem).max(WIRE_LIMITS.deskWorkflowPage),
+  total: z.number().int().min(0).max(WIRE_LIMITS.deskWorkflowHistory),
+  omittedBefore: z.number().int().min(0).max(WIRE_LIMITS.deskWorkflowHistory),
+  omittedAfter: z.number().int().min(0).max(WIRE_LIMITS.deskWorkflowHistory),
+  nextCursor: DeskWorkflowCursor.nullable(), acceptance: z.literal("not-established-by-this-view"),
+}).strict();
+export type DeskWorkflowProjectionValue = z.infer<typeof DeskWorkflowProjection>;
 
 // ---------------------------------------------------------------------------
 // Value types (z.infer — same idiom as contracts.ts)

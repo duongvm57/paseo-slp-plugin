@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { extractRecords, recordSchema, recomputeSha, requireRecordKind, validateRecord } from '../plugin/server/runtime/cli/report-records.ts';
+import { renderSlpReport } from '../plugin/server/runtime/report-semantics.ts';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const head = 'a'.repeat(40);
@@ -20,6 +21,33 @@ function handback(changes = {}) {
     candidate: { repository: '/repo', head },
     checks: [{ cmd: 'npm run typecheck', exit: 0, sha: recomputeSha(output), output }],
     ...changes
+  };
+}
+
+function executionReport(changes = {}) {
+  return {
+    format: 'slp-report',
+    version: 1,
+    purpose: 'execution',
+    assignment: {
+      id: 'asg-1', revision: 'rev-3', scopeRevision: 'scope-2', sourceRef: 'brief.md#current',
+      objective: 'Deliver the bounded runtime report contract.',
+      acceptance: ['Report semantics validate without changing the v1 envelope.'],
+      authority: [{ claim: 'Human authorized this bounded implementation.', sourceRef: 'assignment.md#authority' }],
+      scope: { owned: ['plugin/server/runtime/report-semantics.ts'], excluded: ['plugin/server/desk-records.ts'] },
+    },
+    assumptions: [],
+    unknowns: [],
+    selfReport: { read: ['docs/spec/work-coordination.md'], ran: ['node --test tests/report-records.test.mjs'] },
+    execution: { result: 'Implemented report semantics.', completed: ['report validator'], unfinished: [] },
+    review: null,
+    adjudication: null,
+    findings: [],
+    owners: [{ surface: 'report semantics', ownerId: 'peer-1', role: 'peer', state: 'active', basis: 'assignment', sourceRef: 'brief.md#scope' }],
+    dependencies: [],
+    nextAction: { state: 'none', action: null, ownerId: null },
+    resources: [],
+    ...changes,
   };
 }
 
@@ -74,6 +102,100 @@ test('reports missing fields, unsupported versions, and unknown kinds', () => {
   assert.ok(validateRecord({ kind: 'handback' }).errors.some(error => error.code === 'invalid-record' && error.field === 'version'));
   assert.ok(validateRecord(handback({ version: 2 })).errors.some(error => error.code === 'unsupported-version'));
   assert.ok(validateRecord(handback({ kind: 'future' })).errors.some(error => error.code === 'unknown-kind'));
+});
+
+test('optional slp-report validates meaningful execution content while legacy handbacks stay valid', () => {
+  assert.equal(validateRecord(handback()).valid, true, 'v1 handback without report remains valid');
+  assert.equal(validateRecord(handback({ report: executionReport() })).valid, true);
+
+  const blankResult = validateRecord(handback({ report: executionReport({
+    execution: { result: '  ', completed: [], unfinished: [] }
+  }) }));
+  assert.ok(blankResult.errors.some(error => error.field === 'report.execution.result'),
+    'a selected report rejects whitespace-only required narrative');
+});
+
+test('review reports bind mandate revisions and finding references to the handback candidate', () => {
+  const finding = {
+    id: 'finding-1', state: 'hypothesis', obligation: 'The source boundary may permit a stale candidate.',
+    evidence: [{ summary: 'The candidate pin differs from the current request.', source: 'review fixture', basis: 'observed', ref: 'review.md#finding-1' }],
+    remedy: 'Compare the review pin to the assignment candidate before adjudication.',
+  };
+  const reviewReport = executionReport({
+    purpose: 'review', execution: null,
+    review: {
+      outcome: 'One hypothesis needs Lead adjudication.',
+      mandate: { id: 'mandate-1', assignmentRevision: 'rev-3', scopeRevision: 'scope-2', candidateRef: head },
+      findingRefs: ['finding-1'],
+    },
+    findings: [finding],
+  });
+  assert.equal(validateRecord(handback({ verdict: 'FINDINGS', report: reviewReport })).valid, true);
+
+  const staleCandidate = validateRecord(handback({ report: {
+    ...reviewReport,
+    review: { ...reviewReport.review, mandate: { ...reviewReport.review.mandate, candidateRef: 'b'.repeat(40) } },
+  } }));
+  assert.ok(staleCandidate.errors.some(error => error.field === 'report.review.mandate.candidateRef'));
+
+  const unresolvedFinding = validateRecord(handback({ report: {
+    ...reviewReport, review: { ...reviewReport.review, findingRefs: ['finding-missing'] },
+  } }));
+  assert.ok(unresolvedFinding.errors.some(error => error.field === 'report.review.findingRefs[0]'));
+});
+
+test('finding confidence is explicit and confirmed findings need inspectable observed evidence', () => {
+  const finding = {
+    id: 'finding-1', state: 'hypothesis', obligation: 'The bounded proof is incomplete.',
+    evidence: [{ summary: 'A proof pointer is absent.', source: 'review source', basis: 'inference', ref: 'review.md#proof' }],
+    remedy: 'Add an inspectable proof reference.',
+  };
+  const hypothesis = executionReport({ findings: [finding] });
+  assert.equal(validateRecord(handback({ report: hypothesis })).valid, true);
+
+  const unconfirmed = validateRecord(handback({ report: executionReport({ findings: [{
+    ...finding, state: 'confirmed', evidence: [{ ...finding.evidence[0], basis: 'self-report' }],
+  }] }) }));
+  assert.ok(unconfirmed.errors.some(error => error.field === 'report.findings[0].evidence'));
+
+  const missingRemedy = validateRecord(handback({ report: executionReport({ findings: [{
+    ...finding, state: 'confirmed', remedy: ' ', evidence: [{ ...finding.evidence[0], basis: 'observed' }],
+  }] }) }));
+  assert.ok(missingRemedy.errors.some(error => error.field === 'report.findings[0].remedy'));
+});
+
+test('adjudication distinguishes decided and unresolved decisions and schema exposes purpose rules', () => {
+  const adjudication = executionReport({
+    purpose: 'adjudication', execution: null,
+    adjudication: {
+      summary: 'One decision remains open.', state: 'pending', decisions: [],
+      unresolved: [{ proposition: 'Which proof source is authoritative?', reason: 'The owner has not ruled.', ownerId: 'lead-1' }],
+    },
+  });
+  assert.equal(validateRecord(handback({ report: adjudication })).valid, true);
+  const emptyPending = validateRecord(handback({ report: {
+    ...adjudication, adjudication: { ...adjudication.adjudication, unresolved: [] },
+  } }));
+  assert.ok(emptyPending.errors.some(error => error.field === 'report.adjudication.unresolved'));
+
+  const decision = {
+    proposition: 'Use the candidate measurement for this bounded review.', ruling: 'Use it.', reason: 'It is the current snapshot.',
+    supportingEvidence: ['snapshot.json#sha256'], contraryEvidence: [], unresolvedRisk: 'None recorded.',
+    affectedRevision: 'rev-3', affectedOwners: ['lead-1'], notificationRefs: [], outcomeRefs: ['handback.md#1'],
+  };
+  const decided = { ...adjudication, adjudication: { ...adjudication.adjudication, state: 'decided', decisions: [decision], unresolved: [] } };
+  assert.equal(validateRecord(handback({ report: decided })).valid, true);
+  const missingDecision = validateRecord(handback({ report: {
+    ...decided, adjudication: { ...decided.adjudication, decisions: [] },
+  } }));
+  assert.ok(missingDecision.errors.some(error => error.field === 'report.adjudication.decisions'));
+
+  const schema = recordSchema().oneOf.find(entry => entry.properties.kind.const === 'handback');
+  assert.ok(schema.properties.report.required.includes('execution'));
+  assert.equal(schema.properties.report.properties.format.const, 'slp-report');
+  assert.equal(schema.properties.report.properties.findings.items.properties.state.enum.join(','), 'hypothesis,confirmed');
+  assert.ok(schema.properties.report['x-slpreport-semantic-rules'].some(rule => rule.includes('findingRef resolves')));
+  assert.ok(schema.allOf.some(rule => rule.if.properties.report.properties.purpose.const === 'review'));
 });
 
 test('uses the peer verdict enum in validation and schema', () => {
@@ -304,6 +426,81 @@ test('extracts CRLF fenced blocks', () => {
   assert.deepEqual(result.errors, []);
 });
 
+test('structured renderer labels claims and preserves the original CRLF evidence fence', () => {
+  const record = handback({ report: executionReport() });
+  const source = block(record).replaceAll('\n', '\r\n');
+  const originalFence = source.slice(2);
+  const parsed = extractRecords(source);
+  assert.equal(parsed.records[0].originalFence, originalFence);
+
+  const rendered = renderSlpReport(record, parsed.records[0].originalFence);
+  assert.match(rendered, /Self-reported narrative/u);
+  assert.match(rendered, /Ran \(self-reported; not proof of execution\)/u);
+  assert.match(rendered, /matching sha binds output bytes; it does not prove command execution/u);
+  assert.ok(rendered.endsWith(originalFence));
+  assert.equal(rendered.slice(rendered.length - originalFence.length), originalFence);
+});
+
+test('records renderer safely round-trips multiline record-like text in every narrative string field', async t => {
+  const dir = temp(t), binary = join(root, 'bin/slp.mjs');
+  const literal = 'Keep this example verbatim:\n```slp-record\nnot JSON, an example\n```\nContinue the explanation.';
+  const cases = ['assignment.id', 'assignment.revision', 'assignment.sourceRef', 'findings.remedy'];
+
+  for (const field of cases) await t.test(field, () => {
+    const report = executionReport();
+    if (field === 'assignment.id') report.assignment.id = literal;
+    if (field === 'assignment.revision') report.assignment.revision = literal;
+    if (field === 'assignment.sourceRef') report.assignment.sourceRef = literal;
+    if (field === 'findings.remedy') report.findings = [{
+      id: 'finding-1', state: 'hypothesis', obligation: 'Preserve the narrative as text.',
+      evidence: [{ summary: 'The fixture contains record-like text.', source: 'fixture', basis: 'self-report', ref: 'fixture#1' }],
+      remedy: literal,
+    }];
+    const record = handback({ report });
+    const source = `Context before.\r\n${block(record).replaceAll('\n', '\r\n')}Context after.`;
+    const sourceParsed = extractRecords(source);
+    assert.deepEqual(sourceParsed.errors, []);
+    assert.deepEqual(sourceParsed.warnings, []);
+    assert.equal(sourceParsed.records.length, 1);
+    assert.equal(sourceParsed.records[0].selected, true);
+    assert.deepEqual(sourceParsed.records[0].record, record);
+    const originalFence = sourceParsed.records[0].originalFence;
+    assert.match(originalFence, /\r\n/u);
+
+    const inputPath = join(dir, `${field.replaceAll('.', '-')}.md`);
+    const renderedPath = join(dir, `${field.replaceAll('.', '-')}-rendered.md`);
+    writeFileSync(inputPath, source);
+    const rendered = spawnSync(process.execPath, [binary, 'records', '--render', inputPath], { encoding: 'utf8' });
+    assert.equal(rendered.status, 0, rendered.stderr);
+    assert.ok(rendered.stdout.endsWith(originalFence));
+    assert.equal(rendered.stdout.slice(-originalFence.length), originalFence);
+    const narrative = rendered.stdout.slice(0, -originalFence.length);
+    const renderedParsed = extractRecords(rendered.stdout);
+    assert.deepEqual(renderedParsed.errors, []);
+    assert.deepEqual(renderedParsed.warnings, []);
+    assert.equal(renderedParsed.records.length, 1);
+    assert.equal(renderedParsed.records[0].selected, true);
+    assert.deepEqual(renderedParsed.records[0].record, record);
+    if (field === 'assignment.id') assert.equal(renderedParsed.records[0].record.report.assignment.id, literal);
+    if (field === 'assignment.revision') assert.equal(renderedParsed.records[0].record.report.assignment.revision, literal);
+    if (field === 'assignment.sourceRef') assert.equal(renderedParsed.records[0].record.report.assignment.sourceRef, literal);
+    if (field === 'findings.remedy') assert.equal(renderedParsed.records[0].record.report.findings[0].remedy, literal);
+    assert.ok(narrative.includes(JSON.stringify(literal)));
+    assert.ok(!narrative.includes(literal), 'newlines stay encoded inside narrative strings');
+
+    writeFileSync(renderedPath, rendered.stdout);
+    const cliParsed = spawnSync(process.execPath, [binary, 'records', renderedPath], { encoding: 'utf8' });
+    assert.equal(cliParsed.status, 0, cliParsed.stderr);
+    const cliResult = JSON.parse(cliParsed.stdout);
+    assert.deepEqual(cliResult.errors, []);
+    assert.deepEqual(cliResult.warnings, []);
+    assert.equal(cliResult.records.length, 1);
+    assert.equal(cliResult.records[0].valid, true);
+    assert.equal(cliResult.records[0].selected, true);
+    assert.deepEqual(cliResult.records[0].record, record);
+  });
+});
+
 test('accepts trailing whitespace after the opening and closing record fences', () => {
   const source = block(handback())
     .replace('```slp-record\n', '```slp-record  \t\n')
@@ -338,7 +535,27 @@ test('records CLI supports --require failure, stdin, and schema output', () => {
   assert.equal(JSON.parse(parsed.stdout).records[0].record.kind, 'handback');
   const schema = spawnSync(process.execPath, [binary, 'records', '--schema'], { encoding: 'utf8' });
   assert.equal(schema.status, 0, schema.stderr);
-  assert.equal(JSON.parse(schema.stdout).title, recordSchema().title);
+  const publishedSchema = JSON.parse(schema.stdout);
+  assert.equal(publishedSchema.title, recordSchema().title);
+  assert.equal(publishedSchema.oneOf[0].properties.report.properties.format.const, 'slp-report');
+});
+
+test('records --render <file> outputs narrative followed by the original fenced record', t => {
+  const dir = temp(t), reportFile = join(dir, 'handoff.md');
+  const source = block(handback({ report: executionReport() })).replaceAll('\n', '\r\n');
+  const originalFence = source.slice(2);
+  writeFileSync(reportFile, source);
+  const rendered = spawnSync(process.execPath, [join(root, 'bin/slp.mjs'), 'records', '--render', reportFile], { encoding: 'utf8' });
+  assert.equal(rendered.status, 0, rendered.stderr);
+  assert.match(rendered.stdout, /Self-reported narrative/u);
+  assert.match(rendered.stdout, /Ran \(self-reported; not proof of execution\)/u);
+  assert.ok(rendered.stdout.endsWith(originalFence));
+
+  const invalid = join(dir, 'legacy.md');
+  writeFileSync(invalid, block(handback()));
+  const missingReport = spawnSync(process.execPath, [join(root, 'bin/slp.mjs'), 'records', '--render', invalid], { encoding: 'utf8' });
+  assert.equal(missingReport.status, 1);
+  assert.ok(JSON.parse(missingReport.stdout).errors.some(error => error.code === 'structured-report-required'));
 });
 
 test('records CLI reads a file and filters returned kinds', t => {

@@ -1,7 +1,0 @@
-{
-  "database": "dolt",
-  "backend": "dolt",
-  "dolt_mode": "embedded",
-  "dolt_database": "paseo_slp",
-  "project_id": "c5985bec-8479-4948-b3f9-0d3fa4752284"
-}

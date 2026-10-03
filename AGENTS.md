@@ -29,9 +29,9 @@ repo ceremony.
 
 Global policy owns authority, delegation, ownership and review invariants;
 workspace protocol owns repo ceremony. Repo harness owns external MCP/connectors,
-credentials, polling and queue state. Supervisor uses supplied tools under its
-assignment; Lead chooses workflows. Tracker input implies no Lead type; beads
-remains opt-in. Before adding a plugin setting, gate or onboarding step, name
+credentials and polling. Supervisor uses supplied tools under its
+assignment; Lead chooses workflows. External work-state tools belong to the workspace/harness and imply no Lead
+type. Before adding a plugin setting, gate or onboarding step, name
 its invariant and why protocol/harness cannot own it. Keep optional integrations
 out of default ceremony; preserve required review and authority checks.
 

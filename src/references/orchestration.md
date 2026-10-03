@@ -13,14 +13,15 @@ product objective, current behavior, architecture and module boundaries, recorde
 decisions, dependencies, existing work and authority. Read the relevant docs/code
 before delegating; distinguish verified facts from assumptions and unresolved
 questions. An unclear boundary blocks only the work that depends on that decision.
-Keep a concise project checkpoint in the task's permitted notes or session:
-decisions and rationale, evidence paths, candidate, owner/agent IDs, dependencies,
-open findings and next actions — and, when a review gate applies, the required
-gate, its axis→seat IDs and the rule source or exception relied on. Update it at
-material decisions and handbacks; after resume/compaction reconcile it with
-current repository and actor state. The checkpoint indexes decisions made; it is
-neither a substitute policy source nor proof of compliance — a checkpoint that
-survives without its rules sends you back to the references, never around them.
+Keep the current task state in the permitted brief, session or notes. For
+multi-owner or changing work, identify the operative brief revision and point to
+material decisions, outcome evidence, notifications, open dependencies and next
+actions. Revise it and notify affected owners through existing routes when
+objective, acceptance, authority, ownership or a material decision changes; a
+single bounded task may use one inline brief. Messages and semantic claims are
+coordination inputs, not proof of work or acceptance. Reconcile material changes
+in Lead's shared state, and after resume/compaction with current repository and
+actor evidence. A checkpoint indexes state; it does not replace source policy.
 Pass each Peer the relevant objective, contracts and constraints, plus evidence
 references; retain project-wide integration context in Lead. Context gathering
 does not authorize implementation, broaden scope or require reading the whole repo.
@@ -33,28 +34,28 @@ Use the smallest topology that supplies the required independent judgment:
 
 | Task need | Execution and handback |
 |---|---|
-| Tiny, tightly coupled | One Peer Engineer under Lead; use the repository protocol's tiny procedure, focused proof and Lead artifact inspection. |
-| Bounded implementation | Engineer owns writes and proof; Lead inspects; independent review gate if risk/protocol requires. |
-| Cross-module ownership or lifecycle | Read-only Architect reconstructs boundaries; Lead records design decision; Engineer implements; independent review gate falsifies the stable result when required. |
+| Tiny, tightly coupled | One writer, normally a Peer Engineer; Lead may write only under an explicit Human grant or effective protocol grant for clear, reversible work. Use the repository tactic, focused proof and any required independent review. |
+| Bounded implementation | Peer Engineer owns writes and proof by default; Lead coordinates and inspects; independent review gate if risk/protocol requires. |
+| Cross-module ownership or lifecycle | Read-only Architect reconstructs boundaries; Lead records the technical decision; Peer Engineer implements by default; independent review gate falsifies the stable result when required. |
 | Multiple plausible foundations or costly lock-in | Independent design lenses or sealed council; Lead reconciles material propositions before implementation. |
 | Large dependency branch | Bounded Peer/lane or dependency Lead, with scope and handback separate from the main objective. |
 
-Engineer, Architect, Reviewer and Scout use the same Peer role. Assign each a
+Engineer, Architect, Reviewer, optional Auditor and Scout use the same Peer role. Assign each a
 self-contained question and disposition-specific output (defined in Peer policy).
 Read-only reports stay in the session unless a separate report write scope is
-granted. When a review gate is required, structure it per
-references/review-gates.md and the effective protocol's declared rule — a
-fixed seat/axis shape, or a bounded selection rule under which the Lead
-chooses the minimum sufficient seats; the default is parallel seats on
-split axes, and a single-seat gate is valid only where the declared rule
-yields one seat. The protocol sets the rule by recorded
-decision; inability to supply a required gate is BLOCKED, not permission to
-skip it.
+granted. Record explicit review selection per references/review-gates.md before
+the candidate round: minimum sufficient independent mandates for material
+questions or explicit obligations, or a reasoned not-required decision when none
+applies. An authority-backed exemption is a separate waiver, never inferred from
+size or absent selection. One seat may cover related questions; additional seats
+address distinct unresolved risks or separation needs. Human/protocol-required
+fixed shapes remain binding; inability to supply them is BLOCKED, not permission
+to weaken the gate. Authority/rule references are claims, not grant authentication.
 
 ## Session continuity
 
 Within an ongoing assignment, reuse a suitable existing Peer to preserve its
-context. Send authorized corrections to the same Engineer. Ask the same independent
+context. Send authorized corrections to the same write owner. Ask the same independent
 Reviewer to recheck the new stable candidate and affected findings; reviewing an
 earlier version does not make that Reviewer its implementer. Supply the new
 candidate identity, changes and prior findings, and require current evidence for
@@ -86,7 +87,8 @@ the reuse/new-session choice within protocol, budget and Human constraints.
 1. Give fresh sessions the problem, evidence and neutral constraints. Withhold the
    Lead's preferred answer while framing is unresolved. Assign distinct lenses
    such as ownership/lifecycle versus failure/migration; allow alternatives beyond
-   the Lead's options. Two or three lenses are choices by risk, not fixed counts.
+   the Lead's options. Select lenses for distinct decision-changing questions, without
+   a fixed seat or provider-family count.
 2. For sealed work, collect each report before exposing any seat's conclusions to
    another. Do not fork the Lead or share its prior reasoning as a substitute for
    independence. If visibility leaks, record the limitation and restore independent
@@ -101,19 +103,24 @@ the reuse/new-session choice within protocol, budget and Human constraints.
 
 ## Ownership, isolation and integration
 
-Record agent, disposition, repository/worktree, owned scope, dependencies,
-integration owner and acceptance owner for every lane. One moving scope has one
-writer. Concurrent writers require separate worktrees even if their workspace IDs
-differ. Use discovered Paseo create_workspace with isolation=worktree and a known
-source/base, then give create_agent the returned workspaceId; verify actual paths.
-Worktrees branching from a commit do not carry unrelated uncommitted work: identify
-the intended base and required changes explicitly before the lane starts.
+For concurrent lanes, record the writer, owned and excluded scopes, dependencies
+and readiness, shared-resource owners, repository/workspace plus actual cwd and
+worktree paths, integration owner and acceptance owner. One moving scope has one
+writer. The effective repo protocol or Lead tactic chooses shared checkout,
+worktree or another isolation boundary after declaring scopes and resources
+merge-safe. A shared checkout is permitted only when that tactic makes nonconflict
+explicit; workspace IDs alone do not isolate. Overlapping writes require serial
+ownership transfer or a safe decomposition/isolation choice. Verify actual paths
+and the selected base; a worktree may omit pre-existing uncommitted changes, which
+must be identified before the lane starts.
 
 Overlapping scopes require serial ownership transfer or decomposition. Read-only
-review also needs a frozen candidate. Have writers acknowledge handback and pause;
-an idle lifecycle label alone is insufficient. The receiving owner inspects the
+review needs a frozen candidate. Have writers acknowledge handback and pause; an
+idle lifecycle label alone is insufficient. The receiving owner inspects the
 candidate and dependencies before accepting transfer. Keep integration itself under
 one write owner; Lead retains the decision even when a Peer performs integration.
+Freeze the integrated candidate before acceptance review and keep its writer paused
+through verification.
 Merging/cherry-picking commits and any commit/push still require applicable authority.
 Review the resulting integrated candidate; branch reviews do not prove integration.
 
@@ -157,11 +164,15 @@ semantics.
 
 Keep candidate writers paused during review and verification. A before/after identity
 change invalidates that acceptance attempt. Reviewers report severity, evidence,
-checks and APPROVE/FINDINGS; Engineer supplies proof; Lead issues the project verdict.
+checks and APPROVE/FINDINGS; the write owner supplies proof; Lead issues the project verdict.
 Follow Session continuity for corrections and re-review. Keep unresolved findings visible.
+Adjudicate every material finding with reasons, evidence/counterevidence and residual
+risk within authority under references/review-gates.md; unanimity and reproduction
+alone are not verdict rules. Missing required proof or constraints remain unmet.
 Gate findings repeating one class across consecutive rounds follow
-references/review-gates.md's correction-loop escalation — enumeration, an
-invariant refactor or a findings committee — not another point-fix brief.
+references/review-gates.md's correction-loop escalation — mechanism
+investigation, affected-site enumeration or invariant refactor within the
+assignment's bounded correction/challenge budget — not another point-fix brief.
 
 Evidence must address real failure mechanisms and the Human outcome. Use integration,
 migration, cancellation, performance or Human product/visual/playtest evidence as
@@ -170,6 +181,6 @@ decides subjective or owner-only trade-offs. Complete with candidate, actual che
 review evidence, ACCEPT/CHANGES_REQUESTED/BLOCKED and residual risks. Artifact
 acceptance is distinct from Delivery and resource settlement: a bounded task settles
 after Delivery completes and no correction or re-review remains open. Keep the same
-Engineer and independent review seats for open rework, then follow
+write owner and independent review seats for open rework, then follow
 references/monitoring.md and the repository protocol to reconcile task resources.
 Settlement does not itself archive, kill or reparent sessions.

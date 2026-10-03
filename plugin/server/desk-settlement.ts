@@ -46,7 +46,8 @@ import {
   type DeskSettlementRecordInputValue,
 } from "../shared/enforcement.ts";
 import { ROLES } from "../shared/runtime/families.ts";
-import { deriveId, requireActor as requireDeskActor, requireLead as requireDeskLead } from "./desk-command.ts";
+import { deriveId, effectiveOwnerMatches, requireActor as requireDeskActor, requireLead as requireDeskLead } from "./desk-command.ts";
+import { deskWorkflowParticipant } from "./desk-ownership.ts";
 import {
   LEDGER_LIMITS,
   type LedgerValue,
@@ -183,11 +184,11 @@ export function decideDeskSettlement(ledger: Readonly<LedgerValue>, command: Rec
   if (assignment === undefined) {
     return reject("AUTHORITY_REQUIRED", "the assignment is not registered on this desk", "a settlement settles a durable assignment binding");
   }
-  if (assignment.ownerAgentId !== actor.agentId) {
+  if (!effectiveOwnerMatches(ledger, assignment, actor)) {
     return reject(
       "AUTHORITY_REQUIRED",
-      "only the assignment's receiving owner may record settlement",
-      "the registering lead's agentId is bound into the row — a peer, another lead, or a supervisor cannot settle it",
+      "only the assignment's current effective owner may record settlement",
+      "the effective owner's exact live membership tuple holds custody — a peer, another lead, or a supervisor cannot settle it",
     );
   }
   const seat = assignment.seats.find(s => s.agentId === cmd.seatAgentId);
@@ -435,11 +436,10 @@ export function seatSettlementsView(
   const byAssignment = new Map<string, StatusSettlement[]>();
   let truncated = 0;
   for (const assignment of ledger.assignments) {
-    const owner = assignment.ownerAgentId === row.agentId;
-    const attached = assignment.seats.some(seat => seat.agentId === row.agentId);
-    if (!owner && !attached) continue;
+    const participant = deskWorkflowParticipant(ledger, row, assignment);
+    if (participant === null) continue;
     const rows = ledger.settlements.filter(
-      s => s.assignmentId === assignment.assignmentId && (owner || s.seatAgentId === row.agentId),
+      s => s.assignmentId === assignment.assignmentId && (participant !== "attached-seat" || s.seatAgentId === row.agentId),
     );
     if (rows.length === 0) continue;
     if (rows.length > limits.settlements) truncated += 1;
@@ -575,12 +575,17 @@ export async function runSettlementExport(
       recovery: "export targets a committed settlement revision of this repo desk",
     };
   }
-  if (row.ownerAgentId !== ctx.row.agentId && row.seatAgentId !== ctx.row.agentId) {
+  const settlementAssignment = ledger.assignments.find(a => a.assignmentId === row.assignmentId);
+  const participant = settlementAssignment === undefined
+    ? null
+    : deskWorkflowParticipant(ledger, ctx.row, settlementAssignment);
+  const ownerFamily = participant !== null && participant !== "attached-seat";
+  if (!ownerFamily && row.seatAgentId !== ctx.row.agentId) {
     return {
       ok: false,
       code: "AUTHORITY_REQUIRED",
-      message: "only the receiving owner or the settled seat may export a settlement",
-      recovery: "the export is scoped to the settlement's two parties — ask the owner",
+      message: "only the current effective owner, an ownership participant, or the settled seat may export a settlement",
+      recovery: "the export is scoped to the settlement's parties and the assignment's ownership lineage — ask the current owner",
     };
   }
   const record = buildSettlementRecord(row);

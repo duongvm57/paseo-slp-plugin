@@ -21,10 +21,13 @@ import {
   hello,
   handshake,
   rpc,
+  BIN_SOURCE,
 } from './helpers/desk-bridge-fixture.mjs';
 import { randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { decideDeskCheck } from '../plugin/server/desk-check-runner.ts';
 import { decideDeskRollout } from '../plugin/server/desk-rollout.ts';
+import { approvedScopeRound } from '../plugin/server/desk-scope.ts';
 import { sha256Hex } from '../plugin/server/config-view.ts';
 import {
   DeskAssignmentResult,
@@ -35,8 +38,8 @@ import {
   DeskSeatStatus,
 } from '../plugin/shared/enforcement.ts';
 
-// Literal pin: wire/state-machine fixtures deliberately do not graft the binary.
-const PIN = 'f'.repeat(64);
+// Bind the real fixture binary; startup also verifies its bytes.
+const PIN = sha256Hex(readFileSync(BIN_SOURCE));
 const PROVIDER = 'slp-codex-peer';
 const FIXED_AT = '2026-01-02T00:00:00.000Z';
 const CAPTURED_AT = '2026-01-02T00:00:01.000Z';
@@ -175,6 +178,22 @@ const ledgerOf = (f, repoKey) => {
   return read.ledger;
 };
 
+const briefBody = objective => ({
+  objective,
+  acceptanceCriteria: ['the declared candidate satisfies the scope outcome'],
+  constraints: [],
+  provisionalDesign: 'No implementation design is prescribed; select one after inspection.',
+  assumptions: [], unknowns: [], requiredEvidence: [], ownedSurfaces: [], excludedSurfaces: [], dependencies: [], notifications: [],
+});
+
+async function amendBrief(ctx, expectedBriefRevision, objective) {
+  return call(ctx.leadConn.reader, ctx.leadConn.conn, 'slp_assignment_amend', {
+    requestId: `brief-${randomUUID()}`, assignmentId: ctx.assignmentId, expectedBriefRevision,
+    brief: briefBody(objective), changeReason: `Revise operative outcome ${expectedBriefRevision + 1}.`,
+    authorityRef: 'grant:brief-test', affectedOwners: ['agent-lead', 'agent-1'],
+  });
+}
+
 // --- P5 wire arg builders ---------------------------------------------------
 
 const scopeArgs = (over = {}) => ({
@@ -185,6 +204,8 @@ const scopeArgs = (over = {}) => ({
   declarationSha256: DECL_SHA,
   refs: [],
   seatAgentId: 'agent-1',
+  // Explicit compatibility opt-in for historical two-axis fixtures.
+  reviewPlan: null,
   ...over,
 });
 
@@ -838,13 +859,14 @@ test('B2: a rollout redeclared during the awaited execution typed-rejects — th
     // revision 2 re-pins the rollout onto candidate B. The commit that
     // follows this await must typed-reject — outcome(A) is not evidence(B).
     const store = seedStore(ctx.f);
+    const requestId = `rol-drift-${randomUUID()}`;
     drift.redeclare = await store.transact(ctx.repoKey, {
       repo: ctx.repo,
       actorKey: 'agent:agent-lead',
       assignmentId: ctx.assignmentId,
-      requestId: `rol-drift-${randomUUID()}`,
+      requestId,
       command: {
-        kind: 'rollout.declare', requestId: `rol-drift-${randomUUID()}`, actorAgentId: 'agent-lead',
+        kind: 'rollout.declare', requestId, actorAgentId: 'agent-lead',
         assignmentId: ctx.assignmentId, scopeId: 'scope-1', rolloutId: 'rollout-1',
         label: 're-pinned mid-run', declarationSha256: DECL_SHA,
         candidateSnapshot: SNAP_B, candidateHead: CAPTURED_HEAD,
@@ -862,6 +884,9 @@ test('B2: a rollout redeclared during the awaited execution typed-rejects — th
   const snapA = await observeCandidate(t, ctx, { peerConn: ctx.peerConn, assignmentId, agentId: 'agent-1' });
   capturedSnap = SNAP_B;
   const snapB = await observeCandidate(t, ctx, { peerConn: ctx.peerConn, assignmentId, agentId: 'agent-1' });
+  // Keep checkout A through this execution: only the durable declaration
+  // changes mid-flight, so the store's revision guard remains the subject.
+  capturedSnap = CAPTURED_SNAP;
   await call(ctx.leadConn.reader, ctx.leadConn.conn, 'slp_rollout_declare', rolloutArgs({ assignmentId, candidateSnapshot: snapA }));
   const started = await call(ctx.leadConn.reader, ctx.leadConn.conn, 'slp_rollout_transition', transitionArgs({ assignmentId }));
   assert.equal(started.body.ok, true);
@@ -877,6 +902,7 @@ test('B2: a rollout redeclared during the awaited execution typed-rejects — th
   const gate = await call(ctx.leadConn.reader, ctx.leadConn.conn, 'slp_rollout_transition', transitionArgs({ assignmentId, transition: 'checks-passed', rolloutRevision: 2 }));
   assert.equal(gate.body.code, 'CHECK_INCOMPLETE', 'no passed run is bound to candidate B');
   // A fresh run re-executes under revision 2's pin and discharges it.
+  capturedSnap = SNAP_B;
   const rerun = await call(ctx.leadConn.reader, ctx.leadConn.conn, 'slp_check_run', runArgs({ assignmentId, requestId: `run-${randomUUID()}` }));
   assert.equal(rerun.body.ok, true, JSON.stringify(rerun.body));
   assert.equal(rerun.body.status, 'passed');
@@ -990,6 +1016,192 @@ test('B8: a scope amendment supersedes the approved round — promote rejects un
   assert.equal(promote.body.ok, false);
   assert.equal(promote.body.code, 'REVIEW_INCOMPLETE', 'the approved round is bound to scope revision 1');
   assert.equal(stateOf(ctx.f, ctx.repoKey), 'canary-passed');
+});
+
+test('v7: an operative brief amendment invalidates the standing review and blocks rollout promotion', async t => {
+  const ctx = await canaryReady(t, { checkExec: execOk([]) });
+  await approveScope(ctx);
+  await call(ctx.leadConn.reader, ctx.leadConn.conn, 'slp_rollout_transition', transitionArgs({ assignmentId: ctx.assignmentId, transition: 'start-canary' }));
+  await call(ctx.leadConn.reader, ctx.leadConn.conn, 'slp_rollout_transition', transitionArgs({ assignmentId: ctx.assignmentId, transition: 'canary-passed' }));
+  const before = ledgerOf(ctx.f, ctx.repoKey);
+  const scopeHistory = before.scopeTransitions.filter(row => row.scopeId === 'scope-1');
+  assert.ok(approvedScopeRound(scopeHistory, { briefRevision: 0, scopeRevision: 1, mandateSha256: null }));
+  assert.equal((await amendBrief(ctx, 0, 'A materially revised operative outcome.')).body.ok, true);
+  const after = ledgerOf(ctx.f, ctx.repoKey);
+  assert.equal(after.briefRevisions.at(-1).revision, 1);
+  assert.ok(approvedScopeRound(after.scopeTransitions.filter(row => row.scopeId === 'scope-1')),
+    'the old approval remains recorded at its original event time');
+  assert.equal(approvedScopeRound(after.scopeTransitions.filter(row => row.scopeId === 'scope-1'), {
+    briefRevision: 1, scopeRevision: 1, mandateSha256: null,
+  }), null, 'the freshness projection excludes the old brief pin');
+  const rejected = await call(ctx.leadConn.reader, ctx.leadConn.conn, 'slp_rollout_transition', transitionArgs({
+    assignmentId: ctx.assignmentId, transition: 'promote',
+  }));
+  assert.equal(rejected.body.ok, false);
+  assert.equal(rejected.body.code, 'REVIEW_INCOMPLETE', JSON.stringify(rejected.body));
+  assert.equal(stateOf(ctx.f, ctx.repoKey), 'canary-passed', 'stale promotion commits no rollout transition');
+});
+
+test('v7: a completed promotion remains historically valid when a later brief revision makes its approval stale', async t => {
+  const ctx = await canaryReady(t, { checkExec: execOk([]) });
+  await approveScope(ctx);
+  await call(ctx.leadConn.reader, ctx.leadConn.conn, 'slp_rollout_transition', transitionArgs({ assignmentId: ctx.assignmentId, transition: 'start-canary' }));
+  await call(ctx.leadConn.reader, ctx.leadConn.conn, 'slp_rollout_transition', transitionArgs({ assignmentId: ctx.assignmentId, transition: 'canary-passed' }));
+  const promoted = await call(ctx.leadConn.reader, ctx.leadConn.conn, 'slp_rollout_transition', transitionArgs({
+    assignmentId: ctx.assignmentId, transition: 'promote',
+  }));
+  assert.equal(promoted.body.ok, true, JSON.stringify(promoted.body));
+  assert.equal((await amendBrief(ctx, 0, 'The next work item changes the operative outcome.')).body.ok, true);
+  const ledger = ledgerOf(ctx.f, ctx.repoKey);
+  assert.equal(ledger.rolloutTransitions.filter(row => row.command === 'promote').length, 1);
+  assert.equal(stateOf(ctx.f, ctx.repoKey), 'promoted');
+  assert.equal(approvedScopeRound(ledger.scopeTransitions.filter(row => row.scopeId === 'scope-1'), {
+    briefRevision: 1, scopeRevision: 1, mandateSha256: null,
+  }), null, 'later freshness does not rewrite the earlier approval event');
+});
+
+test('v7: an explicit exemption approves and promotes an empty discharge with event-time history intact', async t => {
+  const ctx = await boundTrio(t, { checkExec: execOk([]) });
+  ctx.assignmentId = await registerPair(t, ctx);
+  const exemption = {
+    kind: 'exempt', authorityRef: 'grant:future-workspace', ruleRef: 'rule:docs-only',
+    reason: 'The authority-backed rule exempts this bounded documentation scope.',
+    lenses: [], exemptionClass: 'docs-only',
+  };
+  const scope = await call(ctx.leadConn.reader, ctx.leadConn.conn, 'slp_scope_declare', scopeArgs({
+    assignmentId: ctx.assignmentId, seatAgentId: null, reviewPlan: exemption,
+  }));
+  assert.equal(scope.body.ok, true, JSON.stringify(scope.body));
+  const check = await call(ctx.leadConn.reader, ctx.leadConn.conn, 'slp_check_declare', checkArgs({ assignmentId: ctx.assignmentId }));
+  assert.equal(check.body.ok, true, JSON.stringify(check.body));
+  ctx.snapshot = await observeCandidate(t, ctx, { peerConn: ctx.peerConn, assignmentId: ctx.assignmentId, agentId: 'agent-1' });
+  const rollout = await call(ctx.leadConn.reader, ctx.leadConn.conn, 'slp_rollout_declare', rolloutArgs({
+    assignmentId: ctx.assignmentId, candidateSnapshot: ctx.snapshot,
+  }));
+  assert.equal(rollout.body.ok, true, JSON.stringify(rollout.body));
+
+  const rolloutTransition = over => call(ctx.leadConn.reader, ctx.leadConn.conn, 'slp_rollout_transition', transitionArgs({
+    assignmentId: ctx.assignmentId, ...over,
+  }));
+  assert.equal((await rolloutTransition({})).body.ok, true);
+  const run = await call(ctx.leadConn.reader, ctx.leadConn.conn, 'slp_check_run', runArgs({ assignmentId: ctx.assignmentId }));
+  assert.equal(run.body.ok, true, JSON.stringify(run.body));
+  assert.equal((await rolloutTransition({ transition: 'checks-passed' })).body.ok, true);
+  assert.equal((await rolloutTransition({ transition: 'canary-ready' })).body.ok, true);
+  assert.equal((await rolloutTransition({ transition: 'start-canary' })).body.ok, true);
+  assert.equal((await rolloutTransition({ transition: 'canary-passed' })).body.ok, true);
+
+  const scopeTransition = over => call(ctx.leadConn.reader, ctx.leadConn.conn, 'slp_scope_transition', scopeTransArgs({
+    assignmentId: ctx.assignmentId, ...over,
+  }));
+  assert.equal((await scopeTransition({ transition: 'claim' })).body.ok, true);
+  assert.equal((await scopeTransition({
+    transition: 'submit-for-review', candidateSnapshot: ctx.snapshot, candidateHead: CAPTURED_HEAD,
+  })).body.ok, true);
+  const observed = await scopeTransition({ transition: 'review-observed' });
+  assert.equal(observed.body.ok, true, JSON.stringify(observed.body));
+  assert.deepEqual(observed.body.discharged, [], 'only the explicit stored exemption has an empty required set');
+  const approval = await scopeTransition({ transition: 'approve' });
+  assert.equal(approval.body.ok, true, JSON.stringify(approval.body));
+  assert.deepEqual(approval.body.discharged, []);
+  const approved = ledgerOf(ctx.f, ctx.repoKey);
+  const scopeHistory = approved.scopeTransitions.filter(row => row.assignmentId === ctx.assignmentId && row.scopeId === 'scope-1').sort((a, b) => a.revision - b.revision);
+  assert.deepEqual(approvedScopeRound(scopeHistory)?.discharged, []);
+
+  const promoted = await rolloutTransition({ transition: 'promote' });
+  assert.equal(promoted.body.ok, true, JSON.stringify(promoted.body));
+  assert.deepEqual(promoted.body.dischargedReviews, []);
+  assert.equal(stateOf(ctx.f, ctx.repoKey), 'promoted');
+
+  assert.equal((await amendBrief(ctx, 0, 'The next authorized work item has a different brief.')).body.ok, true);
+  const revisedScope = await call(ctx.leadConn.reader, ctx.leadConn.conn, 'slp_scope_declare', scopeArgs({
+    assignmentId: ctx.assignmentId, seatAgentId: null, reviewPlan: exemption, expectedBriefRevision: 1,
+    requestId: `scp-${randomUUID()}`,
+  }));
+  assert.equal(revisedScope.body.revision, 2);
+  const historical = ledgerOf(ctx.f, ctx.repoKey);
+  assert.equal(historical.rolloutTransitions.filter(row => row.assignmentId === ctx.assignmentId && row.command === 'promote').length, 1,
+    'the committed promotion remains valid at its event-time brief/scope pins');
+  assert.equal(stateOf(ctx.f, ctx.repoKey), 'promoted');
+});
+
+test('selection: no-review approves and promotes empty evidence while historical pins survive later amendments', async t => {
+  const ctx = await boundTrio(t, { checkExec: execOk([]) });
+  ctx.assignmentId = await registerPair(t, ctx);
+  const exemption = {
+    kind: 'not-required', authorityRef: 'grant:future-workspace', ruleRef: 'rule:docs-only',
+    reason: 'No material independent question remains for this bounded scope.',
+    lenses: [], exemptionClass: null,
+  };
+  const scope = await call(ctx.leadConn.reader, ctx.leadConn.conn, 'slp_scope_declare', scopeArgs({
+    assignmentId: ctx.assignmentId, seatAgentId: null, reviewPlan: exemption,
+  }));
+  assert.equal(scope.body.ok, true, JSON.stringify(scope.body));
+  const check = await call(ctx.leadConn.reader, ctx.leadConn.conn, 'slp_check_declare', checkArgs({ assignmentId: ctx.assignmentId }));
+  assert.equal(check.body.ok, true, JSON.stringify(check.body));
+  ctx.snapshot = await observeCandidate(t, ctx, { peerConn: ctx.peerConn, assignmentId: ctx.assignmentId, agentId: 'agent-1' });
+  const rollout = await call(ctx.leadConn.reader, ctx.leadConn.conn, 'slp_rollout_declare', rolloutArgs({
+    assignmentId: ctx.assignmentId, candidateSnapshot: ctx.snapshot,
+  }));
+  assert.equal(rollout.body.ok, true, JSON.stringify(rollout.body));
+
+  const rolloutTransition = over => call(ctx.leadConn.reader, ctx.leadConn.conn, 'slp_rollout_transition', transitionArgs({
+    assignmentId: ctx.assignmentId, ...over,
+  }));
+  assert.equal((await rolloutTransition({})).body.ok, true);
+  const run = await call(ctx.leadConn.reader, ctx.leadConn.conn, 'slp_check_run', runArgs({ assignmentId: ctx.assignmentId }));
+  assert.equal(run.body.ok, true, JSON.stringify(run.body));
+  assert.equal((await rolloutTransition({ transition: 'checks-passed' })).body.ok, true);
+  assert.equal((await rolloutTransition({ transition: 'canary-ready' })).body.ok, true);
+  assert.equal((await rolloutTransition({ transition: 'start-canary' })).body.ok, true);
+  assert.equal((await rolloutTransition({ transition: 'canary-passed' })).body.ok, true);
+
+  const scopeTransition = over => call(ctx.leadConn.reader, ctx.leadConn.conn, 'slp_scope_transition', scopeTransArgs({
+    assignmentId: ctx.assignmentId, ...over,
+  }));
+  assert.equal((await scopeTransition({ transition: 'claim' })).body.ok, true);
+  assert.equal((await scopeTransition({
+    transition: 'submit-for-review', candidateSnapshot: ctx.snapshot, candidateHead: CAPTURED_HEAD,
+  })).body.ok, true);
+  const observed = await scopeTransition({ transition: 'review-observed' });
+  assert.equal(observed.body.ok, true, JSON.stringify(observed.body));
+  assert.deepEqual(observed.body.discharged, [], 'the selected no-review decision resolves an empty observation set');
+  const approval = await scopeTransition({ transition: 'approve' });
+  assert.equal(approval.body.ok, true, JSON.stringify(approval.body));
+  assert.deepEqual(approval.body.discharged, []);
+  const approved = ledgerOf(ctx.f, ctx.repoKey);
+  const scopeHistory = approved.scopeTransitions.filter(row => row.assignmentId === ctx.assignmentId && row.scopeId === 'scope-1').sort((a, b) => a.revision - b.revision);
+  assert.deepEqual(approvedScopeRound(scopeHistory)?.discharged, []);
+
+  for (const changedPlan of [
+    { ...exemption, reason: 'A revised selection requires a fresh candidate round.' },
+    { kind: 'required', authorityRef: 'grant:selection', ruleRef: 'rule:identity',
+      reason: 'An independent identity judgment is now required.', exemptionClass: null,
+      lenses: [{ id: 'identity', name: 'Identity', authorityRef: 'grant:selection', ruleRef: 'rule:identity' }] },
+  ]) {
+    const stale = structuredClone(approved);
+    stale.scopes[0].reviewPlan = changedPlan;
+    const decision = decideDeskRollout(stale, { kind: 'rollout.transition', actorAgentId: 'agent-lead',
+      ...transitionArgs({ assignmentId: ctx.assignmentId, transition: 'promote' }),
+    });
+    assert.equal(decision.code, 'REVIEW_INCOMPLETE', 'an empty historic discharge cannot survive a changed mandate');
+  }
+
+  const promoted = await rolloutTransition({ transition: 'promote' });
+  assert.equal(promoted.body.ok, true, JSON.stringify(promoted.body));
+  assert.deepEqual(promoted.body.dischargedReviews, []);
+  assert.equal(stateOf(ctx.f, ctx.repoKey), 'promoted');
+
+  assert.equal((await amendBrief(ctx, 0, 'The next authorized work item has a different brief.')).body.ok, true);
+  const revisedScope = await call(ctx.leadConn.reader, ctx.leadConn.conn, 'slp_scope_declare', scopeArgs({
+    assignmentId: ctx.assignmentId, seatAgentId: null, reviewPlan: exemption, expectedBriefRevision: 1,
+    requestId: `scp-${randomUUID()}`,
+  }));
+  assert.equal(revisedScope.body.revision, 2);
+  const historical = ledgerOf(ctx.f, ctx.repoKey);
+  assert.equal(historical.rolloutTransitions.filter(row => row.assignmentId === ctx.assignmentId && row.command === 'promote').length, 1,
+    'the committed promotion remains valid at its event-time brief/scope pins');
+  assert.equal(stateOf(ctx.f, ctx.repoKey), 'promoted');
 });
 
 // ---------------------------------------------------------------------------

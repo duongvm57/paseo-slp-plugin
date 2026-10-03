@@ -57,6 +57,27 @@ const user = (text, messageId = 'm-user') => ({ type: 'user_message', text, mess
 const asst = (text, messageId = 'm-asst') => ({ type: 'assistant_message', text, messageId });
 const clone = value => structuredClone(value);
 
+test('legacy tracker carrier fragments stay unverified while complete wrappers remain readable', () => {
+  // Retained runtimes can still carry this literal; current renderers omit it.
+  const legacy = 'Work tracker: beads (enabled in SLP settings)';
+  for (const fragment of [legacy, `Follow-up\n${legacy}`, `${legacy}\nDo the work`]) {
+    const got = capture(peerEvent('devin', [user(fragment), asst('done')]), ROUTED);
+    assert.deepEqual(got.brief, { state: 'unverified', reason: 'role-prefix-unrecognized' });
+  }
+
+  const plain = 'Follow-up: verify the report.';
+  const current = roleDelivery(REPO, 'peer', {}).entry();
+  assert.ok(!current.includes('Work tracker:'), 'current session instructions omit the retired feature');
+  const retained = current.replace(ROLE_PREFIX_TERMINAL, `${legacy}\n${ROLE_PREFIX_TERMINAL}`);
+  const wrapped = capture(peerEvent('devin', [user(retained + plain), asst('done')]), ROUTED);
+  assert.equal(wrapped.brief.state, 'verified');
+  assert.equal(wrapped.brief.shapeId, 'devin-acp-message-v1');
+  assert.equal(wrapped.brief.value.text, plain);
+
+  const clean = capture(peerEvent('devin', [user(plain), asst('done')]), ROUTED);
+  assert.deepEqual(clean.brief, { state: 'verified', value: { text: plain, messageId: 'm-user' }, shapeId: 'devin-plain-message-v1' });
+});
+
 // ---------------------------------------------------------------------------
 // Observed shapes — each family through the same interface
 // ---------------------------------------------------------------------------
@@ -363,9 +384,6 @@ test('devin transport markers: every fixed structural line of the renderers keep
   const render = () => roleDelivery(REPO, 'lead', env).entry({ explicitLanguageState: true });
   const unmanaged = roleDelivery(REPO, 'lead', {}).entry();
   const unset = render();
-  writeFileSync(join(state, 'work-tracker.json'), '{bad json');
-  const badTracker = render();
-  writeFileSync(join(state, 'work-tracker.json'), JSON.stringify({ schemaVersion: 1, tracker: 'beads', enabled: true }));
   writeFileSync(join(state, 'communication-language'), 'vi');
   const managed = render();
   const structures = [
@@ -379,8 +397,6 @@ test('devin transport markers: every fixed structural line of the renderers keep
     ['init/materialize/snapshot/prepare/prepare-handoff/verify are repo-scoped', '  init/materialize/snapshot/prepare/prepare-handoff/verify are repo-scoped: they take explicit paths and never touch a daemon home.', managed],
     ['Communication language: ', 'Communication language: vi — all text you send to other seats uses it', managed],
     ['Communication language: not set', 'Communication language: not set — this replaces earlier runtime language settings', unset],
-    ['Work tracker: setting unreadable', 'Work tracker: setting unreadable — bad json; continuing without the tracker, record this gap.', badTracker],
-    ['Work tracker: beads (enabled in SLP settings)', 'Work tracker: beads (enabled in SLP settings) — read /r/src/references/work-tracking.md before tracked work', managed],
   ];
   const plain = 'Follow-up: please confirm the report covers src/price.js.';
   const initial = firstTurn(LIVE.devin.items);
@@ -395,7 +411,7 @@ test('devin transport markers: every fixed structural line of the renderers keep
   const clean = capture(peerEvent('devin', [...initial, user(plain), asst('reply')]), ROUTED);
   assert.deepEqual([clean.brief.state, clean.brief.shapeId], ['verified', 'devin-plain-message-v1']);
   // A real unmanaged entry() render carries the snapshot and onboarding lines
-  // (language/helper/tracker lines are managed-only) and still strips.
+  // (language/helper lines are managed-only) and still strips.
   const lead = roleDelivery(REPO, 'lead', {});
   const entry = lead.entry({ explicitLanguageState: true });
   for (const fixed of ['Snapshot command: ', 'For repo setup/update, use ']) assert.ok(entry.includes(fixed), fixed);

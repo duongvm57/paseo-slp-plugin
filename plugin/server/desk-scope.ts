@@ -4,14 +4,14 @@
 // is pinned at declare time and never rebindable — the caller never
 // chooses the owner, and a declaration revision is immutable (an
 // amendment appends a new revision with explicit lineage, it never edits
-// in place). The scope itself is opaque: `scopeId` plus a bounded
-// declaration digest and claimed `refs`; no filesystem path set, no
-// filesystem authority — refs are provenance only and NEVER discharge a
-// required-review gate.
+// in place). Optional structured ownership names declared moving surfaces,
+// state owners, dependencies and notification intent; it grants no
+// filesystem authority. `refs` remain provenance claims and NEVER discharge
+// a required-review gate.
 //
 // Three append-only tables carry the machinery: `scopes` (declaration
 // revisions), `scopeReviews` (reviewer observations bound to
-// assignment/scope/scopeRevision/candidate/reviewer seat+axis), and
+// assignment/scope/scopeRevision/candidate/reviewer seat+axis-or-lens), and
 // `scopeTransitions` (the state-machine walk). State legality comes from
 // one shared seam — SCOPE_TRANSITIONS / scopeTransitionEdge in
 // shared/enforcement.ts — consulted identically by this decide and by the
@@ -24,8 +24,8 @@
 //     declare, claim, submit-for-review, review-observed, approve, reject,
 //     advance, close — always within its own assignment.
 //   - reviewer (a seat attached to the assignment, not the owner, not the
-//     scope's bound seat — self-review is prohibited): records
-//     observations for one axis at a time.
+//     scope's bound seat or declared writer — self-review is prohibited):
+//     records one legacy axis or one pinned named lens at a time.
 //   - every other actor (non-owner, foreign seat, revoked membership,
 //     foreign assignment/scope) gets a typed rejection; a missing
 //     required axis rejects REVIEW_INCOMPLETE and commits nothing.
@@ -35,9 +35,9 @@
 // A review round is pinned by submit-for-review: the transition row
 // carries the round's (scopeRevision, candidateSnapshot, candidateHead)
 // and every review + every gated transition must bind to that exact pin.
-// Candidate drift or declaration-revision drift rejects typed. A mid-round
-// amendment advances the declaration stream but the round pin holds —
-// the gate still requires observations against the round pin. `claim`
+// Candidate drift or declaration, brief or mandate change makes the round
+// stale; old observations remain pinned to their original event-time claims.
+// `claim`
 // remains an explicit edge (declared → claimed); it is present because
 // claim is where a reviewer-visible candidate pin does not yet exist, so
 // the pre-candidate states stay reachable without inventing one.
@@ -49,6 +49,7 @@ import {
   DeskScopeDeclareInput,
   DeskScopeReviewInput,
   DeskScopeTransitionInput,
+  DeskScopeDischarge,
   SCOPE_REVIEW_AXES,
   SCOPE_REVIEW_GATED_COMMANDS,
   ScopeCommand,
@@ -56,15 +57,19 @@ import {
   ScopeReviewVerdict,
   WIRE_LIMITS,
   scopeTransitionEdge,
+  canonicalWorkspacePath,
+  workspacePathsOverlap,
   type DeskRejectionValue,
   type DeskScopeDeclareInputValue,
   type DeskScopeReviewInputValue,
+  type DeskScopeDischargeValue,
   type DeskScopeTransitionInputValue,
   type ScopeCommandValue,
   type ScopeReviewAxisValue,
   type ScopeStateValue,
 } from "../shared/enforcement.ts";
 import {
+  effectiveOwner,
   LEDGER_LIMITS,
   assignmentStructuralRevision,
   type AssignmentValue,
@@ -76,7 +81,9 @@ import {
   type ScopeTransitionValue,
   type ScopeValue,
 } from "./desk-store.ts";
+import { currentReviewExclusions, deskWorkflowParticipant } from "./desk-ownership.ts";
 import { isRejection, readLedger, repoEnvelope, type DeskRunnerDeps, type RunnerCtx } from "./desk-runner.ts";
+import { canonicalJson, canonicalSha256, sha256Hex } from "./config-view.ts";
 import {
   deriveId,
   requireActor as requireDeskActor,
@@ -98,6 +105,8 @@ const ScopePointer = z.string().min(1).max(WIRE_LIMITS.deskScopePointer);
 const ScopeDeclareCommand = DeskScopeDeclareInput.extend({
   kind: z.literal("scope.declare"),
   actorAgentId: ActorAgentId,
+  // Distinguish new explicit null from omission without rewriting old hashes.
+  reviewPlanInput: z.enum(["explicit", "omitted"]).optional(),
 }).strict();
 
 const ScopeTransitionCommand = DeskScopeTransitionInput.extend({
@@ -161,7 +170,7 @@ function requireOwnedOpenAssignment(
     ownerMismatch: reject(
       "AUTHORITY_REQUIRED",
       "only the assignment's receiving owner may administer its scopes",
-      "the registering lead's agentId is bound into the row — a peer, another lead, or a supervisor cannot move scope state",
+      "the current owner is bound by agent and membership — another participant cannot move scope state",
     ),
     closed: reject(
       "SCOPE_CONFLICT",
@@ -193,11 +202,25 @@ function transitionStream(ledger: Readonly<LedgerValue>, assignmentId: string, s
  *  reaches a terminal state. A round lives through submitted-for-review,
  *  review-observed, approved and rejected; `advanced` and `closed` end it,
  *  and the machine can only leave `advanced` through a fresh submit. */
-function activeRound(stream: ScopeTransitionValue[]): { scopeRevision: number; candidateSnapshot: string; candidateHead: string | null } | null {
-  let pin: { scopeRevision: number; candidateSnapshot: string; candidateHead: string | null } | null = null;
+type ScopeRoundPin = {
+  scopeRevision: number;
+  candidateSnapshot: string;
+  candidateHead: string | null;
+  briefRevision: number;
+  mandateSha256: string | null;
+};
+
+function activeRound(stream: ScopeTransitionValue[]): ScopeRoundPin | null {
+  let pin: ScopeRoundPin | null = null;
   for (const row of stream) {
     if (row.command === "submit-for-review") {
-      pin = { scopeRevision: row.scopeRevision, candidateSnapshot: row.candidateSnapshot as string, candidateHead: row.candidateHead };
+      pin = {
+        scopeRevision: row.scopeRevision,
+        candidateSnapshot: row.candidateSnapshot as string,
+        candidateHead: row.candidateHead,
+        briefRevision: row.briefRevision,
+        mandateSha256: row.mandateSha256,
+      };
     } else if (row.to === "advanced" || row.to === "closed") {
       pin = null;
     }
@@ -211,75 +234,286 @@ function activeRound(stream: ScopeTransitionValue[]): { scopeRevision: number; c
  *  edges: later scope transitions must not invalidate a committed rollout. */
 export function approvedScopeRound(
   stream: ScopeTransitionValue[],
+  expected?: { briefRevision?: number; scopeRevision?: number; mandateSha256?: string | null },
 ): {
   scopeRevision: number;
   candidateSnapshot: string;
   candidateHead: string | null;
   discharged: ScopeTransitionValue["discharged"];
+  briefRevision: number;
+  mandateSha256: string | null;
 } | null {
-  let pin: { scopeRevision: number; candidateSnapshot: string; candidateHead: string | null } | null = null;
+  let pin: ScopeRoundPin | null = null;
   let observed: ScopeTransitionValue["discharged"] | null = null;
-  let approved: { scopeRevision: number; candidateSnapshot: string; candidateHead: string | null; discharged: ScopeTransitionValue["discharged"] } | null = null;
+  let approved: ScopeRoundPin & { discharged: ScopeTransitionValue["discharged"] } | null = null;
   let state: ScopeTransitionValue["to"] | null = null;
   for (const row of stream) {
     if (row.command === "submit-for-review") {
-      pin = { scopeRevision: row.scopeRevision, candidateSnapshot: row.candidateSnapshot as string, candidateHead: row.candidateHead };
+      pin = {
+        scopeRevision: row.scopeRevision,
+        candidateSnapshot: row.candidateSnapshot as string,
+        candidateHead: row.candidateHead,
+        briefRevision: row.briefRevision,
+        mandateSha256: row.mandateSha256,
+      };
       observed = null;
     }
-    // The gate transition carries the round's discharged set; approve is
-    // reachable only through it, so the standing approval's evidence is
-    // always the matching review-observed row's.
     if (row.command === "review-observed") observed = row.discharged;
-    if (row.to === "approved" && pin !== null && observed !== null) {
-      approved = { ...pin, discharged: observed };
+    // Approval is independently freshness-gated and carries the exact review
+    // rows resolved in that transaction. Use its durable discharge as the
+    // standing approval proof, including an explicitly empty exemption.
+    if (row.to === "approved" && pin !== null) {
+      // Earlier persisted rows predate approval-level discharge and carry an
+      // empty array even when review-observed recorded the required evidence.
+      const discharge = row.discharged.length === 0 && observed !== null && observed.length > 0
+        ? observed
+        : row.discharged;
+      approved = { ...pin, discharged: discharge };
     }
     state = row.to;
   }
   if (state !== "approved" && state !== "advanced") return null;
+  if (approved !== null && (
+    (expected?.briefRevision !== undefined && approved.briefRevision !== expected.briefRevision) ||
+    (expected?.scopeRevision !== undefined && approved.scopeRevision !== expected.scopeRevision) ||
+    (expected !== undefined && Object.hasOwn(expected, "mandateSha256") && approved.mandateSha256 !== expected.mandateSha256)
+  )) return null;
   return approved;
 }
 
-/** The required review axes for a gated transition — server-derived, the
- *  contract's required-review set. Callers never see or shrink it; the
- *  status projection exposes it on an active round. */
-function requiredAxes(_command?: ScopeCommandValue): ScopeReviewAxisValue[] {
-  return [...SCOPE_REVIEW_AXES];
+type ReviewRequirement = { axis: ScopeReviewAxisValue; lensId: null } | { axis: null; lensId: string };
+
+function requiredReviews(declaration: ScopeValue): ReviewRequirement[] {
+  if (declaration.reviewPlan === null) return SCOPE_REVIEW_AXES.map(axis => ({ axis, lensId: null }));
+  if (declaration.reviewPlan.kind === "exempt" || declaration.reviewPlan.kind === "not-required") return [];
+  return declaration.reviewPlan.lenses.map(lens => ({ axis: null, lensId: lens.id }));
+}
+
+function mandateDigest(declaration: ScopeValue): string | null {
+  return declaration.reviewPlan === null ? null : sha256Hex(canonicalJson(declaration.reviewPlan));
 }
 
 /** The discharge evidence a gated transition commits with: for every
  *  required axis, the latest review revision bound to the round pin —
  *  matching (assignmentId, scopeId, axis, scopeRevision, candidateSnapshot)
- *  exactly. A missing axis yields null and the transition rejects. */
-function resolveDischarges(
+ *  exactly. Observations requalify against the CURRENT owner/writer at
+ *  discharge time: a review authored by the effective owner approving the
+ *  gate, or by the pinned declaration's declared writer, never discharges
+ *  it — the row remains valid history, it simply cannot serve as this
+ *  owner's independent evidence. A missing axis yields null and the
+ *  transition rejects. */
+function qualifyRoundReviews(
   ledger: Readonly<LedgerValue>,
   assignmentId: string,
   scopeId: string,
-  round: { scopeRevision: number; candidateSnapshot: string },
-): { axis: ScopeReviewAxisValue; reviewId: string }[] | null {
-  const discharged: { axis: ScopeReviewAxisValue; reviewId: string }[] = [];
-  for (const axis of SCOPE_REVIEW_AXES) {
-    const bound = ledger.scopeReviews
+  round: ScopeRoundPin,
+  declaration: ScopeValue,
+  excludedReviewerIds: ReadonlySet<string>,
+): { eligibleReviewIds: string[]; discharged: DeskScopeDischargeValue[] | null } {
+  const requirements = requiredReviews(declaration);
+  const eligible = ledger.scopeReviews.filter(r =>
+    r.assignmentId === assignmentId && r.scopeId === scopeId &&
+    r.scopeRevision === round.scopeRevision && r.briefRevision === round.briefRevision &&
+    r.mandateSha256 === round.mandateSha256 && r.candidateSnapshot === round.candidateSnapshot &&
+    !excludedReviewerIds.has(r.reviewerAgentId) &&
+    requirements.some(required => r.axis === required.axis && r.lensId === required.lensId));
+  const eligibleReviewIds = eligible.map(row => row.reviewId);
+  const discharged: DeskScopeDischargeValue[] = [];
+  for (const required of requirements) {
+    const bound = eligible
       .filter(
         r =>
-          r.assignmentId === assignmentId &&
-          r.scopeId === scopeId &&
-          r.axis === axis &&
-          r.scopeRevision === round.scopeRevision &&
-          r.candidateSnapshot === round.candidateSnapshot,
+          r.axis === required.axis &&
+          r.lensId === required.lensId,
       )
-      .sort((a, b) => a.revision - b.revision);
+      .sort((a, b) => {
+        const eventSeq = (row: ScopeReviewValue) => ledger.requests.find(request => request.assignmentId === row.assignmentId && request.requestId === row.requestId && request.actorKey === `agent:${row.reviewerAgentId}`)?.eventSeqs?.[1] ?? 0;
+        return eventSeq(a) - eventSeq(b) || a.revision - b.revision || a.reviewerAgentId.localeCompare(b.reviewerAgentId);
+      });
     const latest = bound[bound.length - 1];
-    if (latest === undefined) return null;
-    discharged.push({ axis, reviewId: latest.reviewId });
+    if (latest === undefined) return { eligibleReviewIds, discharged: null };
+    discharged.push(required.axis !== null
+      ? { axis: required.axis, reviewId: latest.reviewId }
+      : { lensId: required.lensId, reviewId: latest.reviewId });
   }
-  return discharged;
+  return { eligibleReviewIds, discharged };
+}
+
+function currentBriefRevision(ledger: Readonly<LedgerValue>, assignmentId: string): number {
+  return ledger.briefRevisions.filter(row => row.assignmentId === assignmentId).reduce((max, row) => Math.max(max, row.revision), 0);
+}
+
+/** Current qualification shared by scope gates, promotion and read views.
+ * Historical observations remain intact; only the current pins and owner/
+ * writer independence determine whether they can carry a present gate. */
+export function currentScopeReviewQualification(
+  ledger: Readonly<LedgerValue>,
+  assignment: AssignmentValue,
+  scopeId: string,
+) {
+  const declaration = declarationStream(ledger, assignment.assignmentId, scopeId).at(-1) ?? null;
+  const transitions = transitionStream(ledger, assignment.assignmentId, scopeId);
+  const active = activeRound(transitions);
+  const briefRevision = currentBriefRevision(ledger, assignment.assignmentId);
+  const approved = declaration === null ? null : approvedScopeRound(transitions, {
+    briefRevision, scopeRevision: declaration.revision, mandateSha256: mandateDigest(declaration),
+  });
+  const round = active ?? approved;
+  const roundCurrent = declaration !== null && round !== null &&
+    declaration.briefRevision === briefRevision && round.briefRevision === briefRevision &&
+    round.scopeRevision === declaration.revision && round.mandateSha256 === mandateDigest(declaration);
+  const qualified = roundCurrent
+    ? qualifyRoundReviews(ledger, assignment.assignmentId, scopeId, round, declaration,
+      currentReviewExclusions(ledger, assignment, declaration))
+    : { eligibleReviewIds: [] as string[], discharged: null };
+  const independentApproval = approved !== null && roundCurrent &&
+    approved.discharged.every(entry => qualified.eligibleReviewIds.includes(entry.reviewId));
+  return {
+    declaration, activeRound: active, round, roundCurrent,
+    eligibleReviewIds: qualified.eligibleReviewIds, discharged: qualified.discharged,
+    standingApproval: independentApproval ? approved : null,
+  };
+}
+
+function currentLiveSeat(ledger: Readonly<LedgerValue>, assignment: AssignmentValue, agentId: string): boolean {
+  if (effectiveOwner(ledger, assignment).agentId === agentId) return true;
+  const seat = assignment.seats.find(row => row.agentId === agentId);
+  if (seat === undefined) return false;
+  const member = ledger.memberships.find(row => row.membershipId === seat.membershipId);
+  return member !== undefined && member.agentId === agentId && member.state !== "revoked" && member.registeredAt !== null;
+}
+
+function latestScopeDeclarations(ledger: Readonly<LedgerValue>, assignmentId: string): Map<string, ScopeValue> {
+  const latest = new Map<string, ScopeValue>();
+  for (const row of ledger.scopes.filter(scope => scope.assignmentId === assignmentId).sort((a, b) => a.revision - b.revision)) {
+    const prior = latest.get(row.scopeId);
+    if (prior === undefined || row.revision > prior.revision) latest.set(row.scopeId, row);
+  }
+  return latest;
+}
+
+function dependencyProblem(
+  ledger: Readonly<LedgerValue>,
+  assignmentId: string,
+  scopeId: string,
+  ownership: ScopeValue["ownership"],
+): DeskRejectionValue | null {
+  if (ownership === null) return null;
+  const latest = latestScopeDeclarations(ledger, assignmentId);
+  for (const dependency of ownership.dependsOnScopeIds) {
+    if (dependency === scopeId || !latest.has(dependency)) {
+      return reject("SCOPE_CONFLICT", `scope dependency ${JSON.stringify(dependency)} does not resolve to another declared scope`, "dependencies name an existing different scope on the same assignment");
+    }
+  }
+  const edges = new Map([...latest].map(([id, row]) => [id, row.ownership?.dependsOnScopeIds ?? []]));
+  edges.set(scopeId, ownership.dependsOnScopeIds);
+  const visiting = new Set<string>();
+  const visited = new Set<string>();
+  const visit = (id: string): boolean => {
+    if (visiting.has(id)) return false;
+    if (visited.has(id)) return true;
+    visiting.add(id);
+    for (const next of [...(edges.get(id) ?? [])].sort()) if (!visit(next)) return false;
+    visiting.delete(id);
+    visited.add(id);
+    return true;
+  };
+  for (const id of [...edges.keys()].sort()) {
+    if (!visit(id)) return reject("SCOPE_CONFLICT", "declared scope dependencies contain a cycle", "remove an edge in the dependency cycle before declaring the moving scope");
+  }
+  return null;
+}
+
+function ownershipShapeProblem(
+  ledger: Readonly<LedgerValue>,
+  assignment: AssignmentValue,
+  ownership: ScopeValue["ownership"],
+): DeskRejectionValue | null {
+  if (ownership === null) return null;
+  if (!currentLiveSeat(ledger, assignment, ownership.writerAgentId)) {
+    return reject("AUTHORITY_REQUIRED", "the declared writer is not the assignment owner or a current live attached seat", "bind a live writer to the assignment before declaring the moving scope");
+  }
+  if (ownership.writerAgentId === effectiveOwner(ledger, assignment).agentId) {
+    if (ownership.writerAuthorityRef === null) return reject("AUTHORITY_REQUIRED", "a direct owner-writer declaration needs an explicit bounded grant pointer", "record the direct-write grant reference; the pointer remains a claim");
+  } else if (ownership.writerAuthorityRef !== null) {
+    return reject("INVALID_RECORD", "writerAuthorityRef is only used for an owner Lead direct-write grant", "attached-seat writers inherit no direct-write grant claim");
+  }
+  const stateRefs = new Set<string>();
+  const moduleRefs = new Set<string>();
+  for (const owner of ownership.stateOwners) {
+    if (stateRefs.has(owner.stateRef) || moduleRefs.has(owner.moduleRef) || canonicalWorkspacePath(owner.moduleRef) !== owner.moduleRef) {
+      return reject("INVALID_RECORD", "stateOwners must name distinct canonical state and module owners", "use one canonical module owner for each distinct state owner");
+    }
+    stateRefs.add(owner.stateRef);
+    moduleRefs.add(owner.moduleRef);
+  }
+  for (const notification of ownership.notifications) {
+    if (!currentLiveSeat(ledger, assignment, notification.recipientAgentId)) {
+      return reject("INVALID_RECORD", "a notification intent names no current assignment owner or attached seat", "notification intent records a recipient and event but does not send a message");
+    }
+  }
+  return null;
+}
+
+function overlapProblem(
+  ledger: Readonly<LedgerValue>,
+  assignmentId: string,
+  scopeId: string,
+  ownership: ScopeValue["ownership"],
+): DeskRejectionValue | null {
+  if (ownership === null) return null;
+  const conflicts: string[] = [];
+  for (const assignment of ledger.assignments.filter(row => row.state === "open").sort((a, b) => a.assignmentId.localeCompare(b.assignmentId))) {
+    const latest = latestScopeDeclarations(ledger, assignment.assignmentId);
+    for (const other of [...latest.values()].sort((a, b) => a.scopeId.localeCompare(b.scopeId))) {
+      if (assignment.assignmentId === assignmentId && other.scopeId === scopeId) continue;
+      if (other.ownership === null) continue;
+      const stream = transitionStream(ledger, other.assignmentId, other.scopeId);
+      const state = stream.at(-1)?.to ?? "declared";
+      if (state === "advanced" || state === "closed") continue;
+      for (const left of ownership.paths) {
+        for (const right of other.ownership.paths) {
+          if (workspacePathsOverlap(left, right)) conflicts.push(`${other.assignmentId}/${other.scopeId}:path:${right}`);
+        }
+      }
+      for (const left of ownership.resources) {
+        for (const right of other.ownership.resources) if (left === right) conflicts.push(`${other.assignmentId}/${other.scopeId}:resource:${right}`);
+      }
+      for (const left of ownership.stateOwners) {
+        for (const right of other.ownership.stateOwners) {
+          if (left.stateRef === right.stateRef) conflicts.push(`${other.assignmentId}/${other.scopeId}:state:${right.stateRef}`);
+          if (left.moduleRef === right.moduleRef) conflicts.push(`${other.assignmentId}/${other.scopeId}:module:${right.moduleRef}`);
+        }
+      }
+    }
+  }
+  if (conflicts.length === 0) return null;
+  conflicts.sort();
+  return reject("SCOPE_CONFLICT", `declared moving scope overlaps ${conflicts[0]}`, "active moving scopes cannot claim overlapping declared paths, resources or state ownership");
+}
+
+function validateOwnership(
+  ledger: Readonly<LedgerValue>,
+  assignment: AssignmentValue,
+  scopeId: string,
+  ownership: ScopeValue["ownership"],
+): DeskRejectionValue | null {
+  if (ownership === null) return null;
+  for (const path of ownership.paths) {
+    if (canonicalWorkspacePath(path) !== path) return reject("INVALID_RECORD", `scope path ${JSON.stringify(path)} is not canonical relative POSIX`, "paths are canonical relative workspace surfaces; no glob or parent segment is accepted");
+  }
+  const shape = ownershipShapeProblem(ledger, assignment, ownership);
+  if (shape !== null) return shape;
+  const dependency = dependencyProblem(ledger, assignment.assignmentId, scopeId, ownership);
+  if (dependency !== null) return dependency;
+  return overlapProblem(ledger, assignment.assignmentId, scopeId, ownership);
 }
 
 // ---------------------------------------------------------------------------
 // decide — synchronous and pure.
 // ---------------------------------------------------------------------------
 
-function decideDeskScope(ledger: Readonly<LedgerValue>, command: Record<string, unknown>): DecideOutcome {
+export function decideDeskScope(ledger: Readonly<LedgerValue>, command: Record<string, unknown>): DecideOutcome {
   const parsed = DeskScopeCommand.safeParse(command);
   if (!parsed.success) {
     return reject("INVALID_RECORD", "command does not match any desk-scope command schema", "commands are strict JSON objects with a kind discriminator");
@@ -311,8 +545,21 @@ function decideDeskScope(ledger: Readonly<LedgerValue>, command: Record<string, 
         "a declaration binds an attached seat of this assignment, or null for a scope owned by the assignment itself",
       );
     }
+    const briefRevision = currentBriefRevision(ledger, assignment.assignmentId);
+    if ((cmd.expectedBriefRevision ?? (briefRevision === 0 ? 0 : undefined)) !== briefRevision) {
+      return reject("REVISION_CONFLICT", "scope declaration must pin the current operative brief revision", "re-read the assignment brief and declare against its current revision");
+    }
+    const ownership = cmd.ownership ?? null;
+    const ownershipError = validateOwnership(ledger, assignment, cmd.scopeId, ownership);
+    if (ownershipError !== null) return ownershipError;
     const stream = declarationStream(ledger, cmd.assignmentId, cmd.scopeId);
     const latest = stream[stream.length - 1];
+    if (cmd.reviewPlan === undefined && latest === undefined) {
+      return reject("AUTHORITY_REQUIRED", "a new scope requires an explicit review decision", "select a required, exempt or not-required plan; explicit null opts into the legacy two-axis rule");
+    }
+    // Resolve omission under the writer lock; hashing the omitted request
+    // preserves its original outcome on replay after later plan amendments.
+    const reviewPlan = cmd.reviewPlan === undefined ? latest!.reviewPlan : cmd.reviewPlan;
     const revision = (latest?.revision ?? 0) + 1;
     const scopeRow: ScopeValue = {
       assignmentId: cmd.assignmentId,
@@ -323,6 +570,9 @@ function decideDeskScope(ledger: Readonly<LedgerValue>, command: Record<string, 
       ownerMembershipId: actor.membershipId,
       ownerAgentId: actor.agentId as string,
       assignmentRevision: assignmentStructuralRevision(assignment),
+      briefRevision,
+      ownership,
+      reviewPlan,
       seatAgentId: cmd.seatAgentId,
       label: cmd.label,
       declarationSha256: cmd.declarationSha256,
@@ -346,6 +596,8 @@ function decideDeskScope(ledger: Readonly<LedgerValue>, command: Record<string, 
               from: null,
               to: "declared" as const,
               scopeRevision: 1,
+              briefRevision,
+              mandateSha256: reviewPlan === null ? null : sha256Hex(canonicalJson(reviewPlan)),
               candidateSnapshot: null,
               candidateHead: null,
               discharged: [],
@@ -362,6 +614,10 @@ function decideDeskScope(ledger: Readonly<LedgerValue>, command: Record<string, 
           ownerAgentId: actor.agentId,
           revision,
           assignmentRevision: scopeRow.assignmentRevision,
+          briefRevision,
+          mandateSha256: scopeRow.reviewPlan === null ? null : sha256Hex(canonicalJson(scopeRow.reviewPlan)),
+          ownershipSha256: scopeRow.ownership === null ? null : sha256Hex(canonicalJson(scopeRow.ownership)),
+          reviewPlanSha256: scopeRow.reviewPlan === null ? null : sha256Hex(canonicalJson(scopeRow.reviewPlan)),
         },
       }],
       { scopes: [...ledger.scopes, scopeRow], scopeTransitions: transitions },
@@ -385,6 +641,12 @@ function decideDeskScope(ledger: Readonly<LedgerValue>, command: Record<string, 
         "transitions pin the latest declaration revision — re-read the scope and retry with a new requestId",
       );
     }
+    const currentBrief = currentBriefRevision(ledger, cmd.assignmentId);
+    if (latestDeclaration.briefRevision !== currentBrief ||
+        (cmd.briefRevision ?? (currentBrief === 0 ? 0 : undefined)) !== currentBrief) {
+      return reject("REVISION_CONFLICT", "the scope is stale against the operative brief", "amend the scope declaration to pin the current brief before moving its state");
+    }
+    const mandateSha256 = mandateDigest(latestDeclaration);
     const transitions = transitionStream(ledger, cmd.assignmentId, cmd.scopeId);
     const from = transitions[transitions.length - 1]?.to ?? null;
     if (from === null) {
@@ -438,6 +700,8 @@ function decideDeskScope(ledger: Readonly<LedgerValue>, command: Record<string, 
       }
       candidateSnapshot = candidate.snapshotSha256;
       candidateHead = candidate.head;
+      const overlap = overlapProblem(ledger, cmd.assignmentId, cmd.scopeId, latestDeclaration.ownership);
+      if (overlap !== null) return overlap;
     } else if (cmd.candidateSnapshot !== null || cmd.candidateHead !== null) {
       return reject(
         "INVALID_RECORD",
@@ -445,34 +709,50 @@ function decideDeskScope(ledger: Readonly<LedgerValue>, command: Record<string, 
         "candidate fields on another transition are a malformed command, not a rebind",
       );
     }
-    // The review gate — required axes are server-derived and never shrink.
-    // Gated commands (review-observed, advance, close) may commit only when
-    // the ACTIVE round carries a durable observation per required axis —
-    // an early close is not even an edge, so a gated command with no round
-    // typed-rejects. `approve` needs no separate gate: it is only
-    // reachable through a committed review-observed, which already
-    // discharged every axis of the round.
+    // The review gate — requirements come only from the immutable scope
+    // revision and its pinned authority-backed plan. A changed declaration,
+    // brief or mandate invalidates the standing round until a fresh round
+    // binds the current pins. Every review-dependent edge, including approve,
+    // resolves the exact active round again in this transaction so an
+    // amendment between review-observed and approval cannot rebind old work.
+    // A gated command with no round typed-rejects; early close is also not an
+    // edge in the shared transition table.
     const gated = (SCOPE_REVIEW_GATED_COMMANDS as readonly string[]).includes(cmd.transition);
-    const round = activeRound(transitions);
-    let discharged: { axis: ScopeReviewAxisValue; reviewId: string }[] = [];
+    const qualification = currentScopeReviewQualification(ledger, assignment, cmd.scopeId);
+    const round = qualification.activeRound;
+    let discharged: DeskScopeDischargeValue[] = [];
     if (gated && round !== null) {
-      const resolved = resolveDischarges(ledger, cmd.assignmentId, cmd.scopeId, round);
+      if (
+        round.scopeRevision !== latestDeclaration.revision ||
+        round.briefRevision !== currentBrief ||
+        round.briefRevision !== latestDeclaration.briefRevision ||
+        round.mandateSha256 !== mandateSha256
+      ) {
+        return reject("REVISION_CONFLICT", "the active review round is stale against the current scope, brief or review mandate", "redeclare against the current brief and submit a fresh candidate round");
+      }
+      const roundDeclaration = declarations.find(row => row.revision === round.scopeRevision);
+      if (roundDeclaration === undefined) return reject("INVALID_RECORD", "the active round scope revision is absent", "the store history is inconsistent and needs inspection");
+      // Discharge requalifies existing observations against the CURRENT
+      // owner and the round declaration's writer through the shared
+      // resolver: an observation authored by either stays valid history
+      // but is not independent evidence — an exact-pinned third-party
+      // review still reuses.
+      const excludedReviewerIds = currentReviewExclusions(ledger, assignment, roundDeclaration);
+      const resolved = qualification.discharged;
       if (resolved === null) {
-        const missing = SCOPE_REVIEW_AXES.filter(
-          axis =>
-            !ledger.scopeReviews.some(
-              r =>
-                r.assignmentId === cmd.assignmentId &&
-                r.scopeId === cmd.scopeId &&
-                r.axis === axis &&
-                r.scopeRevision === round.scopeRevision &&
-                r.candidateSnapshot === round.candidateSnapshot,
-            ),
-        );
+        const missing = requiredReviews(roundDeclaration).filter(required => !ledger.scopeReviews.some(review =>
+          review.assignmentId === cmd.assignmentId && review.scopeId === cmd.scopeId &&
+          review.axis === required.axis && review.lensId === required.lensId &&
+          review.scopeRevision === round.scopeRevision && review.briefRevision === round.briefRevision &&
+          review.mandateSha256 === round.mandateSha256 && review.candidateSnapshot === round.candidateSnapshot &&
+          !excludedReviewerIds.has(review.reviewerAgentId),
+        )).map(required => required.axis ?? required.lensId);
         return reject(
           "REVIEW_INCOMPLETE",
-          `transition ${JSON.stringify(cmd.transition)} requires review on ${missing.join(", ")} for the active round`,
-          "a bound reviewer seat records scope.review observations against the round's scopeRevision+candidateSnapshot — nothing else discharges the gate",
+          missing.length === 0
+            ? `transition ${JSON.stringify(cmd.transition)} is missing a review observation for the active round`
+            : `transition ${JSON.stringify(cmd.transition)} requires review on ${missing.join(", ")} for the active round`,
+          "a bound independent reviewer records each pinned legacy axis or named lens; explicit exemptions resolve to an empty required set",
         );
       }
       discharged = resolved;
@@ -493,6 +773,8 @@ function decideDeskScope(ledger: Readonly<LedgerValue>, command: Record<string, 
       from,
       to: edge.to,
       scopeRevision: cmd.scopeRevision,
+      briefRevision: currentBrief,
+      mandateSha256,
       candidateSnapshot,
       candidateHead,
       discharged,
@@ -501,7 +783,7 @@ function decideDeskScope(ledger: Readonly<LedgerValue>, command: Record<string, 
     return ok(
       [{
         kind: "scope-transitioned",
-        payload: { assignmentId: cmd.assignmentId, scopeId: cmd.scopeId, command: cmd.transition, from, to: edge.to, revision, discharged },
+        payload: { assignmentId: cmd.assignmentId, scopeId: cmd.scopeId, command: cmd.transition, from, to: edge.to, revision, scopeRevision: cmd.scopeRevision, briefRevision: currentBrief, mandateSha256, discharged },
       }],
       { scopeTransitions: [...ledger.scopeTransitions, row] },
     );
@@ -526,10 +808,10 @@ function decideScopeReview(
   if (reviewAssignment.state !== "open") {
     return reject("SCOPE_CONFLICT", "the assignment is closed", "closed assignments take no new review observations");
   }
-  if (reviewAssignment.ownerAgentId === cmd.actorAgentId) {
+  if (effectiveOwner(ledger, reviewAssignment).agentId === cmd.actorAgentId) {
     return reject(
       "AUTHORITY_REQUIRED",
-      "the assignment owner may not record a review observation",
+      "the current assignment owner may not record a review observation",
       "self-review is prohibited — a bound peer seat records each axis",
     );
   }
@@ -550,7 +832,7 @@ function decideScopeReview(
     return reject("SCOPE_CONFLICT", "the scope is not declared on this assignment", "a review binds a declared scope's active round");
   }
   const latestDeclaration = declarations[declarations.length - 1]!;
-  if (latestDeclaration.seatAgentId === cmd.actorAgentId) {
+  if (latestDeclaration.seatAgentId === cmd.actorAgentId || latestDeclaration.ownership?.writerAgentId === cmd.actorAgentId) {
     return reject(
       "AUTHORITY_REQUIRED",
       "the scope's bound seat may not review its own scope",
@@ -570,8 +852,19 @@ function decideScopeReview(
     return reject(
       "REVISION_CONFLICT",
       `the review pins declaration revision ${cmd.scopeRevision} but the active round binds ${round.scopeRevision}`,
-      "a mid-round amendment does not rebind the round — review the pinned declaration revision",
+      "a mid-round change never rebinds the old round — submit and review the current declaration again",
     );
+  }
+  const currentBrief = currentBriefRevision(ledger, cmd.assignmentId);
+  const currentMandate = mandateDigest(latestDeclaration);
+  if (
+    round.scopeRevision !== latestDeclaration.revision ||
+    latestDeclaration.briefRevision !== currentBrief ||
+    round.briefRevision !== currentBrief ||
+    round.mandateSha256 !== currentMandate ||
+    (cmd.briefRevision ?? (currentBrief === 0 ? 0 : undefined)) !== currentBrief
+  ) {
+    return reject("REVISION_CONFLICT", "the active review round is stale against the current scope, brief or review mandate", "redeclare against the current brief and submit a fresh candidate round");
   }
   if (cmd.candidateSnapshot !== round.candidateSnapshot) {
     return reject(
@@ -580,20 +873,27 @@ function decideScopeReview(
       "observations bind the submitted candidate — drift is never a quiet rebind",
     );
   }
+  const required = requiredReviews(latestDeclaration);
+  const selectedAxis = cmd.axis;
+  const selectedLens = cmd.lensId;
+  if (!required.some(item => item.axis === (selectedAxis ?? null) && item.lensId === (selectedLens ?? null))) {
+    return reject("AUTHORITY_REQUIRED", "the selected axis or named lens is not required by the active review mandate", "record only a review observation named by the pinned authority-backed review plan");
+  }
   if (ledger.scopeReviews.length >= LEDGER_LIMITS.scopeReviews) {
     return reject("INVALID_RECORD", `scopeReviews table is at the ${LEDGER_LIMITS.scopeReviews} cap`, "the review table is bounded per repo desk");
   }
   const revision =
     ledger.scopeReviews
       .filter(
-        r =>
-          r.assignmentId === cmd.assignmentId &&
-          r.scopeId === cmd.scopeId &&
-          r.axis === cmd.axis &&
-          r.reviewerAgentId === cmd.actorAgentId,
+      r =>
+        r.assignmentId === cmd.assignmentId &&
+        r.scopeId === cmd.scopeId &&
+        r.axis === (cmd.axis ?? null) &&
+        r.lensId === (cmd.lensId ?? null) &&
+        r.reviewerAgentId === cmd.actorAgentId,
       )
       .reduce((max, r) => Math.max(max, r.revision), 0) + 1;
-  const reviewId = deriveId("srv", [cmd.actorAgentId, cmd.assignmentId, cmd.scopeId, cmd.axis, cmd.requestId]);
+  const reviewId = deriveId("srv", [cmd.actorAgentId, cmd.assignmentId, cmd.scopeId, cmd.axis ?? cmd.lensId!, cmd.requestId]);
   const row: ScopeReviewValue = {
     reviewId,
     assignmentId: cmd.assignmentId,
@@ -602,7 +902,10 @@ function decideScopeReview(
     revision,
     scopeRevision: cmd.scopeRevision,
     candidateSnapshot: cmd.candidateSnapshot,
-    axis: cmd.axis,
+    axis: cmd.axis ?? null,
+    lensId: cmd.lensId ?? null,
+    briefRevision: round.briefRevision,
+    mandateSha256: round.mandateSha256,
     verdict: cmd.verdict,
     reviewerAgentId: cmd.actorAgentId,
     reviewerSeatId: seat.membershipId,
@@ -611,7 +914,7 @@ function decideScopeReview(
   return ok(
     [{
       kind: "scope-review-recorded",
-      payload: { reviewId, assignmentId: cmd.assignmentId, scopeId: cmd.scopeId, axis: cmd.axis, verdict: cmd.verdict, reviewerAgentId: cmd.actorAgentId, revision },
+      payload: { reviewId, assignmentId: cmd.assignmentId, scopeId: cmd.scopeId, axis: cmd.axis ?? null, lensId: cmd.lensId ?? null, briefRevision: round.briefRevision, mandateSha256: round.mandateSha256, verdict: cmd.verdict, reviewerAgentId: cmd.actorAgentId, revision },
     }],
     { scopeReviews: [...ledger.scopeReviews, row] },
   );
@@ -636,12 +939,19 @@ export type StatusScope = {
   activeCandidateSnapshot: string | null;
   requiredAxes: ScopeReviewAxisValue[];
   dischargedAxes: ScopeReviewAxisValue[];
+  requiredLenses: string[];
+  dischargedLenses: string[];
+  reviewExempt: boolean;
+  reviewDecision: "legacy" | "required" | "exempt" | "not-required";
   transitionCount: number;
-  reviews: {
-    reviewId: string;
-    axis: ScopeReviewAxisValue;
+    reviews: {
+      reviewId: string;
+    axis: ScopeReviewAxisValue | null;
+    lensId: string | null;
     verdict: ScopeReviewValue["verdict"];
     scopeRevision: number;
+    briefRevision: number;
+    mandateSha256: string | null;
     reviewerAgentId: string;
     revision: number;
   }[];
@@ -656,9 +966,9 @@ export function seatScopesView(
   let truncated = 0;
   let reviewsTruncated = 0;
   for (const assignment of ledger.assignments) {
-    const owner = assignment.ownerAgentId === row.agentId;
-    const attached = assignment.seats.some(seat => seat.agentId === row.agentId);
-    if (!owner && !attached) continue;
+    const participant = deskWorkflowParticipant(ledger, row, assignment);
+    if (participant === null) continue;
+    const owner = participant !== "attached-seat";
     const scopeIds = new Set<string>();
     for (const s of ledger.scopes) {
       if (s.assignmentId !== assignment.assignmentId) continue;
@@ -686,8 +996,11 @@ export function seatScopesView(
       const reviews = scopedReviews.slice(0, limits.reviews).map(r => ({
         reviewId: r.reviewId,
         axis: r.axis,
+        lensId: r.lensId,
         verdict: r.verdict,
         scopeRevision: r.scopeRevision,
+        briefRevision: r.briefRevision,
+        mandateSha256: r.mandateSha256,
         reviewerAgentId: r.reviewerAgentId,
         revision: r.revision,
       }));
@@ -703,8 +1016,21 @@ export function seatScopesView(
                     r.scopeRevision === round.scopeRevision &&
                     r.candidateSnapshot === round.candidateSnapshot,
                 )
+                .filter(r => r.briefRevision === round.briefRevision && r.mandateSha256 === round.mandateSha256)
                 .map(r => r.axis),
             )];
+      const dischargedLenses =
+        round === null
+          ? []
+          : [...new Set(
+              ledger.scopeReviews
+                .filter(r => r.assignmentId === assignment.assignmentId && r.scopeId === scopeId &&
+                  r.scopeRevision === round.scopeRevision && r.candidateSnapshot === round.candidateSnapshot &&
+                  r.briefRevision === round.briefRevision && r.mandateSha256 === round.mandateSha256)
+                .map(r => r.lensId)
+                .filter((lensId): lensId is string => lensId !== null),
+            )];
+      const required = round === null ? [] : requiredReviews(declarations.find(row => row.revision === round.scopeRevision) ?? latest);
       projected.push({
         scopeId,
         revision: latest.revision,
@@ -714,8 +1040,12 @@ export function seatScopesView(
         state,
         activeScopeRevision: round?.scopeRevision ?? null,
         activeCandidateSnapshot: round?.candidateSnapshot ?? null,
-        requiredAxes: round === null ? [] : requiredAxes(),
-        dischargedAxes,
+        requiredAxes: required.flatMap(item => item.axis === null ? [] : [item.axis]),
+        dischargedAxes: [...new Set(dischargedAxes.filter((axis): axis is ScopeReviewAxisValue => axis !== null))],
+        requiredLenses: required.flatMap(item => item.lensId === null ? [] : [item.lensId]),
+        dischargedLenses,
+        reviewExempt: round !== null && (declarations.find(row => row.revision === round.scopeRevision) ?? latest).reviewPlan?.kind === "exempt",
+        reviewDecision: (round === null ? latest : declarations.find(row => row.revision === round.scopeRevision) ?? latest).reviewPlan?.kind ?? "legacy",
         transitionCount: transitions.length,
         reviews,
       });
@@ -739,7 +1069,7 @@ export async function runScopeDeclare(
 ): Promise<{ ok: true; [key: string]: unknown } | DeskRejectionValue> {
   const ledger = readLedger(deps, ctx.repoKey);
   if (isRejection(ledger)) return ledger;
-  const command = {
+  let command: z.infer<typeof ScopeDeclareCommand> = {
     kind: "scope.declare" as const,
     requestId: input.requestId,
     actorAgentId: ctx.row.agentId as string,
@@ -749,7 +1079,22 @@ export async function runScopeDeclare(
     declarationSha256: input.declarationSha256,
     refs: input.refs,
     seatAgentId: input.seatAgentId,
+    ...(input.expectedBriefRevision === undefined ? {} : { expectedBriefRevision: input.expectedBriefRevision }),
+    ownership: input.ownership ?? null,
+    ...(input.reviewPlan === undefined ? {} : { reviewPlan: input.reviewPlan }),
+    reviewPlanInput: input.reviewPlan === undefined ? "omitted" : "explicit",
   };
+  // Historical runners normalized omission to null before request hashing.
+  // Reuse those bytes only for an exact recorded hash, never for new work.
+  {
+    const prior = ledger.requests.find(row => row.actorKey === `agent:${ctx.row.agentId}` &&
+      row.assignmentId === input.assignmentId && row.requestId === input.requestId);
+    const { reviewPlanInput: _reviewPlanInput, ...unmarked } = command;
+    const legacyCommand = { ...unmarked, reviewPlan: input.reviewPlan ?? null };
+    if (prior?.bodySha256 === canonicalSha256({ repo: repoEnvelope(ledger), command: legacyCommand })) {
+      command = legacyCommand;
+    }
+  }
   const settled = await deps.store.transact(
     ctx.repoKey,
     { repo: repoEnvelope(ledger), actorKey: `agent:${ctx.row.agentId}`, assignmentId: input.assignmentId, requestId: input.requestId, command },
@@ -784,6 +1129,7 @@ export async function runScopeTransition(
     scopeRevision: input.scopeRevision,
     candidateSnapshot: input.candidateSnapshot,
     candidateHead: input.candidateHead,
+    ...(input.briefRevision === undefined ? {} : { briefRevision: input.briefRevision }),
   };
   const settled = await deps.store.transact(
     ctx.repoKey,
@@ -825,7 +1171,9 @@ export async function runScopeReview(
     scopeId: input.scopeId,
     scopeRevision: input.scopeRevision,
     candidateSnapshot: input.candidateSnapshot,
-    axis: input.axis,
+    ...(input.axis === undefined ? {} : { axis: input.axis }),
+    ...(input.lensId === undefined ? {} : { lensId: input.lensId }),
+    ...(input.briefRevision === undefined ? {} : { briefRevision: input.briefRevision }),
     verdict: input.verdict,
     findingsRef: input.findingsRef,
   };
@@ -843,5 +1191,5 @@ export async function runScopeReview(
   if (row === undefined) {
     return { ok: false, code: "CAPABILITY_GAP", message: "the review committed but its row is not readable", recovery: "retry the same requestId — the idempotent replay rebuilds the response" };
   }
-  return { ok: true, reviewId: row.reviewId, scopeId: row.scopeId, axis: row.axis, revision: row.revision, receiptId: settled.receipt.receiptId };
+  return { ok: true, reviewId: row.reviewId, scopeId: row.scopeId, axis: row.axis, lensId: row.lensId, revision: row.revision, receiptId: settled.receipt.receiptId };
 }

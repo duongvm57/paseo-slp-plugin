@@ -4,6 +4,7 @@ interface ExtractedRecord {
   record: unknown;
   valid: boolean;
   selected: boolean;
+  originalFence: string;
 }
 interface ExtractionIssue extends RecordIssue {
   blockIndex?: number;
@@ -21,6 +22,7 @@ import {
   GIT_HEAD_PATTERN, UTC_TIMESTAMP_PATTERN, REPOSITORY_RELATIVE_PATH_PATTERN,
   validateReportRecordV1,
 } from "../report-records.ts";
+import { SLP_REPORT_V1_SCHEMA } from "../report-semantics.ts";
 export {
   RECORD_KINDS, SHA256_PATTERN, HANDBACK_VERDICTS, SETTLEMENT_VIA,
   GIT_HEAD_PATTERN, UTC_TIMESTAMP_PATTERN, REPOSITORY_RELATIVE_PATH_PATTERN,
@@ -57,7 +59,15 @@ export function extractRecords(text: unknown, { repo }: { repo?: string } = {}) 
   const records: ExtractedRecord[] = [];
   const errors: ExtractionIssue[] = [];
   const warnings: ExtractionIssue[] = [];
-  const lines = String(text).split('\n').map(line => line.endsWith('\r') ? line.slice(0, -1) : line);
+  const originalText = String(text);
+  const rawLines = originalText.split('\n');
+  const lineStarts: number[] = [];
+  let offset = 0;
+  for (const line of rawLines) {
+    lineStarts.push(offset);
+    offset += line.length + 1;
+  }
+  const lines = rawLines.map(line => line.endsWith('\r') ? line.slice(0, -1) : line);
   let blockIndex = 0;
 
   for (let i = 0; i < lines.length; i++) {
@@ -70,6 +80,8 @@ export function extractRecords(text: unknown, { repo }: { repo?: string } = {}) 
       break;
     }
     const source = lines.slice(i + 1, end).join('\n');
+    const fenceEnd = lineStarts[end]! + rawLines[end]!.length + (end < rawLines.length - 1 ? 1 : 0);
+    const originalFence = originalText.slice(lineStarts[i]!, fenceEnd);
     i = end;
     let record;
     try { record = JSON.parse(source); }
@@ -78,7 +90,7 @@ export function extractRecords(text: unknown, { repo }: { repo?: string } = {}) 
       continue;
     }
     const validation = validateRecord(record, { repo });
-    records.push({ blockIndex, record, valid: validation.valid, selected: false });
+    records.push({ blockIndex, record, valid: validation.valid, selected: false, originalFence });
     errors.push(...validation.errors.map(item => ({ ...item, blockIndex })));
     warnings.push(...validation.warnings.map(item => ({ ...item, blockIndex })));
   }
@@ -144,11 +156,17 @@ export function recordSchema() {
           seat: { type: 'object', required: ['role', 'disposition'], properties: { agentId: nullableNonBlankStringSchema, role: nonBlankStringSchema, disposition: nonBlankStringSchema } },
           verdict: { enum: [...HANDBACK_VERDICTS, null] }, candidate,
           checks: { type: 'array', items: { type: 'object', required: ['cmd', 'exit', 'sha'], properties: { cmd: nonBlankStringSchema, exit: { type: 'integer' }, sha: { oneOf: [sha, { type: 'null' }] }, output: { type: 'string' }, outputRef: { type: 'string', pattern: REPOSITORY_RELATIVE_PATH_PATTERN.source }, candidate } } },
-          timeline: { type: 'object', properties: { sessionId: nullableNonBlankStringSchema } }
-        }
+          timeline: { type: 'object', properties: { sessionId: nullableNonBlankStringSchema } },
+          report: SLP_REPORT_V1_SCHEMA,
+        },
+        allOf: [{
+          if: { properties: { report: { properties: { purpose: { const: 'review' } }, required: ['purpose'] } }, required: ['report'] },
+          then: { properties: { candidate: { type: 'object' } } },
+        }],
       },
       {
         type: 'object', required: ['version', 'kind', 'task', 'seat', 'timeline', 'recordedBy', 'at'],
+        not: { required: ['report'] },
         properties: {
           version: { const: 1 }, kind: { const: RECORD_KINDS[1] }, task: nullableNonBlankStringSchema,
           seat: { type: 'object', required: ['provider', 'title'], properties: { agentId: nullableNonBlankStringSchema, provider: nonBlankStringSchema, title: nonBlankStringSchema } },

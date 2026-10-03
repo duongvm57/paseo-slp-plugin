@@ -19,19 +19,24 @@ import {
   hello,
   handshake,
   rpc,
+  BIN_SOURCE,
 } from './helpers/desk-bridge-fixture.mjs';
 import { randomUUID } from 'node:crypto';
+import { readFileSync, writeFileSync } from 'node:fs';
+import { deskRepoPaths } from '../plugin/server/desk-store.ts';
 import { sha256Hex } from '../plugin/server/config-view.ts';
+import { approvedScopeRound, runScopeDeclare } from '../plugin/server/desk-scope.ts';
 import {
   DeskAssignmentResult,
   DeskScopeDeclareResult,
   DeskScopeTransitionResult,
   DeskSeatStatus,
+  DeskReviewPlan,
   WIRE_LIMITS,
 } from '../plugin/shared/enforcement.ts';
 
-// Literal pin: wire/state-machine fixtures deliberately do not graft the binary.
-const PIN = 'f'.repeat(64);
+// Bind the real fixture binary; startup also verifies its bytes.
+const PIN = sha256Hex(readFileSync(BIN_SOURCE));
 const PROVIDER = 'slp-codex-peer';
 const FIXED_AT = '2026-01-02T00:00:00.000Z';
 const CAPTURED_AT = '2026-01-02T00:00:01.000Z';
@@ -158,6 +163,8 @@ const declareArgs = (over = {}) => ({
   declarationSha256: DECL_SHA,
   refs: ['note:plan'],
   seatAgentId: 'agent-1',
+  // Explicit compatibility opt-in for historical two-axis fixtures.
+  reviewPlan: null,
   ...over,
 });
 
@@ -189,6 +196,32 @@ const ledgerOf = (f, repoKey) => {
   assert.equal(read.state, 'ok');
   return read.ledger;
 };
+
+const briefBody = objective => ({
+  objective,
+  acceptanceCriteria: ['the pinned scope completes its declared work'],
+  constraints: [],
+  provisionalDesign: 'No design is prescribed; the owner records the implementation choice after inspection.',
+  assumptions: [],
+  unknowns: [],
+  requiredEvidence: [],
+  ownedSurfaces: [],
+  excludedSurfaces: [],
+  dependencies: [],
+  notifications: [],
+});
+
+async function amendBrief(ctx, expectedBriefRevision, objective) {
+  return call(ctx.leadConn.reader, ctx.leadConn.conn, 'slp_assignment_amend', {
+    requestId: `brief-${randomUUID()}`,
+    assignmentId: ctx.assignmentId,
+    expectedBriefRevision,
+    brief: briefBody(objective),
+    changeReason: `Clarify the operative outcome at revision ${expectedBriefRevision + 1}.`,
+    authorityRef: 'grant:brief-test',
+    affectedOwners: ['agent-lead', 'agent-1'],
+  });
+}
 
 /** declare scope-1 bound to agent-1 — the fixture most tests extend. */
 async function declared(t, ctx) {
@@ -671,32 +704,90 @@ test('B7: close mid-round is gated — the open round still owes its axes', asyn
 });
 
 // ---------------------------------------------------------------------------
-// B8 — mid-round amendment: the declaration stream advances but the round
-// pin holds; reviews and the gate stay bound to the submitted revision.
+// B8 — a declaration amendment preserves the old round as history but makes
+// its observations/transitions stale until the owner rejects it and submits
+// a fresh round pinned to the current declaration.
 // ---------------------------------------------------------------------------
 
-test('B8: a mid-round amendment does not rebind the round — reviews stay pinned to the submitted revision', async t => {
+test('B8: a scope amendment stales the old round, preserves its pin, and requires a fresh independently reviewed round', async t => {
   const ctx = await roundOpen(t);
+  const before = ledgerOf(ctx.f, ctx.repoKey);
+  const firstSubmit = before.scopeTransitions.find(row => row.scopeId === 'scope-1' && row.command === 'submit-for-review');
+  assert.ok(firstSubmit, 'the original candidate round is committed');
+  assert.equal(firstSubmit.scopeRevision, 1);
+
   const amend = await call(ctx.leadConn.reader, ctx.leadConn.conn, 'slp_scope_declare', declareArgs({
-    assignmentId: ctx.assignmentId, requestId: `dcl-${randomUUID()}`, label: 'amended mid-round',
+    assignmentId: ctx.assignmentId, expectedBriefRevision: 0,
+    requestId: `dcl-${randomUUID()}`, label: 'amended mid-round',
   }));
   assert.equal(amend.body.revision, 2);
-  // A review against the new revision is drift — the round pinned rev 1.
-  const drifted = await review(ctx, ctx.peer2Conn, reviewArgs({ assignmentId: ctx.assignmentId, scopeRevision: 2 }));
-  assert.equal(drifted.body.code, 'REVISION_CONFLICT');
-  const bound = await review(ctx, ctx.peer2Conn, reviewArgs({ assignmentId: ctx.assignmentId, scopeRevision: 1, axis: 'spec' }));
-  assert.equal(bound.body.ok, true, JSON.stringify(bound.body));
-  const bound2 = await review(ctx, ctx.peer2Conn, reviewArgs({ assignmentId: ctx.assignmentId, scopeRevision: 1, axis: 'standards' }));
-  assert.equal(bound2.body.ok, true);
-  // The gate transition pins the LATEST declaration (rev 2) while its
-  // discharge evidence stays bound to the round pin (rev 1).
+  const afterAmend = ledgerOf(ctx.f, ctx.repoKey);
+  const oldPin = afterAmend.scopeTransitions.find(row => row.scopeId === 'scope-1' && row.command === 'submit-for-review');
+  assert.deepEqual(oldPin, firstSubmit, 'the submitted round pin remains immutable after amendment');
+
+  const domainState = ledger => ({
+    declarations: ledger.scopes.filter(row => row.assignmentId === ctx.assignmentId && row.scopeId === 'scope-1')
+      .sort((a, b) => a.revision - b.revision),
+    reviews: ledger.scopeReviews.filter(row => row.assignmentId === ctx.assignmentId && row.scopeId === 'scope-1')
+      .sort((a, b) => String(a.axis ?? a.lensId).localeCompare(String(b.axis ?? b.lensId)) ||
+        a.reviewerAgentId.localeCompare(b.reviewerAgentId) || a.revision - b.revision),
+    transitions: ledger.scopeTransitions.filter(row => row.assignmentId === ctx.assignmentId && row.scopeId === 'scope-1')
+      .sort((a, b) => a.revision - b.revision),
+    lastEventSeq: ledger.lastEventSeq,
+    lastEventSha256: ledger.lastEventSha256,
+  });
+  const afterAmendState = domainState(afterAmend);
+
+  // Neither an observation on the old pin nor a gated move on the new
+  // declaration may discharge the stale round. Rejection receipts may be
+  // recorded for idempotency, but no workflow rows or event history change.
+  const staleReview = await review(ctx, ctx.peer2Conn, reviewArgs({
+    assignmentId: ctx.assignmentId, scopeRevision: 1, candidateSnapshot: ctx.snapshot,
+  }));
+  assert.equal(staleReview.body.code, 'REVISION_CONFLICT', JSON.stringify(staleReview.body));
+  const staleGate = await call(ctx.leadConn.reader, ctx.leadConn.conn, 'slp_scope_transition', transitionArgs({
+    assignmentId: ctx.assignmentId, transition: 'review-observed', scopeRevision: 2,
+  }));
+  assert.equal(staleGate.body.code, 'REVISION_CONFLICT', JSON.stringify(staleGate.body));
+  assert.deepEqual(domainState(ledgerOf(ctx.f, ctx.repoKey)), afterAmendState,
+    'stale observations/transitions leave declarations, review rows, transitions and committed event history unchanged');
+
+  const rejectOldRound = await call(ctx.leadConn.reader, ctx.leadConn.conn, 'slp_scope_transition', transitionArgs({
+    assignmentId: ctx.assignmentId, transition: 'reject', scopeRevision: 2,
+  }));
+  assert.equal(rejectOldRound.body.ok, true, JSON.stringify(rejectOldRound.body));
+  const freshSubmit = await call(ctx.leadConn.reader, ctx.leadConn.conn, 'slp_scope_transition', transitionArgs({
+    assignmentId: ctx.assignmentId, scopeRevision: 2, transition: 'submit-for-review',
+    candidateSnapshot: ctx.snapshot, candidateHead: CAPTURED_HEAD,
+  }));
+  assert.equal(freshSubmit.body.ok, true, JSON.stringify(freshSubmit.body));
+  const freshPin = ledgerOf(ctx.f, ctx.repoKey).scopeTransitions.find(row =>
+    row.scopeId === 'scope-1' && row.command === 'submit-for-review' && row.revision === freshSubmit.body.revision);
+  assert.equal(freshPin.scopeRevision, 2);
+  assert.equal(freshPin.candidateSnapshot, ctx.snapshot);
+
+  for (const axis of ['spec', 'standards']) {
+    const observed = await review(ctx, ctx.peer2Conn, reviewArgs({
+      assignmentId: ctx.assignmentId, scopeRevision: 2, candidateSnapshot: ctx.snapshot, axis,
+    }));
+    assert.equal(observed.body.ok, true, JSON.stringify(observed.body));
+  }
   const gate = await call(ctx.leadConn.reader, ctx.leadConn.conn, 'slp_scope_transition', transitionArgs({
     assignmentId: ctx.assignmentId, transition: 'review-observed', scopeRevision: 2,
   }));
   assert.equal(gate.body.ok, true, JSON.stringify(gate.body));
-  const row = ledgerOf(ctx.f, ctx.repoKey).scopeTransitions.at(-1);
-  assert.equal(row.scopeRevision, 2, 'the transition pins the current declaration');
-  assert.equal(row.discharged.length, 2, 'the discharge evidence binds the round pin');
+  assert.deepEqual(gate.body.discharged.map(row => row.axis).sort(), ['spec', 'standards']);
+  const approve = await call(ctx.leadConn.reader, ctx.leadConn.conn, 'slp_scope_transition', transitionArgs({
+    assignmentId: ctx.assignmentId, transition: 'approve', scopeRevision: 2,
+  }));
+  assert.equal(approve.body.ok, true, JSON.stringify(approve.body));
+
+  const final = ledgerOf(ctx.f, ctx.repoKey);
+  const finalOldPin = final.scopeTransitions.find(row => row.scopeId === 'scope-1' &&
+    row.command === 'submit-for-review' && row.revision === firstSubmit.revision);
+  assert.deepEqual(finalOldPin, firstSubmit, 'the stale historical round is never rebound by the fresh one');
+  const standing = final.scopeTransitions.filter(row => row.scopeId === 'scope-1').sort((a, b) => a.revision - b.revision);
+  assert.ok(approvedScopeRound(standing, { scopeRevision: 2, briefRevision: 0, mandateSha256: null }));
 });
 
 // ---------------------------------------------------------------------------
@@ -845,4 +936,452 @@ test('B12: committed rows carry server-derived identity — actor, seat, pins; r
   assert.equal(again.body.revision, 2, 'a repeated observation appends a revision on the same stream');
   const stream = ledgerOf(ctx.f, ctx.repoKey).scopeReviews.filter(r => r.axis === 'spec');
   assert.equal(stream.length, 2);
+});
+
+test('v7: a brief amendment stales scope transitions and requires a fresh approved round without invalidating prior history', async t => {
+  const ctx = await boundTrio(t);
+  ctx.assignmentId = await registerPair(t, ctx);
+  const firstBrief = await amendBrief(ctx, 0, 'Implement the original bounded outcome.');
+  assert.equal(firstBrief.body.ok, true, JSON.stringify(firstBrief.body));
+  const declaredScope = await call(ctx.leadConn.reader, ctx.leadConn.conn, 'slp_scope_declare', declareArgs({
+    assignmentId: ctx.assignmentId, expectedBriefRevision: 1,
+  }));
+  assert.equal(declaredScope.body.ok, true, JSON.stringify(declaredScope.body));
+  const snapshot = await observeCandidate(t, ctx, { peerConn: ctx.peerConn, assignmentId: ctx.assignmentId, agentId: 'agent-1' });
+  const transition = (args = {}) => call(ctx.leadConn.reader, ctx.leadConn.conn, 'slp_scope_transition', transitionArgs({
+    assignmentId: ctx.assignmentId, briefRevision: 1, ...args,
+  }));
+  assert.equal((await transition({ transition: 'claim' })).body.ok, true);
+  assert.equal((await transition({ transition: 'submit-for-review', candidateSnapshot: snapshot, candidateHead: CAPTURED_HEAD })).body.ok, true);
+  for (const axis of ['spec', 'standards']) {
+    const observed = await review(ctx, ctx.peer2Conn, reviewArgs({ assignmentId: ctx.assignmentId, briefRevision: 1, axis }));
+    assert.equal(observed.body.ok, true, JSON.stringify(observed.body));
+  }
+  assert.equal((await transition({ transition: 'review-observed' })).body.ok, true);
+  assert.equal((await transition({ transition: 'approve' })).body.ok, true);
+
+  const beforeAmendment = ledgerOf(ctx.f, ctx.repoKey);
+  const history = beforeAmendment.scopeTransitions.filter(row => row.scopeId === 'scope-1');
+  assert.ok(approvedScopeRound(history, { briefRevision: 1, scopeRevision: 1, mandateSha256: null }));
+  const secondBrief = await amendBrief(ctx, 1, 'Clarify the revised bounded outcome.');
+  assert.equal(secondBrief.body.ok, true, JSON.stringify(secondBrief.body));
+  const afterAmendment = ledgerOf(ctx.f, ctx.repoKey);
+  const oldRound = afterAmendment.scopeTransitions.filter(row => row.scopeId === 'scope-1');
+  assert.ok(approvedScopeRound(oldRound), 'the recorded approval remains historically intact');
+  assert.equal(approvedScopeRound(oldRound, { briefRevision: 2, scopeRevision: 1, mandateSha256: null }), null,
+    'a current freshness query cannot reuse the earlier brief pin');
+  const stale = await transition({ transition: 'advance', briefRevision: 2 });
+  assert.equal(stale.body.code, 'REVISION_CONFLICT', JSON.stringify(stale.body));
+  assert.equal(ledgerOf(ctx.f, ctx.repoKey).scopeTransitions.length, oldRound.length, 'a stale gate writes no transition');
+
+  const redeclared = await call(ctx.leadConn.reader, ctx.leadConn.conn, 'slp_scope_declare', declareArgs({
+    assignmentId: ctx.assignmentId, expectedBriefRevision: 2, requestId: `dcl-${randomUUID()}`,
+  }));
+  assert.equal(redeclared.body.revision, 2);
+  const fresh = await call(ctx.leadConn.reader, ctx.leadConn.conn, 'slp_scope_transition', transitionArgs({
+    assignmentId: ctx.assignmentId, scopeRevision: 2, briefRevision: 2,
+    transition: 'submit-for-review', candidateSnapshot: snapshot, candidateHead: CAPTURED_HEAD,
+  }));
+  assert.equal(fresh.body.ok, true, JSON.stringify(fresh.body));
+  for (const axis of ['spec', 'standards']) {
+    const observed = await review(ctx, ctx.peer2Conn, reviewArgs({
+      assignmentId: ctx.assignmentId, scopeRevision: 2, briefRevision: 2, axis, requestId: `rev-${randomUUID()}`,
+    }));
+    assert.equal(observed.body.ok, true, JSON.stringify(observed.body));
+  }
+  for (const transitionName of ['review-observed', 'approve']) {
+    const moved = await call(ctx.leadConn.reader, ctx.leadConn.conn, 'slp_scope_transition', transitionArgs({
+      assignmentId: ctx.assignmentId, scopeRevision: 2, briefRevision: 2, transition: transitionName,
+    }));
+    assert.equal(moved.body.ok, true, JSON.stringify(moved.body));
+  }
+  const current = ledgerOf(ctx.f, ctx.repoKey).scopeTransitions.filter(row => row.scopeId === 'scope-1');
+  assert.equal(approvedScopeRound(current, { briefRevision: 2, scopeRevision: 2, mandateSha256: null })?.scopeRevision, 2);
+});
+
+test('v7: an old observed round cannot approve on amended brief pins; a fresh round can', async t => {
+  const ctx = await boundTrio(t);
+  ctx.assignmentId = await registerPair(t, ctx);
+  assert.equal((await amendBrief(ctx, 0, 'The first operative outcome.')).body.ok, true);
+  const declaration = await call(ctx.leadConn.reader, ctx.leadConn.conn, 'slp_scope_declare', declareArgs({
+    assignmentId: ctx.assignmentId, expectedBriefRevision: 1,
+  }));
+  assert.equal(declaration.body.ok, true, JSON.stringify(declaration.body));
+  const snapshot = await observeCandidate(t, ctx, { peerConn: ctx.peerConn, assignmentId: ctx.assignmentId, agentId: 'agent-1' });
+  const transition = (over = {}) => call(ctx.leadConn.reader, ctx.leadConn.conn, 'slp_scope_transition', transitionArgs({
+    assignmentId: ctx.assignmentId, briefRevision: 1, ...over,
+  }));
+  assert.equal((await transition({ transition: 'claim' })).body.ok, true);
+  assert.equal((await transition({ transition: 'submit-for-review', candidateSnapshot: snapshot, candidateHead: CAPTURED_HEAD })).body.ok, true);
+  for (const axis of ['spec', 'standards']) {
+    const observed = await review(ctx, ctx.peer2Conn, reviewArgs({
+      assignmentId: ctx.assignmentId, briefRevision: 1, candidateSnapshot: snapshot, axis,
+    }));
+    assert.equal(observed.body.ok, true, JSON.stringify(observed.body));
+  }
+  assert.equal((await transition({ transition: 'review-observed' })).body.ok, true);
+
+  assert.equal((await amendBrief(ctx, 1, 'A materially revised operative outcome.')).body.ok, true);
+  const redeclared = await call(ctx.leadConn.reader, ctx.leadConn.conn, 'slp_scope_declare', declareArgs({
+    assignmentId: ctx.assignmentId, expectedBriefRevision: 2, requestId: `dcl-${randomUUID()}`,
+  }));
+  assert.equal(redeclared.body.revision, 2);
+  const committed = ledgerOf(ctx.f, ctx.repoKey);
+  const state = ledger => ({
+    declarations: ledger.scopes.filter(row => row.assignmentId === ctx.assignmentId && row.scopeId === 'scope-1').sort((a, b) => a.revision - b.revision),
+    reviews: ledger.scopeReviews.filter(row => row.assignmentId === ctx.assignmentId && row.scopeId === 'scope-1').sort((a, b) => a.revision - b.revision),
+    transitions: ledger.scopeTransitions.filter(row => row.assignmentId === ctx.assignmentId && row.scopeId === 'scope-1').sort((a, b) => a.revision - b.revision),
+    lastEventSeq: ledger.lastEventSeq,
+    lastEventSha256: ledger.lastEventSha256,
+  });
+  const beforeStaleApprove = state(committed);
+  const staleApprove = await call(ctx.leadConn.reader, ctx.leadConn.conn, 'slp_scope_transition', transitionArgs({
+    assignmentId: ctx.assignmentId, transition: 'approve', scopeRevision: 2, briefRevision: 2,
+  }));
+  assert.equal(staleApprove.body.ok, false, JSON.stringify(staleApprove.body));
+  assert.equal(staleApprove.body.code, 'REVISION_CONFLICT', 'a new declaration cannot rebind observations from the older round');
+  assert.deepEqual(state(ledgerOf(ctx.f, ctx.repoKey)), beforeStaleApprove,
+    'stale approval leaves rows and the committed event chain untouched');
+
+  const rejected = await call(ctx.leadConn.reader, ctx.leadConn.conn, 'slp_scope_transition', transitionArgs({
+    assignmentId: ctx.assignmentId, transition: 'reject', scopeRevision: 2, briefRevision: 2,
+  }));
+  assert.equal(rejected.body.ok, true, JSON.stringify(rejected.body));
+  const fresh = await call(ctx.leadConn.reader, ctx.leadConn.conn, 'slp_scope_transition', transitionArgs({
+    assignmentId: ctx.assignmentId, transition: 'submit-for-review', scopeRevision: 2, briefRevision: 2,
+    candidateSnapshot: snapshot, candidateHead: CAPTURED_HEAD,
+  }));
+  assert.equal(fresh.body.ok, true, JSON.stringify(fresh.body));
+  for (const axis of ['spec', 'standards']) {
+    const observed = await review(ctx, ctx.peer2Conn, reviewArgs({
+      assignmentId: ctx.assignmentId, scopeRevision: 2, briefRevision: 2,
+      candidateSnapshot: snapshot, axis, requestId: `rev-${randomUUID()}`,
+    }));
+    assert.equal(observed.body.ok, true, JSON.stringify(observed.body));
+  }
+  const freshGate = await call(ctx.leadConn.reader, ctx.leadConn.conn, 'slp_scope_transition', transitionArgs({
+    assignmentId: ctx.assignmentId, transition: 'review-observed', scopeRevision: 2, briefRevision: 2,
+  }));
+  assert.equal(freshGate.body.ok, true, JSON.stringify(freshGate.body));
+  const approved = await call(ctx.leadConn.reader, ctx.leadConn.conn, 'slp_scope_transition', transitionArgs({
+    assignmentId: ctx.assignmentId, transition: 'approve', scopeRevision: 2, briefRevision: 2,
+  }));
+  assert.equal(approved.body.ok, true, JSON.stringify(approved.body));
+  const final = ledgerOf(ctx.f, ctx.repoKey);
+  const stream = final.scopeTransitions.filter(row => row.assignmentId === ctx.assignmentId && row.scopeId === 'scope-1').sort((a, b) => a.revision - b.revision);
+  assert.equal(stream.filter(row => row.command === 'approve').length, 1, 'only the fresh, fully reviewed round is approved');
+  assert.deepEqual(stream.filter(row => row.command === 'approve')[0].discharged.map(item => item.axis).sort(), ['spec', 'standards']);
+  assert.deepEqual(stream.find(row => row.command === 'submit-for-review' && row.scopeRevision === 1),
+    committed.scopeTransitions.filter(row => row.assignmentId === ctx.assignmentId && row.scopeId === 'scope-1').sort((a, b) => a.revision - b.revision).find(row => row.command === 'submit-for-review'),
+    'the original candidate round remains immutable');
+  assert.equal(approvedScopeRound(stream, { scopeRevision: 2, briefRevision: 2, mandateSha256: null })?.scopeRevision, 2);
+});
+
+test('v7: named lenses and authority-claimed exemptions control the review gate without changing legacy defaults', async t => {
+  const ctx = await boundTrio(t);
+  ctx.assignmentId = await registerPair(t, ctx);
+  const snapshot = await observeCandidate(t, ctx, { peerConn: ctx.peerConn, assignmentId: ctx.assignmentId, agentId: 'agent-1' });
+  const reviewPlan = {
+    kind: 'required', authorityRef: 'grant:future-workspace', ruleRef: 'rule:privacy',
+    reason: 'The Human-authorized workspace rule requires this independent lens.', exemptionClass: null,
+    lenses: [{ id: 'privacy', name: 'Privacy review', authorityRef: 'grant:future-workspace', ruleRef: 'rule:privacy' }],
+  };
+  const ownership = {
+    writerAgentId: 'agent-1', writerAuthorityRef: null, paths: ['src/privacy.ts'], resources: ['resource:privacy-state'],
+    stateOwners: [{ stateRef: 'privacy-state', moduleRef: 'src/privacy.ts' }], dependsOnScopeIds: [], notifications: [],
+  };
+  const declaration = await call(ctx.leadConn.reader, ctx.leadConn.conn, 'slp_scope_declare', declareArgs({
+    assignmentId: ctx.assignmentId, seatAgentId: null, ownership, reviewPlan,
+  }));
+  assert.equal(declaration.body.ok, true, JSON.stringify(declaration.body));
+  const staleWriter = await review(ctx, ctx.peerConn, reviewArgs({ assignmentId: ctx.assignmentId, lensId: 'privacy', axis: undefined }));
+  assert.equal(staleWriter.body.code, 'AUTHORITY_REQUIRED', 'the declared writer cannot supply an independent review');
+  for (const [transition, fields] of [
+    ['claim', {}], ['submit-for-review', { candidateSnapshot: snapshot, candidateHead: CAPTURED_HEAD }],
+  ]) {
+    const moved = await call(ctx.leadConn.reader, ctx.leadConn.conn, 'slp_scope_transition', transitionArgs({
+      assignmentId: ctx.assignmentId, transition, ...fields,
+    }));
+    assert.equal(moved.body.ok, true, JSON.stringify(moved.body));
+  }
+  const wrongLens = await review(ctx, ctx.peer2Conn, reviewArgs({ assignmentId: ctx.assignmentId, axis: 'spec' }));
+  assert.equal(wrongLens.body.code, 'AUTHORITY_REQUIRED');
+  const missing = await call(ctx.leadConn.reader, ctx.leadConn.conn, 'slp_scope_transition', transitionArgs({
+    assignmentId: ctx.assignmentId, transition: 'review-observed',
+  }));
+  assert.equal(missing.body.code, 'REVIEW_INCOMPLETE');
+  const lensReview = await review(ctx, ctx.peer2Conn, reviewArgs({
+    assignmentId: ctx.assignmentId, axis: undefined, lensId: 'privacy',
+  }));
+  assert.equal(lensReview.body.ok, true, JSON.stringify(lensReview.body));
+  const complete = await call(ctx.leadConn.reader, ctx.leadConn.conn, 'slp_scope_transition', transitionArgs({
+    assignmentId: ctx.assignmentId, transition: 'review-observed',
+  }));
+  assert.deepEqual(complete.body.discharged.map(item => item.lensId), ['privacy']);
+  const scopeRow = ledgerOf(ctx.f, ctx.repoKey).scopes[0];
+  assert.equal(scopeRow.reviewPlan.authorityRef, 'grant:future-workspace', 'stored authority references remain claims');
+  assert.deepEqual(scopeRow.ownership.stateOwners.map(owner => owner.stateRef), ['privacy-state']);
+
+  const exemption = {
+    kind: 'exempt', authorityRef: 'grant:future-workspace', ruleRef: 'rule:docs-only',
+    reason: 'Authorized class is exempt from independent review.', lenses: [], exemptionClass: 'docs-only',
+  };
+  const exemptDeclaration = await call(ctx.leadConn.reader, ctx.leadConn.conn, 'slp_scope_declare', declareArgs({
+    assignmentId: ctx.assignmentId, scopeId: 'docs-only', seatAgentId: null, reviewPlan: exemption,
+    requestId: `dcl-${randomUUID()}`,
+  }));
+  assert.equal(exemptDeclaration.body.ok, true, JSON.stringify(exemptDeclaration.body));
+  for (const [transition, fields] of [
+    ['claim', {}], ['submit-for-review', { candidateSnapshot: snapshot, candidateHead: CAPTURED_HEAD }],
+  ]) {
+    const moved = await call(ctx.leadConn.reader, ctx.leadConn.conn, 'slp_scope_transition', transitionArgs({
+      assignmentId: ctx.assignmentId, scopeId: 'docs-only', transition, ...fields,
+    }));
+    assert.equal(moved.body.ok, true, JSON.stringify(moved.body));
+  }
+  const exempt = await call(ctx.leadConn.reader, ctx.leadConn.conn, 'slp_scope_transition', transitionArgs({
+    assignmentId: ctx.assignmentId, scopeId: 'docs-only', transition: 'review-observed',
+  }));
+  assert.equal(exempt.body.ok, true, JSON.stringify(exempt.body));
+  assert.deepEqual(exempt.body.discharged, [], 'the stored explicit exemption has an empty required set');
+});
+
+test('v7: omitted-axis named-lens observations append revisions across same and resubmitted rounds', async t => {
+  const ctx = await boundTrio(t);
+  ctx.assignmentId = await registerPair(t, ctx);
+  const reviewPlan = {
+    kind: 'required', authorityRef: 'grant:future-workspace', ruleRef: 'rule:privacy',
+    reason: 'The authorized workspace rule requires an independent named lens.', exemptionClass: null,
+    lenses: [{ id: 'privacy', name: 'Privacy review', authorityRef: 'grant:future-workspace', ruleRef: 'rule:privacy' }],
+  };
+  const declared = await call(ctx.leadConn.reader, ctx.leadConn.conn, 'slp_scope_declare', declareArgs({
+    assignmentId: ctx.assignmentId, seatAgentId: null, reviewPlan,
+  }));
+  assert.equal(declared.body.ok, true, JSON.stringify(declared.body));
+  const snapshot = await observeCandidate(t, ctx, { peerConn: ctx.peerConn, assignmentId: ctx.assignmentId, agentId: 'agent-1' });
+  const transition = (over = {}) => call(ctx.leadConn.reader, ctx.leadConn.conn, 'slp_scope_transition', transitionArgs({
+    assignmentId: ctx.assignmentId, ...over,
+  }));
+  assert.equal((await transition({ transition: 'claim' })).body.ok, true);
+  assert.equal((await transition({ transition: 'submit-for-review', candidateSnapshot: snapshot, candidateHead: CAPTURED_HEAD })).body.ok, true);
+  const observeLens = (scopeRevision = 1) => review(ctx, ctx.peer2Conn, reviewArgs({
+    assignmentId: ctx.assignmentId, scopeRevision, axis: undefined, lensId: 'privacy',
+  }));
+  const first = await observeLens();
+  assert.equal(first.body.ok, true, JSON.stringify(first.body));
+  assert.equal(first.body.revision, 1);
+  const second = await observeLens();
+  assert.equal(second.body.ok, true, JSON.stringify(second.body));
+  assert.equal(second.body.revision, 2, 'the same reviewer/lens stream advances inside one round');
+  const firstRound = ledgerOf(ctx.f, ctx.repoKey).scopeReviews
+    .filter(row => row.assignmentId === ctx.assignmentId && row.scopeId === 'scope-1' && row.reviewerAgentId === 'agent-2' && row.axis === null && row.lensId === 'privacy')
+    .sort((a, b) => a.revision - b.revision);
+  assert.deepEqual(firstRound.map(row => row.revision), [1, 2]);
+
+  const rejected = await transition({ transition: 'reject' });
+  assert.equal(rejected.body.ok, true, JSON.stringify(rejected.body));
+  const redeclared = await call(ctx.leadConn.reader, ctx.leadConn.conn, 'slp_scope_declare', declareArgs({
+    assignmentId: ctx.assignmentId, seatAgentId: null, reviewPlan, expectedBriefRevision: 0,
+    requestId: `dcl-${randomUUID()}`,
+  }));
+  assert.equal(redeclared.body.revision, 2);
+  const resubmitted = await transition({ transition: 'submit-for-review', scopeRevision: 2, candidateSnapshot: snapshot, candidateHead: CAPTURED_HEAD });
+  assert.equal(resubmitted.body.ok, true, JSON.stringify(resubmitted.body));
+  const third = await observeLens(2);
+  assert.equal(third.body.ok, true, JSON.stringify(third.body));
+  assert.equal(third.body.revision, 3, 'redeclare/resubmit does not reset the same reviewer/lens revision stream');
+  const revisions = ledgerOf(ctx.f, ctx.repoKey).scopeReviews
+    .filter(row => row.assignmentId === ctx.assignmentId && row.scopeId === 'scope-1' && row.reviewerAgentId === 'agent-2' && row.axis === null && row.lensId === 'privacy')
+    .sort((a, b) => a.revision - b.revision);
+  assert.deepEqual(revisions.map(row => row.revision), [1, 2, 3]);
+  assert.deepEqual(revisions.map(row => row.scopeRevision), [1, 1, 2]);
+});
+
+test('v7: declared ownership rejects segment overlap, shared state modules, and invalid dependency graphs', async t => {
+  const ctx = await boundTrio(t);
+  ctx.assignmentId = await registerPair(t, ctx);
+  const ownership = (over = {}) => ({
+    writerAgentId: 'agent-1', writerAuthorityRef: null, paths: [], resources: [],
+    stateOwners: [], dependsOnScopeIds: [], notifications: [], ...over,
+  });
+  const declare = (scopeId, value, over = {}) => call(ctx.leadConn.reader, ctx.leadConn.conn, 'slp_scope_declare', declareArgs({
+    assignmentId: ctx.assignmentId, scopeId, seatAgentId: null, ownership: value,
+    requestId: `dcl-${randomUUID()}`, ...over,
+  }));
+
+  const base = await declare('base', ownership({
+    paths: ['src/tree.ts'], resources: ['resource:base'],
+    stateOwners: [{ stateRef: 'base-state', moduleRef: 'src/state.ts' }],
+  }));
+  assert.equal(base.body.ok, true, JSON.stringify(base.body));
+  const beforeConflicts = ledgerOf(ctx.f, ctx.repoKey).scopes.length;
+  const nestedPath = await declare('nested', ownership({ paths: ['src/tree.ts/child.ts'] }));
+  assert.equal(nestedPath.body.code, 'SCOPE_CONFLICT', 'parent/child path segments are an active moving-surface overlap');
+  const moduleOwner = await declare('same-module', ownership({
+    paths: ['src/other.ts'], stateOwners: [{ stateRef: 'other-state', moduleRef: 'src/state.ts' }],
+  }));
+  assert.equal(moduleOwner.body.code, 'SCOPE_CONFLICT', 'one module cannot have two active state owners');
+  assert.equal(ledgerOf(ctx.f, ctx.repoKey).scopes.length, beforeConflicts, 'conflicting declarations commit no scope row');
+
+  const missingDependency = await declare('missing-dependency', ownership({ dependsOnScopeIds: ['not-declared'] }));
+  assert.equal(missingDependency.body.code, 'SCOPE_CONFLICT', 'a dependency must resolve on the same assignment');
+  const depA = await declare('dep-a', ownership({ paths: ['src/dep-a.ts'], dependsOnScopeIds: ['base'] }));
+  assert.equal(depA.body.ok, true, JSON.stringify(depA.body));
+  const depB = await declare('dep-b', ownership({ paths: ['src/dep-b.ts'], dependsOnScopeIds: ['dep-a'] }));
+  assert.equal(depB.body.ok, true, JSON.stringify(depB.body));
+  const cycle = await declare('dep-a', ownership({ paths: ['src/dep-a.ts'], dependsOnScopeIds: ['dep-b'] }));
+  assert.equal(cycle.body.code, 'SCOPE_CONFLICT', 'a declaration amendment cannot introduce a dependency cycle');
+  assert.equal(ledgerOf(ctx.f, ctx.repoKey).scopes.filter(row => row.scopeId === 'dep-a').length, 1);
+});
+
+const selectedNoReview = () => ({
+  kind: 'not-required', authorityRef: 'grant:selection', ruleRef: 'rule:bounded-selection',
+  reason: 'No material independent review question remains for this bounded scope.',
+  lenses: [], exemptionClass: null,
+});
+const selectedRequired = () => ({
+  kind: 'required', authorityRef: 'grant:selection', ruleRef: 'rule:identity',
+  reason: 'An independent identity judgment is required.', exemptionClass: null,
+  lenses: [{ id: 'identity', name: 'Identity judgment', authorityRef: 'grant:selection', ruleRef: 'rule:identity' }],
+});
+
+test('selection: strict decision schema distinguishes no-review from a waiver and rejects blank basis', () => {
+  assert.equal(DeskReviewPlan.safeParse(selectedNoReview()).success, true);
+  for (const over of [
+    { lenses: selectedRequired().lenses }, { exemptionClass: 'waiver' },
+    { reason: ' \t ' }, { authorityRef: ' ' }, { ruleRef: ' ' },
+    { kind: 'required' }, { kind: 'exempt' },
+  ]) assert.equal(DeskReviewPlan.safeParse({ ...selectedNoReview(), ...over }).success, false, JSON.stringify(over));
+  assert.equal(DeskReviewPlan.safeParse({ ...selectedNoReview(), kind: 'exempt', exemptionClass: ' ' }).success, false);
+});
+
+test('selection: new omitted decision rejects durably and never becomes authorized by a later declaration', async t => {
+  const ctx = await boundTrio(t);
+  const assignmentId = await registerPair(t, ctx);
+  const omitted = declareArgs({ assignmentId, reviewPlan: undefined });
+  const rejected = await call(ctx.leadConn.reader, ctx.leadConn.conn, 'slp_scope_declare', omitted);
+  assert.equal(rejected.body.code, 'AUTHORITY_REQUIRED');
+  assert.equal(ledgerOf(ctx.f, ctx.repoKey).scopes.length, 0);
+  const chosen = await call(ctx.leadConn.reader, ctx.leadConn.conn, 'slp_scope_declare', declareArgs({
+    assignmentId, reviewPlan: selectedNoReview(),
+  }));
+  assert.equal(chosen.body.ok, true, JSON.stringify(chosen.body));
+  const replay = await call(ctx.leadConn.reader, ctx.leadConn.conn, 'slp_scope_declare', omitted);
+  assert.deepEqual(replay.body, rejected.body);
+  const altered = await call(ctx.leadConn.reader, ctx.leadConn.conn, 'slp_scope_declare', { ...omitted, reviewPlan: null });
+  assert.equal(altered.body.code, 'IDEMPOTENCY_CONFLICT');
+});
+
+test('selection: redeclare omission inherits named mandates and exact retries retain their original effective choice', async t => {
+  const ctx = await boundTrio(t);
+  const assignmentId = await registerPair(t, ctx);
+  const firstArgs = declareArgs({ assignmentId, reviewPlan: selectedRequired() });
+  const first = await call(ctx.leadConn.reader, ctx.leadConn.conn, 'slp_scope_declare', firstArgs);
+  assert.equal(first.body.ok, true, JSON.stringify(first.body));
+  const inheritedArgs = declareArgs({ assignmentId, reviewPlan: undefined });
+  const inherited = await call(ctx.leadConn.reader, ctx.leadConn.conn, 'slp_scope_declare', inheritedArgs);
+  assert.equal(inherited.body.revision, 2);
+  assert.deepEqual(ledgerOf(ctx.f, ctx.repoKey).scopes[1].reviewPlan, selectedRequired());
+  const changed = await call(ctx.leadConn.reader, ctx.leadConn.conn, 'slp_scope_declare', declareArgs({
+    assignmentId, reviewPlan: selectedNoReview(),
+  }));
+  assert.equal(changed.body.revision, 3);
+  const inheritedReplay = await call(ctx.leadConn.reader, ctx.leadConn.conn, 'slp_scope_declare', inheritedArgs);
+  assert.deepEqual(inheritedReplay.body, inherited.body);
+  assert.deepEqual((await call(ctx.leadConn.reader, ctx.leadConn.conn, 'slp_scope_declare', firstArgs)).body, first.body);
+  assert.equal(ledgerOf(ctx.f, ctx.repoKey).scopes.length, 3);
+  const changedBody = await call(ctx.leadConn.reader, ctx.leadConn.conn, 'slp_scope_declare', { ...inheritedArgs, reviewPlan: null });
+  assert.equal(changedBody.body.code, 'IDEMPOTENCY_CONFLICT');
+  const legacy = await call(ctx.leadConn.reader, ctx.leadConn.conn, 'slp_scope_declare', declareArgs({ assignmentId, reviewPlan: null }));
+  assert.equal(legacy.body.revision, 4);
+  assert.equal(ledgerOf(ctx.f, ctx.repoKey).scopes[3].reviewPlan, null, 'explicit null deliberately chooses the compatibility rule');
+});
+
+test('selection: no-review pins measured candidate, approves empty evidence, projects distinctly and stales after amendment', async t => {
+  const ctx = await boundTrio(t);
+  ctx.assignmentId = await registerPair(t, ctx);
+  const declaration = await call(ctx.leadConn.reader, ctx.leadConn.conn, 'slp_scope_declare', declareArgs({
+    assignmentId: ctx.assignmentId, reviewPlan: selectedNoReview(),
+  }));
+  assert.equal(declaration.body.ok, true, JSON.stringify(declaration.body));
+  const transition = over => call(ctx.leadConn.reader, ctx.leadConn.conn, 'slp_scope_transition', transitionArgs({ assignmentId: ctx.assignmentId, ...over }));
+  assert.equal((await transition({ transition: 'claim' })).body.ok, true);
+  const unmeasured = await transition({ transition: 'submit-for-review', candidateSnapshot: CAPTURED_SNAP, candidateHead: CAPTURED_HEAD });
+  assert.equal(unmeasured.body.ok, false, 'a decision alone cannot invent a candidate');
+  await observeCandidate(t, ctx, { peerConn: ctx.peerConn, assignmentId: ctx.assignmentId, agentId: 'agent-1' });
+  assert.equal((await transition({ transition: 'submit-for-review', candidateSnapshot: CAPTURED_SNAP, candidateHead: CAPTURED_HEAD })).body.ok, true);
+  assert.equal((await review(ctx, ctx.peer2Conn, reviewArgs({ assignmentId: ctx.assignmentId }))).body.code, 'AUTHORITY_REQUIRED');
+  const observed = await transition({ transition: 'review-observed' });
+  assert.equal(observed.body.ok, true, JSON.stringify(observed.body));
+  assert.deepEqual(observed.body.discharged, []);
+  const approval = await transition({ transition: 'approve' });
+  assert.equal(approval.body.ok, true, JSON.stringify(approval.body));
+  assert.deepEqual(approval.body.discharged, []);
+  const status = DeskSeatStatus.parse((await call(ctx.leadConn.reader, ctx.leadConn.conn, 'slp_status', {})).body);
+  const scope = status.assignments.find(row => row.assignmentId === ctx.assignmentId).scopes[0];
+  assert.equal(scope.reviewDecision, 'not-required');
+  assert.equal(scope.reviewExempt, false);
+  assert.deepEqual(scope.requiredAxes, []);
+  assert.deepEqual(scope.requiredLenses, []);
+  const workflow = await call(ctx.leadConn.reader, ctx.leadConn.conn, 'slp_workflow_get', {
+    assignmentId: ctx.assignmentId, section: 'ownership', expectedLedgerRevision: null, expectedBriefRevision: null, cursor: null, limit: 20,
+  });
+  assert.equal(workflow.body.items[0].row.reviewPlan.kind, 'not-required');
+  const redeclared = await call(ctx.leadConn.reader, ctx.leadConn.conn, 'slp_scope_declare', declareArgs({
+    assignmentId: ctx.assignmentId, reviewPlan: undefined,
+  }));
+  assert.equal(redeclared.body.revision, 2);
+  assert.equal((await transition({ transition: 'advance', scopeRevision: 2 })).body.code, 'REVISION_CONFLICT');
+  assert.equal(ledgerOf(ctx.f, ctx.repoKey).scopeTransitions.filter(row => row.to === 'approved').length, 1);
+});
+
+test('selection: store refuses a valid-shaped rewrite of the durable decision and malformed empty mandates', async t => {
+  const ctx = await boundTrio(t);
+  const assignmentId = await registerPair(t, ctx);
+  assert.equal((await call(ctx.leadConn.reader, ctx.leadConn.conn, 'slp_scope_declare', declareArgs({
+    assignmentId, reviewPlan: selectedNoReview(),
+  }))).body.ok, true);
+  const store = seedStore(ctx.f);
+  const path = deskRepoPaths(ctx.f.stableRoot, ctx.repoKey).ledgerPath;
+  const original = readFileSync(path);
+  const persisted = JSON.parse(original);
+  for (const plan of [selectedRequired(), { ...selectedRequired(), lenses: [] }, { ...selectedNoReview(), reason: 'Rewritten basis' }]) {
+    const changed = structuredClone(persisted);
+    changed.scopes[0].reviewPlan = plan;
+    writeFileSync(path, JSON.stringify(changed));
+    assert.equal(store.read(ctx.repoKey).state, 'corrupt', JSON.stringify(plan));
+  }
+  writeFileSync(path, original);
+});
+
+test('selection: historical normalized-null retries replay after new mandates without changing the effective choice', async t => {
+  const ctx = await boundTrio(t);
+  const assignmentId = await registerPair(t, ctx);
+  const store = seedStore(ctx.f);
+  const runnerCtx = { repoKey: ctx.repoKey, row: ctx.lead };
+  // Reproduce the old runner's durable request normalization at the public store seam.
+  const historicalStore = {
+    read: (...args) => store.read(...args),
+    transact: (key, envelope, decide) => {
+      const command = { ...envelope.command, reviewPlan: envelope.command.reviewPlan ?? null };
+      delete command.reviewPlanInput;
+      return store.transact(key, { ...envelope, command }, decide);
+    },
+  };
+  const oldArgs = declareArgs({ assignmentId, reviewPlan: undefined });
+  const old = await runScopeDeclare(runnerCtx, oldArgs, { store: historicalStore });
+  assert.equal(old.ok, true, JSON.stringify(old));
+  const next = await runScopeDeclare(runnerCtx, declareArgs({ assignmentId, reviewPlan: selectedRequired() }), { store });
+  assert.equal(next.revision, 2);
+  const replay = await call(ctx.leadConn.reader, ctx.leadConn.conn, 'slp_scope_declare', oldArgs);
+  assert.deepEqual(replay.body, old);
+  assert.equal(ledgerOf(ctx.f, ctx.repoKey).scopes[0].reviewPlan, null);
+  assert.deepEqual(ledgerOf(ctx.f, ctx.repoKey).scopes[1].reviewPlan, selectedRequired());
+  const altered = await call(ctx.leadConn.reader, ctx.leadConn.conn, 'slp_scope_declare', { ...oldArgs, reviewPlan: selectedNoReview() });
+  assert.equal(altered.body.code, 'IDEMPOTENCY_CONFLICT');
+  const explicitArgs = declareArgs({ assignmentId, reviewPlan: null });
+  const explicit = await call(ctx.leadConn.reader, ctx.leadConn.conn, 'slp_scope_declare', explicitArgs);
+  assert.equal(explicit.body.ok, true, JSON.stringify(explicit.body));
+  const newlyOmitted = await call(ctx.leadConn.reader, ctx.leadConn.conn, 'slp_scope_declare', { ...explicitArgs, reviewPlan: undefined });
+  assert.equal(newlyOmitted.body.code, 'IDEMPOTENCY_CONFLICT', 'new explicit-null request bytes cannot masquerade as omission');
 });

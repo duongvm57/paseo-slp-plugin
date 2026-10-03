@@ -577,64 +577,44 @@ Human re-enables it — an upgrade never widens transmission or turns on
 delivery. Live end-to-end validation and model evaluation have not run; see
 [docs/spec/supervision-integration.md](spec/supervision-integration.md).
 
-### Work tracker (optional)
+### External work state
 
-The work tracker gives seats an optional durable work graph — beads
-(`bd`), a per-repository issue database — so they query task state
-(issues, assignees, dependencies, comments) instead of rebuilding it from
-conversation, and read it back after resume or compaction. It is
-evidence, never a control plane: Paseo alone owns lifecycle, parentage,
-notifications and report routes; a claim or assignee grants no write
-scope; tracker status never discharges a required review gate; a `closed`
-status is a recorded claim, not acceptance proof.
+Use [the repository desk](work-coordination.md) for registered assignments,
+briefs, scopes, review and candidate/check evidence. External trackers and
+project-specific automation belong to the workspace/harness; they do not
+supply desk authority or discharge review obligations.
 
-Enable it on the SLP Manager's **Work tracker** card — the toggle writes
-`<daemonHome>/slp-runtime/state/work-tracker.json` (atomic, 0600; an
-absent file means disabled) and takes effect at the next session entry,
-no re-activation. The card also reports the `bd` it detects on the daemon
-PATH. **Detect, never install:** installing `bd` on the machine
-(`brew install beads`, `npm i -g @beads/bd`, or upstream `install.sh`)
-and initializing a repository (`bd init`) are Human actions — nothing in
-SLP downloads, installs, initializes, upgrades or configures beads, and a
-missing or broken tracker surfaces as a recorded gap, never a spawn
-blocker.
-
-When enabled, managed session entries gain a `Work tracker:` line naming
-the policy reference `src/references/work-tracking.md` (boundaries, the
-writers table — Supervisor owns the root issue, Lead owns children and
-assignment, each seat owns status on its named issue — and procedure) and
-the probe command below. Hook-family seats additionally receive the env
-overlay `BEADS_ACTOR=slp-<role>-<agent id>` plus defaults
-`BD_AGENT_PROFILE=conservative` and `BD_DISABLE_METRICS=1` (caller env
-wins); Devin seats bypass that env path and attribute writes with
-`--actor` per the reference. Disabled, absent or corrupt settings change
-nothing else — a corrupt file is a surfaced gap line, and a disabled
-render is byte-identical to a pre-feature one.
-
-Full design, boundaries and the verify-on-real-`bd` checklist:
-[docs/spec/beads-work-tracker.md](spec/beads-work-tracker.md).
+The plugin does not expose a tracker card, tracker RPC or tracker probe, and
+adds no tracker prompt or environment settings. Existing tracker data and
+legacy settings are retained without being consulted. New managed sessions use
+the current bound runtime; retained candidates and already running sessions
+keep their original bytes until an authorized update and handoff.
 
 ## Lead provider handoff
 
-Switching a Lead to Pi when Codex runs out of quota: change the **SLP Lead**
-profile's provider to `slp-pi-lead`, pick the matching model/thinking and
-Save for later launches. To move work already running, tell the Supervisor:
-"Codex is out of quota — move this Lead to Pi, keep the current scope and
-hand off per the saved profile." The Supervisor checks the old Lead has
-stopped orchestrating, collects state/evidence and creates a new Lead with
-the same policy on Pi. If the old Lead cannot respond, the Supervisor pulls
-state from the timeline/artifacts; no need to call the out-of-quota model
-just for a summary. Without a Supervisor, the Human moves the handoff to a
-new Lead session and confirms ownership.
+To choose Pi for future Lead sessions, change the **SLP Lead** profile's
+provider, model and available settings, Save, then apply the binding action
+the Manager offers. Existing sessions retain their provider and instructions.
+Changing model/thinking within one provider can use `update_agent`, subject
+to provider capability.
 
-This is a handoff to a new session: the host does not switch providers in
-place and does not reparent Peers. The procedure preserves Peer
-IDs/ownership, handles descendant access and wake sources; the new Lead takes
-over after checking the handover state. If you want automatic standby
-provider selection, record the fallback plus budget/authority in the protocol
-beforehand; a quota error alone does not grant provider-switch authority.
-Changing model/thinking within the same provider can use `update_agent`,
-subject to provider capability.
+For an active registered assignment, use the [planned continuity
+procedure](work-continuity.md): the current owner offers responsibility to an
+exact receiving Lead membership, and that Lead reads the latest work and
+accepts under revision checks. This keeps the assignment and its history;
+it does not reparent Peers, stop the old process, settle resources or accept
+the project. Check descendants, wake ownership and outstanding work as part
+of the handoff account.
+
+An unavailable owner without a usable prior offer cannot be replaced through
+the native desk handoff. Preserve artifacts and report the authority gap;
+a chat summary or claimed Human pointer does not grant fresh owner commands.
+Human-authorized recovery may establish a separate bounded assignment, with
+its scope and remaining obligations explicitly reconciled.
+
+Automatic provider fallback requires an explicit budget/authority rule in
+the workspace protocol. A quota error alone grants no provider-switch or
+ownership-transfer authority.
 
 ## Agent naming
 

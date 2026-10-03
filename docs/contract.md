@@ -2,7 +2,8 @@
 
 This revision provides persistent role installation and SLP operating policy for
 task-specific topology, supervision and evidence-based acceptance.
-Behavioral authority is the operating guide and current Human assignment.
+Behavioral authority comes from the current Human assignment, installed role
+policy and effective workspace protocol.
 Local installation/transport checks do not constitute workflow acceptance.
 
 ## File ownership
@@ -14,14 +15,16 @@ and dependency locks are supporting artifacts, not additional runtime owners.
 | Files | Responsibility |
 |---|---|
 | plugin/paseo-plugin.json, plugin/index.server.ts | Plugin identity/host requirement and synchronous server contribution: register RPCs, construct the owned stores and lifecycle hooks, and return cleanup. No runtime installation at plugin load. |
-| plugin/index.client.tsx | Register the Manager surface, its navigation entries and recipient-workspace supervision bell; return contribution cleanup. |
+| plugin/index.client.tsx | Register the Manager surface, workspace work panel, navigation entries and recipient-workspace supervision bell; return contribution cleanup. |
 | plugin/shared/contracts.ts | Strict RPC, receipt, intent and persisted-view schemas plus erased module interfaces used by the server, client and verification adapters. |
 | plugin/shared/supervision.ts | Supervision store migrations, role predicates, effective routes, bounded communication evidence/findings and RPC schemas. |
+| plugin/shared/workflow-view.ts, plugin/server/workflow-view.ts | Read-only Human RPC with strict bounded pages. Bind the selected fresh SDK workspace to the verified served-home repository, report capability/state gaps, and reuse the desk projection without accepting client filesystem paths or adding mutation authority. |
+| plugin/client/workflow-panel.tsx | Workspace work panel: current brief, decision/ownership/review/evidence pages, omission counts and fresh reads; target lifetime and request sequence reject stale host/workspace completions. |
 | plugin/shared/archetypes.ts, plugin/shared/snapshot-catalog.ts | Package seat presets derived from the routing vocabulary, and UI catalog snapshot projections. |
 | plugin/client/ManagerSurface.tsx, plugin/client/manager-state.ts | Displayed host/target, operation start/recovery/polling and bounded status; pure routing/pool form construction and comparisons stay in manager-state. |
 | plugin/client/target-async.ts | Displayed-target async generation and load lifecycle, including effect replay and stale-result guards; cards retain their own reset, dirty-form and CAS policies. |
 | plugin/client/catalog-demand.ts | Target-bound catalog/feature demand, deduplication, cache, retry and invalidation. Manager/card consumers request observations without owning cache lifecycle. |
-| plugin/client/cards/ | Language, saved-role routing, Peer pool, Jev, tracker and supervision editors. Each card owns its RPC workflow, draft semantics, errors and save confirmations. |
+| plugin/client/cards/ | Language, saved-role routing, Peer pool, Jev and supervision editors. Each card owns its RPC workflow, draft semantics, errors and save confirmations. |
 | plugin/client/ui-kit.tsx, plugin/client/supervision-form.ts, plugin/client/supervision-controls.ts | Shared Manager presentation primitives, pure supervision form/projection logic and recipient-workspace bell actions through the single supervision writer. |
 | plugin/server/manager.ts | Administrator mutation mutex, accepted intents, durable phase/recovery transitions, fresh binding verification and bounded status. No generic transaction executor or cached verification. |
 | plugin/server/journal.ts | Private receipt read/CAS/durable replacement, strict receipt refinements and operation lookup; sidecar state stays outside immutable candidates. |
@@ -57,9 +60,8 @@ and dependency locks are supporting artifacts, not additional runtime owners.
 | src/references/anti-patterns.md | All 20 guide §9 hypotheses with evidence, questions and bounded responses; reached on audit/drift triggers. |
 | src/references/provider-routing.md | Supervisor/Lead profile selection, Peer pool selection, validation and handoff; conditional pointer to Jev routing procedure. |
 | src/references/jev-routing.md | Conditional Jev routing procedure: load only for `shadow`, `armed` or `error`; `error` blocks the dependent branch. |
-| src/references/review-gates.md | Review gate structure: a protocol-declared fixed seat/axis shape or bounded selection rule (package default parallel Spec vs Standards; cross-family seat optional, never required), Lead-owned verification distinct from review seats, smell baseline, neutral briefs, non-merged aggregation and the repeated-class correction-loop escalation. |
-| src/references/work-tracking.md | Conditional beads (`bd`) work-graph doctrine — self-gates on the session-entry `Work tracker: beads (enabled in SLP settings)` pointer: probe first, unavailable/uninitialized is a recorded gap never a block, evidence-not-control-plane boundaries, the one-writer-per-scope table (Supervisor roots / Lead children / a seat's own issue), `BEADS_ACTOR`/`--actor` attribution, and recovery/handback rules. SLP never installs, initializes or configures beads. |
-| plugin/server/runtime/cli/report-records.ts | Report-block extraction, JSON schema and filesystem evidence adapter for the shared v1 validator. Referenced reads use the verifier's `--repo` when supplied, otherwise record-declared candidate roots. |
+| src/references/review-gates.md | Selected independent mandates for material questions and Human/protocol requirements, with explicit no-trigger and authorized waiver decisions; Lead-owned verification distinct from review seats, neutral briefs, visible disagreement, task-specific stop conditions and premise escalation. Explicit protocol obligations remain binding. |
+| plugin/server/runtime/cli/report-records.ts | Report-block extraction, JSON schema, exact-fence semantic rendering and filesystem evidence adapter for the shared v1 validator. Referenced reads use the verifier's `--repo` when supplied, otherwise record-declared candidate roots. |
 | plugin/server/runtime/cli/candidate-verify.ts | Read-only handback-claim verifier (P1 `verifyHandback`): measures a report's `slp-record` claims against the caller-pinned `--repo` root — never the record-declared root — via bounded double-capture `snapshot()`/`git status` probes (`--no-optional-locks`, timeout/byte-cap), contract/artifact pin hashing, seat observation over `<paseoHome>/agents/` daemon files, and a runtime measurement comparing `identity(packageRoot).sha256` against the optional `--expect-runtime` candidate hash (`report-only` when absent). Emits the `slp-verify-handback` JSON view with closed comparison/reason enums and a completeness ledger; the one-time capability preflight is the only `CAPABILITY_GAP` source, everything after it is `IO_FAILURE`, and the view is evidence — never acceptance, quiescence or a command re-run. |
 | plugin/server/runtime/cli/routing.ts | Resolve the repository catalog, falling back to the plugin-owned user-scope pool at `<paseoHome>/slp-runtime/state/peer-pool.json` when absent; bind a Lead-selected option with fresh hash and availability checks. `optionExclusions` is the single eligibility predicate — closed-vocabulary tokens (`disabled`, `availability:<state>`, `role-not-listed`) shared by enforcement and Jev candidate generation. `validateCatalog` stays shape-only apart from normalizing the legacy `optionIds` quota-fallback list in place on read (≤1 → `optionId`, >1 fails closed — wave 6) and refusing the Jev decline sentinel as an option id — a shape-level collision; the semantic layer reports a reserved standard-seat id whose tokens diverge from the package set as a Token conflict on every read, and `catalogBinding` refuses to bind one. `catalogBinding` verifies a supplied Jev receipt offline — including the vocabulary version it was issued under — and requires one when the daemon arms `jev.capabilities.routing`. |
 | plugin/shared/runtime/routing-vocabulary.ts | Single routing-criteria vocabulary for CLI, server and Manager: four axes, 16 exact-match tokens, 12 reserved standard-seat token sets, reading helpers and English Jev guidance, versioned together under `ROUTING_VOCABULARY_VERSION`. Callers import this source directly; no vocabulary mirror. |
@@ -69,7 +71,7 @@ and dependency locks are supporting artifacts, not additional runtime owners.
 | skills/paseo-slp-onboarding/SKILL.md | Repo discovery and protocol recommendation before asking for missing decisions. The protocol holds only the workspace's orchestration tactics, condensed from the template under the skill's protocol writing rules; invariants stay in role policy and operational facts in `.paseo-slp/references/`; custom-process interview, confirmed protocol diff and Peer pool setup with Supervisor/Lead profile verification. Supporting resources disclose setup details. Skill installation remains independent from repo initialization. |
 | src/templates/workspace-protocol.md | Common repository tactics and outcome/risk-based workflow recipes, including a protocol-owned Tiny procedure with independent review. Onboarding fills assignment, execution and delivery settings in one effective repo protocol, whose Repository references section points to operational facts (check commands, skill layout) kept in `.paseo-slp/references/`; filling configuration and references is not an Override; init still uses this default and preserves existing files. The `agent_mode` field records intended spawn mode for direct launches (empty falls back to the bundle's `modeId`, then asks). |
 | plugin/server/runtime/cli/binding.ts | Every rule a Binding must satisfy: setting patterns, the route override deny-lists and the single provider-health check. Uses the shared family registry for provider transport targets. |
-| plugin/server/runtime/cli/role-bundle.ts | Which policy bytes each role receives at session entry, and their order; the load-path contract traced in reports/guide-coverage.md. Session-entry instructions also carry the carrier block (spawn kit plus role-scoped policy-byte locators) so profile/provider launches receive the same payload prepare places in initialPrompt. Peer locators include `common.md` and `roles/peer.md`, plus `work-tracking.md` only when managed session entry enables beads; Supervisor/Lead locator sets remain complete. Managed session entry injects the plugin-set communication language (slp-runtime/state/communication-language) when present. ACP delivery freezes the verified candidate core and carrier at adapter startup, reads language per prompt, and explicitly clears earlier runtime language instructions when unset; other transports retain entry-time language semantics. |
+| plugin/server/runtime/cli/role-bundle.ts | Which policy bytes each role receives at session entry, and their order. Session-entry instructions also carry the carrier block (spawn kit plus role-scoped policy-byte locators) so profile/provider launches receive the same payload prepare places in initialPrompt. Peer locators include `common.md` and `roles/peer.md`; Supervisor/Lead locator sets remain complete. Managed session entry injects the plugin-set communication language (slp-runtime/state/communication-language) when present. ACP delivery freezes the verified candidate core and carrier at adapter startup, reads language per prompt, and explicitly clears earlier runtime language instructions when unset; other transports retain entry-time language semantics. |
 | plugin/server/runtime/cli/launch.ts, plugin/server/runtime/cli/profiles.ts | Select one Binding source (saved profiles, catalog routing or an explicit binding), then compose the create_agent argument record. launchPlan and handoffPlan share one builder; preparation state and validation operations also serve launchCheck, preserving each path's diagnostic order and fresh final revalidation; nothing edits the create record afterwards. Handoff adds explicit authority, old-owner evidence, resources and current work snapshot; no lifecycle mutations. request.inventoryFile fills providers/profiles the request did not inline; request.assignmentFileMode defaults to pointer, preserving the read-first prompt; snapshot mode reads and inlines a bounded, validated repository-contained copy during prepare. The same choice applies to prepare-handoff; the daemon never reads the file. The plan also surfaces the intended `modeId` (with a warning when the binding lacks one), a `spawnKit` of role-appropriate MCP tool signatures, and an `orientation` manifest of policy-byte locators (path/bytes/sha256, `missing` for receipt-declared files absent on disk; the set derives from the install receipt, so source-only documents are never declared) — locators only, never interpretation; the same payload is carried inside `create.initialPrompt`, the only field create_agent transmits, so the spawned seat actually receives it. The prompt-side carrier is omitted only when the binding targets the canonical `slp-<family>-<role>` wrapper and the request's live provider inventory observed it — the wrapper injects the carrier at session entry; unverified targets keep the prompt fallback. |
 | plugin/server/runtime/cli/assignment-file.ts | How `request.assignmentFile` reaches the seat prompt: `assignmentFileMode` selection (pointer default, snapshot opt-in), the guarded snapshot reader (repository-contained, 16 KiB cap, UTF-8, no symlink, no nested marker, no credential-shaped content, changed-while-read refusal) and both prompt forms — the read-first pointer line and the marked inline snapshot. |
 | plugin/server/runtime/cli/inventory.ts | Provider/profile inventory in the exact shapes prepare consumes: `paseo provider ls --json` only when the requested home's paseo.pid names a live process, else that home's own config.json `agents.providers` — never another daemon's providers, no directory materialization; provider `enabled` may be null for unrecognized states; profiles always from `daemon.agentProfiles`. Read-only; on multi-daemon hosts the live listing reflects whichever daemon the paseo CLI reaches. |
@@ -80,23 +82,20 @@ and dependency locks are supporting artifacts, not additional runtime owners.
 | plugin/server/runtime/cli/notebook.ts | Read-only locator for a repository's active governance notebook: resolves the repository's git common dir — the property linking a worktree back to its repository — then lists Supervisor agents (provider containing `supervisor`, or a Supervisor-titled state file) whose `cwd` shares it. Output is candidates only, sorted by lastActivityAt, each with notebook path and `notebookExists`; broken agent cwds become gaps. Never copies or mutates notebook content, and picks no authoritative candidate — governance stays per-checkout. |
 | plugin/server/runtime/cli/package.ts | Package identity, exclusive staging, integrity checks and stable Git work snapshot; untracked nested Git work-tree roots are snapshotted recursively under `nested`, sub-repos can carry their own `nested`, and index gitlinks record `{path, kind:"gitlink", indexOid, headOid, state}` with non-clean states listed in top-level `incomplete`. |
 | plugin/server/runtime/cli/runtime-state.ts | Read-only plugin-state probes (H13 workaround): `localTarget` mirrors the plugin's daemon-home detection; `runtimeStatus` recomputes the file-derivable parts of the daemon `status` view — receipt, owned providers/profiles, runtime and launcher integrity, config-drift presence — and reports daemon-only views (live conflicts, family availability) as gaps, never guesses. The Jev probe reports `hasKey`/`keyPermissionsOk` only — key material never enters output. Fails closed on corrupt plugin state. Mutation RPCs are Human-authority and are not exposed. Retire when the host ships `paseo plugin invoke` or MCP `invoke_plugin_rpc`. |
-| plugin/server/runtime/cli/work-tracker.ts | CLI adapter for shared tracker reads and PATH selection; resolves `<daemonHome>/slp-runtime`, projects `{ enabled, error }`, runs read-only `bd version` / `bd where --json` with forced `BD_DISABLE_METRICS=1`, 5 s timeout and 64 KiB cap, and renders the managed session-entry pointer. Missing/broken bd is a gap; non-ENOENT setting read errors propagate. Installs, initialization and configuration remain Human actions. |
 | bin/slp.mjs | Bootstrap-safe Node version guard; imports `plugin/server/runtime/cli/cli.ts` only after the version passes. |
-| plugin/server/runtime/cli/cli.ts | Install/upgrade/preview, verify/uninstall, init, materialize, routes, prepare/handoff, inventory, agents, monitor, notebook, records (extract and validate `slp-record` blocks with optional evidence reads), verify-handback (the read-only `verifyHandback` facade — `slp-verify-handback` JSON view on stdout, typed `<CODE>: <message>` errors on stderr), identity, snapshot, instructions (raw session-entry bundle bytes on stdout, provenance on stderr), route-decide (the only path that calls Jev — explicit invocation, network, emits a receipt; prepare and prepare --check stay offline), status and local-target (read-only plugin-state probes), tracker (the read-only beads probe — prints the probe JSON and exits 0 even when not `ready`), and desk-recover (the P2-e operator-only desk lock recovery — resolves the repository to its repoKey, runs the shared auto-mode algorithm, exits 0/1/2) entrypoints. |
+| plugin/server/runtime/cli/cli.ts | Install/upgrade/preview, verify/uninstall, init, materialize, routes, prepare/handoff, inventory, agents, monitor, notebook, records (extract and validate `slp-record` blocks with optional evidence reads), verify-handback (the read-only `verifyHandback` facade — `slp-verify-handback` JSON view on stdout, typed `<CODE>: <message>` errors on stderr), identity, snapshot, instructions (raw session-entry bundle bytes on stdout, provenance on stderr), route-decide (the only path that calls Jev — explicit invocation, network, emits a receipt; prepare and prepare --check stay offline), status and local-target (read-only plugin-state probes), and desk-recover (the P2-e operator-only desk lock recovery — resolves the repository to its repoKey, runs the shared auto-mode algorithm, exits 0/1/2) entrypoints. |
 | plugin/shared/enforcement.ts | Strict desk wire schemas, inferred tool input types, error vocabulary and bounded views. Owns the scope/rollout transition edge tables shared by command decisions and durable store refinements. |
 | plugin/server/daemon-home.ts | Shared daemon-home detection, verified filesystem resolution and receipt/target matching. Detection alone is a UI suggestion; mutations require the verified home and task authority. |
 | plugin/server/capabilities.ts | Curated capability evidence with source pins, closed statuses and explicit gaps. Static compatibility proves interfaces; live delivery requires live-probe evidence. Provider presence never establishes capability. |
 | plugin/server/runtime-pin.ts | Read-only runtime binding verification against the served home's receipt, target and published payload integrity. Emits a canonical pin digest or a closed not-bound reason; faults remain typed faults. |
 | plugin/server/enforcement.ts, plugin/server/limitations.ts | Read-only `readView` for installation state, capability evidence and membership projection. Reads bounded `repos/*/ledger.json` under the verified served home, emits `SeatBindingView` rows for memberships carrying an `agentId`, and accounts elisions in the completeness ledger. `limitations.ts` owns the shared limitation literals. The unused P0 `dispatch` placeholder is retired; desk mutations enter through `desk-bridge.ts` and the feature runners. |
-| plugin/server/desk-store.ts, plugin/server/kept-files.ts | Durable desk store kernel (ledger v6): header-first absent/ok/corrupt/future/unsafe reads, in-memory v1→v2→v3→v4→v5→v6 migrations and `schema-migrated` on the first post-bump commit. Per-repo `O_EXCL` locks plus an in-process mutex protect idempotent `transact` replay keyed by canonical `bodySha256` of `{repo, command}`. Decide outputs replace complete tables across P2–P5; the store checks schemas, cross-table identities and refinements while features own command semantics. Immutable hash-chained event segments precede the `ledger.json` rename commit point; the ledger byte cap rejects before either write. Live holders yield `CAPABILITY_GAP`, dead/unknown holders `RECOVERY_REQUIRED`; operator-only unlink belongs to recovery. Imports the canonical namespace layout from `runtime/desk-paths.ts`; `kept-files.ts` supplies policy-aware directory guards and re-exports the shared syscall primitives. |
-| plugin/server/runtime/report-records.ts | Canonical typed v1 validator and frozen record vocabulary; evidence and realpath are injected capabilities. No schema or host dependencies. CLI and desk facades use this implementation directly. |
+| plugin/server/desk-store.ts, plugin/server/kept-files.ts | Durable desk store kernel (ledger v8): header-first absent/ok/corrupt/future/unsafe reads, in-memory v1→v2→v3→v4→v5→v6→v7→v8 migrations and `schema-migrated` on the first successful post-bump commit. Per-repo `O_EXCL` locks plus an in-process mutex protect idempotent `transact` replay keyed by canonical `bodySha256` of `{repo, command}`. Decide outputs replace complete tables; the store checks schemas, cross-table identities, ownership at committed event time and full-chain refinements while features own command semantics. Immutable hash-chained event segments precede the `ledger.json` rename commit point; the ledger byte cap rejects before either write. Live holders yield `CAPABILITY_GAP`, dead/unknown holders `RECOVERY_REQUIRED`; operator-only unlink belongs to recovery. Imports the canonical namespace layout from `runtime/desk-paths.ts`; `kept-files.ts` supplies policy-aware directory guards and re-exports the shared syscall primitives. |
+| plugin/server/runtime/report-records.ts | Canonical typed v1 validator and frozen record vocabulary, with optional purpose-specific semantic reports; evidence and realpath are injected capabilities. No schema or host dependencies. CLI and desk facades use this implementation directly. |
 | plugin/server/runtime/lock-holder.ts | One interpretation of desk/bridge/recover-lock holder bytes and process-probe outcomes. Callers retain waiting, re-entry, release, audit and recovery authority. |
 | plugin/server/runtime/desk-recovery.ts | Canonical operator recovery state machine, sync CLI driver, async plugin driver and strict output projection. Two checkpoints preserve race barriers; thrown/rejected hooks re-enter the generator so recover-lock cleanup runs. |
 | plugin/server/runtime/desk-paths.ts, plugin/server/runtime/filesystem.ts | Desk namespace derivation, path layout, bridge sentinel and low-level filesystem primitives shared by CLI recovery and plugin durable stores. No schema or host dependencies. |
-| plugin/server/runtime/work-tracker.ts | One read-only tracker setting validator, absolute-PATH executable scan, version parser and bounded diagnostic formatter. The shared reader takes the stable runtime root and includes `configured`; CLI projection omits that field. |
 | plugin/shared/runtime/jev-transport.ts | Dependency-free Jev provider defaults, model patterns, URL path rules and POST extras; one ordered credential detector/preflight and scrub-before-cap sanitizer. Adapters retain their error classes and config/HTTP lifecycle policies. |
 | plugin/shared/runtime/session-delivery.ts | Published session-entry/launch/snapshot literals and carrier captions shared by producers and capture. Recognizer grammar stays explicit in its parser; historical wire bytes remain compatible. |
-| plugin/server/work-tracker.ts | Verified-home tracker get/set RPCs, plugin `bd version` detection and the hook-only `beadsSeatEnv` overlay; setting writes remain atomic 0600 and plugin-owned. Uses shared read-only primitives. |
 | plugin/server/jev.ts | Jev state/key RPCs and single-shot supervision requests. Strict plugin Zod config validation, CAS, auth-probe policy and stop cancellation stay here; disk/key observations and locations come from runtime/jev-state, provider/credential rules from the shared runtime. |
 | plugin/server/runtime/jev-state.ts | Jev config/key namespace, uncached raw config/hash observations, stat-only key presence and private regular-file checks before secure key reads. CLI retains historical OFF/unknown-key tolerance; plugin persisted/RPC schemas remain strict. Each adapter owns its diagnostics and capability policy. |
 | plugin/shared/runtime/desk-contract.ts, plugin/shared/runtime/node-version.mjs | Plain recovery-result vocabulary and diagnostic bounds; bootstrap-safe supported Node range/check shared by resolver, shim and CLI. Shared runtime has no Node imports or types. |
@@ -106,12 +105,16 @@ and dependency locks are supporting artifacts, not additional runtime owners.
 | plugin/server/desk-recovery.ts, plugin/server/runtime/cli/desk-recovery.ts | P2-e operator-only desk lock recovery: one closed 17-result algorithm exposed by the provenance-gated `enforcement-recover-lock` RPC and the operator-home `desk-recover` CLI. Orphan unlink requires holder parse, ESRCH, unchanged byte re-read, fsynced pre-unlink audit and directory fsync. `recover.lock` serializes recoverers and is never auto-removed; `internal-error` is the only exception sink. No `--force`, `expected`, hook or transact recovery path. Both adapters use `runtime/desk-recovery.ts`; the sync/async driver and surface regression corpus covers the closed results and race schedules. |
 | plugin/server/desk-command.ts | Pure command invariants shared by handback, settlement, scope, check and rollout: deterministic tuple-derived ids, live registered membership, lead role and owned open assignment guards. Features retain their command schemas, state machines and rejection diagnostics. |
 | plugin/server/desk-runner.ts | Shared store dependency, bound caller context, fresh ledger reads and strict repo envelope projection. Capture, export verification and check execution dependencies belong to the feature runners that use them. |
+| plugin/server/desk-assignment.ts | Owner-only immutable brief/decision commands, revision CAS and assignment-local digest lineage. One pure, closed workflow projection supplies both the membership-guarded agent reader and the verified Human RPC. |
+| plugin/server/desk-ownership.ts | Planned same-assignment offer/accept commands, exact live membership and revision checks, immutable receipt replay, participant reads and shared current reviewer exclusions. Current/historical owner resolution remains in the store kernel; acknowledgment transfers responsibility without cleanup, project acceptance or host lifecycle operations. |
+| plugin/server/runtime/report-semantics.ts, plugin/server/runtime/handoff-recap.ts | Dependency-free optional semantic report validation/rendering and explicit-source handoff recap. Preserve v1 envelope and original fence bytes; distinguish supplied claims from fresh measurements and expose missing context without lifecycle operations. |
+| scripts/review-copy.mjs | Development-only pinned candidate copy for independent writable probes, outside the checkout and install unit. Preserve ordinary snapshot identity, reject unsupported nested/gitlink candidates, and leave cleanup with the caller. |
 | plugin/server/desk-seat.ts | The P2-c seat binding handshake (env-only): `DESK_FIELD_POLICY` is the §2.1 field × phase table as data (the single field policy; `ExactKeys` pins every branch two-way to its SDK source type, with compiler-API negative controls), `decideSeatCommand` applies the bounded TTL sweep and the `seat.mint`/`seat.bind`/`seat.register`/`seat.revoke` commands (guards against `BINDING_TRANSITIONS` with explicit P2-c targets, `INVALID_RECORD` + `MEMBERSHIPS_FULL_PREFIX`/`HANDLE_COLLISION_PREFIX` for a full table or handle collision, bounded sweep `ttlSweepPerCommit`, one event per row change, payloads never carry the handle), and `createDeskSeat` exposes the four fail-open seams (`deskMint`/`deskBind`/`deskRegister`/`deskRevoke`) with the §4.2 one-error-one-code repo resolution, the `hookDeskTransactMs` budget (unref'd timer, handlers attached before the race), and one bounded `console.warn` per failure. The raw handle never reaches the ledger, events, or diagnostics. |
-| plugin/server/desk-bridge.ts, bin/slp-desk-mcp.mjs | The P2-d desk MCP bridge transport: the packaged binary is a byte-blind stdio↔UDS NDJSON relay (262144-byte raw-line cap in both directions, `REQUEST_TOO_LARGE`/`RESPONSE_TOO_LARGE` typed rejections, one bounded reconnect, Windows `CAPABILITY_GAP`, no TCP). The plugin-side adapter resolves the verified stable root through the launch set (`launchers.verify` — manifest `daemonHome`/candidate ancestry, independent of `PASEO_HOME`), takes one `O_EXCL` lifecycle lock under the reserved repo namespace (`deskBridgePaths` — live foreign holders get a bounded wait then `CAPABILITY_GAP: desk-busy`; dead/unreadable holders are `RECOVERY_REQUIRED`, never stolen), binds `state/enforcement/desk.sock` at `0600`, and serves the pinned handshake (`slp-desk-bridge/1` hello = handle + self-reported `bridgeSha256` checked against the launch-set pin). The catalog is one source: visible `slp_status` (caller-scoped membership + assignment/handback/settlement/scope projection), `slp_handback_submit` and the lead-only `slp_assignment_register`/`slp_assignment_attach`/`slp_assignment_close` (P3-a), `slp_settlement_record`/`slp_settlement_export` (P3-b), and `slp_scope_declare`/`slp_scope_transition`/`slp_scope_review` (P4 — durable assignment-bound scope declarations, an explicit `declared→claimed→submitted-for-review→review-observed→approved/rejected→advanced/closed` machine with server-derived required-review gates on `spec`+`standards`, and self-review prohibited), `slp_check_declare`/`slp_check_run`/`slp_rollout_declare`/`slp_rollout_transition` (P5 — allowlisted check definitions, bounded repo-scoped runs, and the explicit rollout machine with server-derived check/cohort gates), plus a hidden mechanism entry that always rejects direct dispatch — `slp_recover_lock` and any live-deployment verb are deliberately absent. Schema-bound handlers preserve each parsed input type through execution; catalog names require an implementation at typecheck. Every dispatch re-runs the five guards (handle→membership sha, fresh row+epoch, live SDK identity, `plugin-rpc.dispatch` capability row, strict input) and fails closed; a `recovery-required` or `degraded` desk rejects mutation while read-only status still answers — a ledger that no longer reads returns the handshake-bound row with `desk.state` `degraded` and explicit limitations, never fabricated data, and the status aggregate stays inside `WIRE_LIMITS` (counting markers for elided projection, `DeskBridgeToolEntry` caps enforced on every catalog row at construction). `agent.create` graft adds `mcpServers.slp_desk` (stdio, `command` = binding node, `args` = runtime bridge path, env = handle + socket) only when the earlier role-injection hook minted a handle; a foreign `slp_desk` entry or an integrity mismatch (pin/payload/actual diverge) preserves the request untouched. |
+| plugin/server/desk-bridge.ts, bin/slp-desk-mcp.mjs | The P2-d desk MCP bridge transport: the packaged binary is a byte-blind stdio↔UDS NDJSON relay (262144-byte raw-line cap in both directions, `REQUEST_TOO_LARGE`/`RESPONSE_TOO_LARGE` typed rejections, one bounded reconnect, Windows `CAPABILITY_GAP`, no TCP). The plugin-side adapter resolves the verified stable root through the launch set (`launchers.verify` — manifest `daemonHome`/candidate ancestry, independent of `PASEO_HOME`), takes one `O_EXCL` lifecycle lock under the reserved repo namespace (`deskBridgePaths` — live foreign holders get a bounded wait then `CAPABILITY_GAP: desk-busy`; dead/unreadable holders are `RECOVERY_REQUIRED`, never stolen), binds `state/enforcement/desk.sock` at `0600`, and serves the pinned handshake (`slp-desk-bridge/1` hello = handle + self-reported `bridgeSha256` checked against the launch-set pin). The catalog is one source: visible `slp_status` (caller-scoped membership + assignment/handback/settlement/scope projection), `slp_handback_submit` and the lead-only `slp_assignment_register`/`slp_assignment_attach`/`slp_assignment_close` (P3-a), current-owner `slp_assignment_amend`/`slp_decision_append`, planned `slp_assignment_offer`/`slp_assignment_accept`, and exact-participant `slp_workflow_get`, `slp_settlement_record`/`slp_settlement_export` (P3-b), and `slp_scope_declare`/`slp_scope_transition`/`slp_scope_review` (P4 — durable assignment-bound scope declarations, an explicit `declared→claimed→submitted-for-review→review-observed→approved/rejected→advanced/closed` machine with server-derived required-review gates from the pinned declaration (explicit legacy `spec`+`standards` compatibility, or a declared named-lens, no-trigger or authorized exemption decision), and self-review prohibited), `slp_check_declare`/`slp_check_run`/`slp_rollout_declare`/`slp_rollout_transition` (P5 — allowlisted check definitions, bounded repo-scoped runs, and the explicit rollout machine with server-derived check/cohort gates), plus a hidden mechanism entry that always rejects direct dispatch — `slp_recover_lock` and any live-deployment verb are deliberately absent. Schema-bound handlers preserve each parsed input type through execution; catalog names require an implementation at typecheck. Every dispatch re-runs the five guards (handle→membership sha, fresh row+epoch, live SDK identity, `plugin-rpc.dispatch` capability row, strict input) and fails closed; a `recovery-required` or `degraded` desk rejects mutation while read-only status still answers — a ledger that no longer reads returns the handshake-bound row with `desk.state` `degraded` and explicit limitations, never fabricated data, and the status aggregate stays inside `WIRE_LIMITS` (counting markers for elided projection, `DeskBridgeToolEntry` caps enforced on every catalog row at construction). `agent.create` graft adds `mcpServers.slp_desk` (stdio, `command` = binding node, `args` = runtime bridge path, env = handle + socket) only when the earlier role-injection hook minted a handle; a foreign `slp_desk` entry or an integrity mismatch (pin/payload/actual diverge) preserves the request untouched. |
 | plugin/server/desk-handback.ts, plugin/server/desk-records.ts | The P3-a structured handback surface behind the bridge catalog: a pure command layer (`assignment.register`/`attach`/`close` — lead-membership-only, `authorityRef` stored verbatim as a pointer, deterministic `asg-`/`hb-`/`cand-` ids derived inside decide so replay names the same row; `handback.submit` → `handback.observe` two-commit flow where the seat's `recordV1` is stored verbatim as `claimed`, observed.status `pending`, and the bound-runtime snapshot capture (60s/32MiB subprocess against the membership's `createCwd`, never a record-declared path) joins only `observed`/`gaps` — a failed capture commits with a `gaps` entry, never a rejection). `desk-records.ts` re-exports the shared `runtime/report-records.ts` validator (identical `{code, field, message}` issues, `readEvidence`/`realpath` behind injection seams — without them `outputRef` reports unreadable instead of dereferencing a claimed path). Caller-scoped `seatAssignmentsView` feeds `slp_status` with identifiers and shas only. Recorded gap: `human-register-rpc` — root/operator-side assignment registration (the §4.4 Human-RPC) is not surfaced yet; bindings are created only by a bound lead membership via `slp_assignment_register`. |
 | plugin/server/desk-settlement.ts | Receiving-owner settlement attestations bound to durable assignment and seat identities. Recording verifies claimed timeline exports through the authorized artifact seam; read-only export re-derives and validates the committed v1 record for its two parties. Rows preserve gaps and provenance; acceptance and the official settlement sink remain outside the desk. |
-| plugin/server/desk-scope.ts | Assignment-bound immutable scope declarations, reviewer observations and explicit state transitions. Pins review rounds to declaration revision and candidate, derives required axes server-side and prohibits self-review. Owns the standing approved-round projection used by rollout promotion; the store separately verifies historical approval evidence. Caller-scoped projection feeds desk status. |
-| plugin/server/desk-check-runner.ts | Allowlisted check definitions and bounded executions against the rollout's pinned candidate. Server derives environment, limits and eligibility; callers supply no argv or result. Pure decide commits measured outcomes, including typed blocked capability gaps. |
+| plugin/server/desk-scope.ts | Assignment-bound immutable scope declarations, reviewer observations and explicit state transitions. Pins review rounds to brief/declaration revision, mandate and candidate, derives required lenses server-side and prohibits owner/writer self-review. Optional ownership covers declared path/resource overlap and dependencies; authority pointers remain claims. Owns the standing approved-round projection used by rollout promotion; the store separately verifies historical approval evidence. Caller-scoped projection feeds desk status. |
+| plugin/server/desk-check-runner.ts | Allowlisted check definitions and bounded executions against the rollout's pinned candidate. Bound snapshot capture checks full candidate freshness before execution and before result commit. Server derives environment, limits and eligibility; callers supply no argv or result. Pure decide rechecks current ownership and commits measured outcomes, including typed blocked execution-capability gaps; historical replay does not execute again. |
 | plugin/server/desk-rollout.ts | Immutable rollout declarations and explicit transitions gated by pinned check results, standing scope review and canary cohort. Rollback pins a known-good observed candidate; transitions record decisions and perform no deployment. Owns the standing approved-round projection used by rollout promotion; the store separately verifies historical approval evidence. Caller-scoped projection feeds desk status. |
 | plugin/server/injection-binding.ts | The O1 usable-for-injection predicate behind the hooks' `readActiveBinding`: canonicalizes the served daemon home (env or default source both count), journal-reads `<home>/slp-runtime`, requires `receipt.target.daemonHome` to equal it, then admits a binding only under `ACTIVE`/`ACTIVATING` (a pending operation never unbinds the intact recorded binding), returns `null` for absent receipt or binding-less `ACTIVE`/`ACTIVATING`/`INACTIVE`, and throws marker-carrying refusals for `target-mismatch`, `state-deactivating`, `state-recovery-required` and `state-inconsistent` — `role-injection.ts` still turns a throw into an aborted create. User-facing: while an install is `DEACTIVATING` or `RECOVERY_REQUIRED`, no new managed seat spawns; running sessions are unaffected. |
 | skills/paseo-slp-e2e/SKILL.md | Single-session full-suite execution procedure; requires the source checkout and authorized Paseo actors. |
@@ -170,13 +173,9 @@ in paseo-binding.json retiredProfiles for review. Other profiles remain untouche
 The user-scope Peer pool is plugin-owned mutable state at
 <paseo-home>/slp-runtime/state/peer-pool.json (mode 0600, atomic
 whole-file writes under a sha256 compare-and-swap; the manager surface is
-its sole writer). The beads work-tracker toggle is plugin-owned mutable
-state of the same class at
-<paseo-home>/slp-runtime/state/work-tracker.json (mode 0600, atomic
-whole-file write; the manager surface via `set-work-tracker` is its sole
-writer). An absent file means disabled — upgrading SLP never changes the
-behavior of an existing installation — and a corrupt or foreign file
-degrades to disabled plus a surfaced gap, never a spawn block. Standalone host install/upgrade/uninstall and plugin
+its sole writer). External work trackers belong to workspace/harness configuration.
+The plugin has no tracker settings, RPCs, executable probes or session overlays;
+legacy tracker state and repository data are left untouched. Standalone host install/upgrade/uninstall and plugin
 activation/deactivation create, edit, and delete no routing catalogs —
 a repository catalog exists only where `init --routing-from` imported an
 explicitly chosen file. A legacy <paseo-home>/slp-routing.json is read for
@@ -245,8 +244,7 @@ The carrier block (spawn-kit signatures plus role-scoped policy-byte locators)
 reaches a seat through two channels: session-entry bundle injection for
 profile/provider launches, and `create.initialPrompt` for the prepare path — the
 only field create_agent transmits, so plan-level `spawnKit`/`orientation` fields
-alone would never arrive. Peer locators contain `common.md` and `roles/peer.md`,
-plus `work-tracking.md` only when managed session entry enables beads. The
+alone would never arrive. Peer locators contain `common.md` and `roles/peer.md`.
 Supervisor/Lead sets retain their references. The captions differ on purpose:
 session-entry locators are measured when the bundle loads, plan locators where
 prepare ran. The kit is an approximation to verify against live `mcp_list_tools`;
@@ -257,12 +255,11 @@ Protocol defaults select tactics; global roles no longer impose a single Enginee
 or prohibit heartbeat for every assignment. Assignment supplies Peer disposition,
 read/write authority and output; independent review uses sessions separate from
 implementation and exact candidates; a required gate follows the rule the
-effective workspace protocol declares — a fixed shape or a bounded selection
-rule, parallel seats on split axes by default — and seats the declared rule
-requires that cannot be supplied make it BLOCKED rather than skipped or
-merged. Within one assignment, Lead normally reuses
-the Engineer for corrections and the same independent review seats for re-review on the new
-stable candidate. New independent seats and recovery remain explicit choices.
+effective workspace protocol declares. Lead selects minimum sufficient mandates
+for material questions and Human/protocol requirements, without a package-wide
+seat count or axis pair. An explicitly required shape still binds; required seats
+that cannot be supplied make it BLOCKED. Within one assignment, corrections retain the actual write owner
+and normally reuse the same independent review seats on the new stable candidate. New independent seats and recovery remain explicit choices.
 Lead builds relevant project context from repository evidence and maintains a
 decision/ownership checkpoint across handbacks and resume; Peers receive only
 the context needed for their bounded assignments.
@@ -273,8 +270,9 @@ primitives; `slp.mjs monitor` adds a caller-invoked, delta-only signal scan that
 emits candidates without verdicts — it is not a semantic detector. Peer provider
 entries set `paseoTools.disabledTools` for selected orchestration MCP tools; this
 is a tool-delivery gate, not shell or direct-CLI isolation. No lifecycle runner
-or schedule adapter is added. Missing capabilities remain explicit before any fallback. See
-[guide coverage](reports/guide-coverage.md) for requirement mapping, load paths and host gaps.
+or schedule adapter is added. Missing capabilities remain explicit before any fallback. The file map above
+owns the policy load paths; [the review checklist](review-checklist.md) defines
+what local verification may claim.
 
 ## Runtime selection
 
@@ -491,10 +489,110 @@ visible but do not qualify dependency or retry gates. A new addendum cannot
 retroactively verify an unsigned original. Summary exposes gateReady separately
 from historical status; its CLI returns success only for a fully qualified PASS.
 
+## Durable work coordination
+
+Ledger v7 adds exactly `briefRevisions` and `decisionEntries`. A complete
+operative brief separates objective/acceptance, authority-backed constraints,
+provisional design, assumptions, unknowns and proof from owned/excluded
+surfaces, dependencies and notification intent. Its immutable assignment-local
+revisions use expected-current-revision CAS and canonical body/entry digests.
+Material decisions retain reasons, supporting and contrary evidence, unresolved
+risk, affected revision/owners, notification references and outcome references.
+Every new row is checked against its committed historical event on every read;
+full-chain integrity is not replaced by a cached tip. Legacy assignments have
+no invented brief; migrations preserve their existing evidence and obligations.
+
+Ledger v8 separately adds `ownershipOffers` and `ownershipAccepts`. The
+registration tuple remains immutable; current owner commands resolve the
+latest contiguous accepted agent/membership tuple. A live current owner offers
+an open assignment to one exact live registered Lead. Only that nominee accepts
+with acknowledgment, resource account and ownership/ledger/brief revision CAS.
+Acceptance works before or after the former owner retires and atomically denies
+its fresh owner mutations. It does not expand the Human grant, retire a host
+session, settle resources or establish project acceptance. Every lineage row
+binds its committed event and authority at that event; history is never judged
+using today's replacement owner. Legacy migration invents no acknowledgment.
+New registration events also bind the immutable header content by digest;
+retained events without that digest keep their original evidence shape.
+
+Current owners, exact live prior owners, attached seats and usable current-offer
+nominees can read; revoked, rebound and foreign callers cannot. Offering never
+adds an execution/canary seat. A losing or stale offer grants no permanent read
+access. Only the current owner amends the brief, records decisions or changes
+ownership/review declarations. A declared direct Lead writer requires an
+explicit bounded grant pointer. Pointers, paths/resources, findings and
+notification/outcome references remain claims, not proof of authority,
+communication or semantic truth. Missing prior offer leaves cold owner loss an
+authority gap; no claimed-Human-pointer takeover is added.
+
+Active declared path/resource overlaps and invalid dependency edges are
+rejected. State/module ownership is separate from the moving write owner.
+Review plans are pinned before the candidate round. New scopes must explicitly
+declare `required` named lenses, `not-required` when no review trigger applies,
+or an authorized `exempt` decision. All three retain authority, rule and reason;
+`not-required` has zero lenses and null exemption class, while `exempt` names
+the waived class. A no-trigger decision does not waive mandatory review, and
+runtime validation does not authenticate a source pointer or risk assessment.
+Explicit `reviewPlan: null` selects legacy Spec/Standards compatibility; stored
+legacy declarations, migrations and rounds retain their original obligations.
+Omission on a new scope is rejected. Omission on redeclaration inherits the
+prior plan; exact retries retain their original effective decision and result.
+
+Transitions cannot supply a smaller required set. The owner and writer cannot
+discharge their own required independent review. Brief, scope or plan changes
+invalidate standing dependent reviews while historical approval evidence remains
+valid at its original event. Scope gates, rollout promotion and read views share
+current qualification: a review authored by today's owner or declared writer
+cannot carry their present gate, even when valid at its original event.
+Unchanged independent third-party reviews remain reusable. Accepted ownership
+invalidates an earlier canary pin even with an equal roster; migration alone at
+ownership revision zero preserves its legacy digest recipe.
+Empty discharge is valid only for the pinned
+no-trigger or exempt decision and still requires measured candidate freshness
+and valid approval/rollout history. The status projection exposes the decision
+separately from waiver status. Findings and conflicting observations remain
+visible for Lead adjudication; review and scope/check completion are not project
+acceptance. Mandates cannot be dropped after adverse findings to evade an
+obligation. Under the current Human grant, this repository uses selected mandates
+and task-specific stop/effort bounds instead of a fixed pair or correction quota;
+other repositories keep their effective protocol until an authorized amendment.
+
+The closed workflow projection returns complete bounded rows, counted omissions
+and ledger-bound continuations. The Human workspace RPC freshly binds the
+selected SDK workspace to the verified served daemon home and Git common dir;
+it accepts no client-selected filesystem root and adds no mutation authority.
+Absent, unsupported and unreadable state stays explicit. The client invalidates
+old host/workspace lifetimes and superseded requests. Source callers and agents
+reuse the same projection under their respective binding/authorization checks.
+
+Discovery uses the complete current brief objective (4096-character bound),
+with explicit registration fallback only when no structured brief exists.
+The ownership header separates original/current tuples, accepted acknowledgment
+provenance and recorded membership state from host liveness. Typed handback and
+settlement summaries preserve record digests, pending/failed observation, all
+resource dispositions and claim-versus-measurement provenance; full handback
+bodies remain ledger-held. Human RPC responses cap the complete UTF-8 object
+at 65536 bytes, dropping only complete page items. A single overlarge header or
+record returns `VIEW_TOO_LARGE`; no clipped proof is presented as complete.
+
+The optional handback `report` uses `slp-report` v1 with execution, review or
+adjudication semantics and meaningful purpose-specific fields. The existing
+envelope, verdict, candidate and check validation stays intact. A renderer
+preserves the original fenced evidence bytes; author-reported `read`/`ran`,
+finding evidence and decisions remain claims. `handoff.recapInputs` is an
+optional explicit context source alongside required legacy free text. Its pure
+recap separates supplied report/candidate claims from fresh measurement,
+discloses missing/mismatched/incomplete context and leaves settlement and
+recipient acknowledgment unverified. No host lifecycle action is added.
+
+Usage and detailed obligations are in [work coordination](work-coordination.md)
+and its [spec](spec/work-coordination.md). The proof-copy harness belongs to
+repository verification and stays outside installed bytes.
+
 ## Handoff and snapshots
 
-Provider switching creates a new session: prepare-handoff requires old-owner settlement
-evidence and transfers state/resources without inventing new parentage or acceptance.
+Provider switching creates a new session: prepare-handoff carries old-owner settlement
+evidence and state/resource handoff inputs without inventing parentage or acceptance.
 Supervisor/Human still verifies host state and performs the authorized Paseo lifecycle
 operations. Quota alone is not switch authority; a Human request or standing fallback
 policy supplies it. Actual live transfer remains separate E2E evidence.
@@ -547,18 +645,22 @@ actual compaction resilience requires separate live provider evidence.
 
 Lead classifies clear, reversible work with clear verification and no change to
 authority/delegation/lifecycle/integrity as tiny, recording its reason. Workspace
-protocol owns the ceremony: the shipped template supplies one Peer Engineer, an inline
-brief/formation, in-session proof, trigger-based independent review and Lead
-artifact inspection/verdict. The template triggers review by material risk
+protocol owns the ceremony: a Peer Engineer is the default implementation owner.
+An explicit Human assignment or effective protocol grant may instead authorize
+a bounded direct Lead write. The grant keeps one writer per moving scope,
+candidate proof and every required independent review; tiny classification alone
+does not grant it. The shipped template retains a bounded brief/formation,
+in-session proof, trigger-based independent review and Lead artifact
+inspection/verdict. The template triggers review by material risk
 rather than by recipe; this is a template default, not a new global
 requirement for every custom protocol. A required review gate follows the
-rule its protocol declares — a fixed shape or a bounded selection rule;
-separate Spec and Standards seats under the package default.
+rule its protocol declares. The package selects minimum sufficient independent
+mandates for material questions, without an automatic pair or reviewer count.
 Growing scope/risk requires Lead to reassess the workflow before affected work. Missing or
 older protocols grant no implicit exemption; record the gap and propose a change.
-Where authority permits the task still runs through one Peer Engineer — only the
-step needing an exemption waits for a decision — without automatically migrating
-repository tactics or blocking unrelated work.
+Without an explicit direct-write grant, authorized implementation runs through
+one Peer Engineer. Only the step needing an exemption waits for a decision,
+without automatically migrating repository tactics or blocking unrelated work.
 
 Policy read/re-read requirements permit reuse of the full relevant text still
 in context when its source is known unchanged. A summary is not a substitute;

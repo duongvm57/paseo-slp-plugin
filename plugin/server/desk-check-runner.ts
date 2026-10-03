@@ -46,8 +46,10 @@ import {
 } from "./desk-store.ts";
 import { isRejection, readLedger, repoEnvelope, type DeskRunnerDeps, type RunnerCtx } from "./desk-runner.ts";
 import { sha256Hex } from "./config-view.ts";
+import { ObservedCapture, type HandbackRunnerDeps } from "./desk-handback.ts";
 import {
   deriveId,
+  effectiveOwnerMatches,
   liveMembership,
   requireActor as requireDeskActor,
   requireLead as requireDeskLead,
@@ -156,7 +158,7 @@ function requireOwnedOpenAssignment(
     ownerMismatch: reject(
       "ACTOR_MISMATCH",
       "only the assignment's receiving owner may administer its checks",
-      "the registering lead's agentId is bound into the row — a peer, another lead, or a supervisor cannot run or declare checks",
+      "the current owner's exact agent and membership are bound — another participant cannot run or declare checks",
     ),
     closed: reject(
       "ROLLOUT_CONFLICT",
@@ -475,7 +477,7 @@ export type CheckExecResult = {
 
 export type CheckCapabilityGap = { capability: string; detail: string };
 
-export type CheckRunnerDeps = DeskRunnerDeps & {
+export type CheckRunnerDeps = DeskRunnerDeps & Pick<HandbackRunnerDeps, "capture" | "binding"> & {
   uuid: () => string;
   now: () => Date;
   /** The execution primitive — injectable so tests never spawn. */
@@ -641,8 +643,10 @@ export async function runCheckRun(
   if (isRejection(ledger)) return ledger;
   // Preflight authority BEFORE any replay answer — a committed row never
   // returns before the membership, lead, and owner-binding gates pass.
+  // The actor must resolve to the caller's exact live membership tuple:
+  // a rebound seat keeps its agentId but loses the pinned membership.
   const actor = liveMembership(ledger, ctx.row.agentId as string);
-  if (actor === undefined) {
+  if (actor === undefined || actor.membershipId !== ctx.row.membershipId) {
     return reject("AUTHORITY_REQUIRED", "the actor has no live bound membership on this desk", "a run needs a host-bound, registered row");
   }
   const leadError = requireLead(actor);
@@ -651,8 +655,8 @@ export async function runCheckRun(
   if (assignment === undefined) {
     return reject("AUTHORITY_REQUIRED", "the assignment is not registered on this desk", "check commands name a durable assignment binding of this repo desk");
   }
-  if (assignment.ownerAgentId !== actor.agentId) {
-    return reject("ACTOR_MISMATCH", "only the assignment's receiving owner may administer its checks", "the registering lead's agentId is bound into the row — a peer, another lead, or a supervisor cannot run or declare checks");
+  if (!effectiveOwnerMatches(ledger, assignment, actor)) {
+    return reject("ACTOR_MISMATCH", "only the assignment's current effective owner may administer its checks", "the effective owner's exact live membership tuple holds custody — a peer, another lead, or a supervisor cannot run or declare checks");
   }
   // Idempotent fast-path — bound to THIS actor and the committed request
   // body. The store's request idempotency cannot cover runs (the command
@@ -707,6 +711,32 @@ export async function runCheckRun(
   if (candidate === undefined) {
     return reject("CANDIDATE_DRIFT", "the rollout's pinned candidate is not durable on this assignment", "the ledger refinement guarantees this — inspect the desk under maintenance authority");
   }
+  // Fresh runs measure the checkout through the same bound runtime as
+  // handbacks. Historical replay has already returned above.
+  const freshness = async (): Promise<DeskRejectionValue | null> => {
+    if (deps.binding === null || deps.binding === undefined || typeof deps.capture !== "function") {
+      return reject("CAPABILITY_GAP", "the bound-runtime snapshot capture is unavailable", "restore the capture binding before running a fresh check");
+    }
+    let measured;
+    try {
+      measured = ObservedCapture.safeParse(await deps.capture({
+        ...deps.binding, repository: candidate.repository, now: deps.now,
+      }));
+    } catch {
+      return reject("CAPABILITY_GAP", "the bound-runtime snapshot capture failed", "restore snapshot capture before running a fresh check");
+    }
+    if (!measured.success || measured.data.status !== "ok" || measured.data.incomplete.length !== 0) {
+      return reject("CAPABILITY_GAP", "the bound-runtime snapshot capture is not complete", "obtain a complete snapshot before running a fresh check");
+    }
+    const observed = measured.data;
+    if (observed.repository !== candidate.repository || observed.snapshotSha256 !== declaration.candidateSnapshot ||
+        observed.head !== declaration.candidateHead || observed.head !== candidate.head) {
+      return reject("CANDIDATE_DRIFT", "the measured checkout differs from the rollout's pinned candidate", "observe the changed candidate and redeclare its rollout before checking it");
+    }
+    return null;
+  };
+  const before = await freshness();
+  if (before !== null) return before;
   const exec = deps.exec ?? execFileAsync;
   const probe = deps.probe ?? defaultProbe;
   const environment = deps.environment?.() ?? { node: process.version, platform: process.platform };
@@ -751,6 +781,8 @@ export async function runCheckRun(
       gap: null,
     };
   }
+  const afterExecution = await freshness();
+  if (afterExecution !== null) return afterExecution;
   // The commit carries the pins this run measured under — revision,
   // candidate snapshot/head resolved at preflight. The decide re-verifies
   // them under the lock: a rollout redeclared during the awaited

@@ -1,6 +1,6 @@
 # Draft workflow E2E review — NOT CONFIRMED
 
-Derived from supplied guide §11 .
+This checklist follows the repository's E2E criteria and procedure.
 For basic-* scenarios, the coordinator uses this checklist and the checked-in
 outcome check without a prelaunch confirmer. Other scenarios require Human or an
 independent reviewer to confirm the checklist and job-specific check before launch.
@@ -38,4 +38,5 @@ For a branch selected by the assignment, include its specific evidence: independ
 review candidate/report; sealed design and Lead reconciliation; dependency ownership
 and integration; heartbeat owner/creation/wake/deletion receipts; or recovery mandate,
 old-owner settlement and replacement handback. Mark unexercised branches NOT_RUN.
-The [guide coverage matrix](reports/guide-coverage.md) traces policy text, not E2E outcomes.
+The [candidate contract](contract.md) owns policy load paths and behavior.
+Source inspection of those paths does not establish E2E outcomes.

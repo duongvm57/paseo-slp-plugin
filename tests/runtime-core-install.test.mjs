@@ -40,12 +40,6 @@ test('installed native TS core runs CLI adapters without node_modules or plugin 
   assert.deepEqual(routes.tokenConflicts.map(row => row.id), ['security-review']);
   assert.equal(existsSync(join(destination, 'src/routing-vocabulary.mjs')), false);
   mkdirSync(join(home, 'slp-runtime/state'), { recursive: true });
-  writeFileSync(join(home, 'slp-runtime/state/work-tracker.json'), json({ schemaVersion: 1, tracker: 'beads', enabled: true }));
-  const tracker = JSON.parse(execFileSync(process.execPath, [slp, 'tracker', repo, '--paseo-home', home], {
-    encoding: 'utf8', env: { ...process.env, PATH: '/no-fixture-bd' },
-  }));
-  assert.equal(tracker.enabled, true);
-  assert.equal(tracker.state, 'unavailable');
   writeFileSync(join(home, 'slp-runtime/state/jev.json'), json({ schemaVersion: 1, enabled: false }));
   const jev = JSON.parse(execFileSync(process.execPath, ['--input-type=module', '-e',
     "import { readJevConfig, sanitizeRemoteText } from './plugin/server/runtime/cli/jev.ts'; console.log(JSON.stringify({config: readJevConfig(process.argv[1]), text: sanitizeRemoteText('ordinary brief')}));",

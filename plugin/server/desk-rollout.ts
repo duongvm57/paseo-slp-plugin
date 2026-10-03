@@ -14,8 +14,9 @@
 // refinement. Nothing auto-promotes: `checks-passed`/`promote` are gated
 // on durable passed-run evidence for every required check pinned to the
 // declaration's candidate; `promote` is additionally gated on the scope's
-// standing approved review round (every required axis discharged) bound
-// to the exact candidate pin and current scope revision; `start-canary`
+// standing approved review round (every required legacy axis or named lens
+// discharged, unless the pinned plan is explicitly exempt) bound to the
+// exact candidate, current scope and operative-brief revisions; `start-canary`
 // pins a bounded membership
 // snapshot (owner + seats, sorted+unique, digest-recomputable);
 // `canary-passed`/`promote` are gated on that cohort still describing the
@@ -42,6 +43,7 @@ import {
   type RolloutStateValue,
 } from "../shared/enforcement.ts";
 import {
+  effectiveOwner,
   LEDGER_LIMITS,
   assignmentStructuralRevision,
   type AssignmentValue,
@@ -52,9 +54,10 @@ import {
   type MembershipValue,
   type RolloutTransitionValue,
   type RolloutValue,
-  type ScopeTransitionValue,
 } from "./desk-store.ts";
-import { approvedScopeRound } from "./desk-scope.ts";
+import { currentScopeReviewQualification } from "./desk-scope.ts";
+import { deskWorkflowParticipant } from "./desk-ownership.ts";
+import { assignmentCurrentBriefRevision } from "./desk-assignment.ts";
 import { isRejection, readLedger, repoEnvelope, type DeskRunnerDeps, type RunnerCtx } from "./desk-runner.ts";
 import { canonicalJson, sha256Hex } from "./config-view.ts";
 import {
@@ -127,7 +130,7 @@ function requireOwnedOpenAssignment(
     ownerMismatch: reject(
       "ACTOR_MISMATCH",
       "only the assignment's receiving owner may administer its rollouts",
-      "the registering lead's agentId is bound into the row — a peer, another lead, or a supervisor cannot move rollout state",
+      "the current owner's exact agent and membership are bound — another participant cannot move rollout state",
     ),
     closed: reject(
       "ROLLOUT_CONFLICT",
@@ -154,13 +157,25 @@ function transitionStream(ledger: Readonly<LedgerValue>, assignmentId: string, r
 }
 
 /** The membership snapshot a canary binds: the assignment's durable
- *  roster (owner + seats), sorted and de-duplicated, pinned to the
- *  structural revision the snapshot was taken at. The digest recomputes
- *  canonically — the same roster always digests identically. */
-function cohortSnapshot(assignment: AssignmentValue): { members: string[]; digest: string; assignmentRevision: number } {
-  const members = [...new Set([assignment.ownerAgentId, ...assignment.seats.map(seat => seat.agentId)])].sort();
+ *  roster (current effective owner + seats), sorted and de-duplicated,
+ *  pinned to the structural revision the snapshot was taken at. The
+ *  digest recomputes canonically — the same roster always digests
+ *  identically. At ownership revision 0 the recipe stays the legacy
+ *  {members, assignmentRevision} so a migrated or pre-succession pin
+ *  keeps its validity; any accepted succession changes ownershipRevision
+ *  and the digest recipe, so the pinned cohort drifts even when the
+ *  member list is unchanged. */
+function cohortSnapshot(
+  ledger: Readonly<LedgerValue>,
+  assignment: AssignmentValue,
+): { members: string[]; digest: string; assignmentRevision: number; ownershipRevision: number } {
+  const owner = effectiveOwner(ledger, assignment);
+  const members = [...new Set([owner.agentId, ...assignment.seats.map(seat => seat.agentId)])].sort();
   const assignmentRevision = assignmentStructuralRevision(assignment);
-  return { members, digest: sha256Hex(canonicalJson({ members, assignmentRevision })), assignmentRevision };
+  const digest = owner.ownershipRevision === 0
+    ? sha256Hex(canonicalJson({ members, assignmentRevision }))
+    : sha256Hex(canonicalJson({ members, assignmentRevision, ownershipRevision: owner.ownershipRevision }));
+  return { members, digest, assignmentRevision, ownershipRevision: owner.ownershipRevision };
 }
 
 /** The cohort the stream's latest start-canary pinned, or null. */
@@ -404,7 +419,7 @@ export function decideDeskRollout(ledger: Readonly<LedgerValue>, command: Record
     // The cohort is the server-derived membership snapshot — bounded by
     // the LEDGER cap, sorted+unique, digest-recomputable. A roster that
     // cannot fit the bound cannot be cohort-ed.
-    const snapshot = cohortSnapshot(assignment);
+    const snapshot = cohortSnapshot(ledger, assignment);
     if (snapshot.members.length > LEDGER_LIMITS.cohortMembers) {
       return reject(
         "INVALID_RECORD",
@@ -412,7 +427,12 @@ export function decideDeskRollout(ledger: Readonly<LedgerValue>, command: Record
         "the canary cohort is bounded; the assignment's roster must fit the bound",
       );
     }
-    cohort = { members: snapshot.members, digest: snapshot.digest, assignmentRevision: snapshot.assignmentRevision };
+    cohort = {
+      members: snapshot.members,
+      digest: snapshot.digest,
+      assignmentRevision: snapshot.assignmentRevision,
+      ...(snapshot.ownershipRevision > 0 ? { ownershipRevision: snapshot.ownershipRevision } : {}),
+    };
   } else if (cmd.transition === "rollback") {
     if (cmd.targetSnapshot === null) {
       return reject(
@@ -473,9 +493,9 @@ export function decideDeskRollout(ledger: Readonly<LedgerValue>, command: Record
 
   // The review gate — promote additionally requires the scope's durable
   // approval in force: a review round bound to the declaration's exact
-  // candidate pin and the scope's latest declaration revision, which
-  // discharged every required axis (Spec + Standards) before the owner's
-  // approve edge. A passed check run or an already-promoted row is not
+  // candidate pin, current scope and operative-brief revisions, which
+  // discharged the pinned legacy axes or named lenses (or an explicit
+  // exemption) before the owner's approve edge. A passed check run or an already-promoted row is not
   // review evidence; a foreign-scope, foreign-candidate or superseded
   // approval never discharges this gate.
   if ((ROLLOUT_REVIEW_GATED_COMMANDS as readonly string[]).includes(cmd.transition)) {
@@ -490,15 +510,20 @@ export function decideDeskRollout(ledger: Readonly<LedgerValue>, command: Record
         "the declaration binds a durable scope — inspect the desk under maintenance authority",
       );
     }
-    const scopeTransitions: ScopeTransitionValue[] = ledger.scopeTransitions
-      .filter(t => t.assignmentId === cmd.assignmentId && t.scopeId === latestDeclaration.scopeId)
-      .sort((a, b) => a.revision - b.revision);
-    const approved = approvedScopeRound(scopeTransitions);
+    const operativeBriefRevision = assignmentCurrentBriefRevision(ledger, cmd.assignmentId);
+    if (latestScope.briefRevision !== operativeBriefRevision) {
+      return reject(
+        "REVIEW_INCOMPLETE",
+        `the scope declaration pins brief revision ${latestScope.briefRevision} but the operative brief is ${operativeBriefRevision}`,
+        "redeclare the scope against the current brief and submit a fresh review round before promotion",
+      );
+    }
+    const approved = currentScopeReviewQualification(ledger, assignment, latestDeclaration.scopeId).standingApproval;
     if (approved === null) {
       return reject(
         "REVIEW_INCOMPLETE",
         `promote requires the scope's standing approved review round on ${latestDeclaration.scopeId}`,
-        "a bound reviewer seat records Spec and Standards observations, then the owner approves — nothing else discharges the gate",
+        "a bound reviewer seat records the pinned legacy axes or named lenses, or the pinned authority plan expressly exempts review, then the owner approves",
       );
     }
     if (approved.scopeRevision !== latestScope.revision) {
@@ -518,6 +543,8 @@ export function decideDeskRollout(ledger: Readonly<LedgerValue>, command: Record
         "the review must cover the exact candidate the rollout promotes — re-submit for review under the pinned candidate",
       );
     }
+    // Qualification above shares current pins and independence with scope
+    // gates and read views; the historical discharge itself stays intact.
     dischargedReviews = approved.discharged;
   }
 
@@ -532,7 +559,7 @@ export function decideDeskRollout(ledger: Readonly<LedgerValue>, command: Record
       // after start-canary — but keep the refusal typed.
       return reject("COHORT_DRIFT", "no canary cohort is pinned on this rollout", "start-canary binds the cohort the gate measures");
     }
-    const current = cohortSnapshot(assignment);
+    const current = cohortSnapshot(ledger, assignment);
     if (current.digest !== pinned.digest) {
       return reject(
         "COHORT_DRIFT",
@@ -569,6 +596,8 @@ export function decideDeskRollout(ledger: Readonly<LedgerValue>, command: Record
       payload: {
         assignmentId: cmd.assignmentId,
         rolloutId: cmd.rolloutId,
+        transitionId: row.transitionId,
+        rolloutRevision: row.rolloutRevision,
         command: cmd.transition,
         from,
         to: edge.to,
@@ -638,9 +667,9 @@ export function seatRolloutsView(
   let defsTruncated = 0;
   let runsTruncated = 0;
   for (const assignment of ledger.assignments) {
-    const owner = assignment.ownerAgentId === row.agentId;
-    const attached = assignment.seats.some(seat => seat.agentId === row.agentId);
-    if (!owner && !attached) continue;
+    const participant = deskWorkflowParticipant(ledger, row, assignment);
+    if (participant === null) continue;
+    const owner = participant !== "attached-seat";
     // Check definitions: owner sees all; a seat sees definitions of scopes
     // it is bound to plus unbound scopes (same visibility rule as scopes).
     const defs = new Map<string, CheckDefinitionValue>();
