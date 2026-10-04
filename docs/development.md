@@ -20,8 +20,21 @@ requires `tmpdir()` to resolve to `/tmp`; local runs here use that default.
 
 Local checks cover the manager's transaction/recovery logic, the
 materializer, launch-shim generation, config preservation, protocol and the
-stdio adapter, native desk history, selected review, owner continuity and
-bounded workspace reads. These checks do not prove live role compliance.
+stdio adapter, native desk history, selected review, owner continuity,
+bounded workspace reads and supervised task execution. Task fixtures exercise
+the real Core, durable store, membership hooks, socket bridge and temporary
+Git repositories, including a dependency diamond and integration conflicts.
+Recovery fixtures also exercise issued-create ticket minting, interrupted
+verification and per-resource cleanup, exact replay and capacity boundaries.
+SDK effects remain fixtures; these checks do not prove live delivery, process
+quiescence or role compliance. See [task execution](task-execution.md) for the
+operational limits.
+
+Native task adapters are checked against the published SDK 0.10 contracts;
+installation compatibility with an older daemon does not establish its execution
+capabilities. Installed dependency checks and extracted-target typechecks are
+reported separately.
+
 An earlier candidate was additionally verified live on a real Paseo 0.8.0 daemon:
 Git-source install, management surface, activate/deactivate/reconcile RPCs,
 provider/profile patching, collision and drift refusals, and recovery

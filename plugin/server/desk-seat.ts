@@ -24,24 +24,63 @@ import type {
   PluginSessionOpenRequest,
 } from "@getpaseo/plugin/server";
 import type { AgentSessionConfig } from "@getpaseo/protocol/agent-types";
-import { canTransitionSeatBinding, WIRE_LIMITS, type DeskRejectionValue } from "../shared/enforcement.ts";
+import { canTransitionSeatBinding, WIRE_LIMITS, type DeskRejectionValue,
+  type DeskTaskActionEntryValue, type DeskTaskAttemptEntryValue, type DeskTaskDeclarationEntryValue } from "../shared/enforcement.ts";
 import { Family, OperationConflict, Sha, Time } from "../shared/contracts.ts";
-import { ROLES, type FamilyId } from "../shared/runtime/families.ts";
+import { familyFromProviderId, ROLES, type FamilyId } from "../shared/runtime/families.ts";
 import {
   LEDGER_LIMITS,
   createDeskStore,
+  effectiveOwner,
   repoKeyFor,
   type DeskStore,
   type LedgerValue,
   type MembershipValue,
+  type AssignmentValue,
   type TransactResult,
 } from "./desk-store.ts";
-import { sha256Hex } from "./config-view.ts";
+import { canonicalJson, canonicalSha256, sha256Hex } from "./config-view.ts";
 
 type PluginCreateRequest = {
   config: AgentSessionConfig;
   env?: Record<string, string>;
 };
+
+/** Ephemeral plugin-only ticket and the exact bounded config projection that
+ *  SDK 0.10 exposes to the native before-hook. Raw request IDs, labels,
+ *  parentage, workspace and keys are deliberately unavailable here. */
+export interface DeskSeatTaskCreateTicketContext {
+  ticket: string;
+  config: {
+    provider: string;
+    model: string | null;
+    cwd: string;
+    modeId: string | null;
+    thinkingOptionId: string | null;
+    featureValues: Record<string, unknown> | null;
+  };
+}
+
+const DeskSeatTaskCreateTicketContextSchema = z.object({
+  ticket: z.string().regex(/^[0-9a-f]{64}$/),
+  config: z.object({
+    provider: z.string().min(1).max(WIRE_LIMITS.providerLen),
+    model: z.string().min(1).max(WIRE_LIMITS.providerLen).nullable(),
+    cwd: z.string().min(1).max(WIRE_LIMITS.createCwdLen).refine(isAbsolute),
+    modeId: z.string().min(1).max(WIRE_LIMITS.providerLen).nullable(),
+    thinkingOptionId: z.string().min(1).max(WIRE_LIMITS.providerLen).nullable(),
+    featureValues: z.record(z.string().min(1).max(256), z.unknown()).nullable(),
+  }).strict(),
+}).strict().superRefine((value, ctx) => {
+  try {
+    if (Buffer.byteLength(canonicalJson(value), "utf8") > 64 * 1024) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "task ticket/config context exceeds its bounded byte size" });
+    }
+  } catch {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: "task ticket/config context is not canonical JSON" });
+  }
+});
+
 type CreatedEvent = PluginLifecycleEvents["agent.created"];
 type ArchivedEvent = PluginLifecycleEvents["agent.archived"];
 
@@ -61,6 +100,7 @@ export interface FieldRule {
 
 /** The desk env key — the only key the handshake reads or writes. */
 export const DESK_HANDLE_KEY = "SLP_DESK_HANDLE";
+export const DESK_TASK_CREATE_TICKET_KEY = "SLP_TASK_CREATE_TICKET";
 
 /** The §2.1 table, verbatim. `mint.config` ↔ AgentSessionConfig,
  *  `mint` ↔ the create request, `bind` ↔ PluginSessionOpenRequest,
@@ -245,6 +285,7 @@ const SeatMintCommand = z
     family: Family,
     role: z.enum(ROLES),
     createCwd: z.string().min(1).max(LEDGER_LIMITS.pathLen),
+    taskCreateTicketSha256: Sha.optional(),
   })
   .strict();
 const SeatBindCommand = z
@@ -286,6 +327,7 @@ const SeatCommand = z.discriminatedUnion("kind", [
 type SeatCommandValue = z.infer<typeof SeatCommand>;
 type SeatDecideOk = { ok: true; events: { kind: string; payload: Record<string, unknown> }[]; memberships?: MembershipValue[] };
 type SeatDecideOutcome = SeatDecideOk | DeskRejectionValue;
+type DeskSeatTaskMintDecisionContext = { repoKey: string; taskCreateTicketContext: DeskSeatTaskCreateTicketContext };
 
 function seatRejection(code: DeskRejectionValue["code"], message: string, recovery: string): DeskRejectionValue {
   return { ok: false, code, message: message.slice(0, 300), recovery: recovery.slice(0, 200) };
@@ -293,6 +335,102 @@ function seatRejection(code: DeskRejectionValue["code"], message: string, recove
 
 function firstIssue(error: z.ZodError): string {
   return error.issues[0]?.message ?? "unknown issue";
+}
+
+function validateTaskMembershipClaim(
+  ledger: Readonly<LedgerValue>, command: Extract<SeatCommandValue, { kind: "seat.mint" }>,
+  decisionContext: DeskSeatTaskMintDecisionContext | undefined,
+): NonNullable<MembershipValue["capacityClaim"]> | DeskRejectionValue {
+  const deny = () => seatRejection("ACTOR_MISMATCH", "task create ticket does not match one current issued create", "retain the reserved credit; only the exact current owner/runtime/placement ticket may mint its seat");
+  if (command.taskCreateTicketSha256 === undefined || decisionContext === undefined) return deny();
+  const contextParsed = DeskSeatTaskCreateTicketContextSchema.safeParse(decisionContext.taskCreateTicketContext);
+  if (!contextParsed.success || command.taskCreateTicketSha256 !== sha256Hex(contextParsed.data.ticket)) return deny();
+  const context = contextParsed.data;
+  const observedConfig = context.config;
+  if (command.provider !== observedConfig.provider || command.createCwd !== observedConfig.cwd ||
+      familyFromProviderId(observedConfig.provider) !== command.family) return deny();
+  const roleSuffix = /-(supervisor|lead|peer)$/.exec(observedConfig.provider)?.[1];
+  const markerRole = observedConfig.featureValues?.["slp_role"];
+  const expectedRole = roleSuffix ?? (typeof markerRole === "string" && ROLES.includes(markerRole as typeof ROLES[number]) ? markerRole : null);
+  if (expectedRole !== command.role) return deny();
+
+  const latestCreates = new Map<string, DeskTaskActionEntryValue>();
+  for (const row of ledger.taskEntries) {
+    if (row.kind !== "action" || row.actionKind !== "create" || row.body?.createTicketSha256 !== command.taskCreateTicketSha256) continue;
+    const prior = latestCreates.get(row.actionId);
+    if (prior === undefined || prior.revision < row.revision) latestCreates.set(row.actionId, row);
+  }
+  const actionMatches = [...latestCreates.values()];
+  if (actionMatches.length !== 1 || actionMatches[0]!.state !== "issued") return deny();
+  const action = actionMatches[0]!;
+  const body = action.body;
+  if (body === null || action.attemptId === null || action.taskId === null) return deny();
+  const attemptId = action.attemptId;
+  const taskId = action.taskId;
+  const assignmentId = action.assignmentId;
+  const assignment = ledger.assignments.find(row => row.assignmentId === assignmentId);
+  if (assignment === undefined || assignment.state !== "open") return deny();
+  const owner = effectiveOwner(ledger, assignment);
+  const ownerMembership = ledger.memberships.find(row => row.membershipId === owner.membershipId);
+  if (ownerMembership === undefined || ownerMembership.agentId !== owner.agentId || ownerMembership.role !== "lead" ||
+      ownerMembership.registeredAt === null || ownerMembership.revokedAt !== null) return deny();
+  const task = ledger.taskEntries.filter((row): row is DeskTaskDeclarationEntryValue => row.kind === "task" &&
+    row.assignmentId === assignmentId && row.taskId === taskId)
+    .sort((a, b) => b.revision - a.revision)[0];
+  const attempt = ledger.taskEntries.filter((row): row is DeskTaskAttemptEntryValue => row.kind === "attempt" &&
+    row.assignmentId === assignmentId && row.attemptId === attemptId)
+    .sort((a, b) => b.revision - a.revision)[0];
+  if (task === undefined || attempt === undefined ||
+      task.revision !== attempt.taskRevision || task.state === "withdrawn" || attempt.state !== "reserved" || attempt.member !== null ||
+      attempt.ownerAgentId !== owner.agentId || attempt.ownerMembershipId !== owner.membershipId ||
+      attempt.ownershipRevision !== owner.ownershipRevision || task.actorAgentId !== owner.agentId || task.actorMembershipId !== owner.membershipId) return deny();
+  const currentBriefRevision = ledger.briefRevisions.filter(row => row.assignmentId === assignmentId)
+    .reduce((revision, row) => Math.max(revision, row.revision), 0);
+  if (attempt.briefRevision !== currentBriefRevision || task.briefRevision !== currentBriefRevision) return deny();
+  const liveCreates = ledger.taskEntries.filter((row): row is DeskTaskActionEntryValue => row.kind === "action" && row.actionKind === "create" &&
+    row.attemptId === attempt.attemptId).reduce((latest, row) => {
+      const prior = latest.get(row.actionId);
+      if (prior === undefined || prior.revision < row.revision) latest.set(row.actionId, row);
+      return latest;
+    }, new Map<string, DeskTaskActionEntryValue>());
+  const currentIssued = [...liveCreates.values()].filter(row => row.state === "issued");
+  const bodyLabels = body.labels;
+  const bodyPlacement = body.placement;
+  if (action.actionKind !== "create" || action.state !== "issued" || action.phase !== null || action.attemptId !== attempt.attemptId ||
+      action.taskId !== task.taskId || action.callerAgentId !== owner.agentId || action.actorAgentId !== owner.agentId ||
+      action.actorMembershipId !== owner.membershipId || action.ownershipRevision !== owner.ownershipRevision ||
+      action.briefRevision !== currentBriefRevision || currentIssued.length !== 1 || currentIssued[0]!.actionId !== action.actionId ||
+      body.createTicketSha256 !== command.taskCreateTicketSha256 || !/^[0-9a-f]{64}$/.test(String(body.publicRequestSha256 ?? "")) ||
+      typeof body.publicRequestId !== "string" || body.publicRequestId.length === 0 || body.publicRequestId.length > WIRE_LIMITS.deskRequestId ||
+      typeof body.hostRequestId !== "string" || body.hostRequestId.length === 0 || body.hostRequestId.length > WIRE_LIMITS.deskRequestId ||
+      typeof body.idempotencyKey !== "string" || body.idempotencyKey.length === 0 || body.parent !== owner.agentId ||
+      body.grantRef !== task.grants.create ||
+      observedConfig.cwd !== attempt.placement.cwd || observedConfig.provider !== attempt.seatPin.provider ||
+      observedConfig.model !== (attempt.seatPin.model ?? null) || observedConfig.modeId !== (attempt.seatPin.modeId ?? null) ||
+      observedConfig.thinkingOptionId !== (attempt.seatPin.thinkingOptionId ?? null) ||
+      canonicalSha256(observedConfig.featureValues) !== canonicalSha256(attempt.seatPin.features ?? null) ||
+      canonicalSha256(body.seat) !== canonicalSha256(attempt.seatPin) || canonicalSha256(body.runtime) !== canonicalSha256(attempt.runtime) ||
+      !isRecordValue(bodyLabels) || bodyLabels["slp.repo"] !== decisionContext.repoKey || bodyLabels["slp.assignment"] !== assignmentId ||
+      bodyLabels["slp.task"] !== task.taskId || bodyLabels["slp.attempt"] !== attempt.attemptId || Object.hasOwn(bodyLabels, "slp.create-action") ||
+      !isRecordValue(bodyPlacement) || bodyPlacement.cwd !== attempt.placement.cwd || bodyPlacement.kind !== attempt.placement.kind ||
+      bodyPlacement.workspaceId !== attempt.placement.workspaceId && Object.hasOwn(bodyPlacement, "workspaceId")) return deny();
+  if (ledger.memberships.some(row => row.capacityClaim?.createActionId === action.actionId)) return deny();
+  return {
+    version: 2,
+    basis: "create-ticket",
+    attemptId: attempt.attemptId,
+    createActionId: action.actionId,
+    createIssueRef: { entryId: action.entryId, entrySha256: action.entrySha256 },
+    ticketSha256: command.taskCreateTicketSha256!,
+    hostRequestId: body.hostRequestId,
+    idempotencyKeySha256: sha256Hex(body.idempotencyKey),
+    intendedBodySha256: action.bodySha256!,
+    observedConfigSha256: canonicalSha256(observedConfig),
+  };
+}
+
+function isRecordValue(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 /** The P2-c state set — no P2-c path targets `attached`/`active` (§3). */
@@ -362,6 +500,7 @@ function seatOk(swept: { table: MembershipValue[]; changed: boolean; events: { k
 export function decideSeatCommand(
   ledger: Readonly<LedgerValue>,
   rawCommand: Record<string, unknown>,
+  taskMintContext?: DeskSeatTaskMintDecisionContext,
 ): SeatDecideOk | DeskRejectionValue {
   const parsed = SeatCommand.safeParse(rawCommand);
   if (!parsed.success) {
@@ -371,6 +510,12 @@ export function decideSeatCommand(
   const swept = sweepExpired(ledger.memberships, cmd.at);
 
   if (cmd.kind === "seat.mint") {
+    let capacityClaim: NonNullable<MembershipValue["capacityClaim"]> | null = null;
+    if (cmd.taskCreateTicketSha256 !== undefined || taskMintContext !== undefined) {
+      const checked = validateTaskMembershipClaim(ledger, cmd, taskMintContext);
+      if ("ok" in checked) return checked;
+      capacityClaim = checked;
+    }
     if (swept.table.length >= LEDGER_LIMITS.memberships) {
       return seatRejection(
         "INVALID_RECORD",
@@ -407,10 +552,14 @@ export function decideSeatCommand(
       registeredAt: null,
       revokedAt: null,
       revokeReason: null,
+      ...(capacityClaim === null ? {} : { capacityClaim }),
     };
     return {
       ok: true,
-      events: [...swept.events, { kind: "seat-minted", payload: { membershipId: cmd.membershipId } }],
+      events: [...swept.events, { kind: "seat-minted", payload: {
+        membershipId: cmd.membershipId,
+        ...(capacityClaim === null ? {} : { capacityClaimSha256: canonicalSha256(capacityClaim) }),
+      } }],
       memberships: [...swept.table, row],
     };
   }
@@ -533,6 +682,7 @@ export interface DeskSeat {
     role: string;
     cwd: string | undefined;
     env: Record<string, string>;
+    taskCreateTicketContext?: DeskSeatTaskCreateTicketContext;
   }): Promise<{ handle: string } | null>;
   deskBind(input: {
     agentId: string;
@@ -620,12 +770,14 @@ export function createDeskSeat(deps: DeskSeatDeps): DeskSeat {
   async function transactFor(
     gitCommonDir: string,
     command: Record<string, unknown>,
+    taskCreateTicketContext?: DeskSeatTaskCreateTicketContext,
   ): Promise<
     | { timedOut: true }
     | { failed: true; error: unknown }
     | { timedOut: false; value: TransactResult | OperationConflict }
   > {
     const repo = { hostId: "local", gitCommonDir };
+    const repoKey = repoKeyFor(repo);
     const envelope = {
       repo,
       actorKey: DESK_SEAT_ACTOR,
@@ -633,7 +785,10 @@ export function createDeskSeat(deps: DeskSeatDeps): DeskSeat {
       requestId: uuid(),
       command,
     };
-    return withBudget(store().transact(repoKeyFor(repo), envelope, decideSeatCommand));
+    const decide = taskCreateTicketContext === undefined
+      ? decideSeatCommand
+      : (ledger: Readonly<LedgerValue>, raw: Record<string, unknown>) => decideSeatCommand(ledger, raw, { repoKey, taskCreateTicketContext });
+    return withBudget(store().transact(repoKey, envelope, decide));
   }
 
   async function deskMint(input: {
@@ -642,11 +797,21 @@ export function createDeskSeat(deps: DeskSeatDeps): DeskSeat {
     role: string;
     cwd: string | undefined;
     env: Record<string, string>;
+    taskCreateTicketContext?: DeskSeatTaskCreateTicketContext;
   }): Promise<{ handle: string } | null> {
     const op: DeskSeatOp = "mint";
     try {
       // JOIN (mint.env): a present handle key is a collision — never mint.
       if (input.env[DESK_HANDLE_KEY] !== undefined) return diagnose(op, "env-collision");
+      const envTicket = input.env[DESK_TASK_CREATE_TICKET_KEY];
+      if ((envTicket === undefined) !== (input.taskCreateTicketContext === undefined)) return diagnose(op, "rejected");
+      let taskCreateTicketContext: DeskSeatTaskCreateTicketContext | undefined;
+      if (input.taskCreateTicketContext !== undefined) {
+        const parsed = DeskSeatTaskCreateTicketContextSchema.safeParse(input.taskCreateTicketContext);
+        if (!parsed.success || envTicket !== parsed.data.ticket || parsed.data.config.provider !== input.provider ||
+            parsed.data.config.cwd !== input.cwd || input.cwd === undefined) return diagnose(op, "rejected");
+        taskCreateTicketContext = parsed.data;
+      }
       const resolved = resolveDeskRepo(input.cwd, io);
       if (!("repo" in resolved)) return diagnose(op, resolved.diagnostic);
       const handle = (deps.randomHandle ?? defaultRandomHandle)();
@@ -659,8 +824,9 @@ export function createDeskSeat(deps: DeskSeatDeps): DeskSeat {
         family: input.family,
         role: input.role,
         createCwd: resolved.repo.cwdReal,
+        ...(taskCreateTicketContext === undefined ? {} : { taskCreateTicketSha256: sha256Hex(taskCreateTicketContext.ticket) }),
       };
-      const settled = await transactFor(resolved.repo.gitCommonDir, command);
+      const settled = await transactFor(resolved.repo.gitCommonDir, command, taskCreateTicketContext);
       if ("failed" in settled) return diagnose(op, diagnosticForError(settled.error));
       if (settled.timedOut) return diagnose(op, "store-timeout");
       const result = settled.value;

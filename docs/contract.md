@@ -19,7 +19,7 @@ and dependency locks are supporting artifacts, not additional runtime owners.
 | plugin/shared/contracts.ts | Strict RPC, receipt, intent and persisted-view schemas plus erased module interfaces used by the server, client and verification adapters. |
 | plugin/shared/supervision.ts | Supervision store migrations, role predicates, effective routes, bounded communication evidence/findings and RPC schemas. |
 | plugin/shared/workflow-view.ts, plugin/server/workflow-view.ts | Read-only Human RPC with strict bounded pages. Bind the selected fresh SDK workspace to the verified served-home repository, report capability/state gaps, and reuse the desk projection without accepting client filesystem paths or adding mutation authority. |
-| plugin/client/workflow-panel.tsx | Workspace work panel: current brief, decision/ownership/review/evidence pages, omission counts and fresh reads; target lifetime and request sequence reject stale host/workspace completions. |
+| plugin/client/workflow-panel.tsx | Workspace work panel: current brief, decision/ownership/review/evidence and task pages, full-ledger queue counts, omission counts and fresh reads; target lifetime and request sequence reject stale host/workspace completions. |
 | plugin/shared/archetypes.ts, plugin/shared/snapshot-catalog.ts | Package seat presets derived from the routing vocabulary, and UI catalog snapshot projections. |
 | plugin/client/ManagerSurface.tsx, plugin/client/manager-state.ts | Displayed host/target, operation start/recovery/polling and bounded status; pure routing/pool form construction and comparisons stay in manager-state. |
 | plugin/client/target-async.ts | Displayed-target async generation and load lifecycle, including effect replay and stale-result guards; cards retain their own reset, dirty-form and CAS policies. |
@@ -35,7 +35,7 @@ and dependency locks are supporting artifacts, not additional runtime owners.
 | plugin/server/launchers.ts | Immutable launcher publication and verification, node/family binding, gate-vs-shim manifests and path ancestry. Owns launch-set integrity and collision decisions. |
 | plugin/server/publication-files.ts | Shared asynchronous private-directory, exclusive-write, staging-path and durability mechanics for candidate/launcher publication; domain verification and recovery stay with their callers. |
 | plugin/server/executables.ts | Verified ordinary Node and family executable resolution, daemon PATH aliases and forbidden-prefix/symlink rules. |
-| plugin/server/role-injection.ts | Bind agent.create to the verified installed candidate's role bundle and runtime helpers, applying transport-specific instruction/environment overlays and minting desk membership through its assigned seam. |
+| plugin/server/role-injection.ts | Bind agent.create to the verified installed candidate's role bundle and runtime helpers, applying transport-specific instruction/environment overlays and minting desk membership through its assigned seam. Task-ticket creates require the exact validated claim and strip the carrier before native execution; ordinary hook behavior is preserved. |
 | plugin/server/supervision/state.ts | Served-home supervision file location, schema migration view and the single CAS writer shared by the card and bell. |
 | plugin/server/supervision/capture.ts, plugin/server/supervision/assessment.ts | Fixture-backed per-family brief/handback/send capture, provenance gates, strict Jev rubric/link parsing and independent communication findings. Neither reads an assignment pointer file. |
 | plugin/server/supervision/observer.ts, plugin/server/supervision/delivery.ts | Lifecycle capture, serialized case/assessment queue and bounded metadata rings; route/recipient revalidation, durable mark-before-send attempts and no uncertain retry. |
@@ -61,6 +61,7 @@ and dependency locks are supporting artifacts, not additional runtime owners.
 | src/references/provider-routing.md | Supervisor/Lead profile selection, Peer pool selection, validation and handoff; conditional pointer to Jev routing procedure. |
 | src/references/jev-routing.md | Conditional Jev routing procedure: load only for `shadow`, `armed` or `error`; `error` blocks the dependent branch. |
 | src/references/review-gates.md | Selected independent mandates for material questions and Human/protocol requirements, with explicit no-trigger and authorized waiver decisions; Lead-owned verification distinct from review seats, neutral briefs, visible disagreement, task-specific stop conditions and premise escalation. Explicit protocol obligations remain binding. |
+| src/references/task-execution.md | Conditional native task procedure: declarations, supervised dispatch, current result judgments, integration grants/proof and retained delivery/resource obligations. Scope remains the moving write/review owner. |
 | plugin/server/runtime/cli/report-records.ts | Report-block extraction, JSON schema, exact-fence semantic rendering and filesystem evidence adapter for the shared v1 validator. Referenced reads use the verifier's `--repo` when supplied, otherwise record-declared candidate roots. |
 | plugin/server/runtime/cli/candidate-verify.ts | Read-only handback-claim verifier (P1 `verifyHandback`): measures a report's `slp-record` claims against the caller-pinned `--repo` root — never the record-declared root — via bounded double-capture `snapshot()`/`git status` probes (`--no-optional-locks`, timeout/byte-cap), contract/artifact pin hashing, seat observation over `<paseoHome>/agents/` daemon files, and a runtime measurement comparing `identity(packageRoot).sha256` against the optional `--expect-runtime` candidate hash (`report-only` when absent). Emits the `slp-verify-handback` JSON view with closed comparison/reason enums and a completeness ledger; the one-time capability preflight is the only `CAPABILITY_GAP` source, everything after it is `IO_FAILURE`, and the view is evidence — never acceptance, quiescence or a command re-run. |
 | plugin/server/runtime/cli/routing.ts | Resolve the repository catalog, falling back to the plugin-owned user-scope pool at `<paseoHome>/slp-runtime/state/peer-pool.json` when absent; bind a Lead-selected option with fresh hash and availability checks. `optionExclusions` is the single eligibility predicate — closed-vocabulary tokens (`disabled`, `availability:<state>`, `role-not-listed`) shared by enforcement and Jev candidate generation. `validateCatalog` stays shape-only apart from normalizing the legacy `optionIds` quota-fallback list in place on read (≤1 → `optionId`, >1 fails closed — wave 6) and refusing the Jev decline sentinel as an option id — a shape-level collision; the semantic layer reports a reserved standard-seat id whose tokens diverge from the package set as a Token conflict on every read, and `catalogBinding` refuses to bind one. `catalogBinding` verifies a supplied Jev receipt offline — including the vocabulary version it was issued under — and requires one when the daemon arms `jev.capabilities.routing`. |
@@ -89,7 +90,7 @@ and dependency locks are supporting artifacts, not additional runtime owners.
 | plugin/server/capabilities.ts | Curated capability evidence with source pins, closed statuses and explicit gaps. Static compatibility proves interfaces; live delivery requires live-probe evidence. Provider presence never establishes capability. |
 | plugin/server/runtime-pin.ts | Read-only runtime binding verification against the served home's receipt, target and published payload integrity. Emits a canonical pin digest or a closed not-bound reason; faults remain typed faults. |
 | plugin/server/enforcement.ts, plugin/server/limitations.ts | Read-only `readView` for installation state, capability evidence and membership projection. Reads bounded `repos/*/ledger.json` under the verified served home, emits `SeatBindingView` rows for memberships carrying an `agentId`, and accounts elisions in the completeness ledger. `limitations.ts` owns the shared limitation literals. The unused P0 `dispatch` placeholder is retired; desk mutations enter through `desk-bridge.ts` and the feature runners. |
-| plugin/server/desk-store.ts, plugin/server/kept-files.ts | Durable desk store kernel (ledger v8): header-first absent/ok/corrupt/future/unsafe reads, in-memory v1→v2→v3→v4→v5→v6→v7→v8 migrations and `schema-migrated` on the first successful post-bump commit. Per-repo `O_EXCL` locks plus an in-process mutex protect idempotent `transact` replay keyed by canonical `bodySha256` of `{repo, command}`. Decide outputs replace complete tables; the store checks schemas, cross-table identities, ownership at committed event time and full-chain refinements while features own command semantics. Immutable hash-chained event segments precede the `ledger.json` rename commit point; the ledger byte cap rejects before either write. Live holders yield `CAPABILITY_GAP`, dead/unknown holders `RECOVERY_REQUIRED`; operator-only unlink belongs to recovery. Imports the canonical namespace layout from `runtime/desk-paths.ts`; `kept-files.ts` supplies policy-aware directory guards and re-exports the shared syscall primitives. |
+| plugin/server/desk-store.ts, plugin/server/kept-files.ts | Durable desk store kernel (ledger v9): header-first absent/ok/corrupt/future/unsafe reads, in-memory v1→v2→v3→v4→v5→v6→v7→v8→v9 migrations and `schema-migrated` on the first successful post-bump commit. Per-repo `O_EXCL` locks plus an in-process mutex protect idempotent `transact` replay keyed by canonical `bodySha256` of `{repo, command}`. Decide outputs replace complete tables; the store checks schemas, cross-table identities, ownership at committed event time and full-chain refinements while features own command semantics. Immutable hash-chained event segments precede the `ledger.json` rename commit point; ledger bounds and task recovery headroom reject before either write. Live holders yield `CAPABILITY_GAP`, dead/unknown holders `RECOVERY_REQUIRED`; operator-only unlink belongs to recovery. Imports the canonical namespace layout from `runtime/desk-paths.ts`; `kept-files.ts` supplies policy-aware directory guards and re-exports the shared syscall primitives. |
 | plugin/server/runtime/report-records.ts | Canonical typed v1 validator and frozen record vocabulary, with optional purpose-specific semantic reports; evidence and realpath are injected capabilities. No schema or host dependencies. CLI and desk facades use this implementation directly. |
 | plugin/server/runtime/lock-holder.ts | One interpretation of desk/bridge/recover-lock holder bytes and process-probe outcomes. Callers retain waiting, re-entry, release, audit and recovery authority. |
 | plugin/server/runtime/desk-recovery.ts | Canonical operator recovery state machine, sync CLI driver, async plugin driver and strict output projection. Two checkpoints preserve race barriers; thrown/rejected hooks re-enter the generator so recover-lock cleanup runs. |
@@ -106,10 +107,14 @@ and dependency locks are supporting artifacts, not additional runtime owners.
 | plugin/server/desk-command.ts | Pure command invariants shared by handback, settlement, scope, check and rollout: deterministic tuple-derived ids, live registered membership, lead role and owned open assignment guards. Features retain their command schemas, state machines and rejection diagnostics. |
 | plugin/server/desk-runner.ts | Shared store dependency, bound caller context, fresh ledger reads and strict repo envelope projection. Capture, export verification and check execution dependencies belong to the feature runners that use them. |
 | plugin/server/desk-assignment.ts | Owner-only immutable brief/decision commands, revision CAS and assignment-local digest lineage. One pure, closed workflow projection supplies both the membership-guarded agent reader and the verified Human RPC. |
+| plugin/server/desk-task.ts, plugin/server/desk-task-history.ts | Native task commands and internal effect admission over the additive v9 taskEntries stream. Shared current readiness/result qualification, immutable event-time authority, exact dependency evidence and recovery accounting; no SDK effects or second writer engine. |
+| plugin/server/desk-task-capacity.ts | Pure post-state reserve for remaining task requests, records, memberships, assignment seats, scope transitions, events and serialized bytes. The store applies the same reserve to every commit; issued effects and finite cleanup cycles retain their unconsumed credits. |
+| plugin/server/desk-task-execution.ts, plugin/server/desk-task-execution-host.ts, plugin/server/desk-task-execution-git.ts | Lead-invoked task dispatch, positive-identity observation/reconciliation and controlled integration through Core admission. Bounded SDK/argv/Git/filesystem seams, exact base/result maps, three-way preservation, isolated stage/check and explicit retained proof/cleanup. No automatic retry, commit, push or deployment. |
+| plugin/server/desk-task-services.ts, plugin/server/desk-task-access.ts, plugin/server/desk-task-host.ts, plugin/server/desk-task-runtime.ts | Production assembly: verified repository checkout roots and private per-repository IO, bounded connected SDK waits, installed-candidate measurement and fresh pool/Jev runtime resolution. Timeout preserves effect uncertainty; a supplied path cannot expand authority to a foreign repository. |
 | plugin/server/desk-ownership.ts | Planned same-assignment offer/accept commands, exact live membership and revision checks, immutable receipt replay, participant reads and shared current reviewer exclusions. Current/historical owner resolution remains in the store kernel; acknowledgment transfers responsibility without cleanup, project acceptance or host lifecycle operations. |
 | plugin/server/runtime/report-semantics.ts, plugin/server/runtime/handoff-recap.ts | Dependency-free optional semantic report validation/rendering and explicit-source handoff recap. Preserve v1 envelope and original fence bytes; distinguish supplied claims from fresh measurements and expose missing context without lifecycle operations. |
 | scripts/review-copy.mjs | Development-only pinned candidate copy for independent writable probes, outside the checkout and install unit. Preserve ordinary snapshot identity, reject unsupported nested/gitlink candidates, and leave cleanup with the caller. |
-| plugin/server/desk-seat.ts | The P2-c seat binding handshake (env-only): `DESK_FIELD_POLICY` is the §2.1 field × phase table as data (the single field policy; `ExactKeys` pins every branch two-way to its SDK source type, with compiler-API negative controls), `decideSeatCommand` applies the bounded TTL sweep and the `seat.mint`/`seat.bind`/`seat.register`/`seat.revoke` commands (guards against `BINDING_TRANSITIONS` with explicit P2-c targets, `INVALID_RECORD` + `MEMBERSHIPS_FULL_PREFIX`/`HANDLE_COLLISION_PREFIX` for a full table or handle collision, bounded sweep `ttlSweepPerCommit`, one event per row change, payloads never carry the handle), and `createDeskSeat` exposes the four fail-open seams (`deskMint`/`deskBind`/`deskRegister`/`deskRevoke`) with the §4.2 one-error-one-code repo resolution, the `hookDeskTransactMs` budget (unref'd timer, handlers attached before the race), and one bounded `console.warn` per failure. The raw handle never reaches the ledger, events, or diagnostics. |
+| plugin/server/desk-seat.ts | The P2-c seat binding handshake (env-only): `DESK_FIELD_POLICY` is the §2.1 field × phase table as data (the single field policy; `ExactKeys` pins every branch two-way to its SDK source type, with compiler-API negative controls), `decideSeatCommand` applies the bounded TTL sweep and the `seat.mint`/`seat.bind`/`seat.register`/`seat.revoke` commands (guards against `BINDING_TRANSITIONS` with explicit P2-c targets, `INVALID_RECORD` + `MEMBERSHIPS_FULL_PREFIX`/`HANDLE_COLLISION_PREFIX` for a full table or handle collision, bounded sweep `ttlSweepPerCommit`, one event per row change, payloads never carry the handle), and `createDeskSeat` exposes the four fail-open seams (`deskMint`/`deskBind`/`deskRegister`/`deskRevoke`) with the §4.2 one-error-one-code repo resolution, the `hookDeskTransactMs` budget (unref'd timer, handlers attached before the race), and one bounded `console.warn` per failure. The task-create path supplies an ephemeral ticket/config context for one atomic versioned capacity claim; the role hook refuses native creation when that required claim fails. The raw ticket and handle never reach the ledger, events, or diagnostics. |
 | plugin/server/desk-bridge.ts, bin/slp-desk-mcp.mjs | The P2-d desk MCP bridge transport: the packaged binary is a byte-blind stdio↔UDS NDJSON relay (262144-byte raw-line cap in both directions, `REQUEST_TOO_LARGE`/`RESPONSE_TOO_LARGE` typed rejections, one bounded reconnect, Windows `CAPABILITY_GAP`, no TCP). The plugin-side adapter resolves the verified stable root through the launch set (`launchers.verify` — manifest `daemonHome`/candidate ancestry, independent of `PASEO_HOME`), takes one `O_EXCL` lifecycle lock under the reserved repo namespace (`deskBridgePaths` — live foreign holders get a bounded wait then `CAPABILITY_GAP: desk-busy`; dead/unreadable holders are `RECOVERY_REQUIRED`, never stolen), binds `state/enforcement/desk.sock` at `0600`, and serves the pinned handshake (`slp-desk-bridge/1` hello = handle + self-reported `bridgeSha256` checked against the launch-set pin). The catalog is one source: visible `slp_status` (caller-scoped membership + assignment/handback/settlement/scope projection), `slp_handback_submit` and the lead-only `slp_assignment_register`/`slp_assignment_attach`/`slp_assignment_close` (P3-a), current-owner `slp_assignment_amend`/`slp_decision_append`, planned `slp_assignment_offer`/`slp_assignment_accept`, and exact-participant `slp_workflow_get`, `slp_settlement_record`/`slp_settlement_export` (P3-b), and `slp_scope_declare`/`slp_scope_transition`/`slp_scope_review` (P4 — durable assignment-bound scope declarations, an explicit `declared→claimed→submitted-for-review→review-observed→approved/rejected→advanced/closed` machine with server-derived required-review gates from the pinned declaration (explicit legacy `spec`+`standards` compatibility, or a declared named-lens, no-trigger or authorized exemption decision), and self-review prohibited), `slp_check_declare`/`slp_check_run`/`slp_rollout_declare`/`slp_rollout_transition` (P5 — allowlisted check definitions, bounded repo-scoped runs, and the explicit rollout machine with server-derived check/cohort gates), plus a hidden mechanism entry that always rejects direct dispatch — `slp_recover_lock` and any live-deployment verb are deliberately absent. Schema-bound handlers preserve each parsed input type through execution; catalog names require an implementation at typecheck. Every dispatch re-runs the five guards (handle→membership sha, fresh row+epoch, live SDK identity, `plugin-rpc.dispatch` capability row, strict input) and fails closed; a `recovery-required` or `degraded` desk rejects mutation while read-only status still answers — a ledger that no longer reads returns the handshake-bound row with `desk.state` `degraded` and explicit limitations, never fabricated data, and the status aggregate stays inside `WIRE_LIMITS` (counting markers for elided projection, `DeskBridgeToolEntry` caps enforced on every catalog row at construction). `agent.create` graft adds `mcpServers.slp_desk` (stdio, `command` = binding node, `args` = runtime bridge path, env = handle + socket) only when the earlier role-injection hook minted a handle; a foreign `slp_desk` entry or an integrity mismatch (pin/payload/actual diverge) preserves the request untouched. |
 | plugin/server/desk-handback.ts, plugin/server/desk-records.ts | The P3-a structured handback surface behind the bridge catalog: a pure command layer (`assignment.register`/`attach`/`close` — lead-membership-only, `authorityRef` stored verbatim as a pointer, deterministic `asg-`/`hb-`/`cand-` ids derived inside decide so replay names the same row; `handback.submit` → `handback.observe` two-commit flow where the seat's `recordV1` is stored verbatim as `claimed`, observed.status `pending`, and the bound-runtime snapshot capture (60s/32MiB subprocess against the membership's `createCwd`, never a record-declared path) joins only `observed`/`gaps` — a failed capture commits with a `gaps` entry, never a rejection). `desk-records.ts` re-exports the shared `runtime/report-records.ts` validator (identical `{code, field, message}` issues, `readEvidence`/`realpath` behind injection seams — without them `outputRef` reports unreadable instead of dereferencing a claimed path). Caller-scoped `seatAssignmentsView` feeds `slp_status` with identifiers and shas only. Recorded gap: `human-register-rpc` — root/operator-side assignment registration (the §4.4 Human-RPC) is not surfaced yet; bindings are created only by a bound lead membership via `slp_assignment_register`. |
 | plugin/server/desk-settlement.ts | Receiving-owner settlement attestations bound to durable assignment and seat identities. Recording verifies claimed timeline exports through the authorized artifact seam; read-only export re-derives and validates the committed v1 record for its two parties. Rows preserve gaps and provenance; acceptance and the official settlement sink remain outside the desk. |
@@ -588,6 +593,121 @@ recipient acknowledgment unverified. No host lifecycle action is added.
 Usage and detailed obligations are in [work coordination](work-coordination.md)
 and its [spec](spec/work-coordination.md). The proof-copy harness belongs to
 repository verification and stays outside installed bytes.
+
+## Native task execution
+
+Ledger v9 adds one strict append-only `taskEntries` union for task declarations,
+attempts, results, adjudications, holds, actions, delivery, resources and control.
+Legacy migration adds an empty stream without inventing work or receipts.
+Commands bind exact live membership, current ownership, brief and entity pins;
+effect phases also retain their request-bound admission lineage. Every read
+reverifies the full event chain and task history. Caller pointers remain claims.
+
+Tasks represent outcomes and prerequisite availability; existing scopes remain
+the only moving write/review owner. Current shared resolvers supply both gates
+and read views. Result usability needs explicit current owner adjudication,
+applicable review/check/proof and consumed dependency revisions; a captured
+handback or an approved scope alone is insufficient. Artifact bytes and code
+availability are measured in the consumer's actual checkout or intended Git
+base. A later reopened prerequisite invalidates dependent eligibility without
+erasing the original attempt's consumed pins or resource obligations.
+
+The ten `slp_task_*` tools ride the existing guarded MCP bridge. Dispatch and
+integration are explicit owner-invoked phases, not a scheduler. Reservation,
+resource account and durable intent precede each external effect; SDK/Git
+effects remain outside the ledger transaction. Bootstrap supplies no work
+prompt. Exact registered worker identity, runtime/parent/workspace/placement
+evidence and atomic assignment attachment plus scope declare/claim precede
+writable delivery. Each uncertain effect retains its identity and obligations;
+historical receipt replay never authorizes another create, send or apply.
+
+Managed create carries one opaque ticket through the SDK's supported config/env
+hook projection. The create intent stores its digest; the mint transaction
+validates it against exactly one current issued action and records a versioned
+capacity claim. Intended create metadata and observed hook configuration remain
+separate evidence. The ticket is stripped before native execution; actual worker
+identity and reserved labels must still match before bind/send. A lost ticket or
+raw desk handle leaves a retained gap, without secret regeneration or a second
+create. Ordinary seat creation retains its existing behavior.
+
+Delayed registration leaves send pending without a write or host effect.
+Explicit reconciliation verifies the already-observed create identity and exact
+registered worker before atomic bind/claim; the owner reads fresh revisions
+before sending. Task steering retains each live attempt's original pinned
+reservation even when the current task declaration narrows its scope.
+
+Integration pins source base/result and actual target, confines the delta to
+granted paths, preserves unrelated dirty work using three-way comparison and
+checks a separately staged combined candidate before apply. Owner-pinned named
+bounded argv recipes are immutable proof-policy evidence; callers select IDs,
+not late arbitrary commands. Drift, unsupported measurements or missing proof
+blocks landing. Final target measurements remain distinct from project
+acceptance. Referenced proof maps survive separately admitted stage/backup
+cleanup. No automatic installation, commit, push or deployment is added.
+
+The internal landing recovery plan is pinned once before backup/apply and is
+immutable across later phases. It binds original/expected complete target maps,
+backup manifest integrity and every admitted resource path. Lost receipts are
+reconciled against exact target content and identity: only verified full apply
+establishes a landed pin; partial or unknown recovery keeps obligations and the
+target reservation. Cleanup cannot discharge an unverified or partially applied
+land. Backup blobs have injective keys independent of source path/kind and
+retain pinned content, byte size and original permissions for integrity checks.
+
+Discharge first issues a verification-only account, then a separate removal
+permit for each resource. Stage-only provenance is distinct from land recovery.
+Complete before-inventories and account artifacts remain outside removable
+directories. A locked readonly preflight verifies source/result evidence, target
+identity, registration and all survivors before each resource issue; absence is
+allowed only under an exact previously issued permit for that resource. Stage
+failure stops the sequence before backup issuance. Partial cleanup reconciliation
+records authorized destructive progress, not causal attribution, current backup
+integrity or a new landed pin. All admitted resources must be positively
+accounted for before the target fence releases.
+
+For a worktree pointer lost under an earlier exact issued permit, the current
+issued removal recipe may exclusively restore the original regular `.git`
+leaf inside the owned stage. Fresh account/source/target/survivor and pinned
+admin-registration checks precede it; derived bytes, length and mode must match
+the verified inventory. Restoration refuses existing leaves, locks and foreign registration.
+The adapter then uses the existing Git remove operation. No admin directory or
+sibling worktree is repaired; a crash preserves the same finite-cycle account.
+
+One fresh public discharge admits one verification or removal cycle. Each
+account/resource has two total cycles; an owner, request or phase change cannot
+reset them. Current public CAS/grant and immutable source controls remain
+separate. The status-free internal trigger is persisted alongside Core-derived
+observation; its original replay precedes artifact payload or observer access.
+Transient account bytes never enter the command hash, ledger or read projection.
+
+Stop denies new effect issuance but proves no host turn cancellation. Archive,
+revocation, idle, turn end and a single absence observation alone cannot release
+a writer/process reservation. Explicit revision-bound owner rulings and matching
+server disposition evidence govern release; missing quiescence remains retained.
+Internal task cancellation can close the exact old attempt-bound scope under
+the current owner and brief only after supported effect/delivery/resource
+settlement. Its distinct event records cancellation and grants no approval.
+Ordinary scope closure retains its existing gates. Task result qualification
+may reuse the exact ordinary terminal approved round while all current proof
+and independence pins still hold; canceled or formerly approved rounds do not
+qualify by history alone.
+Planned succession carries outstanding task/action/delivery/resource records,
+without reparenting or changing host report routes. No-offer cold takeover and
+an authenticated Human RPC principal remain unsupported.
+
+The sixth workflow section carries full-ledger task counts and per-entity
+current markers alongside full shared readiness/result qualification and
+current ruling. Historical rows remain readable. Recap is an authorized tasks
+page with the same revision, ownership and continuation pins, counted omissions
+and global counts; a partial history page does not manufacture complete context.
+The existing 50-row page, bounded history and 65536-byte Human/recap budgets
+drop only complete records; a single oversized record returns `VIEW_TOO_LARGE`.
+Admission preserves bounded recovery headroom across requests, task records,
+membership/assignment seats, scopes/transitions, events and serialized bytes.
+The pure reserve is computed on every commit's post-state, including legacy
+commands and recorded rejections, and consumes credits only as the corresponding
+edges commit. It does not prune history or increase the queue's limits.
+Details and operating limits are in [native task execution](task-execution.md).
 
 ## Handoff and snapshots
 

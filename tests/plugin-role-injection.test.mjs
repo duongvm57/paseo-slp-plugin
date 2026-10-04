@@ -12,7 +12,7 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync 
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { join } from 'node:path';
 import { createRoleInjection } from '../plugin/server/role-injection.ts';
-import { DESK_FIELD_POLICY } from '../plugin/server/desk-seat.ts';
+import { DESK_FIELD_POLICY, DESK_TASK_CREATE_TICKET_KEY } from '../plugin/server/desk-seat.ts';
 import { desiredProviderEntries } from '../plugin/server/config-transaction.ts';
 import { createMaterializer } from '../plugin/server/materializer.ts';
 import { embeddedPayload } from '../plugin/server/generated/runtime-payload.ts';
@@ -298,6 +298,21 @@ test('agent.create: foreign providers and bare family ids pass through', async t
     const out = await injection.agentCreate(createReq(provider));
     assert.equal(out, undefined, `${provider} must pass through`);
   }
+});
+
+test('agent.create: task ticket carriers fail closed before foreign-provider passthrough or native create', async t => {
+  const { injection } = makeInjection(t);
+  const ticket = 'f'.repeat(64);
+  const foreign = { request: { config: { provider: 'custom-tool', cwd: '/work' }, env: { [DESK_TASK_CREATE_TICKET_KEY]: ticket } } };
+  await assert.rejects(injection.agentCreate(foreign), /unsupported for this native provider/);
+  assert.equal(await injection.agentCreate(createReq('custom-tool')), undefined, 'no-ticket ordinary pass-through stays unchanged');
+  await assert.rejects(injection.agentCreate({ request: { config: { provider: 'custom-tool', cwd: '/work' },
+    env: { [DESK_TASK_CREATE_TICKET_KEY]: 'bad' } } }), /ticket hook context is invalid/);
+  await assert.rejects(injection.agentCreate({ request: { config: { provider: 'slp-codex-peer', cwd: '/work' },
+    env: { [DESK_TASK_CREATE_TICKET_KEY]: ticket } } }), error => {
+    assert.equal(String(error.message).includes(ticket), false, 'ticket errors never echo the opaque secret');
+    return true;
+  });
 });
 
 test('agent.create: slp_role feature marker resolves the role on an un-suffixed slp-* id', async t => {

@@ -6,6 +6,7 @@ import type { HomeContext } from "./daemon-home.ts";
 import { createDeskStore, effectiveOwner, repoKeyFor } from "./desk-store.ts";
 import type { DeskStore } from "./desk-store.ts";
 import { projectDeskWorkflow } from "./desk-assignment.ts";
+import { taskQueueCounts } from "./desk-task.ts";
 import { GetWorkspaceWorkflowInput, GetWorkspaceWorkflowOutput } from "../shared/workflow-view.ts";
 import type { WorkspaceWorkflowResult } from "../shared/workflow-view.ts";
 import { MAX_RPC_BYTES, OperationConflict } from "../shared/contracts.ts";
@@ -166,7 +167,10 @@ export async function readWorkspaceWorkflow(input: unknown, paseo: WorkflowHostA
         objective: brief === undefined ? assignment.objective : brief.body.objective,
         briefRevision: brief?.revision ?? 0, state: assignment.state,
         ownerAgentId: owner.agentId, ownerMembershipId: owner.membershipId, ownershipRevision: owner.ownershipRevision,
-        workspaceId: assignment.workspaceId };
+        workspaceId: assignment.workspaceId,
+        // Core's queue counter — a migrated desk with zero task entries is a
+        // supported empty queue, not an unavailable one.
+        taskCounts: taskQueueCounts(ledger, assignment) };
       result.assignments.push(row);
       const next = offset + result.assignments.length;
       result.assignmentNextCursor = next < assignments.length ? { ledgerRevision: ledger.revision, offset: next } : null;

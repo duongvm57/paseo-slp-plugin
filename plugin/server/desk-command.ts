@@ -10,7 +10,7 @@ import { effectiveOwner } from "./desk-store.ts";
 /** Derive ids from canonical-JSON tuples, never bare concatenation (which
  *  aliases ["ab", "c"] and ["a", "bc"]). Stored ids keep their identity;
  *  response lookups use durable request fields rather than re-deriving ids. */
-export function deriveId(prefix: "asg" | "hb" | "cand" | "stl" | "scp" | "srv" | "stn" | "chk" | "run" | "rol" | "rtn" | "ofr" | "acc", parts: string[]): string {
+export function deriveId(prefix: "asg" | "hb" | "cand" | "stl" | "scp" | "srv" | "stn" | "chk" | "run" | "rol" | "rtn" | "ofr" | "acc" | "tsk" | "att" | "res" | "adj" | "hld" | "act" | "dlv" | "rsc" | "ctl" | "te", parts: string[]): string {
   return `${prefix}-${sha256Hex(canonicalJson(parts)).slice(0, 32)}`;
 }
 

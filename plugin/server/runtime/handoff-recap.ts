@@ -174,3 +174,152 @@ export function buildHandoffRecap(recapInputs: unknown, measuredCandidate: unkno
     warnings,
   };
 }
+
+// ---------------------------------------------------------------------------
+// Task queue recap — a pure wrapper over the authorized shared projection.
+// ---------------------------------------------------------------------------
+
+/** Minimal structural envelope required to keep this builder inside the
+ *  runtime install unit. The generic preserves the complete caller projection
+ *  and its exact queue-count type; the outside-runtime type-contract test
+ *  checks compatibility with the shared schemas. */
+type TaskRecapProjection = {
+  section: string;
+  items: readonly { kind: string }[];
+  taskCounts?: object;
+  omittedBefore: number;
+  omittedAfter: number;
+};
+
+type CurrentTaskRecapProjection<View extends TaskRecapProjection> = View & {
+  section: 'tasks';
+  taskCounts: NonNullable<View['taskCounts']>;
+};
+
+export type TaskRecapRowShape =
+  | { kind: 'task'; entryId: string; state: string }
+  | { kind: 'attempt'; entryId: string; state: string }
+  | { kind: 'result' | 'adjudication'; entryId: string }
+  | {
+    kind: 'hold';
+    entryId: string;
+    state: 'open' | 'ruled';
+    ruling: { outcome: 'release' | 'retain' | 'withdraw' } | null;
+  }
+  | { kind: 'action'; entryId: string; state: string }
+  | { kind: 'delivery'; entryId: string; state: string }
+  | { kind: 'resource'; entryId: string; disposition: string }
+  | { kind: 'control'; entryId: string; state: string };
+
+export type TaskRecapEntryShape = { kind: 'taskEntry'; current: boolean; row: TaskRecapRowShape };
+
+type TaskRecapOutput<View extends TaskRecapProjection> = {
+  ok: true;
+  contextStatus: 'complete' | 'partial';
+  view: CurrentTaskRecapProjection<View>;
+  counts: NonNullable<View['taskCounts']>;
+  unresolved: {
+    tasks: string[];
+    holds: string[];
+    resources: string[];
+    deliveries: string[];
+    effects: string[];
+    attempts: string[];
+    controls: string[];
+  };
+  gaps: string[];
+  warnings: string[];
+  acceptance: 'not-established-by-this-recap';
+};
+
+/**
+ * Wraps one already-authorized tasks-section projection for succession and
+ * review. The projection owns readiness, qualification, rulings, current-row
+ * identity, counts, pins, history and omission accounting. This function adds
+ * no second resolver and performs no ledger, filesystem, SDK or host reads.
+ */
+export function buildTaskRecap<View extends TaskRecapProjection>(view: View): TaskRecapOutput<View> {
+  if (view.section !== 'tasks') {
+    throw new TypeError('buildTaskRecap requires a tasks-section projection');
+  }
+  if (view.taskCounts === undefined) {
+    throw new TypeError('buildTaskRecap requires full-ledger task counts from the projection');
+  }
+  const taskView = view as CurrentTaskRecapProjection<View>;
+
+  const gaps: string[] = [];
+  const warnings = [
+    'Task rows, readiness, current result qualification, current ruling and queue counts are carried from the shared projection; this recap does not recompute them.',
+    'Queue counts cover current task identities across the full ledger. Unresolved ids include only current entity rows; superseded history remains in view.',
+    'Owner and membership data, evidence references, delivery states, host effects and resource dispositions remain ledger claims; this recap performs no host or filesystem reads.',
+    'Task rulings and integration receipts do not establish project acceptance. Resource settlement and recipient acknowledgment are not established by this recap.',
+  ];
+  const unresolved: TaskRecapOutput<View>['unresolved'] = {
+    tasks: [],
+    holds: [],
+    resources: [],
+    deliveries: [],
+    effects: [],
+    attempts: [],
+    controls: [],
+  };
+
+  for (const candidate of taskView.items) {
+    if (candidate.kind !== 'taskEntry') {
+      gaps.push('tasks-section-contained-non-task-entry');
+      continue;
+    }
+    const item = candidate as TaskRecapEntryShape;
+    if (!item.current) continue;
+
+    const row = item.row;
+    switch (row.kind) {
+      case 'task':
+        if (row.state === 'open' || row.state === 'reopened') unresolved.tasks.push(row.entryId);
+        break;
+      case 'attempt':
+        if (row.state !== 'settled' && row.state !== 'stopped') unresolved.attempts.push(row.entryId);
+        break;
+      case 'result':
+      case 'adjudication':
+        break;
+      case 'hold':
+        if (row.state === 'open' || row.ruling?.outcome === 'retain') unresolved.holds.push(row.entryId);
+        break;
+      case 'action':
+        if (row.state !== 'observed' && row.state !== 'failed' && row.state !== 'abandoned') {
+          unresolved.effects.push(row.entryId);
+        }
+        break;
+      case 'delivery':
+        if (row.state !== 'handled') unresolved.deliveries.push(row.entryId);
+        break;
+      case 'resource':
+        if (row.disposition !== 'released') unresolved.resources.push(row.entryId);
+        break;
+      case 'control':
+        if (row.state === 'stop-requested') unresolved.controls.push(row.entryId);
+        break;
+    }
+  }
+
+  const hasOmissions = taskView.omittedBefore > 0 || taskView.omittedAfter > 0;
+  if (hasOmissions) {
+    gaps.push('task-history-page-incomplete');
+    warnings.push('This recap carries one task-history page; omitted rows remain counted by view.omittedBefore and view.omittedAfter, not summarized.');
+  }
+  if (gaps.length > 0) {
+    warnings.push('The shared projection contains an incomplete task-page shape; consult gaps while the original rows remain available in view.');
+  }
+
+  return {
+    ok: true,
+    contextStatus: gaps.length > 0 ? 'partial' : 'complete',
+    view: taskView,
+    counts: taskView.taskCounts,
+    unresolved,
+    gaps,
+    warnings,
+    acceptance: 'not-established-by-this-recap',
+  };
+}

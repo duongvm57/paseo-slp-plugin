@@ -30,10 +30,14 @@ import { readRuntimePinView } from "./server/runtime-pin.ts";
 import { createDeskBridge } from "./server/desk-bridge.ts";
 import { getWorkspaceWorkflow } from "./shared/workflow-view.ts";
 import { readWorkspaceWorkflow } from "./server/workflow-view.ts";
+import type { TaskHostApi } from "./server/desk-task-execution-host.ts";
+import type { TaskRuntimeApi } from "./server/desk-task-runtime.ts";
 // Host note: this must stay a hoisted function declaration, not a const —
 // the daemon compiler's Hermes interop eagerly copies export values before
 // module bodies run, so `export default const` evaluates to undefined.
 export default function contribute(server: Parameters<PluginServerContribution>[0]): ReturnType<PluginServerContribution> {
+  let taskApi: (TaskHostApi & TaskRuntimeApi) | null = null;
+  const noteTaskApi = (paseo: (TaskHostApi & TaskRuntimeApi) | undefined) => { if (paseo !== undefined) taskApi = paseo; };
   const materializer = createMaterializer(embeddedPayload);
   const manager: Manager = createManager({
     payload: embeddedPayload,
@@ -46,7 +50,11 @@ export default function contribute(server: Parameters<PluginServerContribution>[
   server.handle(deactivate, (input, { paseo }) => manager.deactivate(input, paseo));
   server.handle(status, (input, { paseo }) => manager.status(input, paseo));
   server.handle(localTarget, () => detectDaemonHome());
-  server.handle(getWorkspaceWorkflow, (input, { paseo }) => readWorkspaceWorkflow(input, paseo));
+  server.handle(getWorkspaceWorkflow, (input, { paseo }) => {
+    noteTaskApi(paseo);
+    deskBridge.noteDispatch(paseo);
+    return readWorkspaceWorkflow(input, paseo);
+  });
   server.handle(catalog, (input, { paseo }) => loadCatalog(input, paseo));
   // Plugin-owned state files under slp-runtime/state — same class of
   // operation as jev: no journal, no mutex, no authority gate.
@@ -122,6 +130,7 @@ export default function contribute(server: Parameters<PluginServerContribution>[
     launchers: createLauncherBuilder(),
     payload: embeddedPayload,
     paseoRef: { current: null },
+    taskHost: () => taskApi,
   });
   void deskBridge.start();
   const enforcement = createEnforcement({
@@ -135,8 +144,9 @@ export default function contribute(server: Parameters<PluginServerContribution>[
     },
   });
   server.handle(enforcementStatus, (input, { paseo }) => {
-    // E-P2D-4: this is a REAL daemon→plugin RPC dispatch — the only call
-    // site allowed to record dispatch evidence (hook stashes never count).
+    // Only real daemon→plugin RPC handlers record dispatch evidence;
+    // lifecycle hook stashes never count as an RPC observation.
+    noteTaskApi(paseo);
     deskBridge.noteDispatch(paseo);
     return enforcement.readView(input, paseo);
   });
@@ -150,8 +160,8 @@ export default function contribute(server: Parameters<PluginServerContribution>[
   const runtimePinDeps = { journal, verifyPublished: materializer.verifyPublished };
   server.handle(enforcementRuntimePin, input => readRuntimePinView(input, runtimePinDeps));
   // Desk seat handshake (P2-c): one store per stable root, created lazily
-  // inside desk-seat on first use; the seams are fail-open and budgeted, so
-  // a desk failure never aborts a create or an open (Q3).
+  // inside desk-seat on first use. Ordinary hooks are fail-open and budgeted;
+  // an issued task ticket requires a validated mint before native creation.
   const deskSeat = createDeskSeat({
     stableRoot: join(realpathSync(detectDaemonHome().daemonHome), "slp-runtime"),
   });
@@ -164,7 +174,7 @@ export default function contribute(server: Parameters<PluginServerContribution>[
     verifyCandidate: binding =>
       materializer.verifyPublished(binding.runtimePath, binding.candidateSha256, binding.payloadSha256),
     // P2-c: mint at create (env handle after the seat.mint commit), bind at
-    // session_open (env echo). Both fail-open.
+    // session_open (env echo). Task-ticket validation fails closed at create.
     deskMint: deskSeat.deskMint,
     deskBind: deskSeat.deskBind,
   });
@@ -180,8 +190,24 @@ export default function contribute(server: Parameters<PluginServerContribution>[
   // graft sees request.env already carrying the minted SLP_DESK_HANDLE.
   // The session_open stash only supplies the connected SDK (no request
   // change — the host rejects non-env changes anyway).
-  const offBridgeGraft = server.before("agent.create", deskBridge.agentCreateGraft);
-  const offBridgeStash = server.before("agent.session_open", deskBridge.sessionOpenStash);
+  const offBridgeGraft = server.before("agent.create", (input, ctx) => {
+    noteTaskApi(ctx.paseo);
+    return deskBridge.agentCreateGraft(input, ctx);
+  });
+  const offBridgeStash = server.before("agent.session_open", (input, ctx) => {
+    noteTaskApi(ctx.paseo);
+    return deskBridge.sessionOpenStash(input, ctx);
+  });
+  const offTaskEnded = server.on("agent.turn_ended", (event, { paseo }) => {
+    noteTaskApi(paseo);
+    deskBridge.notePaseo(paseo);
+    return deskBridge.taskTurnEnded({
+      agentId: event.agent.id, ...(event.turnId === null ? {} : { turnId: event.turnId }), outcome: event.outcome.kind,
+      timeline: event.timeline.map(item => item.type === "user_message"
+        ? { type: item.type, messageId: item.messageId, clientMessageId: item.clientMessageId }
+        : { type: item.type }),
+    });
+  });
   // Observer lifecycle hooks — synchronous capture only; every async step
   // (refresh, Jev HTTP, ring write, notify delivery) runs on the observer's
   // own queue.
@@ -197,6 +223,7 @@ export default function contribute(server: Parameters<PluginServerContribution>[
     offBridgeStash();
     offDeskRegister();
     offDeskRevoke();
+    offTaskEnded();
     offCreated?.();
     offArchived?.();
     offStarted?.();

@@ -152,6 +152,10 @@ to the assignment and protocol; exhaustion leaves unresolved obligations visible
 and is not acceptance. Reconcile its resources at settlement;
 preserve sessions and artifacts, and perform lifecycle actions only under explicit
 authority. A continuing lane or Lead mandate does not keep a completed task open.
+For work tracked on the desk task queue, each outstanding attempt, hold,
+delivery obligation and resource is already a ledger entry: reconcile them by
+their recorded dispositions under references/task-execution.md — the entry
+stream is the checkpoint, not a summary of it.
 Human stop halts further work and follow-ups; cancel owned task agents as authorized
 by common policy, and stop the observer's own task-local wakes. Do not start a new
 cleanup agent after stop.

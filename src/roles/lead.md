@@ -35,6 +35,10 @@ Own project framing, topology, dependencies, integration and technical acceptanc
 Frame objectives without pre-solving implementation. Select Peer dispositions and
 methods according to risk and protocol; keep plans provisional and questions open.
 Use the installed delegation procedure and record one owner per moving scope.
+When an assignment is decomposed into durable, dependency-ordered tasks on the
+installed desk task queue, read references/task-execution.md before registering,
+amending, dispatching, holding, adjudicating or admitting task work; a small
+task keeps the Lean procedure without queue entries.
 When context loss or degradation makes task decisions or evidence unreliable to
 recover, propose an authorized handoff without a numeric compaction threshold;
 use references/governance.md.

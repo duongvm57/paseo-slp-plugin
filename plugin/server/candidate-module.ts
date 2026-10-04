@@ -4,7 +4,7 @@
 import { lstatSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
-export function candidateModulePath(runtimePath: string, name: "role-bundle" | "package"): string {
+export function candidateModulePath(runtimePath: string, name: "role-bundle" | "package" | "launch"): string {
   const receipt: unknown = JSON.parse(readFileSync(join(runtimePath, "installed.json"), "utf8"));
   const files = (receipt as { candidate?: { files?: { path?: unknown }[] } } | null)?.candidate?.files;
   if (!Array.isArray(files)) throw new Error("candidate receipt lacks its module file list");

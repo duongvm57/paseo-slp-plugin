@@ -15,8 +15,8 @@ Lead phối hợp các Peer độc lập, tích hợp công việc và trả ver
 Paseo bình thường, được nạp hướng dẫn role riêng với prompt công việc. Bạn giữ mục tiêu,
 trade-off quan trọng và quyền nghiệm thu cuối.
 
-Plugin còn cung cấp **desk của repository**: assignment bền vững, brief hiện hành, quyết định,
-scope đã khai báo, nghĩa vụ review được chọn, bằng chứng candidate/check và chuyển tiếp owner.
+Plugin còn cung cấp **desk của repository**: assignment bền vững, brief hiện hành, queue task
+native, scope đã khai báo, nghĩa vụ review được chọn, bằng chứng candidate/check và chuyển tiếp owner.
 Mở **Read SLP work** để xem công việc đã đăng ký mà không phải dựng lại từ lịch sử chat.
 
 ![Paseo SLP: mục tiêu và nghiệm thu của Human, Lead cùng Peer độc lập, Supervisor tùy chọn và desk bền vững cho công việc, review, proof và handoff](docs/images/slp-overview.svg)
@@ -28,7 +28,8 @@ Mở **Read SLP work** để xem công việc đã đăng ký mà không phải 
    Supervisor quan sát workflow và chuyển quyết định của bạn; nó đứng ngoài phần triển khai
    và nghiệm thu dự án.
 2. **Làm rõ ownership.** Lead định khung nghiệm thu, dependency và rủi ro, đăng ký công việc
-   vào desk khi dùng các tool của nó, rồi giao outcome có giới hạn. Mỗi phạm vi đang thay đổi
+   vào desk và tách mục tiêu lớn thành task. Dependency, attempt, phán xét output và nghĩa vụ
+   còn mở được giữ qua gián đoạn. Mỗi phạm vi đang thay đổi
    chỉ có một writer. Peer có thể phản biện premise, xin dependency hoặc báo blocked.
 3. **Chọn review theo công việc.** Lead chọn mandate độc lập cho câu hỏi quan trọng và yêu cầu
    của Human/protocol. Không cố định cặp hay số reviewer. Thay đổi scope, brief hoặc candidate
@@ -66,11 +67,12 @@ Lý do thiết kế nằm ở [docs/architecture.md](docs/architecture.md).
 | Giữ Peer pool để Lead chọn runtime cho từng Peer                                             | Binding Peer ngoài pool khi chạy `prepare`                                         | Ghi routing catalog của repository                               |
 | Kiểm tra tham số khởi chạy offline (`prepare`), báo lỗi theo từng bước có tên                | Provider inventory chưa được xác minh hoặc không tương thích được đưa vào `prepare` | Chạy daemon giám sát; `monitor` là một lượt quét do bạn gọi       |
 | Ghi assignment, brief, quyết định, scope, review được chọn và bằng chứng candidate/check      | Revision pin cũ, scope khai báo chồng lấn và review bắt buộc không đủ điều kiện      | Suy ra nghiệm thu từ handback, trạng thái agent hay check xanh     |
+| Giữ queue dependency native, thực hiện dispatch và tích hợp qua staging do Lead gọi | Prerequisite chưa được phán xét hoặc chưa có tại đích, retry effect chưa rõ kết quả và target drift | Tự động dispatch, retry, commit hay land khi không có người điều phối |
 | Hỗ trợ handoff owner có chuẩn bị và panel chỉ đọc trong workspace                            | Acknowledgment không khớp offer còn dùng được và revision pin hiện hành             | Chuyển quyền qua tin nhắn chat hay resource account               |
 | Cung cấp Jev routing và communication supervision tùy chọn                                   | Receipt routing Jev không qua được kiểm tra offline (hash, model, catalog)          | Bật dịch vụ ngoài khi bạn chưa cấu hình                            |
 
 Lựa chọn role đã lưu giới hạn provider Supervisor/Lead; cả bốn provider Peer vẫn được chọn qua
-pool. Provider của CLI chưa có sẵn bị vô hiệu hóa. Kiểm tra pool ở bảng trên thuộc về `prepare`.
+pool. Provider của CLI chưa có sẵn bị vô hiệu hóa. Kiểm tra pool áp dụng cho `prepare` và native task dispatch.
 Quy tắc role hướng dẫn cách agent làm việc; kiểm tra managed launch và desk áp dụng tại các
 interface tương ứng. Quyền truy cập repository và shell vẫn do Paseo cùng provider quyết định.
 
@@ -157,6 +159,16 @@ dependency đã khai báo, nhận xét review, cùng bằng chứng candidate/ch
 đọc trạng thái mới; dữ liệu thiếu hoặc cũ được hiển thị rõ. Panel không suy ra công việc từ chat
 hay nghiệm thu task thay bạn.
 
+Với mục tiêu lớn, tab **Tasks** hiển thị queue native, lý do readiness, attempt, phán xét
+result hiện hành và nghĩa vụ delivery/resource chưa giải quyết. Lead gọi dispatch rõ ràng:
+reserve trước, tạo worker chưa có work prompt, bind scope với membership đã đăng ký, rồi
+gửi việc. Dependency cần phán xét output còn hợp lệ và bằng chứng output có tại đích.
+Integration stage và kiểm tra candidate kết hợp trước khi áp dụng delta có giới hạn lên
+target; conflict và effect chưa rõ kết quả được giữ để reconciliation.
+Cleanup stage và backup cần từng bước được cấp quyền riêng, với số lần tiếp tục hữu hạn;
+resource chưa giải quyết vẫn giữ reservation của target.
+Xem [native task execution](docs/task-execution.md) để biết trình tự và giới hạn vận hành.
+
 Chuyển tiếp assignment giữ nguyên ID công việc và lịch sử: Lead hiện tại đề nghị một membership
 Lead cụ thể tiếp nhận, rồi Lead đó xác nhận trách nhiệm dưới kiểm tra revision. Panel tách owner
 và review còn dùng được khỏi nhận xét lịch sử, đồng thời phân biệt claim của handback/settlement
@@ -241,6 +253,7 @@ Tài liệu chi tiết viết bằng tiếng Anh.
 | [docs/cli.md](docs/cli.md)                       | Các lệnh `slp.mjs` offline: `prepare`, `routes`, `route-decide`, `monitor` và các lệnh khác |
 | [docs/work-coordination.md](docs/work-coordination.md) | Brief, quyết định, mandate review, report và panel workspace chỉ đọc |
 | [docs/work-continuity.md](docs/work-continuity.md) | Handoff owner có chuẩn bị, acknowledgment, quyền trong lịch sử và nghĩa vụ còn lại |
+| [docs/task-execution.md](docs/task-execution.md) | Queue native, dispatch có điều phối, proof dependency, tích hợp và reconciliation |
 | [docs/contract.md](docs/contract.md)             | Mỗi file sở hữu gì, trước khi bạn sửa nó                                        |
 | [docs/development.md](docs/development.md)       | Test, trạng thái xác minh và bộ E2E                                             |
 | [AGENTS.md](AGENTS.md)                           | Các quy tắc contributor và agent tuân theo trong repo này                       |

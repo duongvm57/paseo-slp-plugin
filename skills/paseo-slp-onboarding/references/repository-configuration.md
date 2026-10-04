@@ -7,7 +7,7 @@ assignment; these are not repo types or alternate workflow templates.
 |---|---|
 | Execution | Repo/base, remote, scopes, environments, writer/reviewer capacity and authority boundaries |
 | Delivery | Evidence, PR or execution report; destination, publication authority and completion point |
-| Work state | Existing assigned location |
+| Work state | Existing assigned location; the installed plugin's desk task queue when an assignment needs durable task decomposition — record it as the checkpoint pointer, no external tracker required |
 | Shared state | For applicable phases: executor, rehearsal, recovery and reconciliation |
 | Topology | One Lead selects recipes; split only for authority/capacity needs with a Human mandate |
 | Review selection | Material decision-changing questions and required Human/protocol obligations; explicit mandates or reasoned not-required selection; any waiver needs authority |

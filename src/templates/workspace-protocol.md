@@ -293,8 +293,11 @@ whole file.
 The repository harness owns external connectors/MCP, credentials, polling or
 heartbeat setup, and source-specific queue bookkeeping. This protocol consumes
 the resulting assignment; it does not prescribe a tracker integration or intake
-pipeline. If the assignment asks Supervisor to pull work, it uses those supplied
-tools within the grant and reports missing capabilities. Task ownership,
+pipeline. The desk task queue under `references/task-execution.md` — when the
+installed runtime provides it — is the native execution ledger, distinct from
+any external intake bookkeeping. If the assignment asks Supervisor to pull
+work, it uses those supplied tools within the grant and reports missing
+capabilities. Task ownership,
 review and delivery acceptance still follow the rules in this protocol.
 
 A lane is continuous responsibility, not an immortal session: when its context
@@ -321,7 +324,7 @@ workflow or creates a Lead type. All four recipes remain available by default.
 | Lead topology | One Lead handling the assigned work mix; split only for explicit authority or capacity needs under a Human-granted formation mandate |
 | Direct Lead write grant | None by default; the Human may record clear, reversible scope and proof/review bounds here, or grant a bounded write explicitly in an assignment |
 | Shared-state controls | Before a Transition phase: name executor, environment, rehearsal, backup/restore, window and reconciliation evidence |
-| Work state | Task source and durable checkpoint pointer: `<source and location, or none>` |
+| Work state | Task source and durable checkpoint pointer: the installed desk task queue (task-execution.md) when the runtime provides it and the assignment needs durable decomposition; otherwise `<source and location, or none>` |
 | Delivery and completion point | As each assignment states; the task completes when its assignment's stated outcome is accepted |
 
 ## Repository references

@@ -34,6 +34,7 @@ import { canonicalJson, canonicalSha256 } from "./config-view.ts";
 import { requireActor as requireDeskActor } from "./desk-command.ts";
 import { deskWorkflowParticipant } from "./desk-ownership.ts";
 import { currentScopeReviewQualification } from "./desk-scope.ts";
+import { taskQueueCounts, taskWorkflowItems } from "./desk-task.ts";
 import { isRejection, readLedger, repoEnvelope, type DeskRunnerDeps, type RunnerCtx } from "./desk-runner.ts";
 
 const ActorAgentId = z.string().min(1).max(WIRE_LIMITS.agentId);
@@ -218,9 +219,13 @@ function itemRevision(item: DeskWorkflowProjectionItemValue): number {
 }
 
 function itemKey(item: DeskWorkflowProjectionItemValue): string {
+  // Task entries key by the committed entryId — per-kind ids (scopeId,
+  // resultId, …) are nullable or shared across an entity's revisions and
+  // would collide stream items under one key.
+  if (item.kind === "taskEntry") return item.row.entryId;
   if ("row" in item) {
     const row = item.row as Record<string, unknown>;
-    return String(row.scopeId ?? row.decisionId ?? row.revision ?? row.candidateId ?? row.runId ?? row.checkId ?? row.offerId ?? row.acceptId ?? "");
+    return String(row.scopeId ?? row.decisionId ?? row.entryId ?? row.revision ?? row.candidateId ?? row.runId ?? row.checkId ?? row.offerId ?? row.acceptId ?? "");
   }
   if ("summary" in item) return "handbackId" in item.summary ? item.summary.handbackId : item.summary.settlementId;
   return `${item.scopeId}\0${item.reason}\0${item.candidateSnapshot}`;
@@ -385,6 +390,12 @@ export function projectDeskWorkflow(
           .map(row => ({ kind: "settlementSummary", summary: row } as const)),
       ];
       break;
+    case "tasks":
+      // One committed task entry becomes one item; Core's projection stamps
+      // readiness and result qualification from the same resolvers the gates
+      // use — this section never recomputes either.
+      items = taskWorkflowItems(ledger, assignment);
+      break;
   }
   items.sort((a, b) => itemRevision(a) - itemRevision(b) || itemKey(a).localeCompare(itemKey(b)) || a.kind.localeCompare(b.kind));
   if (items.length > WIRE_LIMITS.deskWorkflowHistory) return reject("INVALID_RECORD", "workflow history exceeds the bounded projection history", "the ledger is outside the supported history bound");
@@ -426,6 +437,7 @@ export function projectDeskWorkflow(
     },
     legacyObjective: current === undefined ? assignment.objective : null,
     section: input.section,
+    ...(input.section === "tasks" ? { taskCounts: taskQueueCounts(ledger, assignment) } : {}),
     items: selected,
     total: items.length,
     omittedBefore: offset,

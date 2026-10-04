@@ -150,7 +150,15 @@ export const WIRE_LIMITS = {
   deskDecisionText: 4096,
   deskDecisionOwners: 32,
   deskWorkflowPage: 50,
-  deskWorkflowSections: 5,
+  deskWorkflowSections: 6,
+  deskTaskEntries: 4096,
+  deskTaskEntryBytes: 32768,
+  deskTaskText: 32768,
+  deskTaskActions: 24,
+  deskTaskRecoveryRequests: 12,
+  deskTaskRecoveryEntries: 256,
+  deskTaskReconcileMarks: 16,
+  deskTaskRecoveryBytes: 65536,
   deskWorkflowHistory: 16384,
   deskPathSurface: 4096,
   deskResourceSurface: 512,
@@ -454,6 +462,22 @@ export const DeskErrorCode = z.enum([
   // A path component under the verified stable root is a symlink or not a
   // real directory — the host filesystem itself failed integrity.
   "RUNTIME_INTEGRITY",
+  // Task execution: a resolved runtime/seat no longer matches the durable
+  // routing pin (ROUTE_DRIFT) or is outside the current eligible pool
+  // (SEAT_INELIGIBLE); a control stop fences new effects (STOP_REQUESTED);
+  // an integration admission or phase is blocked by measured state
+  // (INTEGRATION_CONFLICT) or a shape this release cannot express
+  // (INTEGRATION_UNSUPPORTED).
+  "ROUTE_DRIFT",
+  "SEAT_INELIGIBLE",
+  "STOP_REQUESTED",
+  "INTEGRATION_CONFLICT",
+  "INTEGRATION_UNSUPPORTED",
+  // The effect's admission gate fails in the current ledger state — the
+  // runner reports it as a clean non-admission (perform:false), never an
+  // error and never a committed row.
+  "EFFECT_INADMISSIBLE",
+  "VIEW_TOO_LARGE",
 ]);
 
 export const DeskRejection = z.object({
@@ -762,7 +786,7 @@ export type DeskDecisionAppendInputValue = z.infer<typeof DeskDecisionAppendInpu
 export type DeskAssignmentAmendResultValue = z.infer<typeof DeskAssignmentAmendResult>;
 export type DeskDecisionAppendResultValue = z.infer<typeof DeskDecisionAppendResult>;
 
-export const DeskWorkflowSection = z.enum(["briefs", "decisions", "ownership", "reviews", "evidence"]);
+export const DeskWorkflowSection = z.enum(["briefs", "decisions", "ownership", "reviews", "evidence", "tasks"]);
 export type DeskWorkflowSectionValue = z.infer<typeof DeskWorkflowSection>;
 export const DeskWorkflowCursor = z.object({
   assignmentId: DeskEntityId,
@@ -1105,8 +1129,9 @@ export type ScopeReviewGatedCommand = (typeof SCOPE_REVIEW_GATED_COMMANDS)[numbe
 /** Legality lookup — one seam. Returns the edge or undefined. */
 export function scopeTransitionEdge(
   from: ScopeStateValue,
-  command: ScopeCommandValue,
-): ScopeTransitionEdge | undefined {
+  command: ScopeCommandValue | "task-cancel",
+): ScopeTransitionEdge | { from: ScopeStateValue; command: "task-cancel"; to: "closed" } | undefined {
+  if (command === "task-cancel" && from !== "closed") return { from, command, to: "closed" };
   return SCOPE_TRANSITIONS.find(edge => edge.from === from && edge.command === command);
 }
 
@@ -1931,6 +1956,1711 @@ export const enforcementRuntimePin = defineRpc({
 });
 
 // ---------------------------------------------------------------------------
+// Desk task execution — the additive v9 taskEntries union. Every row is an
+// immutable entity revision: a server stamp plus kind and flat bounded fields.
+// Intent bodies and receipts stay verbatim under entry byte caps; the decide
+// layer commits revisions under the same lock as every other desk domain.
+// ---------------------------------------------------------------------------
+
+export const DESK_TASK_REASON_CODES = [
+  "task-withdrawn",
+  "task-superseded",
+  "brief-changed",
+  "owner-changed",
+  "membership-stale",
+  "dependency-unruled",
+  "dependency-reopened",
+  "dependency-pin-changed",
+  "artifact-unavailable",
+  "target-availability-unverified",
+  "scope-unqualified",
+  "proof-policy-missing",
+  "proof-incomplete",
+  "question-open",
+  "finding-open",
+  "stop-requested",
+  "reservation-held",
+  "resource-unresolved",
+  "effect-uncertain",
+  "capacity-full",
+  "report-route-unverified",
+  "result-unruled",
+] as const;
+
+export const DeskTaskReasonCode = z.enum(DESK_TASK_REASON_CODES);
+export type DeskTaskReasonCodeValue = z.infer<typeof DeskTaskReasonCode>;
+
+export const DESK_TASK_ATTEMPT_STATES = [
+  "reserved",
+  "bound",
+  "dispatched",
+  "running",
+  "stop-requested",
+  "reconciliation-required",
+  "stopped",
+  "settled",
+] as const;
+export const DeskTaskAttemptState = z.enum(DESK_TASK_ATTEMPT_STATES);
+export type DeskTaskAttemptStateValue = z.infer<typeof DeskTaskAttemptState>;
+
+export const DESK_TASK_ACTION_STATES = [
+  "intended",
+  "issued",
+  "observed",
+  "uncertain",
+  "failed",
+  "held",
+  "abandoned",
+] as const;
+export const DeskTaskActionState = z.enum(DESK_TASK_ACTION_STATES);
+export type DeskTaskActionStateValue = z.infer<typeof DeskTaskActionState>;
+
+export const DeskTaskActionKind = z.enum(["place", "create", "send", "archive", "integration"]);
+export type DeskTaskActionKindValue = z.infer<typeof DeskTaskActionKind>;
+
+export const DeskTaskIntegrationPhase = z.enum(["stage", "check", "land", "reconcile", "discharge"]);
+export type DeskTaskIntegrationPhaseValue = z.infer<typeof DeskTaskIntegrationPhase>;
+
+export const DeskTaskPlacementKind = z.enum(["shared-checkout", "isolated"]);
+export type DeskTaskPlacementKindValue = z.infer<typeof DeskTaskPlacementKind>;
+
+export const DeskTaskDependencyAvailability = z.enum(["artifact", "integrated-code"]);
+export type DeskTaskDependencyAvailabilityValue = z.infer<typeof DeskTaskDependencyAvailability>;
+
+export const DeskTaskHoldKind = z.enum(["question", "decision", "finding", "manual"]);
+export type DeskTaskHoldKindValue = z.infer<typeof DeskTaskHoldKind>;
+
+export const DeskTaskDeliveryKind = z.enum(["dispatch", "rework", "brief", "handback"]);
+export type DeskTaskDeliveryKindValue = z.infer<typeof DeskTaskDeliveryKind>;
+
+export const DeskTaskResourceKind = z.enum([
+  "agent",
+  "workspace",
+  "worktree",
+  "process",
+  "target",
+  "scratch",
+  "artifact",
+  "membership",
+]);
+export type DeskTaskResourceKindValue = z.infer<typeof DeskTaskResourceKind>;
+
+export const DeskTaskObservationType = z.enum([
+  "placement",
+  "dependencies",
+  "artifacts",
+  "action",
+  "resources",
+]);
+export type DeskTaskObservationTypeValue = z.infer<typeof DeskTaskObservationType>;
+
+const DeskTaskAgentId = z.string().min(1).max(WIRE_LIMITS.agentId);
+const DeskTaskMemberId = z.string().uuid();
+const DeskTaskGitHead = z.string().regex(/^[0-9a-f]{40}$|^[0-9a-f]{64}$/);
+const DeskTaskPath = z.string().min(1).max(WIRE_LIMITS.deskPathSurface);
+const DeskTaskText = z.string().min(1).max(WIRE_LIMITS.deskTaskText);
+const DeskTaskJsonObject = z.record(z.string(), z.unknown());
+
+export const DeskTaskMeasurePin = z
+  .object({
+    snapshotSha256: Sha,
+    head: DeskTaskGitHead.nullable(),
+    root: z.string().min(1).max(WIRE_LIMITS.deskPathSurface),
+    kind: z.enum(["git-snapshot", "content-map", "git-reference"]),
+    measuredAt: Time,
+    incomplete: z.array(z.string().min(1).max(WIRE_LIMITS.deskPathSurface)).max(256),
+    /** Digest of the persisted measure bytes when the caller archived the
+     *  measure artifact — the pin alone is self-declaration; the byte pin
+     *  lets a reader verify the archived measure before trusting it. */
+    artifactSha256: Sha.nullable(),
+  })
+  .strict();
+export type DeskTaskMeasurePinValue = z.infer<typeof DeskTaskMeasurePin>;
+
+/** Internal immutable recovery provenance for one integration land.  The
+ *  adapter derives these contained paths and artifact pins from the admitted
+ *  source/target/stage measurements before the first backup/apply effect.
+ *  The owning action keeps this value across every later phase revision. */
+export const DeskTaskIntegrationRecoveryPlan = z.object({
+  version: z.literal(1),
+  stageDir: DeskTaskPath,
+  backupDir: DeskTaskPath,
+  manifestPath: DeskTaskPath,
+  targetOriginal: z.object({
+    path: DeskTaskPath,
+    artifactSha256: Sha,
+    bytes: z.number().int().min(0),
+    mapSha256: Sha,
+    head: DeskTaskGitHead.nullable(),
+  }).strict(),
+  expectedCombined: z.object({
+    path: DeskTaskPath,
+    artifactSha256: Sha,
+    bytes: z.number().int().min(0),
+    mapSha256: Sha,
+    head: DeskTaskGitHead.nullable(),
+  }).strict(),
+  backupManifest: z.object({
+    artifactSha256: Sha,
+    bytes: z.number().int().min(0),
+  }).strict(),
+}).strict();
+export type DeskTaskIntegrationRecoveryPlanValue = z.infer<typeof DeskTaskIntegrationRecoveryPlan>;
+
+const DeskTaskAbsolutePath = DeskTaskPath.refine(value => value.startsWith("/") || /^[A-Za-z]:[\\/]/.test(value), {
+  message: "path must be absolute",
+});
+const DeskTaskCleanupRelativePath = z.string().min(1).max(WIRE_LIMITS.deskPathSurface).refine(value =>
+  value === "." || (!value.startsWith("/") && !value.includes("\\") && !value.includes("\0") &&
+    value.split("/").every(part => part.length > 0 && part !== "." && part !== "..")),
+  { message: "inventory path must be normalized and relative" },
+);
+const DeskTaskCleanupMode = z.number().int().min(0).max(0o777);
+const DeskTaskCleanupSha = Sha;
+const DESK_TASK_CLEANUP_MAX_ENTRIES = 4096;
+const DESK_TASK_CLEANUP_MAX_FILE_BYTES = 8 * 1024 * 1024;
+const DESK_TASK_CLEANUP_MAX_TOTAL_BYTES = 64 * 1024 * 1024;
+const compareCleanupUtf8 = (left: string, right: string): number => {
+  const a = Array.from(left, value => value.codePointAt(0)!);
+  const b = Array.from(right, value => value.codePointAt(0)!);
+  for (let index = 0; index < Math.min(a.length, b.length); index += 1) if (a[index] !== b[index]) return a[index]! - b[index]!;
+  return a.length - b.length;
+};
+
+/** Exact event refs are durable lineage, never mutable latest pointers. */
+export const DeskTaskIntegrationEntryRef = z.object({
+  entryId: DeskEntityId,
+  entrySha256: DeskTaskCleanupSha,
+}).strict();
+export type DeskTaskIntegrationEntryRefValue = z.infer<typeof DeskTaskIntegrationEntryRef>;
+
+/** Shared control pins for an existing public integration phase. */
+export const DeskTaskIntegrationControlPins = z.object({
+  assignmentId: DeskEntityId,
+  taskId: DeskEntityId,
+  resultId: DeskEntityId,
+  expectedLedgerRevision: z.number().int().min(0),
+  expectedResultRevision: z.number().int().min(1),
+  expectedAdjudicationRevision: z.number().int().min(1),
+  expectedActionRevision: z.number().int().min(1),
+}).strict();
+export type DeskTaskIntegrationControlPinsValue = z.infer<typeof DeskTaskIntegrationControlPins>;
+
+export const DeskTaskIntegrationCleanupInventoryEntry = z.union([
+  z.object({ path: DeskTaskCleanupRelativePath, kind: z.literal("directory"), bytes: z.literal(0), sha256: z.null(), mode: DeskTaskCleanupMode }).strict(),
+  z.object({ path: DeskTaskCleanupRelativePath.refine(value => value !== "."), kind: z.literal("file"), bytes: z.number().int().min(0).max(DESK_TASK_CLEANUP_MAX_FILE_BYTES), sha256: DeskTaskCleanupSha, mode: DeskTaskCleanupMode }).strict(),
+  z.object({ path: DeskTaskCleanupRelativePath.refine(value => value !== "."), kind: z.literal("symlink"), bytes: z.number().int().min(0).max(DESK_TASK_CLEANUP_MAX_FILE_BYTES), sha256: DeskTaskCleanupSha, mode: DeskTaskCleanupMode }).strict(),
+]);
+export type DeskTaskIntegrationCleanupInventoryEntryValue = z.infer<typeof DeskTaskIntegrationCleanupInventoryEntry>;
+
+export const DeskTaskIntegrationCleanupGitRegistration = z.object({
+  path: DeskTaskAbsolutePath,
+  commonDir: DeskTaskAbsolutePath,
+  gitDir: DeskTaskAbsolutePath,
+  head: DeskTaskGitHead,
+}).strict();
+export type DeskTaskIntegrationCleanupGitRegistrationValue = z.infer<typeof DeskTaskIntegrationCleanupGitRegistration>;
+
+export const DeskTaskIntegrationCleanupResourcePin = z.object({
+  role: z.enum(["stage", "backup"]),
+  resourceId: DeskEntityId,
+  resourceRevision: z.number().int().min(1),
+  resourceKey: DeskTaskAbsolutePath,
+  resourceKind: z.enum(["worktree", "scratch"]),
+  cleanupRecipe: z.enum(["git-worktree-remove", "owned-directory-remove"]),
+  inventoryMapSha256: DeskTaskCleanupSha,
+  entryCount: z.number().int().min(1).max(DESK_TASK_CLEANUP_MAX_ENTRIES),
+  contentBytes: z.number().int().min(0).max(DESK_TASK_CLEANUP_MAX_TOTAL_BYTES),
+  rootMode: DeskTaskCleanupMode,
+  gitRegistration: DeskTaskIntegrationCleanupGitRegistration.nullable(),
+}).strict().superRefine((pin, ctx) => {
+  const worktree = pin.resourceKind === "worktree";
+  if ((worktree && pin.cleanupRecipe !== "git-worktree-remove") || (!worktree && pin.cleanupRecipe !== "owned-directory-remove") ||
+      (pin.role === "backup" && (worktree || pin.gitRegistration !== null))) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["cleanupRecipe"], message: "resource kind, role, registration and cleanup recipe must agree" });
+  }
+  if (worktree && pin.gitRegistration === null) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["gitRegistration"], message: "worktree cleanup pins its exact Git registration" });
+  }
+  if (pin.gitRegistration !== null && pin.gitRegistration.path !== pin.resourceKey) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["gitRegistration", "path"], message: "registration path must equal the admitted resource key" });
+  }
+});
+export type DeskTaskIntegrationCleanupResourcePinValue = z.infer<typeof DeskTaskIntegrationCleanupResourcePin>;
+
+const DeskTaskIntegrationCleanupArtifact = z.object({
+  path: DeskTaskAbsolutePath,
+  artifactSha256: DeskTaskCleanupSha,
+  bytes: z.number().int().min(0).max(DESK_TASK_CLEANUP_MAX_TOTAL_BYTES),
+  bundleSha256: DeskTaskCleanupSha,
+  mode: z.literal(0o600),
+}).strict();
+
+const DeskTaskIntegrationCleanupCandidateFields = {
+  version: z.literal(1),
+  actionId: DeskEntityId,
+  sourceAdmissionRef: DeskTaskIntegrationEntryRef,
+  sourceProofRef: DeskTaskIntegrationEntryRef,
+  sourceGrantRef: BriefRef.nullable(),
+  sourceControlSha256: DeskTaskCleanupSha,
+  targetBefore: DeskTaskMeasurePin,
+  artifact: DeskTaskIntegrationCleanupArtifact,
+};
+
+const DeskTaskIntegrationCleanupResourceObservation = z.object({
+  resourceId: DeskEntityId,
+  resourceRevision: z.number().int().min(1),
+  resourceKey: DeskTaskAbsolutePath,
+  expectedInventoryMapSha256: DeskTaskCleanupSha,
+  observedInventoryMapSha256: DeskTaskCleanupSha.nullable(),
+  expectedEntryCount: z.number().int().min(1).max(DESK_TASK_CLEANUP_MAX_ENTRIES),
+  observedEntryCount: z.number().int().min(0).max(DESK_TASK_CLEANUP_MAX_ENTRIES),
+  missingPathsSha256: DeskTaskCleanupSha.nullable(),
+  missingPathCount: z.number().int().min(0).max(DESK_TASK_CLEANUP_MAX_ENTRIES),
+  survivorMapSha256: DeskTaskCleanupSha.nullable(),
+  survivorEntryCount: z.number().int().min(0).max(DESK_TASK_CLEANUP_MAX_ENTRIES),
+  rootMode: DeskTaskCleanupMode.nullable(),
+  gitRegistration: z.enum(["matched", "missing", "mismatch", "not-applicable"]),
+}).strict();
+export type DeskTaskIntegrationCleanupResourceObservationValue = z.infer<typeof DeskTaskIntegrationCleanupResourceObservation>;
+
+const DeskTaskIntegrationCleanupResourceTuple = z.array(DeskTaskIntegrationCleanupResourceObservation).min(1).max(2);
+
+export const DeskTaskIntegrationCleanupCandidate = z.discriminatedUnion("basis", [
+  z.object({
+    ...DeskTaskIntegrationCleanupCandidateFields,
+    basis: z.literal("stage-only"),
+    recoveryPlanSha256: z.null(),
+    sourceProofKind: z.literal("stage-observed"),
+    resources: z.tuple([DeskTaskIntegrationCleanupResourcePin]),
+  }).strict().superRefine((candidate, ctx) => {
+    if (candidate.resources[0].role !== "stage") ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["resources", 0, "role"], message: "stage-only candidate pins exactly the stage resource" });
+  }),
+  z.object({
+    ...DeskTaskIntegrationCleanupCandidateFields,
+    basis: z.literal("land-recovery"),
+    recoveryPlanSha256: DeskTaskCleanupSha,
+    sourceProofKind: z.enum(["full-applied", "original"]),
+    resources: z.tuple([DeskTaskIntegrationCleanupResourcePin, DeskTaskIntegrationCleanupResourcePin]),
+  }).strict().superRefine((candidate, ctx) => {
+    if (candidate.resources[0].role !== "stage" || candidate.resources[1].role !== "backup" ||
+        candidate.resources[1].resourceKind !== "scratch") {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["resources"], message: "LAND cleanup pins stage then scratch backup" });
+    }
+    if (candidate.resources[0].resourceId === candidate.resources[1].resourceId ||
+        candidate.resources[0].resourceKey === candidate.resources[1].resourceKey) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["resources"], message: "stage and backup resource identities are distinct" });
+    }
+    if (candidate.resources[0].entryCount + candidate.resources[1].entryCount > DESK_TASK_CLEANUP_MAX_ENTRIES ||
+        candidate.resources[0].contentBytes + candidate.resources[1].contentBytes > DESK_TASK_CLEANUP_MAX_TOTAL_BYTES) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["resources"], message: "combined inventory exceeds bounded cleanup limits" });
+    }
+  }),
+]);
+export type DeskTaskIntegrationCleanupCandidateValue = z.infer<typeof DeskTaskIntegrationCleanupCandidate>;
+
+const DeskTaskIntegrationCleanupBundleFields = {
+  version: z.literal(1),
+  modeSemantics: z.literal("actual-filesystem-bits"),
+  actionId: DeskEntityId,
+  sourceAdmissionRef: DeskTaskIntegrationEntryRef,
+  sourceProofRef: DeskTaskIntegrationEntryRef,
+  sourceGrantRef: BriefRef.nullable(),
+  sourceControlSha256: DeskTaskCleanupSha,
+  targetBefore: DeskTaskMeasurePin,
+};
+const DeskTaskIntegrationCleanupBundleResource = z.object({
+  pin: DeskTaskIntegrationCleanupResourcePin,
+  entries: z.array(DeskTaskIntegrationCleanupInventoryEntry).min(1).max(DESK_TASK_CLEANUP_MAX_ENTRIES),
+}).strict().superRefine((resource, ctx) => {
+  const entries = resource.entries;
+  if (entries[0]?.path !== "." || entries[0]?.kind !== "directory" || entries[0].mode !== resource.pin.rootMode) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["entries", 0], message: "inventory starts with the exact root directory/mode" });
+  }
+  const paths = entries.map(entry => entry.path);
+  if (new Set(paths).size !== paths.length || paths.some((path, index) => index > 0 && compareCleanupUtf8(paths[index - 1]!, path) >= 0)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["entries"], message: "inventory paths are unique and sorted by UTF-8 byte order" });
+  }
+  const contentBytes = entries.reduce((sum, entry) => sum + (entry.kind === "file" || entry.kind === "symlink" ? entry.bytes : 0), 0);
+  if (entries.length !== resource.pin.entryCount || contentBytes !== resource.pin.contentBytes) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["pin"], message: "inventory rows do not match the pinned map digest/counts" });
+  }
+});
+
+export const DeskTaskIntegrationCleanupBundle = z.discriminatedUnion("basis", [
+  z.object({
+    ...DeskTaskIntegrationCleanupBundleFields,
+    basis: z.literal("stage-only"),
+    recoveryPlanSha256: z.null(),
+    sourceProofKind: z.literal("stage-observed"),
+    resources: z.tuple([DeskTaskIntegrationCleanupBundleResource]),
+  }).strict().superRefine((bundle, ctx) => {
+    if (bundle.resources[0].pin.role !== "stage") ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["resources", 0, "pin", "role"], message: "stage-only bundle contains only the stage resource" });
+  }),
+  z.object({
+    ...DeskTaskIntegrationCleanupBundleFields,
+    basis: z.literal("land-recovery"),
+    recoveryPlanSha256: DeskTaskCleanupSha,
+    sourceProofKind: z.enum(["full-applied", "original"]),
+    resources: z.tuple([DeskTaskIntegrationCleanupBundleResource, DeskTaskIntegrationCleanupBundleResource]),
+  }).strict().superRefine((bundle, ctx) => {
+    if (bundle.resources[0].pin.role !== "stage" || bundle.resources[1].pin.role !== "backup" || bundle.resources[1].pin.resourceKind !== "scratch") {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["resources"], message: "LAND bundle contains stage then scratch backup" });
+    }
+    if (bundle.resources[0].entries.length + bundle.resources[1].entries.length > DESK_TASK_CLEANUP_MAX_ENTRIES ||
+        bundle.resources[0].pin.contentBytes + bundle.resources[1].pin.contentBytes > DESK_TASK_CLEANUP_MAX_TOTAL_BYTES) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["resources"], message: "combined inventory exceeds bounded cleanup limits" });
+    }
+  }),
+]);
+export type DeskTaskIntegrationCleanupBundleValue = z.infer<typeof DeskTaskIntegrationCleanupBundle>;
+
+export const DeskTaskIntegrationCleanupVerification = z.object({
+  candidate: DeskTaskIntegrationCleanupCandidate,
+  verifyIssueRef: DeskTaskIntegrationEntryRef,
+  observerResponseSha256: DeskTaskCleanupSha,
+}).strict();
+export type DeskTaskIntegrationCleanupVerificationValue = z.infer<typeof DeskTaskIntegrationCleanupVerification>;
+
+export const DeskTaskIntegrationCleanupPermit = z.object({
+  version: z.literal(1),
+  cleanupStep: z.literal("remove-resource"),
+  actionId: DeskEntityId,
+  verificationRef: DeskTaskIntegrationEntryRef,
+  resourceId: DeskEntityId,
+  expectedResourceRevision: z.number().int().min(1),
+  resourceKey: DeskTaskAbsolutePath,
+  inventoryMapSha256: DeskTaskCleanupSha,
+  ordinal: z.union([z.literal(1), z.literal(2)]),
+  cleanupRecipe: z.enum(["git-worktree-remove", "owned-directory-remove"]),
+}).strict();
+export type DeskTaskIntegrationCleanupPermitValue = z.infer<typeof DeskTaskIntegrationCleanupPermit>;
+
+export const DeskTaskIntegrationCleanupObservation = z.discriminatedUnion("cleanupStep", [
+  z.object({
+    phase: z.enum(["discharge", "reconcile"]),
+    cleanupStep: z.literal("verify-account"),
+    status: z.enum(["observed", "held"]),
+    candidateSha256: DeskTaskCleanupSha,
+    verifyIssueRef: DeskTaskIntegrationEntryRef,
+    artifact: DeskTaskIntegrationCleanupArtifact,
+    sourceProofRef: DeskTaskIntegrationEntryRef,
+    target: DeskTaskMeasurePin.nullable(),
+    resources: DeskTaskIntegrationCleanupResourceTuple,
+    observerResponseSha256: DeskTaskCleanupSha,
+  }).strict(),
+  z.object({
+    phase: z.literal("discharge"),
+    cleanupStep: z.literal("resource-preflight"),
+    status: z.literal("observed"),
+    verificationRef: DeskTaskIntegrationEntryRef,
+    permit: DeskTaskIntegrationCleanupPermit,
+    priorIssuedPermitRef: DeskTaskIntegrationEntryRef.nullable(),
+    target: DeskTaskMeasurePin,
+    resources: DeskTaskIntegrationCleanupResourceTuple,
+    observerResponseSha256: DeskTaskCleanupSha,
+  }).strict(),
+  z.object({
+    phase: z.enum(["discharge", "reconcile"]),
+    cleanupStep: z.enum(["remove-resource", "reconcile-progress"]),
+    status: z.enum(["observed", "held"]),
+    verificationRef: DeskTaskIntegrationEntryRef,
+    issuedPermitRef: DeskTaskIntegrationEntryRef,
+    permit: DeskTaskIntegrationCleanupPermit,
+    target: DeskTaskMeasurePin.nullable(),
+    resources: DeskTaskIntegrationCleanupResourceTuple,
+    observerResponseSha256: DeskTaskCleanupSha,
+  }).strict(),
+]);
+export type DeskTaskIntegrationCleanupObservationValue = z.infer<typeof DeskTaskIntegrationCleanupObservation>;
+
+const DeskTaskIntegrationCleanupTriggerPins = {
+  controlPins: DeskTaskIntegrationControlPins,
+  publicRequestId: DeskRequestId,
+  publicRequestSha256: DeskTaskCleanupSha,
+};
+
+/** Internal adapter-to-Core observation trigger. It contains only stable
+ *  request controls and durable history references; status and measurements
+ *  are derived by Core after the replay gate. */
+export const DeskTaskIntegrationCleanupTrigger = z.union([
+  z.object({
+    phase: z.literal("discharge"), cleanupStep: z.literal("verify-account"),
+    ...DeskTaskIntegrationCleanupTriggerPins,
+    candidateSha256: DeskTaskCleanupSha,
+    verifyIssueRef: DeskTaskIntegrationEntryRef,
+  }).strict(),
+  z.object({
+    phase: z.literal("reconcile"), cleanupStep: z.literal("verify-account"),
+    ...DeskTaskIntegrationCleanupTriggerPins,
+    verifyIssueRef: DeskTaskIntegrationEntryRef,
+  }).strict(),
+  z.object({
+    phase: z.literal("discharge"), cleanupStep: z.literal("remove-resource"),
+    ...DeskTaskIntegrationCleanupTriggerPins,
+    verificationRef: DeskTaskIntegrationEntryRef,
+    issuedPermitRef: DeskTaskIntegrationEntryRef,
+  }).strict(),
+  z.object({
+    phase: z.literal("reconcile"), cleanupStep: z.literal("reconcile-progress"),
+    ...DeskTaskIntegrationCleanupTriggerPins,
+    verificationRef: DeskTaskIntegrationEntryRef,
+    issuedPermitRef: DeskTaskIntegrationEntryRef,
+  }).strict(),
+]);
+export type DeskTaskIntegrationCleanupTriggerValue = z.infer<typeof DeskTaskIntegrationCleanupTrigger>;
+
+export const DeskTaskIntegrationCleanupPreflightEvidence = z.object({
+  version: z.literal(1),
+  admissionSha256: DeskTaskCleanupSha,
+  verificationRef: DeskTaskIntegrationEntryRef,
+  permit: DeskTaskIntegrationCleanupPermit,
+  priorIssuedPermitRef: DeskTaskIntegrationEntryRef.nullable(),
+  observerResponseSha256: DeskTaskCleanupSha,
+  target: DeskTaskMeasurePin,
+  resources: DeskTaskIntegrationCleanupResourceTuple,
+}).strict();
+export type DeskTaskIntegrationCleanupPreflightEvidenceValue = z.infer<typeof DeskTaskIntegrationCleanupPreflightEvidence>;
+
+export const DeskTaskIntegrationCleanupObservedResource = z.object({
+  resourceId: DeskEntityId,
+  resourceRevision: z.number().int().min(1),
+  resourceKey: DeskTaskAbsolutePath,
+  resourceKind: z.enum(["worktree", "scratch"]),
+  rootMode: DeskTaskCleanupMode.nullable(),
+  entries: z.array(DeskTaskIntegrationCleanupInventoryEntry).max(DESK_TASK_CLEANUP_MAX_ENTRIES),
+  gitRegistration: DeskTaskIntegrationCleanupGitRegistration.nullable(),
+}).strict();
+export type DeskTaskIntegrationCleanupObservedResourceValue = z.infer<typeof DeskTaskIntegrationCleanupObservedResource>;
+
+/** Typed raw observer result. It is consumed in memory by Core and reduced to
+ *  the bounded CleanupObservation before any ledger append. */
+export const DeskTaskIntegrationCleanupObserverResponse = z.object({
+  version: z.literal(1),
+  purpose: z.enum(["verify-account", "reconcile-progress"]),
+  progressKind: z.enum(["initial", "verify-account", "resource-preflight", "resource"]),
+  admissionSha256: DeskTaskCleanupSha,
+  artifact: z.object({
+    path: DeskTaskAbsolutePath,
+    kind: z.enum(["regular", "missing", "symlink", "other"]),
+    mode: DeskTaskCleanupMode.nullable(),
+    bytes: z.instanceof(Uint8Array).nullable(),
+  }).strict(),
+  target: DeskTaskMeasurePin.nullable(),
+  sourceBase: DeskTaskMeasurePin.nullable(),
+  sourceResult: DeskTaskMeasurePin.nullable(),
+  sourceProofRef: DeskTaskIntegrationEntryRef,
+  sourceProofKind: z.enum(["stage-observed", "full-applied", "original"]).nullable(),
+  resources: z.array(DeskTaskIntegrationCleanupObservedResource).max(2),
+}).strict();
+export type DeskTaskIntegrationCleanupObserverResponseValue = z.infer<typeof DeskTaskIntegrationCleanupObserverResponse>;
+
+export const DeskTaskTargetPin = z
+  .object({
+    hostId: z.string().min(1).max(WIRE_LIMITS.targetHostId),
+    repoKey: Sha,
+    gitCommonDir: z.string().min(1).max(WIRE_LIMITS.targetDaemonHome),
+    checkoutRoot: z
+      .string()
+      .min(1)
+      .max(WIRE_LIMITS.deskPathSurface)
+      .refine(value => value.startsWith("/") || /^[A-Za-z]:[\\/]/.test(value), { message: "checkoutRoot must be absolute" }),
+    ref: z.string().min(1).max(WIRE_LIMITS.deskPathSurface).nullable(),
+    head: DeskTaskGitHead.nullable(),
+    snapshotSha256: Sha,
+    incomplete: z.array(z.string().min(1).max(WIRE_LIMITS.deskPathSurface)).max(256),
+    measuredAt: Time,
+  })
+  .strict();
+export type DeskTaskTargetPinValue = z.infer<typeof DeskTaskTargetPin>;
+
+export const DeskTaskDependencyPin = z
+  .object({
+    taskId: DeskEntityId,
+    taskRevision: z.number().int().min(1),
+    briefRevision: z.number().int().min(0),
+    attemptId: DeskEntityId,
+    resultId: DeskEntityId,
+    resultRevision: z.number().int().min(1),
+    resultEntrySha256: Sha,
+    adjudicationId: DeskEntityId,
+    adjudicationRevision: z.number().int().min(1),
+    adjudicationEntrySha256: Sha,
+    availability: DeskTaskDependencyAvailability,
+    artifactKey: z.string().min(1).max(WIRE_LIMITS.deskCheckPointer).nullable(),
+    artifactSha256: Sha.nullable(),
+    targetPath: z.string().min(1).max(WIRE_LIMITS.deskPathSurface).nullable(),
+    integrationActionId: DeskEntityId.nullable(),
+    actualTargetPin: DeskTaskTargetPin.nullable(),
+  })
+  .strict();
+export type DeskTaskDependencyPinValue = z.infer<typeof DeskTaskDependencyPin>;
+
+export const DeskTaskTargetRequirement = z
+  .object({
+    ref: z.string().min(1).max(WIRE_LIMITS.deskPathSurface).nullable(),
+    head: DeskTaskGitHead.nullable(),
+  })
+  .strict();
+export type DeskTaskTargetRequirementValue = z.infer<typeof DeskTaskTargetRequirement>;
+
+export const DeskTaskDependency = z
+  .object({
+    taskId: DeskEntityId,
+    availability: DeskTaskDependencyAvailability,
+    artifactKey: z.string().min(1).max(WIRE_LIMITS.deskCheckPointer).nullable(),
+    targetPath: z.string().min(1).max(WIRE_LIMITS.deskPathSurface).nullable(),
+    target: DeskTaskTargetRequirement.nullable(),
+  })
+  .strict();
+export type DeskTaskDependencyValue = z.infer<typeof DeskTaskDependency>;
+
+export const DeskTaskStateOwner = z
+  .object({
+    stateRef: z.string().min(1).max(WIRE_LIMITS.deskStateRef),
+    moduleRef: z.string().min(1).max(WIRE_LIMITS.deskPathSurface),
+  })
+  .strict();
+export type DeskTaskStateOwnerValue = z.infer<typeof DeskTaskStateOwner>;
+
+export const DeskTaskReservation = z
+  .object({
+    paths: z.array(ScopeSurfacePath).max(WIRE_LIMITS.deskBriefItems),
+    resources: z.array(ScopeResource).max(WIRE_LIMITS.deskBriefItems),
+    stateOwners: z.array(DeskTaskStateOwner).max(WIRE_LIMITS.deskBriefItems),
+  })
+  .strict();
+export type DeskTaskReservationValue = z.infer<typeof DeskTaskReservation>;
+
+export const DeskTaskPlacement = z
+  .object({
+    kind: DeskTaskPlacementKind,
+    cwd: DeskTaskPath.optional(),
+    baseRef: z.string().min(1).max(WIRE_LIMITS.deskPathSurface).optional(),
+    workspaceId: z.string().min(1).max(WIRE_LIMITS.workspaceIdLen).optional(),
+  })
+  .strict();
+export type DeskTaskPlacementValue = z.infer<typeof DeskTaskPlacement>;
+
+export const DeskTaskPlacementRow = z
+  .object({
+    kind: DeskTaskPlacementKind,
+    cwd: DeskTaskPath.nullable(),
+    baseRef: z.string().min(1).max(WIRE_LIMITS.deskPathSurface).nullable(),
+    workspaceId: z.string().min(1).max(WIRE_LIMITS.workspaceIdLen).nullable(),
+  })
+  .strict();
+export type DeskTaskPlacementRowValue = z.infer<typeof DeskTaskPlacementRow>;
+
+export const DeskTaskDependencyObservation = z.object({
+  ledgerRevision: z.number().int().min(0),
+  placement: DeskTaskPlacement,
+  consumerBase: DeskTaskMeasurePin.nullable(),
+  reference: z.object({ gitCommonDir: DeskTaskPath, baseRef: DeskTaskPath,
+    resolvedHead: DeskTaskGitHead, mapSha256: Sha, modeSemantics: z.literal("git-tree-executable-class") }).strict().nullable(),
+  results: z.array(z.object({ taskId: DeskEntityId, resultEntrySha256: Sha,
+    adjudicationEntrySha256: Sha, available: z.boolean(), sha256: Sha.nullable(),
+    actualTargetPin: DeskTaskTargetPin.nullable(),
+    evidence: z.array(z.object({ kind: DeskTaskText, ref: DeskTaskPath }).strict()).max(WIRE_LIMITS.deskBriefRefs),
+  }).strict()).max(WIRE_LIMITS.deskBriefRefs),
+}).strict();
+export type DeskTaskDependencyObservationValue = z.infer<typeof DeskTaskDependencyObservation>;
+
+export const DeskTaskRuntimePin = z
+  .object({
+    optionId: DeskEntityId,
+    catalogSha256: Sha,
+    decision: z.unknown().optional(),
+    quotaFallbackFrom: DeskEntityId.optional(),
+  })
+  .strict();
+export type DeskTaskRuntimePinValue = z.infer<typeof DeskTaskRuntimePin>;
+
+export const DeskTaskSeatPin = z
+  .object({
+    provider: z.string().min(1).max(WIRE_LIMITS.providerLen),
+    model: z.string().min(1).max(WIRE_LIMITS.providerLen).nullable(),
+    optionId: DeskEntityId.nullable(),
+    catalogSha256: Sha.nullable(),
+    /** Resolved-seat tuple fields kept for route-drift revalidation; the
+     *  create-intent body may carry them verbatim while the durable pin
+     *  keeps them typed and bounded. */
+    modeId: z.string().min(1).max(WIRE_LIMITS.deskLensId).optional(),
+    thinkingOptionId: z.string().min(1).max(WIRE_LIMITS.deskLensId).optional(),
+    features: z.record(z.string(), z.unknown()).optional(),
+  })
+  .strict();
+export type DeskTaskSeatPinValue = z.infer<typeof DeskTaskSeatPin>;
+
+export const DeskTaskMemberPin = z
+  .object({
+    agentId: DeskTaskAgentId,
+    membershipId: DeskTaskMemberId,
+  })
+  .strict();
+export type DeskTaskMemberPinValue = z.infer<typeof DeskTaskMemberPin>;
+
+export const DeskTaskReceipt = z
+  .object({
+    status: z.enum(["observed", "uncertain", "failed", "held", "conflict"]),
+  })
+  .catchall(z.unknown());
+export type DeskTaskReceiptValue = z.infer<typeof DeskTaskReceipt>;
+
+/** Legacy receipts keep their existing flexible status/evidence shape. A
+ *  recognized cleanup trigger must parse through its strict status-free
+ *  branch; it cannot fall back to a legacy receipt with injected status. */
+export const DeskTaskEffectReceipt = z.union([DeskTaskIntegrationCleanupTrigger, DeskTaskReceipt]).superRefine((value, ctx) => {
+  if (typeof value !== "object" || value === null || !("cleanupStep" in value)) return;
+  const cleanupStep = (value as { cleanupStep?: unknown }).cleanupStep;
+  if (["verify-account", "remove-resource", "reconcile-progress"].includes(String(cleanupStep)) &&
+      !DeskTaskIntegrationCleanupTrigger.safeParse(value).success) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["cleanupStep"], message: "recognized cleanup triggers must match the strict status-free Core trigger union" });
+  }
+});
+export type DeskTaskEffectReceiptValue = z.infer<typeof DeskTaskEffectReceipt>;
+
+export const DeskTaskProofRecipe = z
+  .object({
+    recipeId: DeskEntityId,
+    argv: z
+      .array(z.string().min(1).max(WIRE_LIMITS.deskCheckPointer))
+      .min(1)
+      .max(WIRE_LIMITS.deskCheckEvidence),
+    cwd: z.string().min(1).max(WIRE_LIMITS.deskPathSurface),
+    timeoutMs: z.number().int().min(1).max(60000),
+    maxOutputBytes: z.number().int().min(1).max(1048576),
+    required: z.boolean(),
+    authorityRef: BriefRef,
+    ruleRef: BriefRef,
+    requiresGitContext: z.boolean().optional(),
+    prep: z
+      .array(
+        z
+          .object({
+            argv: z
+              .array(z.string().min(1).max(WIRE_LIMITS.deskCheckPointer))
+              .min(1)
+              .max(WIRE_LIMITS.deskCheckEvidence),
+            cwd: z.string().min(1).max(WIRE_LIMITS.deskPathSurface),
+            timeoutMs: z.number().int().min(1).max(60000),
+            maxOutputBytes: z.number().int().min(1).max(1048576),
+          })
+          .strict(),
+      )
+      .max(8)
+      .optional(),
+  })
+  .strict();
+export type DeskTaskProofRecipeValue = z.infer<typeof DeskTaskProofRecipe>;
+
+export const DeskTaskProofRecipeRow = DeskTaskProofRecipe.extend({ recipeSha256: Sha }).strict();
+export type DeskTaskProofRecipeRowValue = z.infer<typeof DeskTaskProofRecipeRow>;
+
+const uniqueRecipeIds = (policy: { verificationRecipes: { recipeId: string }[] }, ctx: z.RefinementCtx) => {
+  const seen = new Set<string>();
+  for (const recipe of policy.verificationRecipes) {
+    if (seen.has(recipe.recipeId)) {
+      ctx.addIssue({ code: "custom", message: `duplicate recipeId ${recipe.recipeId}` });
+    }
+    seen.add(recipe.recipeId);
+  }
+};
+
+const DeskTaskProofPolicyBase = z
+  .object({
+    kind: z.literal("declared"),
+    authorityRef: BriefRef,
+    ruleRef: BriefRef,
+    reason: BriefText,
+    requiredChecks: z.array(DeskRolloutRequiredCheck).max(WIRE_LIMITS.deskRolloutRequiredChecks),
+    requiredEvidence: z.array(DeskCheckPointer).max(WIRE_LIMITS.deskCheckEvidence),
+    reviewRequired: z.boolean(),
+    availability: DeskTaskDependencyAvailability,
+  })
+  .strict();
+
+export const DeskTaskProofPolicy = DeskTaskProofPolicyBase.extend({
+  verificationRecipes: z.array(DeskTaskProofRecipe).max(WIRE_LIMITS.deskCheckEvidence),
+})
+  .strict()
+  .superRefine(uniqueRecipeIds);
+export type DeskTaskProofPolicyValue = z.infer<typeof DeskTaskProofPolicy>;
+
+export const DeskTaskProofPolicyRow = DeskTaskProofPolicyBase.extend({
+  verificationRecipes: z.array(DeskTaskProofRecipeRow).max(WIRE_LIMITS.deskCheckEvidence),
+})
+  .strict()
+  .superRefine(uniqueRecipeIds);
+export type DeskTaskProofPolicyRowValue = z.infer<typeof DeskTaskProofPolicyRow>;
+
+/** The scope declaration template a task carries — the atomic declare/claim
+ *  the bound attempt performs under its own name. No declarationSha256: the
+ *  server derives it at declaration time. */
+export const DeskTaskScopeTemplate = z
+  .object({
+    label: z.string().min(1).max(WIRE_LIMITS.deskScopeLabel),
+    refs: z.array(DeskScopePointer).max(WIRE_LIMITS.deskScopeRefs),
+    ownership: DeskScopeOwnership.nullable(),
+    reviewPlan: DeskReviewPlan.nullable(),
+  })
+  .strict();
+export type DeskTaskScopeTemplateValue = z.infer<typeof DeskTaskScopeTemplate>;
+
+/** Owner adjudication of a committed task result — a closed verdict
+ *  vocabulary distinct from scope-review verdicts. */
+export const DeskTaskVerdict = z.enum(["accepted", "changes-requested", "rejected"]);
+export type DeskTaskVerdictValue = z.infer<typeof DeskTaskVerdict>;
+
+export const DeskTaskGrants = z
+  .object({
+    create: BriefRef.nullable(),
+    send: BriefRef.nullable(),
+    archive: BriefRef.nullable(),
+    integrate: BriefRef.nullable(),
+    commit: BriefRef.nullable(),
+  })
+  .strict();
+export type DeskTaskGrantsValue = z.infer<typeof DeskTaskGrants>;
+
+export const DeskTaskBudgets = z
+  .object({
+    maxAttempts: z.number().int().min(1).nullable(),
+    maxActionsPerAttempt: z.number().int().min(1).nullable(),
+  })
+  .strict();
+export type DeskTaskBudgetsValue = z.infer<typeof DeskTaskBudgets>;
+
+export const DeskTaskCheckRunRef = z
+  .object({
+    checkId: z.string().min(1).max(WIRE_LIMITS.deskCheckPointer),
+    runId: z.string().min(1).max(WIRE_LIMITS.deskCheckPointer),
+    definitionSha256: Sha,
+  })
+  .strict();
+export type DeskTaskCheckRunRefValue = z.infer<typeof DeskTaskCheckRunRef>;
+
+export const DeskTaskArtifactRef = z
+  .object({ key: z.string().min(1).max(WIRE_LIMITS.deskCheckPointer), sha256: Sha })
+  .strict();
+export type DeskTaskArtifactRefValue = z.infer<typeof DeskTaskArtifactRef>;
+
+const DeskTaskEntryStamp = {
+  entryId: DeskEntityId,
+  assignmentId: DeskEntityId,
+  taskId: DeskEntityId.nullable(),
+  entityId: DeskEntityId,
+  revision: z.number().int().min(1),
+  priorEntryId: DeskEntityId.nullable(),
+  priorEntrySha256: Sha.nullable(),
+  entrySha256: Sha,
+  requestId: DeskRequestId,
+  actorAgentId: DeskTaskAgentId,
+  actorMembershipId: DeskTaskMemberId,
+  ownershipRevision: z.number().int().min(0),
+  briefRevision: z.number().int().min(0),
+};
+
+export const DeskTaskDeclarationEntry = z
+  .object({
+    ...DeskTaskEntryStamp,
+    kind: z.literal("task"),
+    taskId: DeskEntityId,
+    state: z.enum(["open", "reopened", "withdrawn"]),
+    outcome: BriefText,
+    objective: BriefText.nullable(),
+    authorityRef: BriefRef,
+    dependencies: z.array(DeskTaskDependency).max(WIRE_LIMITS.deskBriefRefs),
+    scope: DeskTaskScopeTemplate.nullable(),
+    proofPolicy: DeskTaskProofPolicyRow.nullable(),
+    grants: DeskTaskGrants,
+    budgets: DeskTaskBudgets,
+    reason: DeskTaskText.nullable(),
+  })
+  .strict();
+export type DeskTaskDeclarationEntryValue = z.infer<typeof DeskTaskDeclarationEntry>;
+
+export const DeskTaskTerminalProof = z.object({
+  kind: z.enum(["never-authorized-work", "observed-quiescence"]),
+  reason: BriefText, evidence: z.array(BriefRef).min(1).max(WIRE_LIMITS.deskBriefRefs),
+  observationRefs: z.array(BriefRef).max(WIRE_LIMITS.deskBriefRefs),
+}).strict();
+export const DeskTaskScopeCancellation = z.object({
+  attemptId: DeskEntityId, attemptRevision: z.number().int().min(1), attemptEntrySha256: Sha,
+  controlId: DeskEntityId, controlEntrySha256: Sha, proofSha256: Sha,
+}).strict();
+export const DeskTaskAttemptEntry = z
+  .object({
+    ...DeskTaskEntryStamp,
+    kind: z.literal("attempt"),
+    taskId: DeskEntityId,
+    attemptId: DeskEntityId,
+    attemptNo: z.number().int().min(1),
+    taskRevision: z.number().int().min(1),
+    state: DeskTaskAttemptState,
+    placement: DeskTaskPlacementRow,
+    sourceBase: DeskTaskMeasurePin.nullable(),
+    consumedDependencies: z.array(DeskTaskDependencyPin).max(WIRE_LIMITS.deskBriefRefs),
+    ownerAgentId: DeskTaskAgentId,
+    ownerMembershipId: DeskTaskMemberId,
+    seatPin: DeskTaskSeatPin,
+    runtime: DeskTaskRuntimePin.nullable(),
+    reuseTarget: z.object({ agentId: DeskTaskAgentId }).strict().nullable(),
+    member: DeskTaskMemberPin.nullable(),
+    host: z.object({ agentId: DeskTaskAgentId.nullable() }).strict(),
+    boundScopeId: DeskEntityId.nullable(),
+    boundScopeRevision: z.number().int().min(1).nullable(),
+    stop: z.object({ requested: z.boolean(), reason: DeskTaskText.nullable() }).strict(),
+    predecessor: z
+      .object({ attemptId: DeskEntityId, resultId: DeskEntityId })
+      .strict()
+      .nullable(),
+    resultId: DeskEntityId.nullable(),
+    integrationActionId: DeskEntityId.nullable(),
+    capacityCredits: z
+      .object({
+        requestSlots: z.number().int().min(0),
+        entrySlots: z.number().int().min(0),
+        byteBudget: z.number().int().min(0),
+      })
+      .strict(),
+    effectBudget: z.number().int().min(1).nullable(),
+    terminalProof: DeskTaskTerminalProof.nullable().optional(),
+  })
+  .strict();
+export type DeskTaskAttemptEntryValue = z.infer<typeof DeskTaskAttemptEntry>;
+
+export const DeskTaskResultEntry = z
+  .object({
+    ...DeskTaskEntryStamp,
+    kind: z.literal("result"),
+    taskId: DeskEntityId,
+    resultId: DeskEntityId,
+    attemptId: DeskEntityId,
+    taskRevision: z.number().int().min(1),
+    snapshotSha256: Sha,
+    candidate: z
+      .object({
+        candidateId: DeskEntityId,
+        snapshotSha256: Sha,
+        head: DeskTaskGitHead.nullable(),
+      })
+      .strict()
+      .nullable(),
+    handbackId: DeskEntityId.nullable(),
+    handbackDigest: Sha.nullable(),
+    artifacts: z.array(DeskTaskArtifactRef).max(WIRE_LIMITS.deskCheckEvidence),
+    scopeId: DeskEntityId.nullable(),
+    scopeRevision: z.number().int().min(1).nullable(),
+    reviewRound: z
+      .object({
+        scopeRevision: z.number().int().min(1),
+        candidateSnapshot: Sha,
+        briefRevision: z.number().int().min(0),
+        mandateSha256: Sha.nullable(),
+      })
+      .strict()
+      .nullable(),
+    checkRuns: z.array(DeskTaskCheckRunRef).max(WIRE_LIMITS.deskCheckEvidence),
+    consumedDependencies: z.array(DeskTaskDependencyPin).max(WIRE_LIMITS.deskBriefRefs),
+    findings: z.array(BriefRef).max(WIRE_LIMITS.deskBriefRefs),
+    provenance: z.enum(["claimed", "measured"]),
+  })
+  .strict();
+export type DeskTaskResultEntryValue = z.infer<typeof DeskTaskResultEntry>;
+
+export const DeskTaskAdjudicationEntry = z
+  .object({
+    ...DeskTaskEntryStamp,
+    kind: z.literal("adjudication"),
+    taskId: DeskEntityId,
+    adjudicationId: DeskEntityId,
+    resultId: DeskEntityId,
+    resultRevision: z.number().int().min(1),
+    resultEntrySha256: Sha,
+    taskRevision: z.number().int().min(1),
+    attemptId: DeskEntityId.nullable(),
+    verdict: DeskTaskVerdict,
+    reason: BriefText,
+    evidence: z.array(BriefRef).max(WIRE_LIMITS.deskBriefRefs),
+    counterevidence: z.array(BriefRef).max(WIRE_LIMITS.deskBriefRefs),
+    residualRisk: BriefText.nullable(),
+    findings: z.array(BriefRef).max(WIRE_LIMITS.deskBriefRefs),
+    proofPolicyDigest: Sha.nullable(),
+    dependencyPins: z.array(DeskTaskDependencyPin).max(WIRE_LIMITS.deskBriefRefs),
+  })
+  .strict();
+export type DeskTaskAdjudicationEntryValue = z.infer<typeof DeskTaskAdjudicationEntry>;
+
+export const DeskTaskHoldEntry = z
+  .object({
+    ...DeskTaskEntryStamp,
+    kind: z.literal("hold"),
+    taskId: DeskEntityId,
+    holdId: DeskEntityId,
+    attemptId: DeskEntityId.nullable(),
+    holdKind: DeskTaskHoldKind,
+    question: BriefText,
+    proposition: BriefText.nullable(),
+    claimRefs: z.array(BriefRef).max(WIRE_LIMITS.deskBriefRefs),
+    resourceIds: z.array(DeskEntityId).max(WIRE_LIMITS.deskBriefRefs),
+    state: z.enum(["open", "ruled"]),
+    ruling: z
+      .object({
+        reason: BriefText,
+        outcome: z.enum(["release", "retain", "withdraw"]),
+        ownerAgentId: DeskTaskAgentId,
+        ownerMembershipId: DeskTaskMemberId,
+        briefRevision: z.number().int().min(0),
+      })
+      .strict()
+      .nullable(),
+  })
+  .strict();
+export type DeskTaskHoldEntryValue = z.infer<typeof DeskTaskHoldEntry>;
+
+export const DeskTaskCheckRunRow = z
+  .object({
+    recipeId: DeskEntityId,
+    status: z.string().min(1).max(WIRE_LIMITS.deskCheckPointer),
+    exitCode: z.number().int().nullable(),
+    outputSha256: z.string().max(64),
+    durationMs: z.number().int().min(0).optional(),
+  })
+  .strict();
+export type DeskTaskCheckRunRowValue = z.infer<typeof DeskTaskCheckRunRow>;
+
+export const DeskTaskActionEntry = z
+  .object({
+    ...DeskTaskEntryStamp,
+    kind: z.literal("action"),
+    taskId: DeskEntityId,
+    actionId: DeskEntityId,
+    attemptId: DeskEntityId.nullable(),
+    resultId: DeskEntityId.nullable(),
+    actionKind: DeskTaskActionKind,
+    ordinal: z.number().int().min(1),
+    phase: DeskTaskIntegrationPhase.nullable(),
+    body: DeskTaskJsonObject.nullable(),
+    bodySha256: Sha.nullable(),
+    state: DeskTaskActionState,
+    callerAgentId: DeskTaskAgentId,
+    parentAgentId: DeskTaskAgentId.nullable(),
+    reportTo: BriefRef.nullable(),
+    receipt: DeskTaskReceipt.nullable(),
+    grant: z
+      .object({
+        authorityRef: BriefRef,
+        paths: z.array(ScopeSurfacePath).max(WIRE_LIMITS.deskBriefItems),
+        target: z.object({ cwd: DeskTaskPath }).strict().nullable(),
+      })
+      .strict()
+      .nullable(),
+    verification: z
+      .object({ recipeIds: z.array(DeskEntityId).max(WIRE_LIMITS.deskCheckEvidence) })
+      .strict()
+      .nullable(),
+    sourceBase: DeskTaskMeasurePin.nullable(),
+    sourceResult: DeskTaskMeasurePin.nullable(),
+    target: DeskTaskMeasurePin.nullable(),
+    sourceBaseSha: Sha.nullable(),
+    sourceResultSha: Sha.nullable(),
+    targetBaseSha: Sha.nullable(),
+    targetCwd: DeskTaskPath.nullable(),
+    sourceCwd: DeskTaskPath.nullable(),
+    stageKind: z.enum(["git-worktree", "content-dir"]).nullable(),
+    stageDir: DeskTaskPath.nullable(),
+    stagedSha: Sha.nullable(),
+    expectedStageSha: Sha.nullable(),
+    /** Digest of the expected stage content-map — a re-measure of the stage
+     *  dir must equal this pin or the phase holds 'stage-drift'. */
+    expectedSha: Sha.nullable(),
+    backupDir: DeskTaskPath.nullable(),
+    checkRuns: z.array(DeskTaskCheckRunRow).max(WIRE_LIMITS.deskCheckEvidence).nullable(),
+    conflicts: z
+      .array(
+        z
+          .object({
+            path: z.string().min(1).max(WIRE_LIMITS.deskPathSurface),
+            reason: DeskTaskText,
+          })
+          .strict(),
+      )
+      .max(WIRE_LIMITS.deskBriefItems)
+      .nullable(),
+    changedPaths: z.array(z.string().min(1).max(WIRE_LIMITS.deskPathSurface)).max(WIRE_LIMITS.deskBriefItems).nullable(),
+    deltaDigest: Sha.nullable(),
+    scopeWriter: z
+      .object({
+        scopeId: DeskEntityId,
+        scopeRevision: z.number().int().min(1),
+        writerAgentId: DeskTaskAgentId,
+      })
+      .strict()
+      .nullable(),
+    qualificationDigest: Sha.nullable(),
+    proofPolicyDigest: Sha.nullable(),
+    requiredChecks: z.array(DeskRolloutRequiredCheck).max(WIRE_LIMITS.deskRolloutRequiredChecks).nullable(),
+    commitGrantRef: BriefRef.nullable(),
+    stageBase: DeskTaskMeasurePin.nullable(),
+    prepared: DeskTaskMeasurePin.nullable(),
+    landIntent: z
+      .object({ ref: z.string().min(1).max(WIRE_LIMITS.deskPathSurface).nullable(), baseHead: DeskTaskGitHead.nullable() })
+      .strict()
+      .nullable(),
+    /** Absent only on legacy v9 rows written before integration recovery
+     *  plans were pinned; new actions explicitly start with null. */
+    recoveryPlan: DeskTaskIntegrationRecoveryPlan.nullable().optional(),
+    /** Absent/null on legacy v9 rows; only a positive proof-bundle observation
+     *  may add this immutable cleanup account. */
+    cleanupVerification: DeskTaskIntegrationCleanupVerification.nullable().optional(),
+    /** Compact positive read-only resource preflight bound to a destructive
+     *  ISSUE revision; raw inventory entries never enter the ledger. */
+    cleanupIssueEvidence: DeskTaskIntegrationCleanupPreflightEvidence.nullable().optional(),
+    landed: DeskTaskMeasurePin.nullable(),
+    uncertainties: z
+      .array(z.object({ kind: DeskTaskText, detail: DeskTaskText }).strict())
+      .max(WIRE_LIMITS.deskCheckEvidence)
+      .nullable(),
+    resourceIds: z.array(DeskEntityId).max(WIRE_LIMITS.deskBriefRefs).nullable(),
+  })
+  .strict();
+export type DeskTaskActionEntryValue = z.infer<typeof DeskTaskActionEntry>;
+
+export const DeskTaskDeliveryEntry = z
+  .object({
+    ...DeskTaskEntryStamp,
+    kind: z.literal("delivery"),
+    taskId: DeskEntityId.nullable(),
+    deliveryId: DeskEntityId,
+    deliveryKind: DeskTaskDeliveryKind,
+    senderAgentId: DeskTaskAgentId,
+    senderMembershipId: DeskTaskMemberId,
+    recipientAgentId: DeskTaskAgentId,
+    recipientMembershipId: DeskTaskMemberId.nullable(),
+    bodySha256: Sha.nullable(),
+    bodyRef: z.string().min(1).max(WIRE_LIMITS.deskCheckPointer).nullable(),
+    actionId: DeskEntityId.nullable(),
+    attemptId: DeskEntityId.nullable(),
+    resultId: DeskEntityId.nullable(),
+    state: z.enum(["pending", "host-accepted", "responsibility-acknowledged", "handled"]),
+    ackEvidence: z.array(BriefRef).max(WIRE_LIMITS.deskBriefRefs),
+    handlingEvidence: z.array(BriefRef).max(WIRE_LIMITS.deskBriefRefs).nullable(),
+    reason: DeskTaskText.nullable(),
+  })
+  .strict();
+export type DeskTaskDeliveryEntryValue = z.infer<typeof DeskTaskDeliveryEntry>;
+
+export const DeskTaskResourceEntry = z
+  .object({
+    ...DeskTaskEntryStamp,
+    kind: z.literal("resource"),
+    taskId: DeskEntityId.nullable(),
+    resourceId: DeskEntityId,
+    resourceKind: DeskTaskResourceKind,
+    resourceKey: z.string().min(1).max(WIRE_LIMITS.deskPathSurface),
+    ownerAgentId: DeskTaskAgentId,
+    ownerMembershipId: DeskTaskMemberId,
+    attemptId: DeskEntityId.nullable(),
+    actionId: DeskEntityId.nullable(),
+    disposition: z.enum(["retained", "transfer-pending", "released"]),
+    observedState: DeskTaskText.nullable(),
+    observedVia: z.enum(["observer", "host", "receipt"]).nullable(),
+    obligations: z
+      .array(
+        z
+          .object({
+            kind: z.string().min(1).max(WIRE_LIMITS.deskCheckPointer),
+            ref: z.string().min(1).max(WIRE_LIMITS.deskPathSurface),
+          })
+          .strict(),
+      )
+      .max(WIRE_LIMITS.deskBriefRefs),
+    releaseRuling: z
+      .object({
+        reason: BriefText,
+        evidence: z.array(BriefRef).max(WIRE_LIMITS.deskBriefRefs),
+        entryId: DeskEntityId.nullable(),
+      })
+      .strict()
+      .nullable(),
+  })
+  .strict();
+export type DeskTaskResourceEntryValue = z.infer<typeof DeskTaskResourceEntry>;
+
+export const DeskTaskControlEntry = z
+  .object({
+    ...DeskTaskEntryStamp,
+    kind: z.literal("control"),
+    taskId: DeskEntityId.nullable(),
+    controlId: DeskEntityId,
+    targetTaskId: DeskEntityId.nullable(),
+    targetAttemptId: DeskEntityId.nullable(),
+    state: z.enum(["stop-requested", "resume-ruled", "stop-observed"]),
+    reason: BriefText,
+    outstandingActionIds: z.array(DeskEntityId).max(WIRE_LIMITS.deskBriefRefs),
+    outstandingResourceIds: z.array(DeskEntityId).max(WIRE_LIMITS.deskBriefRefs),
+  })
+  .strict();
+export type DeskTaskControlEntryValue = z.infer<typeof DeskTaskControlEntry>;
+
+export const DeskTaskEntry = z.discriminatedUnion("kind", [
+  DeskTaskDeclarationEntry,
+  DeskTaskAttemptEntry,
+  DeskTaskResultEntry,
+  DeskTaskAdjudicationEntry,
+  DeskTaskHoldEntry,
+  DeskTaskActionEntry,
+  DeskTaskDeliveryEntry,
+  DeskTaskResourceEntry,
+  DeskTaskControlEntry,
+]);
+export type DeskTaskEntryValue = z.infer<typeof DeskTaskEntry>;
+
+export const DeskTaskCommandBody = z
+  .object({
+    state: z.enum(["open", "reopened", "withdrawn"]),
+    outcome: BriefText,
+    objective: BriefText.nullable(),
+    authorityRef: BriefRef,
+    dependencies: z.array(DeskTaskDependency).max(WIRE_LIMITS.deskBriefRefs),
+    scope: DeskTaskScopeTemplate.nullable(),
+    proofPolicy: DeskTaskProofPolicy.nullable(),
+    grants: DeskTaskGrants,
+    budgets: DeskTaskBudgets,
+    reason: DeskTaskText.nullable(),
+  })
+  .strict();
+export type DeskTaskCommandBodyValue = z.infer<typeof DeskTaskCommandBody>;
+
+/** Owner amendment — a partial patch over the task body; present fields
+ *  replace, absent fields keep their durable value. */
+export const DeskTaskAmendment = DeskTaskCommandBody.partial();
+export type DeskTaskAmendmentValue = z.infer<typeof DeskTaskAmendment>;
+
+export const DeskTaskResultBody = z
+  .object({
+    snapshotSha256: Sha,
+    candidate: z
+      .object({
+        candidateId: DeskEntityId,
+        snapshotSha256: Sha,
+        head: DeskTaskGitHead.nullable(),
+      })
+      .strict()
+      .nullable(),
+    handbackId: DeskEntityId.nullable(),
+    handbackDigest: Sha.nullable(),
+    artifacts: z.array(DeskTaskArtifactRef).max(WIRE_LIMITS.deskCheckEvidence),
+    scopeId: DeskEntityId.nullable(),
+    scopeRevision: z.number().int().min(1).nullable(),
+    reviewRound: z
+      .object({
+        scopeRevision: z.number().int().min(1),
+        candidateSnapshot: Sha,
+        briefRevision: z.number().int().min(0),
+        mandateSha256: Sha.nullable(),
+      })
+      .strict()
+      .nullable(),
+    checkRuns: z.array(DeskTaskCheckRunRef).max(WIRE_LIMITS.deskCheckEvidence),
+    findings: z.array(BriefRef).max(WIRE_LIMITS.deskBriefRefs),
+    provenance: z.enum(["claimed", "measured"]),
+  })
+  .strict();
+export type DeskTaskResultBodyValue = z.infer<typeof DeskTaskResultBody>;
+
+export const DeskTaskAdjudicationBody = z
+  .object({
+    resultId: DeskEntityId,
+    expectedResultRevision: z.number().int().min(1),
+    verdict: DeskTaskVerdict,
+    reason: BriefText,
+    evidence: z.array(BriefRef).max(WIRE_LIMITS.deskBriefRefs),
+    counterevidence: z.array(BriefRef).max(WIRE_LIMITS.deskBriefRefs),
+    residualRisk: BriefText.nullable(),
+    findings: z.array(BriefRef).max(WIRE_LIMITS.deskBriefRefs),
+  })
+  .strict();
+export type DeskTaskAdjudicationBodyValue = z.infer<typeof DeskTaskAdjudicationBody>;
+
+export const DeskTaskHoldBody = z
+  .object({
+    holdKind: DeskTaskHoldKind,
+    question: BriefText,
+    proposition: BriefText.nullable(),
+    claimRefs: z.array(BriefRef).max(WIRE_LIMITS.deskBriefRefs),
+    resourceIds: z.array(DeskEntityId).max(WIRE_LIMITS.deskBriefRefs),
+  })
+  .strict();
+export type DeskTaskHoldBodyValue = z.infer<typeof DeskTaskHoldBody>;
+
+export const DeskTaskHoldRuling = z
+  .object({
+    reason: BriefText,
+    outcome: z.enum(["release", "retain", "withdraw"]),
+  })
+  .strict();
+export type DeskTaskHoldRulingValue = z.infer<typeof DeskTaskHoldRuling>;
+
+const DeskTaskCasPins = {
+  expectedLedgerRevision: z.number().int().min(0).optional(),
+  expectedBriefRevision: z.number().int().min(0).optional(),
+  expectedOwnershipRevision: z.number().int().min(0).optional(),
+};
+
+const DeskTaskOptionalTaskPin = {
+  expectedTaskRevision: z.number().int().min(0).optional(),
+};
+
+export const DeskTaskDefineInput = z
+  .object({
+    requestId: DeskRequestId,
+    assignmentId: DeskEntityId,
+    taskId: DeskEntityId.nullable(),
+    expectedLedgerRevision: z.number().int().min(0),
+    expectedBriefRevision: z.number().int().min(0),
+    expectedOwnershipRevision: z.number().int().min(0),
+    expectedTaskRevision: z.number().int().min(0),
+    task: DeskTaskCommandBody,
+  })
+  .strict();
+export type DeskTaskDefineInputValue = z.infer<typeof DeskTaskDefineInput>;
+
+export const DeskTaskReserveInput = z
+  .object({
+    requestId: DeskRequestId,
+    assignmentId: DeskEntityId,
+    taskId: DeskEntityId,
+    grantRef: BriefRef,
+    ...DeskTaskCasPins,
+    ...DeskTaskOptionalTaskPin,
+    placement: DeskTaskPlacement,
+    runtime: DeskTaskRuntimePin.nullable(),
+    seatPin: DeskTaskSeatPin,
+    reuseTarget: z.union([z.literal("new"), z.object({ agentId: DeskTaskAgentId }).strict()]),
+    effectBudget: z.number().int().min(1).max(WIRE_LIMITS.deskTaskActions).optional(),
+    predecessor: z.object({ attemptId: DeskEntityId, resultId: DeskEntityId }).strict().nullable().optional(),
+  })
+  .strict();
+export type DeskTaskReserveInputValue = z.infer<typeof DeskTaskReserveInput>;
+
+export const DeskTaskResultInput = z
+  .object({
+    requestId: DeskRequestId,
+    assignmentId: DeskEntityId,
+    taskId: DeskEntityId,
+    attemptId: DeskEntityId,
+    expectedTaskRevision: z.number().int().min(0),
+    ...DeskTaskCasPins,
+    result: DeskTaskResultBody,
+  })
+  .strict();
+export type DeskTaskResultInputValue = z.infer<typeof DeskTaskResultInput>;
+
+export const DeskTaskRuleInput = z
+  .object({
+    requestId: DeskRequestId,
+    assignmentId: DeskEntityId,
+    taskId: DeskEntityId,
+    expectedTaskRevision: z.number().int().min(0),
+    ...DeskTaskCasPins,
+    adjudication: DeskTaskAdjudicationBody,
+  })
+  .strict();
+export type DeskTaskRuleInputValue = z.infer<typeof DeskTaskRuleInput>;
+
+export const DeskTaskHoldInput = z
+  .object({
+    requestId: DeskRequestId,
+    assignmentId: DeskEntityId,
+    taskId: DeskEntityId,
+    attemptId: DeskEntityId.nullable(),
+    holdId: DeskEntityId.nullable(),
+    ...DeskTaskCasPins,
+    ...DeskTaskOptionalTaskPin,
+    hold: DeskTaskHoldBody.nullable(),
+    ruling: DeskTaskHoldRuling.nullable(),
+  })
+  .strict();
+export type DeskTaskHoldInputValue = z.infer<typeof DeskTaskHoldInput>;
+
+export const DeskTaskStopInput = z
+  .object({
+    requestId: DeskRequestId,
+    assignmentId: DeskEntityId,
+    taskId: DeskEntityId.nullable(),
+    attemptId: DeskEntityId.nullable(),
+    ...DeskTaskCasPins,
+    ...DeskTaskOptionalTaskPin,
+    reason: BriefText,
+  })
+  .strict();
+export type DeskTaskStopInputValue = z.infer<typeof DeskTaskStopInput>;
+
+export const DeskTaskAcknowledgeInput = z
+  .object({
+    requestId: DeskRequestId,
+    assignmentId: DeskEntityId,
+    deliveryId: DeskEntityId,
+    ...DeskTaskCasPins,
+    acknowledgment: z.enum(["responsibility-acknowledged", "handled"]),
+    reason: DeskTaskText.nullable(),
+  })
+  .strict();
+export type DeskTaskAcknowledgeInputValue = z.infer<typeof DeskTaskAcknowledgeInput>;
+
+export const DeskTaskReleaseRuling = z.object({ resourceId: DeskEntityId,
+  expectedResourceRevision: z.number().int().min(1), reason: BriefText,
+  evidence: z.array(BriefRef).min(1).max(WIRE_LIMITS.deskBriefRefs) }).strict();
+export const DeskTaskAttemptRuling = z.object({ attemptId: DeskEntityId,
+  expectedAttemptRevision: z.number().int().min(1), disposition: z.enum(["settled", "stopped"]), reason: BriefText,
+  evidence: z.array(BriefRef).min(1).max(WIRE_LIMITS.deskBriefRefs) }).strict();
+export type DeskTaskReleaseRulingValue = z.infer<typeof DeskTaskReleaseRuling>;
+export type DeskTaskAttemptRulingValue = z.infer<typeof DeskTaskAttemptRuling>;
+export const DeskTaskReconcileInput = z
+  .object({
+    requestId: DeskRequestId,
+    assignmentId: DeskEntityId,
+    taskId: DeskEntityId.nullable().optional(),
+    attemptIds: z.array(DeskEntityId).max(WIRE_LIMITS.deskBriefRefs),
+    actionIds: z.array(DeskEntityId).max(WIRE_LIMITS.deskBriefRefs),
+    resourceIds: z.array(DeskEntityId).max(WIRE_LIMITS.deskBriefRefs),
+    releaseRulings: z.array(DeskTaskReleaseRuling).max(WIRE_LIMITS.deskTaskReconcileMarks).optional(),
+    attemptRulings: z.array(DeskTaskAttemptRuling).max(WIRE_LIMITS.deskTaskReconcileMarks).optional(),
+    observationTypes: z.array(DeskTaskObservationType).max(5),
+    expectedLedgerRevision: z.number().int().min(0).optional(),
+  })
+  .strict();
+export type DeskTaskReconcileInputValue = z.infer<typeof DeskTaskReconcileInput>;
+
+const TaskDispatchPins = {
+  requestId: DeskRequestId, assignmentId: DeskEntityId, taskId: DeskEntityId,
+  expectedLedgerRevision: z.number().int().min(0), expectedBriefRevision: z.number().int().min(0),
+  expectedOwnershipRevision: z.number().int().min(0), expectedTaskRevision: z.number().int().min(1),
+  grantRef: BriefRef,
+};
+const TaskDispatchReservation = {
+  ...TaskDispatchPins, attemptId: z.null(), expectedAttemptRevision: z.literal(0),
+  runtime: DeskTaskRuntimePin, placement: DeskTaskPlacement,
+  effectBudget: z.number().int().min(1).max(WIRE_LIMITS.deskTaskActions).optional(),
+};
+export const DeskTaskDispatchInput = z.discriminatedUnion("phase", [
+  z.object({ ...TaskDispatchReservation, phase: z.literal("bootstrap"), title: DeskTaskText.optional() }).strict(),
+  z.object({ ...TaskDispatchReservation, phase: z.literal("reuse"), reuseTarget: z.object({ agentId: DeskTaskAgentId }).strict() }).strict(),
+  z.object({ ...TaskDispatchPins, phase: z.literal("send"), attemptId: DeskEntityId,
+    expectedAttemptRevision: z.number().int().min(1), text: DeskTaskText }).strict(),
+  z.object({ ...TaskDispatchPins, phase: z.literal("archive"), attemptId: DeskEntityId,
+    expectedAttemptRevision: z.number().int().min(1), cascade: z.object({
+      attemptIds: z.array(DeskEntityId).max(WIRE_LIMITS.deskBriefRefs),
+      disposition: z.string().min(1).max(WIRE_LIMITS.deskCheckPointer),
+    }).strict().optional() }).strict(),
+]);
+export type DeskTaskDispatchInputValue = z.infer<typeof DeskTaskDispatchInput>;
+
+const TaskIntegrationPins = {
+  requestId: DeskRequestId, assignmentId: DeskEntityId, taskId: DeskEntityId, resultId: DeskEntityId,
+  expectedLedgerRevision: z.number().int().min(0),
+  expectedResultRevision: z.number().int().min(1), expectedAdjudicationRevision: z.number().int().min(1),
+};
+const TaskIntegrationContinuation = {
+  ...TaskIntegrationPins, integrationActionId: DeskEntityId, expectedActionRevision: z.number().int().min(1),
+};
+export const DeskTaskIntegrateInput = z.discriminatedUnion("phase", [
+  z.object({ ...TaskIntegrationPins, phase: z.literal("stage"), integrationActionId: z.null(),
+    grant: z.object({ authorityRef: BriefRef, paths: z.array(ScopeSurfacePath).max(WIRE_LIMITS.deskBriefItems),
+      target: z.object({ cwd: DeskTaskPath }).strict() }).strict(),
+    verification: z.object({ recipeIds: z.array(DeskEntityId).max(WIRE_LIMITS.deskCheckEvidence) }).strict(),
+    stageKind: z.enum(["git-worktree", "content-dir"]),
+  }).strict(),
+  z.object({ ...TaskIntegrationContinuation, phase: z.literal("check") }).strict(),
+  z.object({ ...TaskIntegrationContinuation, phase: z.literal("land") }).strict(),
+  z.object({ ...TaskIntegrationContinuation, phase: z.literal("reconcile") }).strict(),
+  z.object({ ...TaskIntegrationContinuation, phase: z.literal("discharge"), grantRef: BriefRef }).strict(),
+]);
+export type DeskTaskIntegrateInputValue = z.infer<typeof DeskTaskIntegrateInput>;
+
+export const DeskTaskAmendInput = z
+  .object({
+    requestId: DeskRequestId,
+    assignmentId: DeskEntityId,
+    taskId: DeskEntityId,
+    expectedTaskRevision: z.number().int().min(0),
+    expectedBriefRevision: z.number().int().min(0).optional(),
+    task: DeskTaskAmendment,
+  })
+  .strict();
+export type DeskTaskAmendInputValue = z.infer<typeof DeskTaskAmendInput>;
+
+export const DeskTaskAbandonInput = z
+  .object({
+    requestId: DeskRequestId,
+    assignmentId: DeskEntityId,
+    taskId: DeskEntityId,
+    expectedTaskRevision: z.number().int().min(0),
+    reason: BriefText,
+  })
+  .strict();
+export type DeskTaskAbandonInputValue = z.infer<typeof DeskTaskAbandonInput>;
+
+export const DeskTaskReopenInput = z
+  .object({
+    requestId: DeskRequestId,
+    assignmentId: DeskEntityId,
+    taskId: DeskEntityId,
+    expectedTaskRevision: z.number().int().min(0),
+    reason: BriefText,
+  })
+  .strict();
+export type DeskTaskReopenInputValue = z.infer<typeof DeskTaskReopenInput>;
+
+export const DeskTaskAcceptInput = z
+  .object({
+    requestId: DeskRequestId,
+    assignmentId: DeskEntityId,
+    taskId: DeskEntityId,
+    expectedTaskRevision: z.number().int().min(0),
+    resultId: DeskEntityId,
+  })
+  .strict();
+export type DeskTaskAcceptInputValue = z.infer<typeof DeskTaskAcceptInput>;
+
+export const DeskTaskCommandInput = z.discriminatedUnion("operation", [
+  DeskTaskDefineInput.extend({ operation: z.literal("define") }),
+  DeskTaskAmendInput.extend({ operation: z.literal("amend") }),
+  DeskTaskAbandonInput.extend({ operation: z.literal("abandon") }),
+  DeskTaskReopenInput.extend({ operation: z.literal("reopen") }),
+  DeskTaskReserveInput.extend({ operation: z.literal("reserve") }),
+  DeskTaskResultInput.extend({ operation: z.literal("result") }),
+  DeskTaskRuleInput.extend({ operation: z.literal("rule") }),
+  DeskTaskHoldInput.extend({ operation: z.literal("hold") }),
+  DeskTaskStopInput.extend({ operation: z.literal("stop") }),
+  DeskTaskAcknowledgeInput.extend({ operation: z.literal("acknowledge") }),
+  DeskTaskReconcileInput.extend({ operation: z.literal("reconcile") }),
+]);
+export type DeskTaskCommandInputValue = z.infer<typeof DeskTaskCommandInput>;
+
+export const DeskTaskEffectInput = z.discriminatedUnion("operation", [
+  z
+    .object({
+      operation: z.literal("intent"),
+      requestId: DeskRequestId,
+      attemptId: DeskEntityId.optional(),
+      actionId: DeskEntityId.optional(),
+      actionKind: DeskTaskActionKind,
+      taskId: DeskEntityId.optional(),
+      resultId: DeskEntityId.optional(),
+      body: DeskTaskJsonObject,
+    })
+    .strict(),
+  z
+    .object({
+      operation: z.literal("issue"),
+      requestId: DeskRequestId,
+      attemptId: DeskEntityId.optional(),
+      actionId: DeskEntityId,
+      actionKind: DeskTaskActionKind.optional(),
+    })
+    .strict(),
+  z
+    .object({
+      operation: z.literal("observe"),
+      requestId: DeskRequestId,
+      attemptId: DeskEntityId.optional(),
+      taskId: DeskEntityId.optional(),
+      resultId: DeskEntityId.optional(),
+      actionId: DeskEntityId,
+      actionKind: DeskTaskActionKind,
+      receipt: DeskTaskEffectReceipt,
+    })
+    .strict(),
+  z
+    .object({
+      operation: z.literal("bind"),
+      requestId: DeskRequestId,
+      attemptId: DeskEntityId,
+      member: DeskTaskMemberPin,
+      observed: z
+        .object({
+          provider: z.string().min(1).max(WIRE_LIMITS.providerLen),
+          createCwd: DeskTaskPath.nullable().optional(),
+          workspaceId: z.string().min(1).max(WIRE_LIMITS.workspaceIdLen).nullable().optional(),
+        })
+        .strict(),
+    })
+    .strict(),
+  z
+    .object({
+      operation: z.literal("integration-admit"),
+      requestId: DeskRequestId,
+      assignmentId: DeskEntityId,
+      taskId: DeskEntityId,
+      resultId: DeskEntityId,
+      expectedResultRevision: z.number().int().min(0).optional(),
+      expectedAdjudicationRevision: z.number().int().min(0).optional(),
+      expectedLedgerRevision: z.number().int().min(0).optional(),
+      grant: z
+        .object({
+          authorityRef: BriefRef,
+          paths: z.array(ScopeSurfacePath).max(WIRE_LIMITS.deskBriefItems),
+          target: z.object({ cwd: DeskTaskPath }).strict().optional(),
+        })
+        .strict(),
+      verification: z
+        .object({ recipeIds: z.array(DeskEntityId).max(WIRE_LIMITS.deskCheckEvidence) })
+        .strict()
+        .optional(),
+      body: DeskTaskJsonObject,
+    })
+    .strict(),
+]);
+export type DeskTaskEffectInputValue = z.infer<typeof DeskTaskEffectInput>;
+
+export const DeskTaskCommandResult = z
+  .object({
+    ok: z.literal(true),
+    receiptId: DeskEntityId,
+    taskId: DeskEntityId.nullable(),
+    attemptId: DeskEntityId.optional(),
+    actionId: DeskEntityId.nullable().optional(),
+    resultId: DeskEntityId.nullable().optional(),
+    adjudicationId: DeskEntityId.nullable().optional(),
+    holdId: DeskEntityId.nullable().optional(),
+    deliveryId: DeskEntityId.nullable().optional(),
+    state: z.string().min(1).max(WIRE_LIMITS.deskDecisionText).nullable().optional(),
+    ledgerRevision: z.number().int().min(0),
+    replayed: z.boolean(),
+    next: z
+      .object({ operation: z.string().min(1).max(32), actionId: DeskEntityId })
+      .strict()
+      .optional(),
+    resolved: z.array(DeskEntityId).optional(),
+    outstanding: z.array(DeskEntityId).optional(),
+    bound: z.array(DeskEntityId).optional(),
+  })
+  .strict();
+export type DeskTaskCommandResultValue = z.infer<typeof DeskTaskCommandResult>;
+
+export const DeskTaskEffectPermit = z
+  .object({
+    actionId: DeskEntityId,
+    entrySha256: Sha,
+    ownershipRevision: z.number().int().min(0),
+    attemptRevision: z.number().int().min(0),
+    body: DeskTaskJsonObject,
+    requestId: DeskRequestId.nullable().optional(),
+    grantRef: BriefRef.nullable().optional(),
+    target: DeskTaskJsonObject.nullable().optional(),
+    bodySha256: Sha.optional(),
+  })
+  .strict();
+export type DeskTaskEffectPermitValue = z.infer<typeof DeskTaskEffectPermit>;
+
+export const DeskTaskEffectResult = z
+  .object({
+    ok: z.literal(true),
+    receiptId: DeskEntityId.nullable().optional(),
+    actionId: DeskEntityId.optional(),
+    actionPin: z.object({ actionId: DeskEntityId }).strict().optional(),
+    attemptId: DeskEntityId.optional(),
+    perform: z.boolean().optional(),
+    bound: z.boolean().optional(),
+    reason: BriefText.optional(),
+    ledgerRevision: z.number().int().min(0).optional(),
+    replayed: z.boolean().optional(),
+    permit: DeskTaskEffectPermit.optional(),
+  })
+  .strict();
+export type DeskTaskEffectResultValue = z.infer<typeof DeskTaskEffectResult>;
+
+export const DESK_TASK_READINESS_BUCKETS = [
+  "backlog",
+  "ready",
+  "held",
+  "running",
+  "integrating",
+  "settled",
+  "superseded",
+] as const;
+export const DeskTaskReadinessBucket = z.enum(DESK_TASK_READINESS_BUCKETS);
+export type DeskTaskReadinessBucketValue = z.infer<typeof DeskTaskReadinessBucket>;
+
+export const DeskTaskQueueCounts = z
+  .object({
+    backlog: z.number().int().min(0),
+    ready: z.number().int().min(0),
+    held: z.number().int().min(0),
+    running: z.number().int().min(0),
+    integrating: z.number().int().min(0),
+    settled: z.number().int().min(0),
+    superseded: z.number().int().min(0),
+    openHolds: z.number().int().min(0),
+    pendingAcks: z.number().int().min(0),
+    resources: z.number().int().min(0),
+    controls: z.number().int().min(0),
+  })
+  .strict();
+export type DeskTaskQueueCountsValue = z.infer<typeof DeskTaskQueueCounts>;
+
+export const DeskTaskRecapItem = z
+  .object({
+    entryId: DeskEntityId,
+    taskId: DeskEntityId.nullable(),
+    kind: z.enum([
+      "task",
+      "attempt",
+      "result",
+      "adjudication",
+      "hold",
+      "action",
+      "delivery",
+      "resource",
+      "control",
+    ]),
+    state: z.string().min(1).max(WIRE_LIMITS.deskCheckPointer),
+    summary: DeskTaskText.nullable(),
+    entrySha256: Sha,
+    ordinal: z.number().int().min(0),
+  })
+  .strict();
+export type DeskTaskRecapItemValue = z.infer<typeof DeskTaskRecapItem>;
+
+export const DeskTaskReadiness = z
+  .object({
+    bucket: DeskTaskReadinessBucket,
+    reasons: z.array(DeskTaskReasonCode).max(WIRE_LIMITS.deskBriefRefs),
+    eligible: z.boolean(),
+    pins: z
+      .object({
+        briefRevision: z.number().int().min(0),
+        taskRevision: z.number().int().min(0),
+        dependencyRevisions: z.record(z.string(), z.number().int().min(0)).optional(),
+      })
+      .strict(),
+  })
+  .strict();
+export type DeskTaskReadinessValue = z.infer<typeof DeskTaskReadiness>;
+
+export const DeskTaskResultQualification = z
+  .object({
+    qualified: z.boolean(),
+    scopeProof: z.enum(["none", "standing-approval", "terminal-approved-round"]).nullable(),
+    reasons: z.array(DeskTaskReasonCode).max(WIRE_LIMITS.deskBriefRefs),
+    resultId: DeskEntityId.nullable(),
+    adjudicationId: DeskEntityId.nullable(),
+    pins: z
+      .object({
+        resultRevision: z.number().int().min(0),
+        adjudicationRevision: z.number().int().min(0),
+        scopeId: DeskEntityId.nullable(),
+        scopeRevision: z.number().int().min(0).nullable(),
+      })
+      .strict(),
+  })
+  .strict();
+export type DeskTaskResultQualificationValue = z.infer<typeof DeskTaskResultQualification>;
+
+// ---------------------------------------------------------------------------
 // Desk workflow projection. Closed variants carry complete bounded store
 // rows; no arbitrary-kind or unknown-record escape hatch is accepted.
 // ---------------------------------------------------------------------------
@@ -1973,11 +3703,12 @@ const DeskWorkflowScopeDischarge = z.union([
 const DeskWorkflowScopeTransitionRow = z.object({
   transitionId: DeskEntityId, assignmentId: DeskEntityId, scopeId: DeskEntityId, requestId: DeskRequestId,
   revision: z.number().int().min(1),
-  command: z.enum(["declare", "claim", "submit-for-review", "review-observed", "approve", "reject", "advance", "close"]),
+  command: z.enum(["declare", "claim", "submit-for-review", "review-observed", "approve", "reject", "advance", "close", "task-cancel"]),
   from: ScopeState.nullable(), to: ScopeState, scopeRevision: z.number().int().min(1),
   briefRevision: z.number().int().min(0), mandateSha256: Sha.nullable(), candidateSnapshot: Sha.nullable(),
   candidateHead: z.string().regex(/^[0-9a-f]{40}$|^[0-9a-f]{64}$/).nullable(),
   discharged: z.array(DeskWorkflowScopeDischarge).max(WIRE_LIMITS.deskBriefItems),
+  taskCancellation: DeskTaskScopeCancellation.optional(),
   actorAgentId: z.string().min(1).max(WIRE_LIMITS.agentId),
 }).strict();
 const DeskWorkflowCandidateRow = z.object({
@@ -2109,6 +3840,14 @@ export const DeskWorkflowProjectionItem = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("checkRun"), row: DeskWorkflowCheckRunRow }).strict(),
   z.object({ kind: z.literal("handbackSummary"), summary: DeskWorkflowHandbackSummary }).strict(),
   z.object({ kind: z.literal("settlementSummary"), summary: DeskWorkflowSettlementSummary }).strict(),
+  /** Task execution — the durable v9 row plus its typed recap summary; the
+   *  view stamps the full readiness the shared resolver computed (bucket,
+   *  reason codes, eligibility and pins), never a recomputed one. */
+  z.object({ kind: z.literal("taskEntry"), row: DeskTaskEntry, current: z.boolean(),
+    readiness: DeskTaskReadiness.nullable(),
+    resultQualification: DeskTaskResultQualification.nullable(),
+    currentRuling: DeskTaskAdjudicationEntry.nullable(),
+    summary: DeskTaskRecapItem }).strict(),
 ]);
 export type DeskWorkflowProjectionItemValue = z.infer<typeof DeskWorkflowProjectionItem>;
 
@@ -2146,13 +3885,42 @@ export const DeskWorkflowProjection = z.object({
     bodySha256: Sha, entrySha256: Sha, authorityRef: z.string().min(1).max(WIRE_LIMITS.deskAuthorityRef),
     actorAgentId: z.string().min(1).max(WIRE_LIMITS.agentId) }).strict().nullable(),
   legacyObjective: z.string().max(WIRE_LIMITS.deskObjective).nullable(),
+  taskCounts: DeskTaskQueueCounts.optional(),
   section: DeskWorkflowSection, items: z.array(DeskWorkflowProjectionItem).max(WIRE_LIMITS.deskWorkflowPage),
   total: z.number().int().min(0).max(WIRE_LIMITS.deskWorkflowHistory),
   omittedBefore: z.number().int().min(0).max(WIRE_LIMITS.deskWorkflowHistory),
   omittedAfter: z.number().int().min(0).max(WIRE_LIMITS.deskWorkflowHistory),
   nextCursor: DeskWorkflowCursor.nullable(), acceptance: z.literal("not-established-by-this-view"),
-}).strict();
+}).strict().superRefine((view, ctx) => {
+  if (view.section === "tasks" && view.taskCounts === undefined) ctx.addIssue({ code: "custom", path: ["taskCounts"], message: "tasks projection requires counts from its full ledger observation" });
+  if (view.section !== "tasks" && view.taskCounts !== undefined) ctx.addIssue({ code: "custom", path: ["taskCounts"], message: "taskCounts belongs to the tasks section" });
+});
 export type DeskWorkflowProjectionValue = z.infer<typeof DeskWorkflowProjection>;
+
+/** Public recap is a page request. Only the pure builder consumes the
+ * already-authorized projection; clients cannot submit observed state. */
+export const DeskTaskRecapInput = z.object({
+  requestId: DeskRequestId, assignmentId: DeskEntityId,
+  expectedLedgerRevision: z.number().int().min(0),
+  expectedBriefRevision: z.number().int().min(0).nullable(),
+  expectedOwnershipRevision: z.number().int().min(0).optional(),
+  cursor: DeskWorkflowCursor.nullable(), limit: z.number().int().min(1).max(WIRE_LIMITS.deskWorkflowPage),
+}).strict();
+export type DeskTaskRecapInputValue = z.infer<typeof DeskTaskRecapInput>;
+
+const TaskRecapEntryIds = z.array(DeskEntityId).max(WIRE_LIMITS.deskWorkflowPage);
+export const DeskTaskRecapResult = z.object({
+  ok: z.literal(true), contextStatus: z.enum(["complete", "partial"]),
+  view: DeskWorkflowProjection.refine(view => view.section === "tasks", "recap requires the tasks section"),
+  counts: DeskTaskQueueCounts,
+  unresolved: z.object({ tasks: TaskRecapEntryIds, holds: TaskRecapEntryIds, resources: TaskRecapEntryIds,
+    deliveries: TaskRecapEntryIds, effects: TaskRecapEntryIds, attempts: TaskRecapEntryIds, controls: TaskRecapEntryIds }).strict(),
+  gaps: z.array(DeskTaskText).max(WIRE_LIMITS.deskBriefRefs),
+  warnings: z.array(DeskTaskText).max(WIRE_LIMITS.deskBriefRefs),
+  acceptance: z.literal("not-established-by-this-recap"),
+}).strict();
+export type DeskTaskRecapResultValue = z.infer<typeof DeskTaskRecapResult>;
+
 
 // ---------------------------------------------------------------------------
 // Value types (z.infer — same idiom as contracts.ts)

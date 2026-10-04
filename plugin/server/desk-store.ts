@@ -28,6 +28,8 @@ export { REPO_KEY_ALGORITHM, REPO_KEY_PATTERN, DESK_BRIDGE_REPO, deskReposDir, d
 // untouched, and the module writes nowhere outside <stableRoot>/state/
 // enforcement/.
 
+import { taskGraphValid, taskHistoryValid } from "./desk-task-history.ts";
+import { resolveDeskTaskCapacityReserve } from "./desk-task-capacity.ts";
 import { randomUUID } from "node:crypto";
 import {
   closeSync,
@@ -51,6 +53,9 @@ import {
   DeskOperativeBrief,
   DeskReviewPlan,
   DeskScopeDischarge,
+  DeskTaskEntry,
+  DeskTaskScopeCancellation,
+  type DeskTaskEntryValue,
   DeskScopeOwnership,
   DeskSettlementResource,
   ROLLOUT_CHECK_GATED_COMMANDS,
@@ -147,10 +152,14 @@ export const LEDGER_LIMITS = {
   // the WIRE_LIMITS.desk* keys directly (the F-STD-4 rule).
   ownershipOffers: 2048,
   ownershipAccepts: 1024,
+  // Task execution — the additive v9 taskEntries union. The row cap reads
+  // the wire bound directly (F-STD-4); per-entity revision chains are
+  // bounded by the same table cap.
+  taskEntries: WIRE_LIMITS.deskTaskEntries,
 } as const;
 
 const LEDGER_FORMAT = "paseo-slp/enforcement";
-const LEDGER_SCHEMA_VERSION = 8;
+const LEDGER_SCHEMA_VERSION = 9;
 const CANONICALIZATION = "slp-canonical-json/1";
 const SEGMENT_NAME = /^(\d+)-(\d+)\.jsonl$/;
 const LOCK_RETRY_MS = 25;
@@ -280,6 +289,29 @@ export const REVOKE_REASONS = [
  *  observedParentAgentId arrive in v3 (P2-e) by another additive
  *  migration — P2-c has no writer for them. The raw handle is never
  *  stored; only its SHA-256. */
+const MembershipCapacityClaimV1Schema = z.object({
+  version: z.literal(1),
+  attemptId: BoundedId,
+  createActionId: BoundedId,
+  createIssueRef: z.object({ entryId: BoundedId, entrySha256: Sha }).strict(),
+  hostRequestId: z.string().min(1).max(WIRE_LIMITS.deskRequestId),
+  idempotencyKeySha256: Sha,
+  rawCreateContextSha256: Sha,
+}).strict();
+const MembershipCapacityClaimV2Schema = z.object({
+  version: z.literal(2),
+  basis: z.literal("create-ticket"),
+  attemptId: BoundedId,
+  createActionId: BoundedId,
+  createIssueRef: z.object({ entryId: BoundedId, entrySha256: Sha }).strict(),
+  ticketSha256: Sha,
+  hostRequestId: z.string().min(1).max(WIRE_LIMITS.deskRequestId),
+  idempotencyKeySha256: Sha,
+  intendedBodySha256: Sha,
+  observedConfigSha256: Sha,
+}).strict();
+const MembershipCapacityClaimSchema = z.union([MembershipCapacityClaimV1Schema, MembershipCapacityClaimV2Schema]);
+
 const MembershipSchema = z
   .object({
     membershipId: z.string().uuid(),
@@ -297,6 +329,9 @@ const MembershipSchema = z
     registeredAt: Time.nullable(),
     revokedAt: Time.nullable(),
     revokeReason: z.enum(REVOKE_REASONS).nullable(),
+    /** Legacy memberships omit this; task-issued credits pin one immutable
+     *  create/attempt claim without granting worker or scope authority. */
+    capacityClaim: MembershipCapacityClaimSchema.nullable().optional(),
   })
   .strict();
 
@@ -630,6 +665,11 @@ const ScopeTransitionSchemaV7 = ScopeTransitionSchema.extend({
 // and the allowlisted class names live in shared/enforcement.ts; the runner
 // seam itself lives in desk-check-runner.ts.
 // ---------------------------------------------------------------------------
+
+const ScopeTransitionSchemaV9 = ScopeTransitionSchemaV7.extend({
+  command: z.enum(["declare", "claim", "submit-for-review", "review-observed", "approve", "reject", "advance", "close", "task-cancel"]),
+  taskCancellation: DeskTaskScopeCancellation.optional(),
+});
 
 /** P5 — one immutable check-definition revision. The row binds
  *  (assignmentId, scopeId, checkId, ownerAgentId) plus the assignment's
@@ -966,6 +1006,9 @@ const TABLE_FIELDS_BY_VERSION = {
     ownershipOffers: z.array(OwnershipOfferSchema).max(LEDGER_LIMITS.ownershipOffers),
     ownershipAccepts: z.array(OwnershipAcceptSchema).max(LEDGER_LIMITS.ownershipAccepts),
   },
+  9: {
+    taskEntries: z.array(DeskTaskEntry).max(LEDGER_LIMITS.taskEntries),
+  },
 } as const;
 
 const TABLE_FIELDS_V7 = {
@@ -990,6 +1033,8 @@ const LedgerTableFields = {
   ...TABLE_FIELDS_BY_VERSION[5],
   ...TABLE_FIELDS_V8,
   ...TABLE_FIELDS_BY_VERSION[8],
+  ...TABLE_FIELDS_BY_VERSION[9],
+  scopeTransitions: z.array(ScopeTransitionSchemaV9).max(LEDGER_LIMITS.scopeTransitions),
 };
 type LedgerTableName = keyof typeof LedgerTableFields;
 type LedgerTables = Pick<LedgerValue, LedgerTableName>;
@@ -1004,15 +1049,20 @@ const LedgerSchemaV4 = LedgerSchemaV3.extend({ schemaVersion: z.literal(4), ...T
 const LedgerSchemaV5 = LedgerSchemaV4.extend({ schemaVersion: z.literal(5), ...TABLE_FIELDS_BY_VERSION[5] });
 const LedgerSchemaV6 = LedgerSchemaV5.extend({ schemaVersion: z.literal(6), ...TABLE_FIELDS_BY_VERSION[6] });
 const LedgerSchemaV7 = LedgerSchemaV6.extend({ schemaVersion: z.literal(7), ...TABLE_FIELDS_V7 });
-const LedgerSchema = LedgerSchemaV7.extend({
-  schemaVersion: z.literal(LEDGER_SCHEMA_VERSION),
+const LedgerSchemaV8 = LedgerSchemaV7.extend({
+  schemaVersion: z.literal(8),
   rolloutTransitions: TABLE_FIELDS_V8.rolloutTransitions,
   ...TABLE_FIELDS_BY_VERSION[8],
+});
+const LedgerSchema = LedgerSchemaV8.extend({
+  schemaVersion: z.literal(LEDGER_SCHEMA_VERSION),
+  ...TABLE_FIELDS_BY_VERSION[9],
+  scopeTransitions: z.array(ScopeTransitionSchemaV9).max(LEDGER_LIMITS.scopeTransitions),
 });
 const LEDGER_SCHEMAS = {
   1: LedgerSchemaV1, 2: LedgerSchemaV2, 3: LedgerSchemaV3,
   4: LedgerSchemaV4, 5: LedgerSchemaV5, 6: LedgerSchemaV6, 7: LedgerSchemaV7,
-  8: LedgerSchema,
+  8: LedgerSchemaV8, 9: LedgerSchema,
 } as const;
 
 type LedgerValueV2 = z.infer<typeof LedgerSchemaV2>;
@@ -1021,6 +1071,7 @@ type LedgerValueV4 = z.infer<typeof LedgerSchemaV4>;
 type LedgerValueV5 = z.infer<typeof LedgerSchemaV5>;
 type LedgerValueV6 = z.infer<typeof LedgerSchemaV6>;
 type LedgerValueV7 = z.infer<typeof LedgerSchemaV7>;
+type LedgerValueV8 = z.infer<typeof LedgerSchemaV8>;
 
 function emptyTables<Fields extends Record<string, z.ZodArray>>(fields: Fields): { [K in keyof Fields]: z.infer<Fields[K]> } {
   // Every registered field is an array; every call creates distinct empties.
@@ -1059,8 +1110,13 @@ export const MIGRATIONS = {
   // v8 is purely additive: the ownership lineage tables arrive empty and
   // every existing table (including cohort pins with their original digest
   // recipe) carries over verbatim.
-  7: (ledger: LedgerValueV7): LedgerValue => ({
+  7: (ledger: LedgerValueV7): LedgerValueV8 => ({
     ...ledger, schemaVersion: 8, ...emptyTables(TABLE_FIELDS_BY_VERSION[8]),
+  }),
+  // v9 is purely additive: the taskEntries union arrives empty and every
+  // existing row carries over verbatim.
+  8: (ledger: LedgerValueV8): LedgerValue => ({
+    ...ledger, schemaVersion: 9, ...emptyTables(TABLE_FIELDS_BY_VERSION[9]),
   }),
 } as const;
 
@@ -1148,7 +1204,7 @@ export type HandbackValue = z.infer<typeof HandbackSchema>;
 export type SettlementValue = z.infer<typeof SettlementSchema>;
 export type ScopeValue = z.infer<typeof ScopeSchemaV7>;
 export type ScopeReviewValue = z.infer<typeof ScopeReviewSchemaV7>;
-export type ScopeTransitionValue = z.infer<typeof ScopeTransitionSchemaV7>;
+export type ScopeTransitionValue = z.infer<typeof ScopeTransitionSchemaV9>;
 export type CheckDefinitionValue = z.infer<typeof CheckDefinitionSchema>;
 export type CheckRunValue = z.infer<typeof CheckRunSchema>;
 export type RolloutValue = z.infer<typeof RolloutSchema>;
@@ -1254,7 +1310,7 @@ export type DeskStoreEnvelope = z.infer<typeof EnvelopeSchema>;
  *  repo-key-invalid | repo-mismatch). */
 export type DeskStoreRead =
   | { state: "absent" }
-  | { state: "ok"; ledger: LedgerValue; persistedSchemaVersion: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 }
+  | { state: "ok"; ledger: LedgerValue; persistedSchemaVersion: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 }
   | { state: "corrupt" | "future" | "unsafe"; diagnostics: { code: string; schemaVersion: number | null } };
 
 export type TransactReceipt = {
@@ -1449,6 +1505,23 @@ export function createDeskStore(deps: DeskStoreDeps): DeskStore {
       if (row.agentId !== null && row.state !== "revoked") {
         if (liveAgents.has(row.agentId)) return corrupt();
         liveAgents.add(row.agentId);
+      }
+    }
+    if (eventHistory !== undefined) {
+      const minted = eventHistory.filter(event => event.kind === "seat-minted");
+      for (const row of ledger.memberships) {
+        const matches = minted.filter(event => event.payload.membershipId === row.membershipId);
+        if (row.capacityClaim == null) {
+          if (matches.some(event => Object.hasOwn(event.payload, "capacityClaimSha256"))) return corrupt();
+          continue;
+        }
+        const claimDigest = canonicalSha256(row.capacityClaim);
+        if (matches.length !== 1 || matches[0]!.payload.capacityClaimSha256 !== claimDigest) return corrupt();
+      }
+      for (const event of minted) {
+        if (!Object.hasOwn(event.payload, "capacityClaimSha256")) continue;
+        const membership = ledger.memberships.find(row => row.membershipId === event.payload.membershipId);
+        if (membership?.capacityClaim == null || event.payload.capacityClaimSha256 !== canonicalSha256(membership.capacityClaim)) return corrupt();
       }
     }
     // P3-a table refinements: unique ids, referential integrity into the
@@ -1748,7 +1821,7 @@ export function createDeskStore(deps: DeskStoreDeps): DeskStore {
     // review set for its round pin. Legacy plans remain Spec+Standards;
     // v7 plans use their named lenses or an explicitly empty exemption.
     const transitionIds = new Set<string>();
-    const transitionRequestKeys = new Set<string>();
+    const transitionRequestKeys = new Map<string, ScopeTransitionValue>();
     const transitionsByScope = new Map<string, ScopeTransitionValue[]>();
     for (const row of ledger.scopeTransitions) {
       if (transitionIds.has(row.transitionId)) return corrupt();
@@ -1758,15 +1831,21 @@ export function createDeskStore(deps: DeskStoreDeps): DeskStore {
       stream.push(row);
       transitionsByScope.set(streamKey, stream);
       const requestKey = JSON.stringify([row.assignmentId, row.actorAgentId, row.requestId]);
-      if (transitionRequestKeys.has(requestKey)) return corrupt();
-      transitionRequestKeys.add(requestKey);
+      const sameRequest = transitionRequestKeys.get(requestKey);
+      if (sameRequest !== undefined && !(
+        sameRequest.scopeId === row.scopeId && sameRequest.command === "declare" && row.command === "claim" &&
+        ledger.taskEntries.some(entry => entry.kind === "attempt" && entry.requestId === row.requestId &&
+          entry.assignmentId === row.assignmentId && entry.actorAgentId === row.actorAgentId &&
+          entry.boundScopeId === row.scopeId && entry.boundScopeRevision === row.scopeRevision && entry.state === "bound")
+      )) return corrupt();
+      transitionRequestKeys.set(requestKey, row);
       const assignment = assignmentsById.get(row.assignmentId);
       if (assignment === undefined) return corrupt();
       if (!inLineageAgent(row.assignmentId, row.actorAgentId)) return corrupt();
       const declStream = scopeStreams.get(streamKey);
       if (declStream === undefined) return corrupt();
       const rowDeclaration = declStream.find(s => s.revision === row.scopeRevision);
-      if (rowDeclaration === undefined || row.briefRevision !== rowDeclaration.briefRevision ||
+      if (rowDeclaration === undefined || (row.command!=="task-cancel" && row.briefRevision !== rowDeclaration.briefRevision) ||
           row.mandateSha256 !== scopeMandateSha256(rowDeclaration.reviewPlan)) return corrupt();
       if (row.command !== "submit-for-review") {
         if (row.candidateSnapshot !== null || row.candidateHead !== null) return corrupt();
@@ -2424,6 +2503,100 @@ export function createDeskStore(deps: DeskStoreDeps): DeskStore {
         if (revision !== index + 1) return corrupt();
       }
     }
+    // v9 taskEntries — every row is an immutable entity revision. Each
+    // entityId stream revises contiguously 1..N with a self-hashed chain;
+    // the named per-kind id equals entityId; task-scoped kinds always carry
+    // their taskId; the actor tuple resolves to a real membership; at most
+    // one non-settled attempt may exist per task; per-attempt action
+    // ordinals are unique and contiguous. These checks recompute under the
+    // same rules the decide applies, so a tampered or bypassed row fails
+    // the whole ledger closed.
+    const taskEntryIds = new Set<string>();
+    const taskEntityStreams = new Map<string, Map<string, DeskTaskEntryValue[]>>();
+    const taskActionOrdinals = new Map<string, Map<string, number>>();
+    const taskEntityById = new Map<string, DeskTaskEntryValue>();
+    for (const row of ledger.taskEntries) {
+      if (taskEntryIds.has(row.entryId)) return corrupt();
+      taskEntryIds.add(row.entryId);
+      const { entrySha256: rowDigest, ...withoutDigest } = row as Record<string, unknown>;
+      if (rowDigest !== canonicalSha256(withoutDigest)) return corrupt();
+      const namedId =
+        row.kind === "task" ? row.taskId :
+        row.kind === "attempt" ? row.attemptId :
+        row.kind === "result" ? row.resultId :
+        row.kind === "adjudication" ? row.adjudicationId :
+        row.kind === "hold" ? row.holdId :
+        row.kind === "action" ? row.actionId :
+        row.kind === "delivery" ? row.deliveryId :
+        row.kind === "resource" ? row.resourceId : row.controlId;
+      if (namedId !== row.entityId) return corrupt();
+      if (row.kind !== "delivery" && row.kind !== "resource" && row.kind !== "control" && row.taskId === null) return corrupt();
+      if (row.kind === "task" && row.taskId !== row.entityId) return corrupt();
+      const actor = membershipsById.get(row.actorMembershipId);
+      if (actor === undefined || actor.agentId !== row.actorAgentId) return corrupt();
+      const assignment = assignmentsById.get(row.assignmentId);
+      if (assignment === undefined) return corrupt();
+      const streamKey = JSON.stringify([row.assignmentId, row.entityId]);
+      const stream = taskEntityStreams.get(streamKey) ?? new Map<string, DeskTaskEntryValue[]>();
+      const streamRows = stream.get(row.kind) ?? [];
+      streamRows.push(row);
+      stream.set(row.kind, streamRows);
+      taskEntityStreams.set(streamKey, stream);
+      const canonicalBytes = Buffer.byteLength(canonicalJson(withoutDigest), "utf8");
+      if (canonicalBytes > WIRE_LIMITS.deskTaskEntryBytes) return corrupt();
+      // Action ordinals name unique ACTIONS, not revisions — every revision
+      // of one actionId re-carries its ordinal, so the check dedupes by
+      // actionId and rejects a revision whose ordinal drifted. Attempt
+      // actions count per attempt; integration rows count per task.
+      if (row.kind === "action") {
+        const scopeKey = row.attemptId !== null ? `attempt:${row.attemptId}` : `integration:${row.taskId}`;
+        const key = JSON.stringify([row.assignmentId, scopeKey]);
+        const ordinals = taskActionOrdinals.get(key) ?? new Map<string, number>();
+        const prior = ordinals.get(row.actionId);
+        if (prior !== undefined && prior !== row.ordinal) return corrupt();
+        ordinals.set(row.actionId, row.ordinal);
+        taskActionOrdinals.set(key, ordinals);
+      }
+      taskEntityById.set(row.entityId, row);
+    }
+    // At most one non-settled attempt per task, measured on each attempt's
+    // latest revision — historical revisions keep their recorded state.
+    const latestAttempts = new Map<string, DeskTaskEntryValue>();
+    const attemptTaskById = new Map<string, string>();
+    for (const row of ledger.taskEntries) {
+      if (row.kind !== "attempt") continue;
+      const prior = latestAttempts.get(row.attemptId);
+      if (prior === undefined || prior.revision < row.revision) latestAttempts.set(row.attemptId, row);
+      attemptTaskById.set(row.attemptId, row.taskId!);
+    }
+    const taskAttemptLive = new Map<string, number>();
+    for (const [attemptId, latest] of latestAttempts) {
+      if (latest.kind !== "attempt") return corrupt();
+      if (latest.state === "settled" || latest.state === "stopped") continue;
+      const taskId = attemptTaskById.get(attemptId)!;
+      const live = (taskAttemptLive.get(taskId) ?? 0) + 1;
+      taskAttemptLive.set(taskId, live);
+      if (live > 1) return corrupt();
+    }
+    for (const streams of taskEntityStreams.values()) {
+      for (const streamRows of streams.values()) {
+        const ordered = [...streamRows].sort((a, b) => a.revision - b.revision);
+        let prior: DeskTaskEntryValue | undefined;
+        for (const [index, row] of ordered.entries()) {
+          if (row.revision !== index + 1) return corrupt();
+          if (row.priorEntryId !== (prior?.entryId ?? null) || row.priorEntrySha256 !== (prior?.entrySha256 ?? null)) return corrupt();
+          prior = row;
+        }
+      }
+    }
+    for (const ordinals of taskActionOrdinals.values()) {
+      if (new Set(ordinals.values()).size !== ordinals.size) return corrupt();
+      const sorted = [...new Set(ordinals.values())].sort((a, b) => a - b);
+      for (const [index, ordinal] of sorted.entries()) {
+        if (ordinal !== index + 1) return corrupt();
+      }
+    }
+    if (!taskGraphValid(ledger.taskEntries)) return corrupt();
     if (eventHistory !== undefined) {
       const matchingEvent = <T extends BriefRevisionValue | DecisionEntryValue>(
         row: T,
@@ -2730,7 +2903,7 @@ export function createDeskStore(deps: DeskStoreDeps): DeskStore {
         const declaration = latestScopeAt(row.assignmentId, row.scopeId, event.seq);
         const currentBrief = briefRevisionAt(row.assignmentId, event.seq);
         if (declaration === undefined || declaration.revision !== row.scopeRevision ||
-            declaration.briefRevision !== currentBrief || row.briefRevision !== currentBrief ||
+            (row.command!=="task-cancel" && declaration.briefRevision !== currentBrief) || row.briefRevision !== currentBrief ||
             row.mandateSha256 !== scopeMandateSha256(declaration.reviewPlan)) return historyCorrupt();
         if ((SCOPE_REVIEW_GATED_COMMANDS as readonly string[]).includes(row.command)) {
           const pin = activeRoundAt(row.assignmentId, row.scopeId, event.seq);
@@ -2979,6 +3152,30 @@ export function createDeskStore(deps: DeskStoreDeps): DeskStore {
         if (!committedEvent(event, row.assignmentId, row.requestId, row.actorAgentId) || event === null) return historyCorrupt();
         if (row.actorAgentId !== ownerAt(row.assignmentId, event.seq).agentId) return historyCorrupt();
       }
+      // v9 taskEntries — every row binds to exactly one committed
+      // task-entry-appended event carrying its identity and digest; the
+      // request that produced it must own the event's seq range. This is
+      // the same bidirectional binding the brief/decision streams carry.
+      const taskEntryEvents = eventHistory.filter(event => event.kind === "task-entry-appended");
+      if (taskEntryEvents.length !== ledger.taskEntries.length) return historyCorrupt();
+      for (const row of ledger.taskEntries) {
+        const matches = taskEntryEvents.filter(event =>
+          event.assignmentId === row.assignmentId && event.requestId === row.requestId &&
+          event.actorKey === `agent:${row.actorAgentId}` &&
+          event.payload.entryId === row.entryId && event.payload.entrySha256 === row.entrySha256 &&
+          event.payload.entityId === row.entityId && event.payload.entryKind === row.kind &&
+          event.payload.revision === row.revision &&
+          event.payload.actorMembershipId === row.actorMembershipId &&
+          event.payload.briefRevision === row.briefRevision &&
+          event.payload.ownershipRevision === row.ownershipRevision);
+        if (matches.length !== 1) return historyCorrupt();
+        const event = matches[0]!;
+        const request = ledger.requests.find(record => record.actorKey === `agent:${row.actorAgentId}` &&
+          record.assignmentId === row.assignmentId && record.requestId === row.requestId);
+        if (request === undefined || request.outcome !== "committed" || request.eventSeqs === null ||
+            event.seq < request.eventSeqs[0] || event.seq > request.eventSeqs[1]) return historyCorrupt();
+      }
+      if (!taskHistoryValid(ledger, eventHistory, ownerAt, briefRevisionAt)) return historyCorrupt();
     }
     return null;
   }
@@ -3094,63 +3291,70 @@ export function createDeskStore(deps: DeskStoreDeps): DeskStore {
       // never touched by read — the bump happens in the next transact's
       // commit.
       let ledger: LedgerValue;
-      let persistedSchemaVersion: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8;
+      let persistedSchemaVersion: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
       if (schemaVersion === 1) {
         const v1 = LedgerSchemaV1.safeParse(json);
         if (!v1.success) {
           return { state: "corrupt", diagnostics: { code: "schema-invalid", schemaVersion } };
         }
-        ledger = MIGRATIONS[7](MIGRATIONS[6](MIGRATIONS[5](MIGRATIONS[4](MIGRATIONS[3](MIGRATIONS[2](MIGRATIONS[1](v1.data)))))));
+        ledger = MIGRATIONS[8](MIGRATIONS[7](MIGRATIONS[6](MIGRATIONS[5](MIGRATIONS[4](MIGRATIONS[3](MIGRATIONS[2](MIGRATIONS[1](v1.data))))))));
         persistedSchemaVersion = 1;
       } else if (schemaVersion === 2) {
         const v2 = LedgerSchemaV2.safeParse(json);
         if (!v2.success) {
           return { state: "corrupt", diagnostics: { code: "schema-invalid", schemaVersion } };
         }
-        ledger = MIGRATIONS[7](MIGRATIONS[6](MIGRATIONS[5](MIGRATIONS[4](MIGRATIONS[3](MIGRATIONS[2](v2.data))))));
+        ledger = MIGRATIONS[8](MIGRATIONS[7](MIGRATIONS[6](MIGRATIONS[5](MIGRATIONS[4](MIGRATIONS[3](MIGRATIONS[2](v2.data)))))));
         persistedSchemaVersion = 2;
       } else if (schemaVersion === 3) {
         const v3 = LedgerSchemaV3.safeParse(json);
         if (!v3.success) {
           return { state: "corrupt", diagnostics: { code: "schema-invalid", schemaVersion } };
         }
-        ledger = MIGRATIONS[7](MIGRATIONS[6](MIGRATIONS[5](MIGRATIONS[4](MIGRATIONS[3](v3.data)))));
+        ledger = MIGRATIONS[8](MIGRATIONS[7](MIGRATIONS[6](MIGRATIONS[5](MIGRATIONS[4](MIGRATIONS[3](v3.data))))));
         persistedSchemaVersion = 3;
       } else if (schemaVersion === 4) {
         const v4 = LedgerSchemaV4.safeParse(json);
         if (!v4.success) {
           return { state: "corrupt", diagnostics: { code: "schema-invalid", schemaVersion } };
         }
-        ledger = MIGRATIONS[7](MIGRATIONS[6](MIGRATIONS[5](MIGRATIONS[4](v4.data))));
+        ledger = MIGRATIONS[8](MIGRATIONS[7](MIGRATIONS[6](MIGRATIONS[5](MIGRATIONS[4](v4.data)))));
         persistedSchemaVersion = 4;
       } else if (schemaVersion === 5) {
         const v5 = LedgerSchemaV5.safeParse(json);
         if (!v5.success) {
           return { state: "corrupt", diagnostics: { code: "schema-invalid", schemaVersion } };
         }
-        ledger = MIGRATIONS[7](MIGRATIONS[6](MIGRATIONS[5](v5.data)));
+        ledger = MIGRATIONS[8](MIGRATIONS[7](MIGRATIONS[6](MIGRATIONS[5](v5.data))));
         persistedSchemaVersion = 5;
       } else if (schemaVersion === 6) {
         const v6 = LedgerSchemaV6.safeParse(json);
         if (!v6.success) {
           return { state: "corrupt", diagnostics: { code: "schema-invalid", schemaVersion } };
         }
-        ledger = MIGRATIONS[7](MIGRATIONS[6](v6.data));
+        ledger = MIGRATIONS[8](MIGRATIONS[7](MIGRATIONS[6](v6.data)));
         persistedSchemaVersion = 6;
       } else if (schemaVersion === 7) {
         const v7 = LedgerSchemaV7.safeParse(json);
         if (!v7.success) {
           return { state: "corrupt", diagnostics: { code: "schema-invalid", schemaVersion } };
         }
-        ledger = MIGRATIONS[7](v7.data);
+        ledger = MIGRATIONS[8](MIGRATIONS[7](v7.data));
         persistedSchemaVersion = 7;
+      } else if (schemaVersion === 8) {
+        const v8 = LedgerSchemaV8.safeParse(json);
+        if (!v8.success) {
+          return { state: "corrupt", diagnostics: { code: "schema-invalid", schemaVersion } };
+        }
+        ledger = MIGRATIONS[8](v8.data);
+        persistedSchemaVersion = 8;
       } else {
         const parsed = LedgerSchema.safeParse(json);
         if (!parsed.success) {
           return { state: "corrupt", diagnostics: { code: "schema-invalid", schemaVersion } };
         }
         ledger = parsed.data;
-        persistedSchemaVersion = 8;
+        persistedSchemaVersion = 9;
       }
       // Classify a structurally valid ledger bound to another repo before
       // looking into this namespace's event history. `future` ledgers have
@@ -3417,6 +3621,10 @@ export function createDeskStore(deps: DeskStoreDeps): DeskStore {
           "maintenance compaction required",
         );
       }
+      // One pure post-state resolver owns the complete obligation graph. It
+      // sees legacy and task tables together, so rejected/ordinary commits
+      // retain the same request/byte floor and exact task/membership/scope
+      // credits are consumed only by their durable after-state facts.
       // decide is synchronous and pure — a thenable or a throw is a caller
       // error, recorded nowhere.
       let outcome: unknown;
@@ -3484,6 +3692,26 @@ export function createDeskStore(deps: DeskStoreDeps): DeskStore {
         }
       }
 
+      const reserve = resolveDeskTaskCapacityReserve({
+        taskEntries: nextTables.taskEntries,
+        memberships: nextTables.memberships,
+        assignments: nextTables.assignments,
+        scopes: nextTables.scopes,
+        scopeTransitions: nextTables.scopeTransitions,
+      }, { eventPayloadBytes: LEDGER_LIMITS.eventPayloadBytes });
+      const assignmentSeatOverflow = nextTables.assignments.some(assignment => {
+        const seats = Array.isArray(assignment.seats) ? assignment.seats.length : 0;
+        const id = typeof assignment.assignmentId === "string" ? assignment.assignmentId : "";
+        return seats + (reserve.assignmentSeats.get(id) ?? 0) > LEDGER_LIMITS.assignmentSeats;
+      });
+      if (ledger.requests.length + 1 + reserve.requests > LEDGER_LIMITS.requests ||
+          nextTables.taskEntries.length + reserve.taskEntries > LEDGER_LIMITS.taskEntries ||
+          nextTables.memberships.length + reserve.memberships > LEDGER_LIMITS.memberships ||
+          nextTables.scopes.length + reserve.scopes > LEDGER_LIMITS.scopes ||
+          nextTables.scopeTransitions.length + reserve.scopeTransitions > LEDGER_LIMITS.scopeTransitions ||
+          assignmentSeatOverflow) {
+        return invalidRecord("commit would consume retained task stop/recovery capacity", "retain immutable history; advance an exact unresolved obligation or settle within the reserved credit budget");
+      }
       const receiptId = uuid();
       const revision = ledger.revision + 1;
       const rejectionForRecord = decided.ok === false ? (decided as DeskRejectionValue) : null;
@@ -3572,10 +3800,15 @@ export function createDeskStore(deps: DeskStoreDeps): DeskStore {
       // that would push past it is refused BEFORE any durable write — an
       // oversized file would silently drop every acknowledged mutation. The
       // rejection is unrecorded (a record is itself part of the bytes).
+      // Non-recovery commits additionally hold the recovery byte slice back
+      // so a settle/recovery commit can always land.
       const nextSize = Buffer.byteLength(nextBytes, "utf8");
-      if (nextSize > LEDGER_LIMITS.ledgerBytes) {
+      const byteLimit = LEDGER_LIMITS.ledgerBytes - reserve.bytes;
+      if (nextSize > byteLimit) {
         return invalidRecord(
-          `the committed ledger would be ${nextSize} bytes — over the ${LEDGER_LIMITS.ledgerBytes}-byte cap`,
+          nextSize > LEDGER_LIMITS.ledgerBytes
+            ? `the committed ledger would be ${nextSize} bytes — over the ${LEDGER_LIMITS.ledgerBytes}-byte cap`
+            : `the committed ledger would be ${nextSize} bytes — inside the ${reserve.bytes}-byte recovery reserve`,
           "maintenance compaction required before more desk mutations",
         );
       }

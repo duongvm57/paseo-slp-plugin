@@ -15,8 +15,8 @@ The Lead coordinates independent Peers, integrates their work and returns a proj
 Each seat is an ordinary Paseo agent with its role instructions loaded separately from your task.
 You keep control of intent, important trade-offs and final acceptance.
 
-The plugin also supplies a **repository desk**: durable assignments, current briefs, decisions,
-declared scopes, selected review obligations, candidate/check evidence and planned owner handoff.
+The plugin also supplies a **repository desk**: durable assignments, current briefs, a native
+task queue, declared scopes, selected review obligations, candidate/check evidence and planned owner handoff.
 Open **Read SLP work** to inspect registered work without reconstructing it from chat.
 
 ![Paseo SLP: Human intent and acceptance, Lead and independent Peers, optional Supervisor, and a durable repository desk for work, review, proof and handoff](docs/images/slp-overview.svg)
@@ -28,7 +28,8 @@ Open **Read SLP work** to inspect registered work without reconstructing it from
    the checks you ran.` The Supervisor observes workflow and relays your decisions; it stays
    outside implementation and project acceptance.
 2. **Make ownership explicit.** The Lead frames acceptance, dependencies and risks, registers
-   work in the desk when using its tools, and delegates bounded outcomes. Each moving scope has
+   work in the desk and decomposes large objectives into tasks. Their dependencies, attempts,
+   output judgments and open obligations survive interruption. Each moving scope has
    one writer. Peers can challenge a premise, request a dependency or report blocked.
 3. **Select review for the work.** The Lead chooses independent mandates for material questions
    and Human/protocol requirements. There is no fixed reviewer pair or count. Scope changes,
@@ -66,12 +67,13 @@ The design rationale is in [docs/architecture.md](docs/architecture.md).
 | Keeps a Peer pool that the Lead picks each Peer's runtime from                               | A Peer binding outside the pool during `prepare`                                 | Writes your repository's routing catalog                          |
 | Validates launch arguments offline (`prepare`), with named failures                          | Unverified or incompatible provider inventory supplied to `prepare`              | Runs a monitoring daemon; `monitor` is a scan you invoke          |
 | Records assignments, briefs, decisions, scopes, selected review and candidate/check evidence | Stale revision pins, overlapping declared scopes and unqualified required reviews | Infers acceptance from a handback, an agent status or a green check |
+| Keeps a native dependency queue and performs Lead-invoked dispatch and staged integration | Unruled or unavailable prerequisites, uncertain effect retries and target drift | Dispatches, retries, commits or lands work unattended |
 | Supports planned owner handoff and a read-only workspace work panel                         | An acknowledgment that does not match a usable offer and current revision pins  | Transfers authority through a chat message or a resource account  |
 | Offers opt-in Jev routing and communication supervision                                    | A Jev routing receipt that fails offline verification (hash, model, catalog)     | Enables external services without your configuration              |
 
 Saved role choices narrow the Supervisor/Lead providers; all four Peer providers remain
-pool-driven. Provider entries for unavailable CLIs are disabled. The pool check above belongs to
-`prepare`. Role rules guide agents, while managed launch and desk checks cover their own
+pool-driven. Provider entries for unavailable CLIs are disabled. Pool checks apply to
+`prepare` and native task dispatch. Role rules guide agents, while managed launch and desk checks cover their own
 interfaces; repository and shell permissions still come from Paseo and the provider.
 
 ## The roles
@@ -157,6 +159,16 @@ declared owners and dependencies, review observations, and candidate/check evide
 **Reload** for fresh state; missing or older records are shown explicitly. It does not infer
 work from chats or accept a task for you.
 
+For a large objective, the **Tasks** section shows the native queue, readiness reasons,
+attempts, current result judgments and unresolved delivery/resource obligations. The Lead
+invokes dispatch explicitly: reserve first, create without a work prompt, bind the registered
+worker's scope, then send work. Dependencies require qualified output judgments and measured
+availability. Integration stages and checks the combined candidate before applying a bounded
+delta to the target; conflicts and uncertain effects stay recorded for reconciliation.
+Stage and backup cleanup uses separately granted steps with finite continuation;
+unresolved resources retain the target reservation.
+See [native task execution](docs/task-execution.md) for the sequence and operational limits.
+
 Assignment handoff keeps the same work ID and history: the current Lead offers it to an
 exact receiving Lead membership, which acknowledges responsibility under revision checks.
 The panel distinguishes current ownership and usable reviews from historical observations,
@@ -240,6 +252,7 @@ After editing it, run `node scripts/generate-readme-diagrams.mjs`; use `--check`
 | [docs/cli.md](docs/cli.md)                       | The offline `slp.mjs` commands: `prepare`, `routes`, `route-decide`, `monitor` and the rest |
 | [docs/work-coordination.md](docs/work-coordination.md) | Durable briefs, decisions, review mandates, reports and the read-only workspace panel |
 | [docs/work-continuity.md](docs/work-continuity.md) | Planned owner handoff, acknowledgment, historical authority and remaining obligations |
+| [docs/task-execution.md](docs/task-execution.md) | Native task queue, supervised dispatch, dependency proof, integration and reconciliation |
 | [docs/contract.md](docs/contract.md)             | What every file owns, before you change it                                      |
 | [docs/development.md](docs/development.md)       | Tests, verification status and the E2E harness                                  |
 | [AGENTS.md](AGENTS.md)                           | The rules contributors and agents follow in this repository                     |

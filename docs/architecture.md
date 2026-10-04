@@ -1,11 +1,12 @@
 # Architecture — how SLP rides on Paseo
 
 SLP is a way of organizing agents: a Supervisor watches, a Lead owns the
-project's technical calls, Peers do bounded work. The plugin's whole job is
-to make that organization exist **on a stock Paseo daemon** — using only
+project's technical calls, Peers do bounded work. The plugin makes
+that organization exist **on a stock Paseo daemon** — using
 the primitives Paseo already has (custom providers, agent profiles,
-`config.patch`, workspaces, agent parentage) plus one ingredient Paseo does
-not have: a hidden instruction channel into each session.
+`config.patch`, workspaces, agent parentage) plus role instructions delivered
+separately from each task prompt and a
+durable repository desk for work, evidence and supervised execution.
 
 This document draws that architecture. For requirements and file-level
 contracts see [contract.md](contract.md); for the implementation spec see
@@ -54,8 +55,36 @@ Five ideas carry the design:
 4. **Three instruction layers, not one fat prompt.** Role bundle →
    workspace protocol → assignment. Precedence is one-way: a lower layer
    narrows but never widens a higher layer.
-5. **Paseo is the only control plane.** The plugin adds policy bytes and
-   managed configuration — not another scheduler or agent database.
+5. **Paseo owns agents and lifecycle.** The plugin adds policy bytes,
+   managed configuration and one repository work ledger. The Lead invokes
+   bounded dispatch/integration phases; no independent scheduler owns agents.
+
+## Native work execution
+
+The desk separates assignment intent, task outcomes, execution attempts and
+owner judgments. Tasks retain dependencies and operation grants; scopes retain
+moving write ownership and selected review obligations. Shared resolvers qualify
+prerequisite results and supply the same readiness and current evidence to
+execution gates, the workspace panel and recaps.
+
+External effects use a recorded intent, locked admission, bounded SDK/Git
+execution and an observed receipt or uncertainty. The ledger transaction cannot
+make a host call atomic. Bootstrap creates no work prompt; registered membership
+and atomic scope binding precede delivery. Unknown effects retain resources and
+require positive-identity reconciliation.
+An issued-create ticket connects the supported native configuration hook to one
+reserved membership claim. Actual post-create identity is checked separately;
+losing a secret does not authorize creation again.
+
+Integration measures the worker's original base, result and actual target,
+stages the granted delta separately, runs pinned proof recipes and rechecks
+freshness before application. It preserves unrelated target work and retained
+proof. Cleanup verifies an account before separately issuing stage and backup
+removal permits. Recovery uses that immutable inventory and each resource's
+issued history, with finite continuation and retained target reservations.
+Post-state capacity accounting funds the remaining supported edges across all
+ledger writers. The task's accepted output and the integrated project's acceptance are
+separate judgments. See [native task execution](task-execution.md).
 
 ## The role model
 
@@ -498,7 +527,7 @@ RPC provenance and output bounds stay in the plugin adapter; CLI home and
 operator identity resolution stay in the CLI adapter.
 
 Legacy runtime receipts remain verifiable without the new subtrees. Ledger
-v1–v7 migration support remains in the v8 store because deployed older ledgers
+v1–v8 migration support remains in the v9 store because deployed older ledgers
 have not been ruled out.
 
 Assignment registration is immutable; planned owner succession appends an

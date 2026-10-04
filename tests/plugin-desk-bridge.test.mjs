@@ -389,6 +389,16 @@ test('tools/list exposes the visible catalog — hidden and excluded tools absen
     'slp_rollout_transition',
     'slp_assignment_offer',
     'slp_assignment_accept',
+    'slp_task_define',
+    'slp_task_dispatch',
+    'slp_task_result',
+    'slp_task_rule',
+    'slp_task_hold',
+    'slp_task_stop',
+    'slp_task_acknowledge',
+    'slp_task_reconcile',
+    'slp_task_integrate',
+    'slp_task_recap',
   ]);
   // The catalog row carries a JSON Schema derived from the zod input.
   assert.equal(reply.result.tools[0].inputSchema.type, 'object');
@@ -436,6 +446,16 @@ test('the whole desk tool catalog satisfies DeskBridgeToolEntry (all rows, centr
     'slp_settlement_export',
     'slp_settlement_record',
     'slp_status',
+    'slp_task_acknowledge',
+    'slp_task_define',
+    'slp_task_dispatch',
+    'slp_task_hold',
+    'slp_task_integrate',
+    'slp_task_recap',
+    'slp_task_reconcile',
+    'slp_task_result',
+    'slp_task_rule',
+    'slp_task_stop',
     'slp_workflow_get',
   ]);
 });

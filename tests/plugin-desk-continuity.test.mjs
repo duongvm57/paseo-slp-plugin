@@ -751,6 +751,7 @@ test('cohort: migrated rev-0 pin stays valid; accepted revision drifts with iden
   // byte-identical to what v7 would have written.
   const path = ledgerPath(dir);
   const file = JSON.parse(readFileSync(path, 'utf8'));
+  delete file.taskEntries;
   delete file.ownershipOffers;
   delete file.ownershipAccepts;
   file.schemaVersion = 7;
@@ -759,7 +760,7 @@ test('cohort: migrated rev-0 pin stays valid; accepted revision drifts with iden
   const migrated = store.read(REPO_KEY);
   assert.equal(migrated.state, 'ok');
   assert.equal(migrated.persistedSchemaVersion, 7);
-  assert.equal(migrated.ledger.schemaVersion, 8);
+  assert.equal(migrated.ledger.schemaVersion, 9);
   assert.deepEqual(migrated.ledger.ownershipOffers, []);
   assert.deepEqual(migrated.ledger.ownershipAccepts, []);
 
@@ -767,7 +768,7 @@ test('cohort: migrated rev-0 pin stays valid; accepted revision drifts with iden
   const passed = await tx(store, decideDeskRollout, A.agentId, rid('rtn'),
     rolloutMove(A, rid('rtn'), 'ro-1', 'canary-passed'));
   assert.equal(passed.ok, true, JSON.stringify(passed));
-  assert.equal(JSON.parse(readFileSync(path, 'utf8')).schemaVersion, 8);
+  assert.equal(JSON.parse(readFileSync(path, 'utf8')).schemaVersion, 9);
 
   // Succession while the prior owner stays live — the roster is identical;
   // only the ownership revision in the digest recipe moves.
@@ -980,7 +981,7 @@ test('workflow projection carries registered + effective tuples and lineage item
 // Migration — v7 file upgrades additively; the first commit writes v8.
 // ---------------------------------------------------------------------------
 
-test('migration: a v7 ledger reads as v8 with empty lineage tables; first commit migrates', async t => {
+test('migration: a v7 ledger reads as v9 with empty lineage tables; first commit migrates', async t => {
   const dir = fixture(t);
   const store = createDeskStore({ stableRoot: dir });
   const A = member('agent-a', 'lead');
@@ -991,6 +992,7 @@ test('migration: a v7 ledger reads as v8 with empty lineage tables; first commit
   // Rewrite as a v7 file — no ownership tables, version literal 7.
   const path = ledgerPath(dir);
   const file = JSON.parse(readFileSync(path, 'utf8'));
+  delete file.taskEntries;
   delete file.ownershipOffers;
   delete file.ownershipAccepts;
   file.schemaVersion = 7;
@@ -999,7 +1001,7 @@ test('migration: a v7 ledger reads as v8 with empty lineage tables; first commit
   const read = store.read(REPO_KEY);
   assert.equal(read.state, 'ok');
   assert.equal(read.persistedSchemaVersion, 7);
-  assert.equal(read.ledger.schemaVersion, 8);
+  assert.equal(read.ledger.schemaVersion, 9);
   assert.deepEqual(read.ledger.ownershipOffers, []);
   assert.deepEqual(read.ledger.ownershipAccepts, []);
   assert.equal(JSON.parse(readFileSync(path, 'utf8')).schemaVersion, 7,
@@ -1018,5 +1020,5 @@ test('migration: a v7 ledger reads as v8 with empty lineage tables; first commit
     changeReason: 'initial', authorityRef: 'grant:human-1', affectedOwners: [],
   });
   assert.equal(committed.ok, true, JSON.stringify(committed));
-  assert.equal(JSON.parse(readFileSync(path, 'utf8')).schemaVersion, 8);
+  assert.equal(JSON.parse(readFileSync(path, 'utf8')).schemaVersion, 9);
 });

@@ -115,7 +115,8 @@ not prove absence of a transient change that was subsequently reverted.
 Ledger v8 adds append-only `ownershipOffers` and `ownershipAccepts`; legacy
 assignments have ownership revision zero and no invented acknowledgment.
 Reading an older ledger migrates it in memory. The first successful write
-persists v8; a rejected operation does not materialize the schema upgrade.
+persists the current v9 schema, including an empty task stream for legacy work;
+a rejected operation does not materialize the schema upgrade.
 Every read still verifies the complete event history.
 
 New registration events bind the immutable header content by digest. Retained

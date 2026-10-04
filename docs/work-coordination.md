@@ -6,13 +6,17 @@ and effective workspace protocol still determine authority and required review.
 
 The [assignment continuity guide](work-continuity.md) describes planned owner
 handoff, its revision checks and the obligations that remain with the work.
+For decomposed objectives, [native task execution](task-execution.md) adds the
+dependency queue, supervised dispatch, result adjudication and controlled
+integration to the same desk.
 
 ## Read the work
 
 In the repository's Paseo workspace, open **Read SLP work** from the command
 palette. The **SLP work** panel lists registered assignments and shows their
 current brief, historical decisions, declared ownership/dependencies, review,
-and candidate/check observations. Discovery uses the whole operative objective;
+candidate/check observations and a **Tasks** section with shared readiness,
+current result qualification and full-ledger counts. Discovery uses the whole operative objective;
 legacy registration text is used only without a structured brief. The header
 shows current ownership, recorded membership state and the latest durable
 acknowledgment, without claiming to observe host-agent liveness. **Reload** starts a fresh read; **Next page**

@@ -42,6 +42,7 @@ import { pathToFileURL } from "node:url";
 import type { PluginBeforeRequests } from "@getpaseo/plugin/server";
 import { familyFromProviderId, HOOK_PROVIDER_ID_RE, ROLES, WRAPPER_PROVIDER_ID_RE, type FamilyId } from "../shared/runtime/families.ts";
 import { candidateModulePath } from "./candidate-module.ts";
+import { DESK_HANDLE_KEY, DESK_TASK_CREATE_TICKET_KEY, type DeskSeatTaskCreateTicketContext } from "./desk-seat.ts";
 
 type AgentCreateRequest = PluginBeforeRequests["agent.create"];
 type SessionOpenRequest = PluginBeforeRequests["agent.session_open"];
@@ -88,18 +89,19 @@ export interface RoleInjectionDeps {
   /** Grant-token derivation seam for tests; must return a non-empty token. */
   grantToken?: (request: { agentId: string; reason: string }) => string;
   /** P2-c desk seams — both optional and asynchronous; absent means the
-   *  pre-P2-c behavior byte-for-byte. Neither promise ever rejects (the
-   *  desk-seat module wraps everything fail-open); the composer still
-   *  belt-catches so a seam bug can never abort a create or an open (W5).
-   *  deskMint resolves the membership handle AFTER the seat.mint commit
-   *  (G1) or null on any failure; deskBind reports the env-echoed handle
-   *  and never throws. */
+   *  pre-P2-c behavior byte-for-byte for ordinary requests. Ordinary mint
+   *  remains fail-open, but a reserved task create ticket is deliberately
+   *  fail-closed before native create unless deskMint validates and consumes
+   *  its exact claim. deskMint resolves the membership handle AFTER the
+   *  seat.mint commit (G1) or null on ordinary failure; deskBind reports the
+   *  env-echoed handle and never throws. */
   deskMint?: (input: {
     provider: string;
     family: FamilyId;
     role: string;
     cwd: string | undefined;
     env: Record<string, string>;
+    taskCreateTicketContext?: DeskSeatTaskCreateTicketContext;
   }) => Promise<{ handle: string } | null>;
   deskBind?: (input: {
     agentId: string;
@@ -182,19 +184,24 @@ export function createRoleInjection(deps: RoleInjectionDeps) {
     return promise;
   }
 
-  /** P2-c mint — fail-open belt around the desk seam: the seam itself never
-   *  rejects (W5/G4), and a belt catch here keeps a seam bug from aborting
-   *  the create. No seam, or a family the registry cannot name, means no
-   *  handle — the request returns exactly as before P2-c. */
+  /** P2-c mint — ordinary requests keep the fail-open W5/G4 behavior. A
+   *  reserved task ticket takes the deliberate fail-closed branch: missing
+   *  or rejecting desk validation aborts that native create without echoing
+   *  the ticket. No seam, or an unknown family, means no handle for ordinary
+   *  requests — those still return exactly as before P2-c. */
   async function mintFor(input: {
     provider: string;
     family: FamilyId | null;
     role: string;
     config: AgentCreateRequest["config"];
     env: Record<string, string>;
+    taskCreateTicketContext?: DeskSeatTaskCreateTicketContext;
   }): Promise<string | null> {
     const seam = deps.deskMint;
-    if (seam === undefined || input.family === null) return null;
+    if (seam === undefined || input.family === null) {
+      if (input.taskCreateTicketContext !== undefined) throw new Error("task create ticket cannot be validated by the desk mint seam");
+      return null;
+    }
     try {
       const out = await seam({
         provider: input.provider,
@@ -202,11 +209,43 @@ export function createRoleInjection(deps: RoleInjectionDeps) {
         role: input.role,
         cwd: input.config.cwd,
         env: input.env,
+        ...(input.taskCreateTicketContext === undefined ? {} : { taskCreateTicketContext: input.taskCreateTicketContext }),
       });
+      if (out === null && input.taskCreateTicketContext !== undefined) throw new Error("task create ticket claim was not accepted");
       return out === null ? null : out.handle;
     } catch {
+      if (input.taskCreateTicketContext !== undefined) throw new Error("task create ticket claim could not be validated");
       return null;
     }
+  }
+
+  function taskCreateTicketContext(request: AgentCreateRequest): DeskSeatTaskCreateTicketContext | undefined {
+    const hasTicket = request.env !== undefined && Object.hasOwn(request.env, DESK_TASK_CREATE_TICKET_KEY);
+    if (!hasTicket) return undefined;
+    const value = request.env?.[DESK_TASK_CREATE_TICKET_KEY];
+    const config = request.config;
+    if (typeof value !== "string" || !/^[0-9a-f]{64}$/.test(value) || typeof config?.provider !== "string" ||
+        typeof config?.cwd !== "string" || config.cwd.length === 0) {
+      throw new Error("task create ticket hook context is invalid");
+    }
+    return {
+      ticket: value,
+      config: {
+        provider: config.provider,
+        model: typeof config.model === "string" ? config.model : null,
+        cwd: config.cwd,
+        modeId: typeof config.modeId === "string" ? config.modeId : null,
+        thinkingOptionId: typeof config.thinkingOptionId === "string" ? config.thinkingOptionId : null,
+        featureValues: config.featureValues ?? null,
+      },
+    };
+  }
+
+  function envAfterTicket(request: AgentCreateRequest, handle: string): Record<string, string> {
+    const env = { ...(request.env ?? {}) };
+    delete env[DESK_TASK_CREATE_TICKET_KEY];
+    env[DESK_HANDLE_KEY] = handle;
+    return env;
   }
 
   return {
@@ -216,6 +255,10 @@ export function createRoleInjection(deps: RoleInjectionDeps) {
     async agentCreate(input: { request: AgentCreateRequest }) {
       const config = input.request.config;
       const provider = config?.provider;
+      const taskTicketContext = taskCreateTicketContext(input.request);
+      if (taskTicketContext !== undefined && (typeof provider !== "string" || !provider.startsWith("slp-"))) {
+        throw new Error("task create ticket is unsupported for this native provider");
+      }
       if (typeof provider !== "string" || !provider.startsWith("slp-")) return;
       // R2 (C10) — the devin wrapper path now grafts ONLY the desk handle
       // into request.env: no config change, no binding, no role bytes. A
@@ -229,11 +272,13 @@ export function createRoleInjection(deps: RoleInjectionDeps) {
           role: wrapper[2],
           config,
           env: input.request.env ?? {},
+          ...(taskTicketContext === undefined ? {} : { taskCreateTicketContext: taskTicketContext }),
         });
+        if (handle === null && taskTicketContext !== undefined) throw new Error("task create ticket claim is unavailable");
         if (handle === null) return;
         return {
           ...input.request,
-          env: { ...(input.request.env ?? {}), SLP_DESK_HANDLE: handle },
+          env: taskTicketContext === undefined ? { ...(input.request.env ?? {}), [DESK_HANDLE_KEY]: handle } : envAfterTicket(input.request, handle),
         };
       }
       const role = roleForCreate(provider, config.featureValues);
@@ -273,8 +318,10 @@ export function createRoleInjection(deps: RoleInjectionDeps) {
         role,
         config,
         env: input.request.env ?? {},
+        ...(taskTicketContext === undefined ? {} : { taskCreateTicketContext: taskTicketContext }),
       });
       if (handle === null) {
+        if (taskTicketContext !== undefined) throw new Error("task create ticket claim is unavailable");
         return {
           ...input.request,
           config: { ...config, systemPrompt },
@@ -283,7 +330,7 @@ export function createRoleInjection(deps: RoleInjectionDeps) {
       return {
         ...input.request,
         config: { ...config, systemPrompt },
-        env: { ...(input.request.env ?? {}), SLP_DESK_HANDLE: handle },
+        env: taskTicketContext === undefined ? { ...(input.request.env ?? {}), [DESK_HANDLE_KEY]: handle } : envAfterTicket(input.request, handle),
       };
     },
 

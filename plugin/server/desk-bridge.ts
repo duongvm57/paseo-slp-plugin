@@ -58,6 +58,7 @@ import { detectDaemonHome } from "./daemon-home.ts";
 import { sha256Hex } from "./config-view.ts";
 import type { Journal } from "./journal.ts";
 import type { LauncherBuilder } from "../shared/contracts.ts";
+import { MAX_RPC_BYTES } from "../shared/contracts.ts";
 import {
   DESK_BRIDGE_PROTOCOL,
   DeskAssignmentAcceptInput,
@@ -85,13 +86,33 @@ import {
   DeskSeatStatus,
   DeskSettlementExportInput,
   DeskSettlementRecordInput,
+  DeskTaskDefineInput,
+  DeskTaskDispatchInput,
+  DeskTaskResultInput,
+  DeskTaskRuleInput,
+  DeskTaskHoldInput,
+  DeskTaskStopInput,
+  DeskTaskAcknowledgeInput,
+  DeskTaskReconcileInput,
+  DeskTaskIntegrateInput,
+  DeskTaskRecapInput,
+  DeskTaskRecapResult,
   WIRE_LIMITS,
   type DeskRejectionValue,
   type DeskSeatStatusValue,
+  type DeskTaskCommandInputValue,
 } from "../shared/enforcement.ts";
 import { auditCapabilities, CAPABILITY_IDS } from "./capabilities.ts";
 import { canReadDeskWorkflow, projectDeskWorkflow, runAssignmentAmend, runDecisionAppend } from "./desk-assignment.ts";
 import { runAssignmentAccept, runAssignmentOffer } from "./desk-ownership.ts";
+import { runTaskCommand } from "./desk-task.ts";
+import { createTaskServices } from "./desk-task-services.ts";
+import { createTaskHostEventObserver, createTaskObserver, runTaskDispatch, runTaskIntegration, runTaskReconciliation } from "./desk-task-execution.ts";
+import type { TaskExecutionDeps, TaskTurnEndedEvent } from "./desk-task-execution.ts";
+import type { TaskHostApi } from "./desk-task-execution-host.ts";
+import type { TaskRuntimeApi } from "./desk-task-runtime.ts";
+import { buildTaskRecap } from "./runtime/handoff-recap.ts";
+import { isRejection } from "./desk-runner.ts";
 import {
   captureSeatSnapshot,
   runAssignmentAttach,
@@ -157,6 +178,16 @@ const ROLLOUT_DECLARE_TOOL = "slp_rollout_declare";
 const ROLLOUT_TRANSITION_TOOL = "slp_rollout_transition";
 const ASSIGNMENT_OFFER_TOOL = "slp_assignment_offer";
 const ASSIGNMENT_ACCEPT_TOOL = "slp_assignment_accept";
+const TASK_DEFINE_TOOL = "slp_task_define";
+const TASK_DISPATCH_TOOL = "slp_task_dispatch";
+const TASK_RESULT_TOOL = "slp_task_result";
+const TASK_RULE_TOOL = "slp_task_rule";
+const TASK_HOLD_TOOL = "slp_task_hold";
+const TASK_STOP_TOOL = "slp_task_stop";
+const TASK_ACKNOWLEDGE_TOOL = "slp_task_acknowledge";
+const TASK_RECONCILE_TOOL = "slp_task_reconcile";
+const TASK_INTEGRATE_TOOL = "slp_task_integrate";
+const TASK_RECAP_TOOL = "slp_task_recap";
 
 /** The bridge's own limitation literals — the seat-facing read view's
  *  bounded flag strings (kept in one table, same discipline as
@@ -323,6 +354,66 @@ export const DESK_TOOL_CATALOG = [
       "→ {ok, acceptId, ownershipRevision, gaps}.",
   },
   {
+    name: TASK_DEFINE_TOOL,
+    visible: true,
+    mutation: true,
+    description: "Define or amend an outcome task with dependency, scope, proof and effect-grant pins. Current owner only; a declaration does not launch a worker.",
+  },
+  {
+    name: TASK_DISPATCH_TOOL,
+    visible: true,
+    mutation: true,
+    description: "Current owner: perform one supervised bootstrap, reuse, send or archive phase. Reservation and exact registered membership precede work; uncertain effects require reconciliation.",
+  },
+  {
+    name: TASK_RESULT_TOOL,
+    visible: true,
+    mutation: true,
+    description: "Record a bound attempt result and supplied evidence. Capture, check completion and a handback do not establish an accepted task result.",
+  },
+  {
+    name: TASK_RULE_TOOL,
+    visible: true,
+    mutation: true,
+    description: "Current owner: adjudicate the exact task/result revisions with reasons and evidence. A usable ruling remains qualified only while its dependency, review and proof pins stand.",
+  },
+  {
+    name: TASK_HOLD_TOOL,
+    visible: true,
+    mutation: true,
+    description: "Raise a bounded task question or hold; current-owner rulings release or retain obligations. Brief changes never silently release a hold.",
+  },
+  {
+    name: TASK_STOP_TOOL,
+    visible: true,
+    mutation: true,
+    description: "Current owner: durably stop further task effect issuance. In-flight work and resources remain obligations; this tool does not cancel a host turn.",
+  },
+  {
+    name: TASK_ACKNOWLEDGE_TOOL,
+    visible: true,
+    mutation: true,
+    description: "Exact recipient: acknowledge a recorded delivery obligation. Host acceptance, responsibility acknowledgment, handling and resource settlement are distinct.",
+  },
+  {
+    name: TASK_RECONCILE_TOOL,
+    visible: true,
+    mutation: true,
+    description: "Current owner: observe known attempts, effects and resources without retrying an uncertain effect. Missing or negative evidence never proves absence.",
+  },
+  {
+    name: TASK_INTEGRATE_TOOL,
+    visible: true,
+    mutation: true,
+    description: "Current owner: stage, check, land, reconcile or discharge a pinned result under its integration grant. Three-way checks preserve target work; cleanup requires separate admission.",
+  },
+  {
+    name: TASK_RECAP_TOOL,
+    visible: true,
+    mutation: false,
+    description: "Read a bounded task recap from the same authorized, revision-pinned workflow projection. Omissions and unresolved obligations remain visible; a recap grants no authority.",
+  },
+  {
     name: HIDDEN_TOOL,
     visible: false,
     mutation: false,
@@ -367,6 +458,8 @@ export interface DeskBridgeDeps {
   audit?: typeof auditCapabilities;
   /** The connected-SDK slot — hook/RPC contexts fill it via notePaseo. */
   paseoRef: { current: PaseoLike | null };
+  /** The actual connected task SDK, supplied by hook/RPC contexts. */
+  taskHost?: () => (TaskHostApi & TaskRuntimeApi) | null;
   platform?: string;
   now?: () => Date;
   uuid?: () => string;
@@ -1022,6 +1115,111 @@ export function createDeskBridge(deps: DeskBridgeDeps) {
     environment: deps.checkEnvironment,
   });
 
+  async function taskServices(ctx: ToolContext, input: {
+    assignmentId: string;
+    taskId?: string | null;
+    attemptId?: string | null;
+    integrationActionId?: string | null;
+    attemptIds?: string[];
+    placement?: { cwd?: string } | null;
+    grant?: { target: { cwd: string } };
+  }): Promise<TaskExecutionDeps | DeskRejectionValue> {
+    if (store === null || binding === null || stableRoot === null || ctx.seatRead?.state !== "ok") {
+      return rejection("STATE_UNREADABLE", "task services require the verified runtime and repository ledger", "restore the desk binding before task execution");
+    }
+    const ledger = ctx.seatRead.ledger;
+    const roots = new Set<string>();
+    if (input.placement?.cwd !== undefined) roots.add(input.placement.cwd);
+    if (input.grant !== undefined) roots.add(input.grant.target.cwd);
+    for (const entry of ledger.taskEntries) {
+      if (entry.assignmentId !== input.assignmentId) continue;
+      if (entry.kind === "attempt" && (entry.attemptId === input.attemptId ||
+          input.attemptIds?.includes(entry.attemptId) || entry.taskId === input.taskId)) {
+        if (entry.placement.cwd !== null && existsSync(entry.placement.cwd)) roots.add(entry.placement.cwd);
+      }
+      if (entry.kind === "action" && (entry.actionId === input.integrationActionId || entry.taskId === input.taskId)) {
+        for (const path of [entry.sourceCwd, entry.targetCwd]) {
+          if (path !== null && existsSync(path)) roots.add(path);
+        }
+      }
+    }
+    try {
+      return await createTaskServices({
+        ctx: { repoKey: ctx.bound.repoKey, row: ctx.row }, ledger, store,
+        binding, stableRoot, daemonHome: dirname(stableRoot),
+        host: deps.taskHost ?? (() => null), checkoutRoots: [...roots], now,
+      });
+    } catch (error) {
+      return rejection("CAPABILITY_GAP", `task repository services are unavailable: ${(error as Error).message.slice(0, 240)}`, "use checkout roots in the bound repository and preserve outstanding effects for reconciliation");
+    }
+  }
+
+  async function taskCommand(ctx: ToolContext, input: DeskTaskCommandInputValue) {
+    const services = await taskServices(ctx, input);
+    if (isRejection(services)) return services;
+    const actor = { repoKey: ctx.bound.repoKey, row: ctx.row };
+    return runTaskCommand(actor, input, { store: services.store, observe: createTaskObserver(actor, services) });
+  }
+
+  /** A native lifecycle event supplies an agent identity, not owner
+   *  authority. Only the exact registered bound worker may observe its own
+   *  positively correlated send; missing principals leave reconciliation
+   *  with the current owner. Nothing here establishes work acceptance. */
+  async function taskTurnEnded(event: TaskTurnEndedEvent): Promise<void> {
+    try {
+      if (stopped || state.kind !== "listening" || store === null || stableRoot === null || capabilityGate() !== null) return;
+      if (!event.timeline?.some(item => item.type === "user_message" && (item.messageId || item.clientMessageId))) return;
+      const messageIds = new Set(event.timeline.filter(item => item.type === "user_message")
+        .flatMap(item => [item.messageId, item.clientMessageId].filter((id): id is string => typeof id === "string")));
+      const repos = readdirSync(deskReposDir(stableRoot)).filter(name => REPO_KEY_PATTERN.test(name));
+      if (repos.length > REPO_SCAN_LIMIT) return;
+      const matches: { repoKey: string; row: SeatRow; read: Extract<DeskStoreRead, { state: "ok" }>; attemptId: string; assignmentId: string }[] = [];
+      for (const repoKey of repos) {
+        const read = store.read(repoKey);
+        if (read.state !== "ok") continue;
+        const row = read.ledger.memberships.find(member => member.agentId === event.agentId &&
+          member.state === "host-confirmed" && member.registeredAt !== null && member.revokedAt === null);
+        if (row === undefined) continue;
+        const attempts = new Map<string, typeof read.ledger.taskEntries[number]>();
+        const actions = new Map<string, typeof read.ledger.taskEntries[number]>();
+        for (const entry of read.ledger.taskEntries) {
+          if (entry.kind === "action") {
+            const prior = actions.get(entry.actionId);
+            if (prior === undefined || prior.revision < entry.revision) actions.set(entry.actionId, entry);
+          }
+          if (entry.kind !== "attempt") continue;
+          const prior = attempts.get(entry.attemptId);
+          if (prior === undefined || prior.revision < entry.revision) attempts.set(entry.attemptId, entry);
+        }
+        for (const attempt of attempts.values()) {
+          if (attempt.kind !== "attempt" || attempt.host.agentId !== event.agentId ||
+              attempt.member?.agentId !== row.agentId || attempt.member.membershipId !== row.membershipId) continue;
+          if (![...actions.values()].some(action => action.kind === "action" && action.actionKind === "send" &&
+              action.attemptId === attempt.attemptId && (action.state === "issued" || action.state === "uncertain") &&
+              typeof action.body?.messageId === "string" && messageIds.has(action.body.messageId))) continue;
+          matches.push({ repoKey, row, read, attemptId: attempt.attemptId, assignmentId: attempt.assignmentId });
+        }
+      }
+      if (matches.length !== 1) return;
+      const match = matches[0];
+      if (await sdkIdentity(match.row) !== null || probeAvailability(match.repoKey) !== "available" || stopped) return;
+      const bound: BoundSeat = {
+        repoKey: match.repoKey, membershipId: match.row.membershipId,
+        handleSha256: match.row.bindingHandleSha256, agentId: event.agentId,
+        openGeneration: match.row.openGeneration, row: match.row,
+      };
+      const fresh = freshRow(bound);
+      if ("error" in fresh || fresh.read.state !== "ok") return;
+      const services = await taskServices({ row: fresh.row, bound, seatRead: fresh.read, availability: "available" }, {
+        assignmentId: match.assignmentId, attemptId: match.attemptId,
+      });
+      if (isRejection(services) || stopped) return;
+      await createTaskHostEventObserver(services).onTurnEnded({ repoKey: match.repoKey, row: fresh.row }, event);
+    } catch {
+      // Hooks fail open; unresolved effects stay visible in durable state.
+    }
+  }
+
   const TOOL_IMPLS: Record<(typeof DESK_TOOL_CATALOG)[number]["name"], ToolHandler> = {
     [STATUS_TOOL]: defineTool(z.object({}).strict(), async ({ row, bound, availability, seatRead }) => {
       const limitations: string[] = [];
@@ -1243,6 +1441,50 @@ export function createDeskBridge(deps: DeskBridgeDeps) {
         input,
         runnerDeps(),
       );
+    }),
+    [TASK_DEFINE_TOOL]: defineTool(DeskTaskDefineInput, ctx => taskCommand(ctx, { ...ctx.input, operation: "define" })),
+    [TASK_RESULT_TOOL]: defineTool(DeskTaskResultInput, ctx => taskCommand(ctx, { ...ctx.input, operation: "result" })),
+    [TASK_RULE_TOOL]: defineTool(DeskTaskRuleInput, ctx => taskCommand(ctx, { ...ctx.input, operation: "rule" })),
+    [TASK_HOLD_TOOL]: defineTool(DeskTaskHoldInput, ctx => taskCommand(ctx, { ...ctx.input, operation: "hold" })),
+    [TASK_STOP_TOOL]: defineTool(DeskTaskStopInput, ctx => taskCommand(ctx, { ...ctx.input, operation: "stop" })),
+    [TASK_ACKNOWLEDGE_TOOL]: defineTool(DeskTaskAcknowledgeInput, ctx => taskCommand(ctx, { ...ctx.input, operation: "acknowledge" })),
+    [TASK_DISPATCH_TOOL]: defineTool(DeskTaskDispatchInput, async ctx => {
+      const services = await taskServices(ctx, ctx.input);
+      return isRejection(services) ? services : runTaskDispatch({ repoKey: ctx.bound.repoKey, row: ctx.row }, ctx.input, services);
+    }),
+    [TASK_RECONCILE_TOOL]: defineTool(DeskTaskReconcileInput, async ctx => {
+      const services = await taskServices(ctx, ctx.input);
+      return isRejection(services) ? services : runTaskReconciliation({ repoKey: ctx.bound.repoKey, row: ctx.row }, ctx.input, services);
+    }),
+    [TASK_INTEGRATE_TOOL]: defineTool(DeskTaskIntegrateInput, async ctx => {
+      const services = await taskServices(ctx, ctx.input);
+      return isRejection(services) ? services : runTaskIntegration({ repoKey: ctx.bound.repoKey, row: ctx.row }, ctx.input, services);
+    }),
+    [TASK_RECAP_TOOL]: defineTool(DeskTaskRecapInput, async ({ row, input, seatRead }) => {
+      if (seatRead?.state !== "ok") return rejection("STATE_UNREADABLE", "the bound ledger cannot supply a task recap", "read the current desk ledger");
+      if (!canReadDeskWorkflow(seatRead.ledger, row, input.assignmentId)) {
+        return rejection("AUTHORITY_REQUIRED", "this live membership has no participant read access to the assignment", "use an authorized workflow participant");
+      }
+      let limit = input.limit;
+      while (true) {
+        const view = projectDeskWorkflow(seatRead.ledger, input.assignmentId, {
+          section: "tasks", expectedLedgerRevision: input.expectedLedgerRevision,
+          expectedBriefRevision: input.expectedBriefRevision, cursor: input.cursor, limit,
+        });
+        if (isRejection(view)) return view;
+        if (input.expectedOwnershipRevision !== undefined && input.expectedOwnershipRevision !== view.ownership.ownershipRevision) {
+          return rejection("REVISION_CONFLICT", "the requested ownership revision no longer stands", "reload the task page under the current ownership pin");
+        }
+        const parsed = DeskTaskRecapResult.safeParse(buildTaskRecap(view));
+        if (!parsed.success) {
+          return rejection("INVALID_RECORD", "the authorized task page cannot supply the shared recap contract", "preserve the page and inspect the recap producer before continuing");
+        }
+        if (Buffer.byteLength(JSON.stringify(parsed.data)) <= MAX_RPC_BYTES) return parsed.data;
+        if (limit === 1) {
+          return rejection("VIEW_TOO_LARGE", "a complete task recap record exceeds the view budget", "read a smaller bounded artifact; no proof was shortened or omitted silently");
+        }
+        limit = Math.max(1, Math.floor(limit / 2));
+      }
     }),
     [HIDDEN_TOOL]: defineTool(z.object({}).strict(), async () => {
       throw new Error("hidden tool must never run");
@@ -1933,6 +2175,7 @@ export function createDeskBridge(deps: DeskBridgeDeps) {
     /** Called from a real daemon→plugin RPC handler: records dispatch
      *  evidence AND stashes the SDK context. */
     noteDispatch,
+    taskTurnEnded,
     agentCreateGraft,
     sessionOpenStash,
     stop,

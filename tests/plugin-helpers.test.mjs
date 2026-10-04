@@ -250,8 +250,9 @@ test('Peer carrier locators are allowlisted to the required bundle; a legacy tra
 
   for (const role of ['supervisor', 'lead']) {
     const entries = policyLocators(installed, role, env);
-    assert.equal(entries.length, 3 + 10, `${role} retains its required bundle and all ten references`);
+    assert.equal(entries.length, 3 + 11, `${role} retains its required bundle and all eleven references`);
     assert.ok(entries.some(entry => entry.path === join(installed, 'src/references/jev-routing.md')));
+    assert.ok(entries.some(entry => entry.path === join(installed, 'src/references/task-execution.md')));
   }
 
   // A receipt-declared reference deleted from disk still reports missing.

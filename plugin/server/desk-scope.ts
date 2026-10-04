@@ -234,7 +234,7 @@ function activeRound(stream: ScopeTransitionValue[]): ScopeRoundPin | null {
  *  edges: later scope transitions must not invalidate a committed rollout. */
 export function approvedScopeRound(
   stream: ScopeTransitionValue[],
-  expected?: { briefRevision?: number; scopeRevision?: number; mandateSha256?: string | null },
+  expected?: { briefRevision?: number; scopeRevision?: number; mandateSha256?: string | null; includeClosedApproval?: boolean },
 ): {
   scopeRevision: number;
   candidateSnapshot: string;
@@ -272,7 +272,8 @@ export function approvedScopeRound(
     }
     state = row.to;
   }
-  if (state !== "approved" && state !== "advanced") return null;
+  const terminal = expected?.includeClosedApproval === true && state === "closed" && stream.at(-1)?.command === "close" && stream.at(-1)?.from === "approved";
+  if (state !== "approved" && state !== "advanced" && !terminal) return null;
   if (approved !== null && (
     (expected?.briefRevision !== undefined && approved.briefRevision !== expected.briefRevision) ||
     (expected?.scopeRevision !== undefined && approved.scopeRevision !== expected.scopeRevision) ||
@@ -350,13 +351,14 @@ export function currentScopeReviewQualification(
   ledger: Readonly<LedgerValue>,
   assignment: AssignmentValue,
   scopeId: string,
+  options: { includeClosedApproval?: boolean } = {},
 ) {
   const declaration = declarationStream(ledger, assignment.assignmentId, scopeId).at(-1) ?? null;
   const transitions = transitionStream(ledger, assignment.assignmentId, scopeId);
   const active = activeRound(transitions);
   const briefRevision = currentBriefRevision(ledger, assignment.assignmentId);
   const approved = declaration === null ? null : approvedScopeRound(transitions, {
-    briefRevision, scopeRevision: declaration.revision, mandateSha256: mandateDigest(declaration),
+    briefRevision, scopeRevision: declaration.revision, mandateSha256: mandateDigest(declaration), includeClosedApproval: options.includeClosedApproval,
   });
   const round = active ?? approved;
   const roundCurrent = declaration !== null && round !== null &&
@@ -371,7 +373,8 @@ export function currentScopeReviewQualification(
   return {
     declaration, activeRound: active, round, roundCurrent,
     eligibleReviewIds: qualified.eligibleReviewIds, discharged: qualified.discharged,
-    standingApproval: independentApproval ? approved : null,
+    standingApproval: independentApproval && transitions.at(-1)?.to !== "closed" ? approved : null,
+    terminalApproval: independentApproval && transitions.at(-1)?.to === "closed" && transitions.at(-1)?.command === "close" && transitions.at(-1)?.from === "approved" ? approved : null,
   };
 }
 
@@ -1192,4 +1195,64 @@ export async function runScopeReview(
     return { ok: false, code: "CAPABILITY_GAP", message: "the review committed but its row is not readable", recovery: "retry the same requestId — the idempotent replay rebuilds the response" };
   }
   return { ok: true, reviewId: row.reviewId, scopeId: row.scopeId, axis: row.axis, lensId: row.lensId, revision: row.revision, receiptId: settled.receipt.receiptId };
+}
+
+/** Internal task cancellation. The public scope transition parser has no
+ * cancellation verb/context. Core composes terminal task/control rows and
+ * discharged obligations in the same transaction before calling this seam. */
+export function decideTaskScopeCancellation(
+  ledger: Readonly<LedgerValue>, context: {
+    actorAgentId: string; actorMembershipId: string; assignmentId: string;
+    attemptId: string; controlId: string; requestId: string;
+  },
+): DecideOutcome {
+  const actor = ledger.memberships.find(row => row.membershipId === context.actorMembershipId && row.agentId === context.actorAgentId);
+  if (!actor || actor.state === "revoked" || actor.registeredAt === null) return reject("ACTOR_MISMATCH", "cancellation has no exact live actor", "use the current owner tuple");
+  const assignment = requireOwnedOpenAssignment(ledger, actor, context.assignmentId);
+  if ("ok" in assignment) return assignment;
+  const head = (id: string) => ledger.taskEntries.filter(row => row.entityId === id).at(-1);
+  const attempt = head(context.attemptId), control = head(context.controlId);
+  if (attempt?.kind !== "attempt" || attempt.assignmentId !== context.assignmentId || attempt.state !== "stopped" ||
+      attempt.requestId !== context.requestId || attempt.actorMembershipId !== actor.membershipId || attempt.terminalProof == null ||
+      control?.kind !== "control" || control.requestId !== context.requestId || control.assignmentId !== context.assignmentId ||
+      control.targetAttemptId !== attempt.attemptId || control.state !== "stop-observed" || control.actorMembershipId !== actor.membershipId) {
+    return reject("EVIDENCE_INCOMPLETE", "cancellation lacks same-request terminal attempt and owner control proof", "retain the moving scope until supported cancellation is composed");
+  }
+  if (attempt.boundScopeId === null) return ok([]);
+  const declaration = declarationStream(ledger, assignment.assignmentId, attempt.boundScopeId).at(-1);
+  const transitions = transitionStream(ledger, assignment.assignmentId, attempt.boundScopeId);
+  const current = transitions.at(-1);
+  if (!declaration || declaration.revision !== attempt.boundScopeRevision || current === undefined || current.to === "closed" ||
+      declaration.ownership?.writerAgentId !== attempt.member?.agentId) return reject("SCOPE_CONFLICT", "cancellation scope/writer pins differ", "reconcile the exact current writer declaration before cancellation");
+  const currentRows = [...new Map(ledger.taskEntries.map(row => [row.entityId, row])).values()];
+  if (currentRows.some(row =>
+    (row.kind === "action" && row.attemptId === attempt.attemptId && ['intended','issued','uncertain','held'].includes(row.state)) ||
+    (row.kind === "resource" && row.attemptId === attempt.attemptId && row.disposition !== "released") ||
+    (row.kind === "delivery" && row.attemptId === attempt.attemptId && row.state !== "handled"))) {
+    return reject("EVIDENCE_INCOMPLETE", "cancellation still has effect/delivery/resource obligations", "discharge supported obligations under owner authority first");
+  }
+  const proof = attempt.terminalProof;
+  if (proof.kind === "never-authorized-work") {
+    if (ledger.taskEntries.some(row => row.kind === "action" && row.attemptId === attempt.attemptId &&
+        (row.actionKind === "send" || row.actionKind === "create") && ['issued','observed','uncertain','held'].includes(row.state))) {
+      return reject("EVIDENCE_INCOMPLETE", "work may have been authorized or a seat created", "never-authorized-work cannot stand in for process quiescence");
+    }
+  } else if (proof.observationRefs.length === 0) return reject("EVIDENCE_INCOMPLETE", "quiescence has no positive observation references", "retain uncertain workers and scopes");
+  const briefRevision = currentBriefRevision(ledger, assignment.assignmentId);
+  if (attempt.briefRevision !== briefRevision || control.briefRevision !== briefRevision) return reject("REVISION_CONFLICT", "cancellation pins a stale scope/brief", "amend the declaration under the current brief before resolving it");
+  const taskCancellation = {
+    attemptId: attempt.attemptId, attemptRevision: attempt.revision, attemptEntrySha256: attempt.entrySha256,
+    controlId: control.controlId, controlEntrySha256: control.entrySha256, proofSha256: canonicalSha256(proof),
+  };
+  const row: ScopeTransitionValue = {
+    transitionId: deriveId("stn", [context.assignmentId, declaration.scopeId, context.requestId, "task-cancel"]),
+    assignmentId: context.assignmentId, scopeId: declaration.scopeId, requestId: context.requestId,
+    revision: current.revision + 1, command: "task-cancel", from: current.to, to: "closed",
+    scopeRevision: declaration.revision, briefRevision, mandateSha256: mandateDigest(declaration),
+    candidateSnapshot: null, candidateHead: null, discharged: [], actorAgentId: actor.agentId!, taskCancellation,
+  };
+  return ok([{ kind: "scope-transitioned", payload: {
+    scopeId: row.scopeId, revision: row.revision, scopeRevision: row.scopeRevision, command: row.command,
+    from: row.from, to: row.to, briefRevision, mandateSha256: row.mandateSha256, discharged: [], taskCancellation,
+  } }], { scopeTransitions: [...ledger.scopeTransitions, row] });
 }

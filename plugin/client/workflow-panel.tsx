@@ -15,7 +15,7 @@ type Section = WorkspaceWorkflowRequest["page"]["section"];
 const sections: { id: Section; title: string }[] = [
   { id: "briefs", title: "Brief history" }, { id: "decisions", title: "Decisions" },
   { id: "ownership", title: "Owners and dependencies" }, { id: "reviews", title: "Review" },
-  { id: "evidence", title: "Candidate and checks" },
+  { id: "evidence", title: "Candidate and checks" }, { id: "tasks", title: "Tasks" },
 ];
 
 const firstPage = (workspaceId: string, assignmentId: string | null = null, section: Section = "briefs"): WorkspaceWorkflowRequest => ({
@@ -85,7 +85,67 @@ const itemTitles: Record<string, string> = {
   scopeReview: "Independent review observation", scopeTransition: "Scope transition",
   candidateObservation: "Runtime candidate observation", checkDefinition: "Declared check", checkRun: "Runtime check observation",
   handbackSummary: "Handback summary", settlementSummary: "Settlement summary",
+  taskEntry: "Task entry",
 };
+
+const taskEntryTitles: Record<string, string> = {
+  task: "Task declaration", attempt: "Task attempt", result: "Task result",
+  adjudication: "Task adjudication", hold: "Task hold", action: "Task effect",
+  delivery: "Delivery obligation", resource: "Task resource", control: "Task control",
+};
+
+function taskQueueLine(taskCounts: WorkspaceWorkflowResult["assignments"][number]["taskCounts"] | undefined): string {
+  if (taskCounts == null) return "task queue not recorded on this desk";
+  const tasks = taskCounts.backlog + taskCounts.ready + taskCounts.held + taskCounts.running
+    + taskCounts.integrating + taskCounts.settled + taskCounts.superseded;
+  if (tasks === 0 && taskCounts.openHolds + taskCounts.pendingAcks + taskCounts.resources + taskCounts.controls === 0) {
+    return "no task entries recorded";
+  }
+  const obligations = taskCounts.openHolds + taskCounts.pendingAcks + taskCounts.resources;
+  return `tasks ${tasks} · ready ${taskCounts.ready} · held ${taskCounts.held} · running ${taskCounts.running} · integrating ${taskCounts.integrating}`
+    + (obligations > 0 ? ` · outstanding obligations ${obligations}` : "")
+    + (taskCounts.controls > 0 ? ` · controls ${taskCounts.controls}` : "");
+}
+
+function taskCaption(item: Extract<DeskWorkflowProjectionItemValue, { kind: "taskEntry" }>): string {
+  const row = item.row;
+  const revision = item.current ? "Current revision for this entity." : "Superseded historical revision for this entity.";
+  const readiness = item.readiness === null ? "readiness not available for this row" :
+    `readiness ${item.readiness.bucket}${item.readiness.eligible ? " (eligible)" : " (not eligible)"}` +
+    (item.readiness.reasons.length ? ` — ${item.readiness.reasons.join(", ")}` : "");
+  const qualification = item.resultQualification === null ? "result qualification not available for this row" :
+    `result qualification ${item.resultQualification.qualified ? "qualified" : "not qualified"}` +
+    ` (scope proof ${item.resultQualification.scopeProof ?? "null"})` +
+    (item.resultQualification.reasons.length ? ` — ${item.resultQualification.reasons.join(", ")}` : "");
+  const ruling = item.currentRuling === null ? "no current task ruling is projected" :
+    `current task ruling ${item.currentRuling.verdict} (${item.currentRuling.adjudicationId})`;
+  const context = `${revision} Current task context: ${readiness}; ${qualification}; ${ruling}.`;
+  switch (row.kind) {
+    case "task": return `Recorded state ${row.state}. ${context} These resolver values are pinned in the task projection.`;
+    case "attempt": return `Attempt state ${row.state} — a reservation and ledger record, not observed host liveness. ${context}`;
+    case "result": return `Result ${row.provenance === "measured" ? "with measured evidence" : "as a supplied claim"} — not acceptance. ${context}`;
+    case "adjudication": return `Recorded verdict ${row.verdict}. Current task qualification and ruling come from the shared resolver, not row order. ${context}`;
+    case "hold": return row.state === "open"
+      ? `Open hold — release needs a current-owner ruling; a brief or ownership change does not discharge it. ${context}`
+      : row.ruling?.outcome === "retain"
+        ? `Retained hold — remains an active obligation until a current-owner ruling releases or withdraws it. ${context}`
+        : row.ruling?.outcome === "release"
+          ? `Released hold — the release ruling and pins are recorded in the row. ${context}`
+          : row.ruling?.outcome === "withdraw"
+            ? `Withdrawn hold — the withdrawal ruling and pins are recorded in the row. ${context}`
+            : `Ruled hold — outcome is unavailable; inspect the recorded row and pins. ${context}`;
+    case "action": return row.actionKind === "integration"
+      ? `Integration ${row.state} — a landing receipt establishes availability at the pinned target, not project acceptance. ${context}`
+      : `Effect ${row.actionKind} ${row.state}${row.state === "uncertain" ? " — the acknowledgment was lost; reconcile by positive identity before same-class retry" : ""}. ${context}`;
+    case "delivery": return `Delivery ${row.state} — a recorded delivery flag, never settlement or acceptance. ${context}`;
+    case "resource": return row.disposition === "released"
+      ? `Released resource — the recorded ruling carries its disposition evidence. ${context}`
+      : `${row.disposition} resource — stays an obligation until a current-owner ruling records actual disposition evidence. ${context}`;
+    case "control": return row.state === "stop-requested"
+      ? `Stop requested — blocks new effects; outstanding actions and resources remain recorded obligations. ${context}`
+      : `Resume ruled — the current owner's recorded ruling. ${context}`;
+  }
+}
 
 function qualificationLine(item: Extract<DeskWorkflowProjectionItemValue, { kind: "scopeReview" }>): string {
   if (item.qualification.standingApproval) return "Counts toward the current standing approval.";
@@ -105,6 +165,10 @@ function RecordDetails({ colors, title, children }: { colors: Colors; title: str
 
 const metadataFields = new Set(["requestId", "actorMembershipId", "ownerMembershipId", "reviewerSeatId", "actorSeatId",
   "bodySha256", "entrySha256", "priorEntrySha256", "priorDecisionId", "declarationSha256", "definitionSha256", "mandateSha256"]);
+// Task-entry stamp fields join provenance only on taskEntry rows — other
+// row kinds keep their existing primary/metadata split untouched.
+const taskStampFields = new Set(["entryId", "entityId", "taskId", "assignmentId", "revision", "priorEntryId",
+  "actorAgentId", "actorMembershipId", "ownershipRevision", "briefRevision", "entrySha256", "priorEntrySha256", "requestId"]);
 
 function WorkItem({ colors, item, briefRevision }: { colors: Colors; item: DeskWorkflowProjectionItemValue; briefRevision: number }) {
   if (item.kind === "reviewDisagreement") return <Card colors={colors} title="Unresolved review disagreement">
@@ -118,16 +182,34 @@ function WorkItem({ colors, item, briefRevision }: { colors: Colors; item: DeskW
     <RecordedFields colors={colors} value={item.summary} />
   </Card>;
   const row = item.row;
-  const title = item.kind === "decisionEntry" ? item.row.body.proposition : itemTitles[item.kind];
+  const title = item.kind === "decisionEntry" ? item.row.body.proposition
+    : item.kind === "taskEntry"
+      ? (item.row.kind === "action" && item.row.actionKind === "integration"
+          ? "Integration record" : taskEntryTitles[item.row.kind] ?? itemTitles.taskEntry)
+    : itemTitles[item.kind];
   const body = item.kind === "decisionEntry" || item.kind === "briefRevision" ? item.row.body : null;
-  const primary = Object.fromEntries(Object.entries(body ?? row).filter(([key]) => !metadataFields.has(key)));
-  const metadata = Object.fromEntries(Object.entries(row).filter(([key]) => metadataFields.has(key) || (body !== null && key !== "body")));
+  const isStamp = (key: string) => metadataFields.has(key) || (item.kind === "taskEntry" && taskStampFields.has(key));
+  const primary = Object.fromEntries(Object.entries(body ?? row).filter(([key]) => !isStamp(key)));
+  const metadata = Object.fromEntries(Object.entries(row).filter(([key]) => isStamp(key) || (body !== null && key !== "body")));
   return <Card colors={colors} title={title}>
     {"briefRevision" in row && row.briefRevision !== briefRevision ? <Text style={{ color: colors.statusWarning }}>
       Recorded against brief {row.briefRevision}; the current brief is {briefRevision}.
     </Text> : null}
     {item.kind === "scopeReview" ? <Text style={{ color: colors.foregroundMuted }}>{qualificationLine(item)}</Text> : null}
+    {item.kind === "taskEntry" ? <Text style={{ color: colors.foregroundMuted }}>{taskCaption(item)}</Text> : null}
     <RecordedFields colors={colors} value={primary} />
+    {item.kind === "taskEntry" && item.readiness !== null ? <RecordDetails colors={colors} title="Current task readiness — shared resolver">
+      <RecordedFields colors={colors} value={item.readiness} />
+    </RecordDetails> : null}
+    {item.kind === "taskEntry" && item.resultQualification !== null ? <RecordDetails colors={colors} title="Current task result qualification — shared resolver">
+      <RecordedFields colors={colors} value={item.resultQualification} />
+    </RecordDetails> : null}
+    {item.kind === "taskEntry" && item.currentRuling !== null ? <RecordDetails colors={colors} title="Current task ruling — shared projection">
+      <RecordedFields colors={colors} value={item.currentRuling} />
+    </RecordDetails> : null}
+    {item.kind === "taskEntry" ? <RecordDetails colors={colors} title="Recap summary row">
+      <RecordedFields colors={colors} value={item.summary} />
+    </RecordDetails> : null}
     <RecordDetails colors={colors} title="Record provenance"><RecordedFields colors={colors} value={metadata} /></RecordDetails>
   </Card>;
 }
@@ -165,6 +247,7 @@ export function WorkflowPanel({ workspaceId, host, theme, layout }: PluginWorksp
         <Text selectable style={{ color: colors.foregroundMuted }}>
           {assignment.id} · {assignment.state} · owner {assignment.ownerAgentId} · ownership revision {assignment.ownershipRevision}
           {assignment.objectiveBasis === "registration" ? " · registration objective" : ` · brief ${assignment.briefRevision}`}
+          {` · ${taskQueueLine(assignment.taskCounts)}`}
         </Text>
         <Button colors={colors} label="Read assignment" onPress={() => { void reader.select(assignment.id); }} />
       </Card>)}
@@ -189,6 +272,15 @@ export function WorkflowPanel({ workspaceId, host, theme, layout }: PluginWorksp
       </Card> : <Card colors={colors} title="Legacy assignment — structured brief absent">
         <Text selectable style={{ color: colors.foregroundMuted }}>{view.legacyObjective ?? "No objective recorded."}</Text>
       </Card>}
+      {view.section === "tasks" ? <Card colors={colors} title="Current task queue"
+        subtitle="Counts cover current task identities across the full ledger; this page may show only part of the history.">
+        <Text style={{ color: colors.foregroundMuted }}>
+          {view.taskCounts === undefined ? "Task counts are unavailable in this projection." : taskQueueLine(view.taskCounts)}
+        </Text>
+        {view.taskCounts === undefined ? null : <RecordDetails colors={colors} title="Current queue counts">
+          <RecordedFields colors={colors} value={view.taskCounts} />
+        </RecordDetails>}
+      </Card> : null}
       <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>{sections.map(section =>
         <Button key={section.id} colors={colors} label={section.title} kind={view.section === section.id ? "primary" : "ghost"}
           onPress={() => { void reader.section(section.id); }} />)}</View>

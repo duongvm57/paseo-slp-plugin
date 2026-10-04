@@ -259,7 +259,7 @@ test('§2.2: decide with a valid memberships table → read returns it, same com
   const read = store.read(REPO_KEY);
   assert.equal(read.state, 'ok');
   assert.deepEqual(read.ledger.memberships, [row]);
-  assert.equal(read.persistedSchemaVersion, 8, 'a fresh transaction persists the current additive schema');
+  assert.equal(read.persistedSchemaVersion, 9, 'a fresh transaction persists the current additive schema');
 });
 
 test('§2.2: memberships with a bad schema → INVALID_RECORD, file bytes unchanged, no request record', async t => {
@@ -384,7 +384,7 @@ test('migration: a valid v1 ledger reads ok with persistedSchemaVersion 1', t =>
   assert.equal(readFileSync(ledgerPath(dir), 'utf8'), JSON.stringify(v1), 'read never rewrites the file');
 });
 
-test('migration: the first transact after a v1 read writes v7 + schema-migrated and keeps requests', async t => {
+test('migration: the first transact after a v1 read writes v9 + schema-migrated and keeps requests', async t => {
   const dir = fixture(t);
   const store = freshStore(dir);
   mkdirSync(repoDir(dir), { recursive: true });
@@ -396,7 +396,7 @@ test('migration: the first transact after a v1 read writes v7 + schema-migrated 
   }));
   assert.equal(result.ok, true);
   const onDisk = JSON.parse(readFileSync(ledgerPath(dir), 'utf8'));
-  assert.equal(onDisk.schemaVersion, 8);
+  assert.equal(onDisk.schemaVersion, 9);
   assert.deepEqual(onDisk.memberships, []);
   assert.deepEqual(onDisk.assignments, []);
   assert.deepEqual(onDisk.candidates, []);
@@ -405,7 +405,7 @@ test('migration: the first transact after a v1 read writes v7 + schema-migrated 
   // The migration event is in the chain: read it back from the segments.
   const read = store.read(REPO_KEY);
   assert.equal(read.state, 'ok');
-  assert.equal(read.persistedSchemaVersion, 8);
+  assert.equal(read.persistedSchemaVersion, 9);
   // Replay a pre-bump requestId — idempotency survives the bump.
   const replay = await store.transact(REPO_KEY, envelopeV2(), () => {
     throw new Error('decide must not run on a replay');
@@ -424,20 +424,20 @@ test('migration: MIGRATIONS[1] is pure and total — input untouched, output add
   assert.equal(JSON.stringify(v1), snapshot, 'the input object is never mutated');
 });
 
-test('header v8 → future', t => {
+test('header v10 → future', t => {
   const dir = fixture(t);
   const store = freshStore(dir);
   mkdirSync(repoDir(dir), { recursive: true });
-  const body = JSON.stringify({ format: 'paseo-slp/enforcement', schemaVersion: 9, anything: 'goes' });
+  const body = JSON.stringify({ format: 'paseo-slp/enforcement', schemaVersion: 10, anything: 'goes' });
   writeFileSync(ledgerPath(dir), body);
   const read = store.read(REPO_KEY);
   assert.equal(read.state, 'future');
   assert.equal(read.diagnostics.code, 'future-version');
-  assert.equal(read.diagnostics.schemaVersion, 9);
+  assert.equal(read.diagnostics.schemaVersion, 10);
   assert.equal(readFileSync(ledgerPath(dir), 'utf8'), body, 'a future ledger is never modified');
 });
 
-test('fresh commits write v7 directly with empty tables and no migration event', async t => {
+test('fresh commits write v9 directly with empty tables and no migration event', async t => {
   const dir = fixture(t);
   const store = freshStore(dir);
   const result = await store.transact(REPO_KEY, envelopeV2(), () => ({
@@ -446,7 +446,7 @@ test('fresh commits write v7 directly with empty tables and no migration event',
   }));
   assert.equal(result.ok, true);
   const onDisk = JSON.parse(readFileSync(ledgerPath(dir), 'utf8'));
-  assert.equal(onDisk.schemaVersion, 8);
+  assert.equal(onDisk.schemaVersion, 9);
   assert.deepEqual(onDisk.memberships, []);
   assert.deepEqual(onDisk.assignments, []);
   assert.deepEqual(onDisk.candidates, []);
@@ -454,7 +454,7 @@ test('fresh commits write v7 directly with empty tables and no migration event',
   assert.deepEqual(onDisk.briefRevisions, []);
   assert.deepEqual(onDisk.decisionEntries, []);
   const read = store.read(REPO_KEY);
-  assert.equal(read.persistedSchemaVersion, 8);
+  assert.equal(read.persistedSchemaVersion, 9);
   // No schema-migrated event on a fresh ledger: the first segment covers
   // exactly the decide's own event.
   assert.deepEqual(result.receipt.eventSeqs, [1, 1]);
@@ -491,13 +491,13 @@ test('E-P2C-2 (i) reject-then-success: the rejection keeps v1 with no segment; t
   }));
   assert.equal(ok.ok, true);
   const afterSuccess = JSON.parse(readFileSync(ledgerPath(dir), 'utf8'));
-  assert.equal(afterSuccess.schemaVersion, 8, 'the first successful commit migrates');
+  assert.equal(afterSuccess.schemaVersion, 9, 'the first successful commit migrates');
   assert.deepEqual(afterSuccess.memberships, []);
   assert.deepEqual(afterSuccess.assignments, []);
   // The chain carries schema-migrated before the decide's own event.
   const read = store.read(REPO_KEY);
   assert.equal(read.state, 'ok');
-  assert.equal(read.persistedSchemaVersion, 8);
+  assert.equal(read.persistedSchemaVersion, 9);
   const segment = readFileSync(join(eventsDir(dir), '1-2.jsonl'), 'utf8');
   const kinds = segment.trim().split('\n').map(line => JSON.parse(line).kind);
   assert.deepEqual(kinds, ['schema-migrated', 'test.event']);
@@ -514,11 +514,11 @@ test('E-P2C-2 (ii) success-first: migrate immediately; a later rejection adds no
   }));
   assert.equal(ok.ok, true);
   const afterSuccess = JSON.parse(readFileSync(ledgerPath(dir), 'utf8'));
-  assert.equal(afterSuccess.schemaVersion, 8);
+  assert.equal(afterSuccess.schemaVersion, 9);
   const rejected = await store.transact(REPO_KEY, envelopeV2({ requestId: 'rej-1' }), decideReject());
   assert.equal(rejected.ok, false);
   const afterRejection = JSON.parse(readFileSync(ledgerPath(dir), 'utf8'));
-  assert.equal(afterRejection.schemaVersion, 8, 'already migrated — the rejection changes nothing');
+  assert.equal(afterRejection.schemaVersion, 9, 'already migrated — the rejection changes nothing');
   assert.equal(afterRejection.requests.length, 3);
   const read = store.read(REPO_KEY);
   const last = read.ledger.requests.at(-1);
@@ -605,7 +605,7 @@ test('migration: a valid v2 ledger reads ok with persistedSchemaVersion 2', t =>
   assert.equal(readFileSync(ledgerPath(dir), 'utf8'), JSON.stringify(v2), 'read never rewrites the file');
 });
 
-test('migration: the first commit on a v2 ledger writes v3 + schema-migrated, tables byte-preserved', async t => {
+test('migration: the first commit on a v2 ledger writes v9 + schema-migrated, tables byte-preserved', async t => {
   const dir = fixture(t);
   mkdirSync(repoDir(dir), { recursive: true });
   const v2 = v2Ledger();
@@ -617,7 +617,7 @@ test('migration: the first commit on a v2 ledger writes v3 + schema-migrated, ta
   }));
   assert.equal(result.ok, true);
   const onDisk = JSON.parse(readFileSync(ledgerPath(dir), 'utf8'));
-  assert.equal(onDisk.schemaVersion, 8);
+  assert.equal(onDisk.schemaVersion, 9);
   assert.deepEqual(onDisk.assignments, []);
   assert.deepEqual(onDisk.candidates, []);
   assert.deepEqual(onDisk.handbacks, []);
@@ -628,7 +628,7 @@ test('migration: the first commit on a v2 ledger writes v3 + schema-migrated, ta
   const kinds = segment.trim().split('\n').map(line => JSON.parse(line).kind);
   assert.deepEqual(kinds, ['schema-migrated', 'test.event']);
   const migrated = JSON.parse(segment.trim().split('\n')[0]);
-  assert.deepEqual(migrated.payload, { from: 2, to: 8 });
+  assert.deepEqual(migrated.payload, { from: 2, to: 9 });
 });
 
 test('migration: MIGRATIONS[2] is pure and total — input untouched, output adds three empty tables', t => {
@@ -662,13 +662,13 @@ test('migration: a v1 ledger chains v1→v2→v3 on read and on commit', async t
   }));
   assert.equal(result.ok, true);
   const onDisk = JSON.parse(readFileSync(ledgerPath(dir), 'utf8'));
-  assert.equal(onDisk.schemaVersion, 8);
+  assert.equal(onDisk.schemaVersion, 9);
   assert.deepEqual(onDisk.assignments, []);
   assert.deepEqual(onDisk.settlements, []);
   const segment = readFileSync(join(eventsDir(dir), '1-2.jsonl'), 'utf8');
   const migrated = JSON.parse(segment.trim().split('\n')[0]);
   assert.equal(migrated.kind, 'schema-migrated');
-  assert.deepEqual(migrated.payload, { from: 1, to: 8 });
+  assert.deepEqual(migrated.payload, { from: 1, to: 9 });
 });
 
 // ---------------------------------------------------------------------------
@@ -875,7 +875,7 @@ test('migration: a rejection on a v2 ledger commits the v2 shape — bump waits 
   }));
   assert.equal(ok.ok, true);
   const migrated = JSON.parse(readFileSync(ledgerPath(dir), 'utf8'));
-  assert.equal(migrated.schemaVersion, 8);
+  assert.equal(migrated.schemaVersion, 9);
   assert.deepEqual(migrated.assignments, []);
   assert.deepEqual(migrated.settlements, []);
 });
@@ -1164,7 +1164,7 @@ test('ledger bytes: an over-cap commit is refused INVALID_RECORD before any dura
   }));
   assert.equal(result.ok, false);
   assert.equal(result.code, 'INVALID_RECORD');
-  assert.match(result.message, /byte cap|over the \d+-byte cap/);
+  assert.match(result.message, /byte cap|over the \d+-byte cap|recovery reserve/);
   // The refusal fired before the segment and the commit point alike — the
   // repo directory holds neither a ledger nor an orphan event segment.
   assert.equal(store.read(REPO_KEY).state, 'absent');
@@ -1201,9 +1201,9 @@ test('ledger bytes: saturation refuses the over-cap commit, keeps acknowledged s
   }
   assert.ok(saturated !== null, 'the byte cap must fire before 80 commits');
   assert.equal(saturated.code, 'INVALID_RECORD');
-  assert.match(saturated.message, /over the \d+-byte cap/);
+  assert.match(saturated.message, /over the \d+-byte cap|recovery reserve/);
   // The acknowledged ledger never crossed the cap and still reads cleanly.
-  assert.ok(statSync(ledgerPath(dir)).size <= LEDGER_LIMITS.ledgerBytes);
+  assert.ok(statSync(ledgerPath(dir)).size <= LEDGER_LIMITS.ledgerBytes - WIRE_LIMITS.deskTaskRecoveryBytes);
   const read = store.read(REPO_KEY);
   assert.equal(read.state, 'ok', `saturated ledger must stay readable: ${JSON.stringify(read.diagnostics)}`);
   assert.equal(read.ledger.handbacks.length, committed);
@@ -1298,7 +1298,7 @@ test('ledger bytes: a decide rejection that would push the ledger over the cap i
   );
   assert.equal(rejected.ok, false);
   assert.equal(rejected.code, 'INVALID_RECORD');
-  assert.match(rejected.message, /over the \d+-byte cap/);
+  assert.match(rejected.message, /over the \d+-byte cap|recovery reserve/);
   // The acknowledged ledger is byte-identical — nothing was appended.
   assert.equal(readFileSync(ledgerPath(dir), 'utf8'), bytes);
   assert.equal(store.read(REPO_KEY).state, 'ok');
@@ -1620,7 +1620,7 @@ test('migration: a valid v3 ledger reads ok with persistedSchemaVersion 3', t =>
   assert.equal(readFileSync(ledgerPath(dir), 'utf8'), JSON.stringify(v3), 'read never rewrites the file');
 });
 
-test('migration: the first commit on a v3 ledger writes v5 + schema-migrated, tables byte-preserved', async t => {
+test('migration: the first commit on a v3 ledger writes v9 + schema-migrated, tables byte-preserved', async t => {
   const dir = fixture(t);
   mkdirSync(repoDir(dir), { recursive: true });
   const v3 = v3Ledger();
@@ -1632,7 +1632,7 @@ test('migration: the first commit on a v3 ledger writes v5 + schema-migrated, ta
   }));
   assert.equal(result.ok, true);
   const onDisk = JSON.parse(readFileSync(ledgerPath(dir), 'utf8'));
-  assert.equal(onDisk.schemaVersion, 8);
+  assert.equal(onDisk.schemaVersion, 9);
   assert.deepEqual(onDisk.settlements, []);
   assert.deepEqual(onDisk.scopes, []);
   assert.deepEqual(onDisk.scopeReviews, []);
@@ -1644,7 +1644,7 @@ test('migration: the first commit on a v3 ledger writes v5 + schema-migrated, ta
   const kinds = segment.trim().split('\n').map(line => JSON.parse(line).kind);
   assert.deepEqual(kinds, ['schema-migrated', 'test.event']);
   const migrated = JSON.parse(segment.trim().split('\n')[0]);
-  assert.deepEqual(migrated.payload, { from: 3, to: 8 });
+  assert.deepEqual(migrated.payload, { from: 3, to: 9 });
 });
 
 test('migration: MIGRATIONS[3] is pure and total — input untouched, output adds the empty table', t => {
@@ -1689,13 +1689,13 @@ test('migration: a v2 ledger chains v2→v3→v4→v5 on read and on commit', as
   }));
   assert.equal(result.ok, true);
   const onDisk = JSON.parse(readFileSync(ledgerPath(dir), 'utf8'));
-  assert.equal(onDisk.schemaVersion, 8);
+  assert.equal(onDisk.schemaVersion, 9);
   assert.deepEqual(onDisk.settlements, []);
   assert.deepEqual(onDisk.scopes, []);
   const segment = readFileSync(join(eventsDir(dir), '1-2.jsonl'), 'utf8');
   const migrated = JSON.parse(segment.trim().split('\n')[0]);
   assert.equal(migrated.kind, 'schema-migrated');
-  assert.deepEqual(migrated.payload, { from: 2, to: 8 });
+  assert.deepEqual(migrated.payload, { from: 2, to: 9 });
 });
 
 test('migration: a v1 ledger chains v1→v2→v3→v4→v5 on read and on commit', async t => {
@@ -1718,16 +1718,16 @@ test('migration: a v1 ledger chains v1→v2→v3→v4→v5 on read and on commit
   }));
   assert.equal(result.ok, true);
   const onDisk = JSON.parse(readFileSync(ledgerPath(dir), 'utf8'));
-  assert.equal(onDisk.schemaVersion, 8);
+  assert.equal(onDisk.schemaVersion, 9);
   const segment = readFileSync(join(eventsDir(dir), '1-2.jsonl'), 'utf8');
   const migrated = JSON.parse(segment.trim().split('\n')[0]);
-  assert.deepEqual(migrated.payload, { from: 1, to: 8 });
+  assert.deepEqual(migrated.payload, { from: 1, to: 9 });
 });
 
 test('migration: a future-version ledger still fails closed', t => {
   const dir = fixture(t);
   mkdirSync(repoDir(dir), { recursive: true });
-  writeFileSync(ledgerPath(dir), JSON.stringify({ ...v3Ledger(), schemaVersion: 9 }));
+  writeFileSync(ledgerPath(dir), JSON.stringify({ ...v3Ledger(), schemaVersion: 10 }));
   const store = freshStore(dir);
   const read = store.read(REPO_KEY);
   assert.equal(read.state, 'future');
@@ -1755,7 +1755,7 @@ test('migration: a rejection on a v3 ledger commits the v3 shape — bump waits 
   }));
   assert.equal(ok.ok, true);
   const migrated = JSON.parse(readFileSync(ledgerPath(dir), 'utf8'));
-  assert.equal(migrated.schemaVersion, 8);
+  assert.equal(migrated.schemaVersion, 9);
   assert.deepEqual(migrated.settlements, []);
   assert.deepEqual(migrated.scopes, []);
 });
@@ -2233,7 +2233,7 @@ test('migration: a valid v4 ledger reads ok with persistedSchemaVersion 4 and em
   assert.equal(readFileSync(ledgerPath(dir), 'utf8'), JSON.stringify(v4), 'read never rewrites the file');
 });
 
-test('migration: the first commit on a v4 ledger writes v7 + schema-migrated, tables byte-preserved', async t => {
+test('migration: the first commit on a v4 ledger writes v9 + schema-migrated, tables byte-preserved', async t => {
   const dir = fixture(t);
   mkdirSync(repoDir(dir), { recursive: true });
   const v4 = v4Ledger();
@@ -2245,7 +2245,7 @@ test('migration: the first commit on a v4 ledger writes v7 + schema-migrated, ta
   }));
   assert.equal(result.ok, true);
   const onDisk = JSON.parse(readFileSync(ledgerPath(dir), 'utf8'));
-  assert.equal(onDisk.schemaVersion, 8);
+  assert.equal(onDisk.schemaVersion, 9);
   assert.deepEqual(onDisk.scopes, []);
   assert.deepEqual(onDisk.scopeReviews, []);
   assert.deepEqual(onDisk.scopeTransitions, []);
@@ -2258,7 +2258,7 @@ test('migration: the first commit on a v4 ledger writes v7 + schema-migrated, ta
   const kinds = segment.trim().split('\n').map(line => JSON.parse(line).kind);
   assert.deepEqual(kinds, ['schema-migrated', 'test.event']);
   const migrated = JSON.parse(segment.trim().split('\n')[0]);
-  assert.deepEqual(migrated.payload, { from: 4, to: 8 });
+  assert.deepEqual(migrated.payload, { from: 4, to: 9 });
 });
 
 test('migration: a rejection on a v4 ledger commits the v4 shape — the bump waits for success', async t => {
@@ -2279,7 +2279,7 @@ test('migration: a rejection on a v4 ledger commits the v4 shape — the bump wa
   }));
   assert.equal(ok.ok, true);
   const migrated = JSON.parse(readFileSync(ledgerPath(dir), 'utf8'));
-  assert.equal(migrated.schemaVersion, 8);
+  assert.equal(migrated.schemaVersion, 9);
   assert.deepEqual(migrated.scopes, []);
   assert.deepEqual(migrated.rollouts, []);
 });
@@ -2818,7 +2818,7 @@ test('migration: a valid v5 ledger reads ok with persistedSchemaVersion 5 and em
   assert.equal(readFileSync(ledgerPath(dir), 'utf8'), JSON.stringify(v5), 'read never rewrites the file');
 });
 
-test('migration: the first commit on a v5 ledger writes v7 + schema-migrated, tables byte-preserved', async t => {
+test('migration: the first commit on a v5 ledger writes v9 + schema-migrated, tables byte-preserved', async t => {
   const dir = fixture(t);
   mkdirSync(repoDir(dir), { recursive: true });
   const v5 = v5Ledger();
@@ -2830,7 +2830,7 @@ test('migration: the first commit on a v5 ledger writes v7 + schema-migrated, ta
   }));
   assert.equal(result.ok, true);
   const onDisk = JSON.parse(readFileSync(ledgerPath(dir), 'utf8'));
-  assert.equal(onDisk.schemaVersion, 8);
+  assert.equal(onDisk.schemaVersion, 9);
   assert.deepEqual(onDisk.checkDefinitions, []);
   assert.deepEqual(onDisk.checkRuns, []);
   assert.deepEqual(onDisk.rollouts, []);
@@ -2840,7 +2840,7 @@ test('migration: the first commit on a v5 ledger writes v7 + schema-migrated, ta
   const kinds = segment.trim().split('\n').map(line => JSON.parse(line).kind);
   assert.deepEqual(kinds, ['schema-migrated', 'test.event']);
   const migrated = JSON.parse(segment.trim().split('\n')[0]);
-  assert.deepEqual(migrated.payload, { from: 5, to: 8 });
+  assert.deepEqual(migrated.payload, { from: 5, to: 9 });
 });
 
 test('migration: a rejection on a v5 ledger commits the v5 shape — the bump waits for success', async t => {
@@ -2860,7 +2860,7 @@ test('migration: a rejection on a v5 ledger commits the v5 shape — the bump wa
   }));
   assert.equal(ok.ok, true);
   const migrated = JSON.parse(readFileSync(ledgerPath(dir), 'utf8'));
-  assert.equal(migrated.schemaVersion, 8);
+  assert.equal(migrated.schemaVersion, 9);
   assert.deepEqual(migrated.checkRuns, []);
 });
 
@@ -2903,7 +2903,7 @@ test('migration: a valid v6 ledger reads with neutral v7 pins and keeps legacy t
   assert.equal(readFileSync(ledgerPath(dir), 'utf8'), JSON.stringify(legacy), 'read never migrates disk bytes');
 });
 
-test('migration: the first successful v6 commit writes only the two additive v7 tables', async t => {
+test('migration: the first successful v6 commit writes current additive v9 tables', async t => {
   const dir = fixture(t);
   mkdirSync(repoDir(dir), { recursive: true });
   writeFileSync(ledgerPath(dir), JSON.stringify(v6Ledger()));
@@ -2913,13 +2913,13 @@ test('migration: the first successful v6 commit writes only the two additive v7 
   }));
   assert.equal(result.ok, true);
   const onDisk = JSON.parse(readFileSync(ledgerPath(dir), 'utf8'));
-  assert.equal(onDisk.schemaVersion, 8);
+  assert.equal(onDisk.schemaVersion, 9);
   assert.deepEqual(onDisk.briefRevisions, []);
   assert.deepEqual(onDisk.decisionEntries, []);
   assert.deepEqual(onDisk.rollouts, []);
   const events = readFileSync(join(eventsDir(dir), '1-2.jsonl'), 'utf8').trim().split('\n').map(line => JSON.parse(line));
   assert.deepEqual(events.map(event => event.kind), ['schema-migrated', 'test.event']);
-  assert.deepEqual(events[0].payload, { from: 6, to: 8 });
+  assert.deepEqual(events[0].payload, { from: 6, to: 9 });
 });
 
 test('migration: MIGRATIONS[6] is pure and total — exactly briefRevisions and decisionEntries are added', () => {

@@ -227,6 +227,7 @@ test('contribute() registers the RPCs plus the two before-hooks, cleanup unregis
       'agent.created',
       'agent.created',
       'agent.turn_ended',
+      'agent.turn_ended',
       'agent.turn_started',
     ],
   );
@@ -246,6 +247,7 @@ test('contribute() registers the RPCs plus the two before-hooks, cleanup unregis
       'agent.created',
       'agent.session_open',
       'agent.session_open',
+      'agent.turn_ended',
       'agent.turn_ended',
       'agent.turn_started',
     ],
@@ -278,12 +280,12 @@ test('contribute() leaves the shadow observer inert when the served home is only
     on(name, handler) { registrations.push({ name, handler }); return () => {}; },
   };
   const cleanup = contribute(server);
-  // (a) exactly two lifecycle registrations, on the desk pair only — no
-  // turn_started/turn_ended hook, so the shadow observer is inert (b).
+  // The desk registers membership lifecycle plus positive task-send
+  // observation. The optional communication observer remains inert.
   assert.deepEqual(
     registrations.map(r => r.name).sort(),
-    ['agent.archived', 'agent.created'],
-    'only the desk handshake registers without a verified served home; the shadow observer stays inert',
+    ['agent.archived', 'agent.created', 'agent.turn_ended'],
+    'only desk lifecycle registers without a verified served home; communication supervision stays inert',
   );
   // (c) provenance: driving each handler with an slp-* payload over a
   // non-git cwd yields exactly the desk diagnostic warn and never throws —
@@ -299,6 +301,12 @@ test('contribute() leaves the shadow observer inert when the served home is only
   const expectedOp = { 'agent.created': 'register', 'agent.archived': 'revoke' };
   for (const { name, handler } of registrations) {
     assert.equal(typeof handler, 'function');
+    if (name === 'agent.turn_ended') {
+      const before = warnings.length;
+      await handler({ agent: slpEvent.agent, turnId: 'fixture-turn', outcome: { kind: 'completed' }, timeline: [] }, {});
+      assert.equal(warnings.length, before, 'unbound task observation stays inert');
+      continue;
+    }
     await handler(slpEvent, {});
     assert.deepEqual(warnings.at(-1), `slp: desk ${expectedOp[name]} skipped: not-git`, `${name} handler is the desk ${expectedOp[name]}`);
     const beforeSilent = warnings.length;

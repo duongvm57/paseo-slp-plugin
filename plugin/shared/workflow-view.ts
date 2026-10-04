@@ -1,6 +1,6 @@
 import { defineRpc } from "@getpaseo/plugin";
 import { z } from "zod";
-import { DeskWorkflowProjection, DeskWorkflowProjectionPageInput } from "./enforcement.ts";
+import { DeskTaskQueueCounts, DeskWorkflowProjection, DeskWorkflowProjectionPageInput } from "./enforcement.ts";
 import { Sha } from "./contracts.ts";
 
 export const WorkflowAssignmentCursor = z.object({
@@ -51,6 +51,11 @@ export const GetWorkspaceWorkflowOutput = z.object({
     ownerMembershipId: z.string().uuid(),
     ownershipRevision: z.number().int().nonnegative(),
     workspaceId: z.string().min(1).max(256).nullable(),
+    /** Current task-queue counts for this assignment when the desk ledger
+     *  supports task entries — a supported empty queue reports zero counts,
+     *  while an unreadable/absent desk leaves no row (and therefore no
+     *  counts) at all. Never an empty-list-equals-absence shortcut. */
+    taskCounts: DeskTaskQueueCounts.nullable(),
   }).strict()).max(50),
   assignmentTotal: z.number().int().nonnegative(),
   assignmentOffset: z.number().int().nonnegative(),
