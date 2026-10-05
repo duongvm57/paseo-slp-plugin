@@ -1,0 +1,465 @@
+{
+ "lang": "vi",
+ "fps": 30,
+ "width": 1920,
+ "height": 1080,
+ "duration": 255.033,
+ "narration": {
+  "profile": "omnivoice",
+  "provider": "OmniVoice (k2-fsa), local",
+  "model": "k2-fsa/OmniVoice",
+  "voice": "synthetic male narrator (OmniVoice voice design → clone prompt)",
+  "voiceId": null,
+  "instruct": "male, middle-aged, very low pitch",
+  "settings": {
+   "dtype": "bfloat16",
+   "numStep": 32,
+   "speed": 0.95,
+   "seedBase": 20261005,
+   "device": "cpu"
+  },
+  "license": "OmniVoice code Apache-2.0; pre-trained model CC BY-NC (k2-fsa/OmniVoice model card). Audio tokenizer: Boson Higgs Audio 2 Community License — Built with Higgs Materials licensed from Boson AI USA, Inc., Copyright Boson AI USA, Inc., All Rights Reserved and Meta Llama 3 licensed under the Meta Llama 3 Community License, Copyright Meta Platforms, Inc., All Rights Reserved."
+ },
+ "labels": {
+  "honest": "hoạt hình minh họa · không phải cảnh quay thật",
+  "credit": "Giọng đọc: OmniVoice (k2-fsa, CC BY-NC) · giọng nam tổng hợp · tạo cục bộ",
+  "titleCredit": "giọng thuyết minh tạo cục bộ bằng OmniVoice",
+  "poster": "Xem video tổng quan {dur}  ·  thuyết minh + phụ đề tiếng Việt",
+  "mp4Title": "Tổng quan Paseo SLP (tiếng Việt)"
+ },
+ "scenes": [
+  {
+   "id": "title",
+   "chapter": "Tổng quan",
+   "title": "Một brief trở thành thao tác có kiểm soát như thế nào",
+   "start": 0.0,
+   "end": 13.24,
+   "last": false,
+   "timing": "sentences",
+   "cues": [
+    {
+     "text": "Paseo SLP tổ chức các coding agent thành Supervisor, Lead và các Peer độc lập.",
+     "start": 1.6,
+     "end": 6.07
+    },
+    {
+     "text": "Đây là cách một brief trở thành thao tác có kiểm soát, và nơi phán đoán của con người vẫn quan trọng.",
+     "start": 6.45,
+     "end": 12.14
+    }
+   ]
+  },
+  {
+   "id": "owners",
+   "chapter": "Ai sở hữu gì",
+   "title": "Ba bên cùng chia nhau mỗi thao tác",
+   "start": 13.24,
+   "end": 31.09,
+   "last": false,
+   "timing": "sentences",
+   "cues": [
+    {
+     "text": "Ba bên cùng chia nhau công việc.",
+     "start": 14.04,
+     "end": 15.84
+    },
+    {
+     "text": "Paseo chạy session, workspace và quan hệ cha con của agent.",
+     "start": 16.22,
+     "end": 19.59
+    },
+    {
+     "text": "Plugin thêm role policy, cùng một runtime kiểm tra dữ kiện đã ghi.",
+     "start": 19.97,
+     "end": 23.68
+    },
+    {
+     "text": "Human giữ mục tiêu, thẩm quyền và quyền nghiệm thu cuối cùng.",
+     "start": 24.06,
+     "end": 27.51
+    },
+    {
+     "text": "Và plugin không phải bộ lập lịch agent.",
+     "start": 27.89,
+     "end": 29.99
+    }
+   ]
+  },
+  {
+   "id": "policy",
+   "chapter": "Policy và enforcement",
+   "title": "Role policy được đọc. Enforcement được kiểm tra.",
+   "start": 31.09,
+   "end": 49.82,
+   "last": false,
+   "timing": "sentences",
+   "cues": [
+    {
+     "text": "Role policy là thứ mỗi seat đọc, xếp lớp từ quy tắc chung đến một assignment.",
+     "start": 31.89,
+     "end": 36.3
+    },
+    {
+     "text": "Lớp dưới chỉ thu hẹp, không bao giờ mở rộng.",
+     "start": 36.68,
+     "end": 38.94
+    },
+    {
+     "text": "Enforcement là code, kiểm tra membership, quyền sở hữu và revision trên lệnh desk được bảo vệ.",
+     "start": 39.32,
+     "end": 44.78
+    },
+    {
+     "text": "Policy dẫn dắt phán đoán. Enforcement canh giữ dữ kiện đã ghi.",
+     "start": 45.16,
+     "end": 48.72
+    }
+   ]
+  },
+  {
+   "id": "install",
+   "chapter": "Cài đặt, kích hoạt, bind",
+   "title": "Checkout, runtime đã phát hành và session là ba thứ khác nhau",
+   "start": 49.82,
+   "end": 71.25,
+   "last": false,
+   "timing": "sentences",
+   "cues": [
+    {
+     "text": "SLP Manager kích hoạt một runtime đã phát hành.",
+     "start": 50.62,
+     "end": 53.27
+    },
+    {
+     "text": "Byte đã xác minh nằm trong thư mục runtime cố định, cùng launcher và profile.",
+     "start": 53.65,
+     "end": 58.14
+    },
+    {
+     "text": "Binding ghim runtime, Node, transport và daemon home.",
+     "start": 58.52,
+     "end": 61.58
+    },
+    {
+     "text": "Khi khởi chạy, hook hoặc wrapper nạp role trước khi provider bắt đầu.",
+     "start": 61.96,
+     "end": 65.93
+    },
+    {
+     "text": "Rebind chỉ đổi các lần khởi chạy sau; session đang chạy giữ byte cũ.",
+     "start": 66.31,
+     "end": 70.15
+    }
+   ]
+  },
+  {
+   "id": "desk",
+   "chapter": "Membership và desk",
+   "title": "Tiêu đề chỉ để hiển thị. Membership là danh tính.",
+   "start": 71.25,
+   "end": 94.3,
+   "last": false,
+   "timing": "sentences",
+   "cues": [
+    {
+     "text": "Session chỉ thao tác trên desk qua membership đã bind.",
+     "start": 72.05,
+     "end": 75.14
+    },
+    {
+     "text": "Membership ghi chính xác agent, họ runtime, vai trò, thư mục và thế hệ binding.",
+     "start": 75.52,
+     "end": 80.17
+    },
+    {
+     "text": "Mọi lệnh desk đi qua bridge: danh tính mới, capability, schema chặt chẽ.",
+     "start": 80.55,
+     "end": 84.7
+    },
+    {
+     "text": "Desk là ledger chỉ ghi thêm, nối chuỗi hash, dùng chung cho các worktree liên quan.",
+     "start": 85.08,
+     "end": 89.88
+    },
+    {
+     "text": "Nó bảo vệ lệnh desk. Nó không phải sandbox cho shell.",
+     "start": 90.26,
+     "end": 93.21
+    }
+   ]
+  },
+  {
+   "id": "review",
+   "chapter": "Sở hữu và review",
+   "title": "Một người ghi mỗi scope. Review được chọn, rồi ghim.",
+   "start": 94.3,
+   "end": 112.69,
+   "last": false,
+   "timing": "sentences",
+   "cues": [
+    {
+     "text": "Mỗi scope đang thay đổi có một người ghi.",
+     "start": 95.1,
+     "end": 97.3
+    },
+    {
+     "text": "Review được chọn: bắt buộc, không cần, hoặc miễn kèm con trỏ thẩm quyền.",
+     "start": 97.68,
+     "end": 101.73
+    },
+    {
+     "text": "Một vòng review ghim candidate, scope, brief và mandate trung lập.",
+     "start": 102.11,
+     "end": 105.9
+    },
+    {
+     "text": "Đổi một thứ, review trở thành cũ.",
+     "start": 106.28,
+     "end": 108.06
+    },
+    {
+     "text": "Owner và người ghi không thể tự xả cổng độc lập của mình.",
+     "start": 108.44,
+     "end": 111.59
+    }
+   ]
+  },
+  {
+   "id": "dispatch",
+   "chapter": "Dispatch có quản lý",
+   "title": "Worker chỉ nhận việc sau khi bind",
+   "start": 112.69,
+   "end": 136.65,
+   "last": false,
+   "timing": "sentences",
+   "cues": [
+    {
+     "text": "Dispatch có quản lý là một chuỗi bước được ghi lại.",
+     "start": 113.49,
+     "end": 116.11
+    },
+    {
+     "text": "Giữ chỗ attempt, rồi tạo worker không kèm prompt công việc.",
+     "start": 116.49,
+     "end": 119.84
+    },
+    {
+     "text": "Xác minh runtime, nhãn, agent cha, workspace và thư mục đã quan sát được.",
+     "start": 120.22,
+     "end": 124.39
+    },
+    {
+     "text": "Bind membership, claim scope, rồi mới gửi công việc.",
+     "start": 124.77,
+     "end": 127.65
+    },
+    {
+     "text": "Đăng ký muộn thì send trả về seat-pending và không gửi gì.",
+     "start": 128.03,
+     "end": 131.27
+    },
+    {
+     "text": "Receipt tạo agent bị mất vẫn là bất định, không bị thay thế mù quáng.",
+     "start": 131.65,
+     "end": 135.55
+    }
+   ]
+  },
+  {
+   "id": "dependencies",
+   "chapter": "Phụ thuộc giữa task",
+   "title": "Tiền đề đã xong chưa chắc đã dùng được",
+   "start": 136.65,
+   "end": 154.82,
+   "last": false,
+   "timing": "sentences",
+   "cues": [
+    {
+     "text": "Tiền đề đã xong chưa chắc đã dùng được.",
+     "start": 137.45,
+     "end": 139.48
+    },
+    {
+     "text": "Sẵn sàng cần kết quả đủ điều kiện, và tính khả dụng đo trong base thật của bên dùng.",
+     "start": 139.86,
+     "end": 144.5
+    },
+    {
+     "text": "B và C đã land và đủ điều kiện, nhưng base của D chỉ có B. Nên D vẫn bị chặn.",
+     "start": 144.88,
+     "end": 148.91
+    },
+    {
+     "text": "Mở lại A làm mất hiệu lực trạng thái sẵn sàng; lịch sử vẫn giữ những gì đã dùng.",
+     "start": 149.29,
+     "end": 153.72
+    }
+   ]
+  },
+  {
+   "id": "effects",
+   "chapter": "Ranh giới ledger / hiệu ứng",
+   "title": "Một hiệu ứng đã issue, được ghi ở cả hai phía",
+   "start": 154.82,
+   "end": 177.62,
+   "last": false,
+   "timing": "sentences",
+   "cues": [
+    {
+     "text": "Transaction của ledger không thể biến hiệu ứng trên host thành nguyên tử.",
+     "start": 155.62,
+     "end": 159.49
+    },
+    {
+     "text": "Nên mỗi hiệu ứng được tách: intent, issue có khóa, lệnh SDK hoặc Git có giới hạn, rồi observe.",
+     "start": 159.87,
+     "end": 165.23
+    },
+    {
+     "text": "Mất receipt thì hiệu ứng ở trạng thái bất định.",
+     "start": 165.61,
+     "end": 168.12
+    },
+    {
+     "text": "Replay chính xác trả về kết quả đã ghi; reconcile đo lại danh tính gốc.",
+     "start": 168.5,
+     "end": 172.45
+    },
+    {
+     "text": "Yêu cầu mới không phải là phục hồi. Không có cơ chế tự động thử lại.",
+     "start": 172.83,
+     "end": 176.52
+    }
+   ]
+  },
+  {
+   "id": "integrate",
+   "chapter": "Tích hợp",
+   "title": "Tích hợp delta, giữ nguyên công việc không liên quan",
+   "start": 177.62,
+   "end": 198.66,
+   "last": false,
+   "timing": "sentences",
+   "cues": [
+    {
+     "text": "Tích hợp đo riêng base của worker, kết quả của nó và target thật.",
+     "start": 178.42,
+     "end": 181.98
+    },
+    {
+     "text": "So sánh ba chiều giữ thay đổi không liên quan và giữ lại xung đột.",
+     "start": 182.36,
+     "end": 186.0
+    },
+    {
+     "text": "Stage dựng candidate bên ngoài target; check chạy các recipe do owner ghim.",
+     "start": 186.38,
+     "end": 190.82
+    },
+    {
+     "text": "Land kiểm lại, ghi kế hoạch phục hồi, sao lưu, áp dụng và đo kết quả.",
+     "start": 191.2,
+     "end": 194.94
+    },
+    {
+     "text": "Nó không bao giờ commit, push hay deploy.",
+     "start": 195.32,
+     "end": 197.56
+    }
+   ]
+  },
+  {
+   "id": "cleanup",
+   "chapter": "Dọn dẹp",
+   "title": "Dọn dẹp cũng là quy trình có cổng bằng chứng",
+   "start": 198.66,
+   "end": 215.03,
+   "last": false,
+   "timing": "sentences",
+   "cues": [
+    {
+     "text": "Dọn dẹp cũng phải có bằng chứng.",
+     "start": 199.46,
+     "end": 201.26
+    },
+    {
+     "text": "Trước hết, một account ghim bằng chứng gốc và danh mục tài nguyên.",
+     "start": 201.64,
+     "end": 205.35
+    },
+    {
+     "text": "Stage được xóa theo giấy phép riêng, rồi mới đến bản sao lưu.",
+     "start": 205.73,
+     "end": 209.09
+    },
+    {
+     "text": "Mỗi thứ có tổng cộng hai lượt. Hết lượt thì nghĩa vụ được giữ lại, không lặp mãi.",
+     "start": 209.47,
+     "end": 213.93
+    }
+   ]
+  },
+  {
+   "id": "limits",
+   "chapter": "Ranh giới trung thực",
+   "title": "Những gì cơ chế này không chứng minh",
+   "start": 215.03,
+   "end": 236.2,
+   "last": false,
+   "timing": "sentences",
+   "cues": [
+    {
+     "text": "Một số giới hạn luôn được nói rõ.",
+     "start": 215.83,
+     "end": 217.61
+    },
+    {
+     "text": "Stop chặn hiệu ứng mới, nhưng không chứng minh lượt đang chạy đã bị hủy.",
+     "start": 217.99,
+     "end": 222.05
+    },
+    {
+     "text": "Archive không chứng minh tiến trình đã dừng hẳn.",
+     "start": 222.43,
+     "end": 225.12
+    },
+    {
+     "text": "Tham chiếu grant không xác thực grant của Human.",
+     "start": 225.5,
+     "end": 228.31
+    },
+    {
+     "text": "Hướng dẫn ngôn ngữ, quota fallback, Jev routing và supervision đều là tùy chọn, không phải bộ lập lịch tự động.",
+     "start": 228.69,
+     "end": 235.1
+    }
+   ]
+  },
+  {
+   "id": "value",
+   "chapter": "Vì sao hữu ích",
+   "title": "Công việc bền vững, kiểm tra được, với phán đoán thật",
+   "start": 236.2,
+   "end": 255.01,
+   "last": true,
+   "timing": "sentences",
+   "cues": [
+    {
+     "text": "Công việc, quyền sở hữu, review và hiệu ứng tồn tại qua gián đoạn, và xem được trong Read SLP work.",
+     "start": 237.0,
+     "end": 242.59
+    },
+    {
+     "text": "Phán đoán của Human và nghiệm thu dự án vẫn là quyết định thật.",
+     "start": 242.97,
+     "end": 246.44
+    },
+    {
+     "text": "Chi tiết và source pin: mở docs/plugin-explained.html.",
+     "start": 246.82,
+     "end": 251.51
+    }
+   ]
+  }
+ ]
+}

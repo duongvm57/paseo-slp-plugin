@@ -404,17 +404,15 @@ test('orientation carries mechanical locators only', t => {
   // docs/contract.md is a source-checkout document outside the install unit;
   // the locator set derives from the install receipt and never declares it.
   assert.equal(byPath[join(installed, 'docs/contract.md')], undefined);
-  for (const rel of ['src/common.md', 'src/roles/lead.md', 'src/delegation.md',
-    'src/references/delegation-formation.md', 'src/references/delegation-execution.md',
-    'src/references/anti-patterns.md', 'src/references/governance.md', 'src/references/monitoring.md',
-    'src/references/orchestration.md', 'src/references/provider-routing.md', 'src/references/report-records.md',
-    'src/references/review-gates.md', 'src/references/jev-routing.md',
-    'src/references/task-execution.md']) {
+  const receipt = JSON.parse(readFileSync(join(installed, 'installed.json'), 'utf8'));
+  const expectedPolicy = ['src/common.md', 'src/roles/lead.md', 'src/delegation.md',
+    ...receipt.candidate.files.map(entry => entry.path).filter(path => path.startsWith('src/references/'))];
+  for (const rel of expectedPolicy) {
     const entry = byPath[join(installed, rel)];
     const bytes = readFileSync(join(installed, rel));
     assert.deepEqual(entry, { path: join(installed, rel), bytes: bytes.length, sha256: hash(bytes) });
   }
-  assert.equal(lead.orientation.policyBytes.length, 14);
+  assert.equal(lead.orientation.policyBytes.length, expectedPolicy.length);
   // Carrier: locators must survive into initialPrompt on the fallback path
   // (stock piBinding is not an injecting wrapper, so the carrier stays).
   assert.ok(lead.create.initialPrompt.includes(`- ${join(installed, 'src/common.md')} — `));

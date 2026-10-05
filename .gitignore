@@ -3,6 +3,11 @@
 .paseo-slp/notebook.md
 node_modules/
 
+# Overview media is hosted as GitHub attachments; keep rendered binaries out of Git.
+docs/media/paseo-slp-overview/*.mp4
+docs/media/paseo-slp-overview/*.mp3
+docs/media/paseo-slp-overview/*.wav
+
 # Local skill-install artifacts (skills CLI); repo-scoped skills are tracked
 .agents/*
 !.agents/skills/

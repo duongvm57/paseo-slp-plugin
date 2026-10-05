@@ -123,7 +123,10 @@ test('workspace init creates only protocol and notebook once and preserves Human
   assert.equal(readFileSync(protocol, 'utf8'),
     readFileSync(join(destination, 'src/templates/workspace-protocol.md'), 'utf8'),
     'init stages the effective default template verbatim, without resolving repository settings');
-  assert.match(readFileSync(protocol, 'utf8'), /Supervisor and Lead read this file when the assignment lands/);
+  for (const role of ['supervisor', 'lead']) {
+    assert.match(readFileSync(join(destination, `src/roles/${role}.md`), 'utf8'),
+      /read .*workspace-protocol\.md[\s\S]*before (?:replying|a\s+reply)/i);
+  }
   // A repository routing catalog is a deliberate opt-in — default init never
   // writes one, so the repo resolves the user-scope pool.
   assert.equal(existsSync(join(dir, '.paseo-slp/slp-routing.json')), false);
@@ -194,36 +197,15 @@ test('installed adapter injects every role over stdio while preserving host prom
     assert.ok(actual[3].params.collaborationMode.settings.developer_instructions.endsWith(instruction));
     assert.deepEqual(actual.slice(4), messages.slice(4));
     assert.equal(roleBundle(destination, role).orchestrates, role !== 'peer');
-    // Selection procedure reaches orchestrating roles; every role keeps the
-    // no-waiver invariant and Lead alone gets the selection/re-read triggers.
-    // These independent literals reach
-    // the seat on thread/start and thread/resume (same instruction string).
-    assert.match(instruction, /Review selection never waives a Human, assignment or protocol obligation/);
-    assert.equal(/Lead records an explicit review selection before the candidate round/.test(instruction), role !== 'peer');
-    assert.equal(/Required review cannot be weakened because seats are unavailable or findings are adverse/.test(instruction), role !== 'peer');
-    assert.equal(/Record the review selection and its reason before the candidate round/.test(instruction), role === 'lead');
-    assert.equal(/review-gates\.md when making or revising that decision, including a\s+not-required decision/.test(instruction), role === 'lead');
+    // The exact loaded bundle above preserves transport bytes. These pins
+    // verify role-specific semantic responsibility and operating disclosure.
+    assert.match(instruction, /Review selection never waives\s+a Human, assignment or protocol obligation/);
+    assert.equal(/ordinary\/Lean creation or observation/.test(instruction), role !== 'peer');
+    assert.equal(/references\/task-execution.md/.test(instruction), role !== 'peer');
     assert.equal(/When the assignment or protocol\s+requires independent review/.test(instruction), role === 'lead');
-    assert.equal(/Reviewer and optional Auditor mandates remain independent of the writer and\s+accepting owner/.test(instruction), role === 'peer');
-    assert.doesNotMatch(instruction, /does not license merging\s+the axes into one seat|parallel seats on split axes/);
-    // The C8 formation pins ride the same delegation block: the decision
-    // table, formation record, placement pin and post-create verification
-    // reach Supervisor and Lead, never Peer.
-    assert.equal(/Observe-existing-work/.test(instruction), role !== 'peer');
-    assert.equal(/Continuation: same team and ownership/.test(instruction), role !== 'peer');
-    assert.equal(/formation record/.test(instruction), role !== 'peer');
-    assert.equal(/not evidence of parentage/.test(instruction), role !== 'peer');
-    assert.equal(/not filesystem\s+isolation/.test(instruction), role !== 'peer');
-    assert.equal(/send_agent_prompt to a\s+parentless or differently parented/.test(instruction), role !== 'peer');
-    assert.equal(/second workspace\s+for the same team with no isolation reason/.test(instruction), role !== 'peer');
-    // The inbound-route self-check rides common.md — a self-check, not formation
-    // doctrine — so it reaches every role including Peer.
-    assert.match(instruction, /paseo\.parent-agent-id label must match/);
-    assert.match(instruction, /distinct from your\s+parent/);
-    assert.match(instruction, /not a hard block/);
-    assert.match(instruction, /names no agent\s+recipient/);
-    assert.equal(/standalone session never makes\s+it your child/.test(instruction), role === 'supervisor');
-    assert.equal(/does not adopt it/.test(instruction), role === 'lead');
+    assert.equal(/Reviewer\/Auditor stays independent of writer and accepting owner/.test(instruction), role === 'peer');
+    assert.match(instruction, /parent\/report recipient must match your paseo\.parent-agent-id\s+label/);
+    assert.match(instruction, /Unexposed labels are a visibility gap/);
     assert.equal(execFileSync(process.execPath, [argv[0], role, '--version'], { env, encoding: 'utf8' }).trim(), 'probe-ok');
   }
 });

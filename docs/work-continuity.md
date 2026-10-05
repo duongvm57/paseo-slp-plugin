@@ -34,7 +34,9 @@ alone does not create an ownership receipt.
 5. The receiving Lead continues the same work streams as current owner. The
    former owner loses permission for fresh owner mutations immediately,
    including while its session remains live. Session archival and resource
-   cleanup are separate authorized actions.
+   cleanup are separate authorized actions; a settled Peer seat archives under
+   authorized host controls per the installed monitoring rules, and archive
+   alone never proves process, descendant or resource quiescence.
 
 ```mermaid
 sequenceDiagram

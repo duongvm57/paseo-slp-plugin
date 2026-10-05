@@ -50,18 +50,17 @@ and dependency locks are supporting artifacts, not additional runtime owners.
 | bin/devin-role.mjs, plugin/server/runtime/cli/role-transport.ts | Generic ACP adapter; prepend role core, recovery pointer and current managed communication-language state on every session prompt. First prompts and prompts re-armed by load/resume/fork also carry session-entry helpers and the full measured carrier; no compaction event is required. |
 | bin/claude-role.mjs, plugin/server/runtime/cli/role-transport.ts | Claude Agent SDK stream-json adapter; append installed role instructions to the initialize control request's system-prompt append field; all other frames pass through. |
 | src/common.md, src/roles/*.md | Authority, role behavior, conditional policy-text reuse and context-recovery rules; no repository tactics or model IDs. |
-| src/delegation.md | Always-loaded Supervisor/Lead delegation core: required review-gate, parentage/placement and ambiguous-create invariants, with conditional pointers to formation and execution procedures. |
-| src/references/delegation-formation.md | Conditional delegation classification and formation record: new team, continuation or observe-existing. |
-| src/references/delegation-execution.md | Conditional delegation preparation, pointer to the routing-rule owner, creation verification, ambiguous-create recovery, notification and report retrieval. |
+| src/delegation.md | Always-loaded Supervisor/Lead delegation core: required review-gate, parentage/placement and ambiguous-create invariants, with distinct managed-desk and ordinary/direct operating pointers. |
+| src/references/delegation-execution.md | Ordinary/Lean formation, preparation, manual host verification and uncertain-create recovery; managed task dispatch uses its own guarded path. |
 | src/references/orchestration.md | Lead's conditional topology, independent review/council, dependency and integration procedure. |
 | src/references/monitoring.md | Supervisor/Lead event observation, heartbeat ownership and bounded-task resource settlement. |
-| src/references/report-records.md | Handback and settlement record fields, extraction semantics, failure codes, durable sinks and provider-native timeline handles. |
-| src/references/governance.md | Supervisor scope, causal notebook, authorized recovery, cross-project relay and policy evolution. |
-| src/references/anti-patterns.md | All 20 guide §9 hypotheses with evidence, questions and bounded responses; reached on audit/drift triggers. |
+| src/references/report-records.md | Handback submission versus offline schema/evidence validation, claim/observation limits and settlement mirror/export/sink operation. |
+| src/references/governance.md | Supervisor scope, causal notebook, evidence-led failure investigation, authorized recovery, cross-project relay and policy evolution. |
+| src/references/anti-patterns.md | Conditional twenty-pattern judgment catalogue with specific Inspect evidence, questions and bounded responses; governance owns causal records and authority. Hypotheses, not runtime detectors or a mandatory full audit. |
 | src/references/provider-routing.md | Supervisor/Lead profile selection, Peer pool selection, validation and handoff; conditional pointer to Jev routing procedure. |
 | src/references/jev-routing.md | Conditional Jev routing procedure: load only for `shadow`, `armed` or `error`; `error` blocks the dependent branch. |
 | src/references/review-gates.md | Selected independent mandates for material questions and Human/protocol requirements, with explicit no-trigger and authorized waiver decisions; Lead-owned verification distinct from review seats, neutral briefs, visible disagreement, task-specific stop conditions and premise escalation. Explicit protocol obligations remain binding. |
-| src/references/task-execution.md | Conditional native task procedure: declarations, supervised dispatch, current result judgments, integration grants/proof and retained delivery/resource obligations. Scope remains the moving write/review owner. |
+| src/references/task-execution.md | Existing guarded desk tools: shared projections/briefs, scope review, task dispatch/result/ruling/integration/reconciliation; declares operation boundaries and unsupported capabilities without a mirrored state machine. |
 | plugin/server/runtime/cli/report-records.ts | Report-block extraction, JSON schema, exact-fence semantic rendering and filesystem evidence adapter for the shared v1 validator. Referenced reads use the verifier's `--repo` when supplied, otherwise record-declared candidate roots. |
 | plugin/server/runtime/cli/candidate-verify.ts | Read-only handback-claim verifier (P1 `verifyHandback`): measures a report's `slp-record` claims against the caller-pinned `--repo` root — never the record-declared root — via bounded double-capture `snapshot()`/`git status` probes (`--no-optional-locks`, timeout/byte-cap), contract/artifact pin hashing, seat observation over `<paseoHome>/agents/` daemon files, and a runtime measurement comparing `identity(packageRoot).sha256` against the optional `--expect-runtime` candidate hash (`report-only` when absent). Emits the `slp-verify-handback` JSON view with closed comparison/reason enums and a completeness ledger; the one-time capability preflight is the only `CAPABILITY_GAP` source, everything after it is `IO_FAILURE`, and the view is evidence — never acceptance, quiescence or a command re-run. |
 | plugin/server/runtime/cli/routing.ts | Resolve the repository catalog, falling back to the plugin-owned user-scope pool at `<paseoHome>/slp-runtime/state/peer-pool.json` when absent; bind a Lead-selected option with fresh hash and availability checks. `optionExclusions` is the single eligibility predicate — closed-vocabulary tokens (`disabled`, `availability:<state>`, `role-not-listed`) shared by enforcement and Jev candidate generation. `validateCatalog` stays shape-only apart from normalizing the legacy `optionIds` quota-fallback list in place on read (≤1 → `optionId`, >1 fails closed — wave 6) and refusing the Jev decline sentinel as an option id — a shape-level collision; the semantic layer reports a reserved standard-seat id whose tokens diverge from the package set as a Token conflict on every read, and `catalogBinding` refuses to bind one. `catalogBinding` verifies a supplied Jev receipt offline — including the vocabulary version it was issued under — and requires one when the daemon arms `jev.capabilities.routing`. |
@@ -69,8 +68,8 @@ and dependency locks are supporting artifacts, not additional runtime owners.
 | plugin/shared/runtime/families.ts | Dependency-free provider-family and role registry for CLI, server and Manager. Derives provider IDs, transport targets, classifications, labels and picker order. The shim retains bootstrap-local sets to reject unsupported Node before TypeScript loads and validate recorded launch manifests independently. |
 | plugin/server/runtime/cli/jev.ts | Jev (TypeSafe System One) bounded-decision transport — never an ACP provider. Per-daemon config/key resolution (fail closed, all toggles default off) over two provider kinds: `openrouter` (Decisions API, pinned `typesafe/jev-1.13`, `provider.allow_fallbacks: false` on the wire) and `typesafe` (first-party `POST {baseUrl}/v1/systemone`, pinned `jev-1.13.0`, no provider field; baseUrl may be a custom https origin+path prefix) — each with its own model pin and baseUrl rule, calls with ~5s timeout and at most one bounded retry, typed-answer validation, credential-shaped-string redaction before send, and decision-receipt build/verify with the pin chosen by the receipt's provider kind. Receipts prove consistency, not authenticity; confidence is recorded, never a threshold. Provider endpoint/model rules and credential preflight/sanitization use the shared `runtime/jev-transport.ts`; CLI config parsing, typed answers and retry policy remain here. |
 | plugin/server/runtime/cli/jev-routing.ts | First Jev consumer: `route-decide` computes the deterministic eligible set from `optionExclusions`, drops Token-conflicted seats from candidates (reporting every catalog conflict on the receipt), sends the Lead-authored brief as state plus the versioned English suitability guidance and the compact per-token glossary (never raw assignmentFile bytes; catalog `notes` withheld) and emits the option id plus receipt. The per-option surface is fixed-shape — `id`, `provider`, `model`, `thinkingOptionId` (explicit `null` when absent), `suitableFor`, `avoidFor`. Decline exits nonzero; `jev-no-candidates` when no usable seat remains. Runs only on explicit invocation — no loops, schedules or prepare-time calls. |
-| skills/paseo-slp-onboarding/SKILL.md | Repo discovery and protocol recommendation before asking for missing decisions. The protocol holds only the workspace's orchestration tactics, condensed from the template under the skill's protocol writing rules; invariants stay in role policy and operational facts in `.paseo-slp/references/`; custom-process interview, confirmed protocol diff and Peer pool setup with Supervisor/Lead profile verification. Supporting resources disclose setup details. Skill installation remains independent from repo initialization. |
-| src/templates/workspace-protocol.md | Common repository tactics and outcome/risk-based workflow recipes, including a protocol-owned Tiny procedure with independent review. Onboarding fills assignment, execution and delivery settings in one effective repo protocol, whose Repository references section points to operational facts (check commands, skill layout) kept in `.paseo-slp/references/`; filling configuration and references is not an Override; init still uses this default and preserves existing files. The `agent_mode` field records intended spawn mode for direct launches (empty falls back to the bundle's `modeId`, then asks). |
+| skills/paseo-slp-onboarding/SKILL.md | Evidence-based protocol adaptation and grant-aware writing before asking only missing decisions. The protocol holds the workspace's orchestration tactics adapted under its writing rules; invariants stay in role policy and operational facts in `.paseo-slp/references/`; conditional custom interview, exact authorized protocol diff and Peer pool setup with Supervisor/Lead profile verification. Supporting resources disclose setup details. Skill installation remains independent from repo initialization. |
+| src/templates/workspace-protocol.md | Compact adaptable repository tactics, including a tiny procedure, outcome routes, local review triggers and completion decisions. Onboarding fills assignment, execution and delivery settings in one effective repo protocol, whose Repository references section points to operational facts (check commands, skill layout) kept in `.paseo-slp/references/`; filling configuration and references is not an Override; init still uses this default and preserves existing files. The `agent_mode` field records intended spawn mode for direct launches (empty falls back to the bundle's `modeId`, then asks). |
 | plugin/server/runtime/cli/binding.ts | Every rule a Binding must satisfy: setting patterns, the route override deny-lists and the single provider-health check. Uses the shared family registry for provider transport targets. |
 | plugin/server/runtime/cli/role-bundle.ts | Which policy bytes each role receives at session entry, and their order. Session-entry instructions also carry the carrier block (spawn kit plus role-scoped policy-byte locators) so profile/provider launches receive the same payload prepare places in initialPrompt. Peer locators include `common.md` and `roles/peer.md`; Supervisor/Lead locator sets remain complete. Managed session entry injects the plugin-set communication language (slp-runtime/state/communication-language) when present. ACP delivery freezes the verified candidate core and carrier at adapter startup, reads language per prompt, and explicitly clears earlier runtime language instructions when unset; other transports retain entry-time language semantics. |
 | plugin/server/runtime/cli/launch.ts, plugin/server/runtime/cli/profiles.ts | Select one Binding source (saved profiles, catalog routing or an explicit binding), then compose the create_agent argument record. launchPlan and handoffPlan share one builder; preparation state and validation operations also serve launchCheck, preserving each path's diagnostic order and fresh final revalidation; nothing edits the create record afterwards. Handoff adds explicit authority, old-owner evidence, resources and current work snapshot; no lifecycle mutations. request.inventoryFile fills providers/profiles the request did not inline; request.assignmentFileMode defaults to pointer, preserving the read-first prompt; snapshot mode reads and inlines a bounded, validated repository-contained copy during prepare. The same choice applies to prepare-handoff; the daemon never reads the file. The plan also surfaces the intended `modeId` (with a warning when the binding lacks one), a `spawnKit` of role-appropriate MCP tool signatures, and an `orientation` manifest of policy-byte locators (path/bytes/sha256, `missing` for receipt-declared files absent on disk; the set derives from the install receipt, so source-only documents are never declared) — locators only, never interpretation; the same payload is carried inside `create.initialPrompt`, the only field create_agent transmits, so the spawned seat actually receives it. The prompt-side carrier is omitted only when the binding targets the canonical `slp-<family>-<role>` wrapper and the request's live provider inventory observed it — the wrapper injects the carrier at session entry; unverified targets keep the prompt fallback. |
@@ -230,63 +229,69 @@ Permissions and role boundaries remain distinct: policy is not tool isolation.
 
 ## Authority and role policy
 
-Assignment supplies objective, repository/workspace, owned/excluded scope,
-authority, verification and handback. Supervisor and Lead read the repository
-protocol when the assignment lands — before decisions that depend on its
-tactics, not only before delegation. Lead passes only relevant constraints to
-Peer. No global role is written to AGENTS.md.
+The current Human assignment supplies outcome, scope, phase/grants, proof and
+handback. Supervisor/Lead read the effective protocol on entry; Peer receives
+relevant constraints unless explicitly assigned a full read. No global role is
+written to AGENTS.md. Common policy owns authority, language, host boundaries,
+one writer, direct-Lead-write exception, required gates, inbound route,
+Human stop and recovery. Roles carry responsibilities and decision triggers;
+conditional references own procedures. The recursive install unit and receipt-derived locators track the resulting
+policy graph; core common/role/delegation loader paths remain stable. Formation
+is consolidated into ordinary delegation and onboarding decision resources
+into its skill. Governance's investigation method conditionally reaches the
+preserved anti-pattern catalogue for specific evidence/questions. Retired paths are absent
+from new receipts while historical wire fixtures retain their recorded bytes.
 
-Common/role instructions and the Supervisor/Lead delegation core load at
-session entry. Formation and execution procedures are disclosed through explicit
-decision-triggered pointers, not inlined in every session. They point to conditional references under the installed src/
-directory. The recursive install unit includes all those references; the full
-operating guide stays a source document, not a prompt broadcast to every role.
-Load-bearing decision rules — the required review gate and agent-scoped seat
-creation — sit in that always-loaded layer, and Lead re-reads the conditional
-references at the decisions that apply them, including after resume or
-compaction.
-The carrier block (spawn-kit signatures plus role-scoped policy-byte locators)
-reaches a seat through two channels: session-entry bundle injection for
-profile/provider launches, and `create.initialPrompt` for the prepare path — the
-only field create_agent transmits, so plan-level `spawnKit`/`orientation` fields
-alone would never arrive. Peer locators contain `common.md` and `roles/peer.md`.
-Supervisor/Lead sets retain their references. The captions differ on purpose:
-session-entry locators are measured when the bundle loads, plan locators where
-prepare ran. The kit is an approximation to verify against live `mcp_list_tools`;
-locators are integrity evidence, not policy content. The source contract reviewers use is this file —
-`docs/contract.md` lives in the repository and is deliberately outside the
-install unit, so locator sets never declare it.
-Protocol defaults select tactics; global roles no longer impose a single Engineer
-or prohibit heartbeat for every assignment. Assignment supplies Peer disposition,
-read/write authority and output; independent review uses sessions separate from
-implementation and exact candidates; a required gate follows the rule the
-effective workspace protocol declares. Lead selects minimum sufficient mandates
-for material questions and Human/protocol requirements, without a package-wide
-seat count or axis pair. An explicitly required shape still binds; required seats
-that cannot be supplied make it BLOCKED. Within one assignment, corrections retain the actual write owner
-and normally reuse the same independent review seats on the new stable candidate. New independent seats and recovery remain explicit choices.
-Lead builds relevant project context from repository evidence and maintains a
-decision/ownership checkpoint across handbacks and resume; Peers receive only
-the context needed for their bounded assignments.
+The carrier reaches seats through session-entry injection and prepare's
+create.initialPrompt, the only field create_agent transmits. Plan-level
+spawnKit/orientation alone would not reach them. Peer locators contain
+`common.md` and `roles/peer.md`; Supervisor/Lead sets include their references.
+Captions distinguish entry measurement from prepare measurement. The kit is
+approximate pending live mcp_list_tools; locators are integrity evidence, not
+policy content. This source contract stays outside installed bytes.
 
-The policy describes monitoring, council, recovery and parallel ownership, but these
-paths are not E2E-qualified by this revision. Heartbeat uses discovered host wake
-primitives; `slp.mjs monitor` adds a caller-invoked, delta-only signal scan that
-emits candidates without verdicts — it is not a semantic detector. Peer provider
-entries set `paseoTools.disabledTools` for selected orchestration MCP tools; this
-is a tool-delivery gate, not shell or direct-CLI isolation. No lifecycle runner
-or schedule adapter is added. Missing capabilities remain explicit before any fallback. The file map above
-owns the policy load paths; [the review checklist](review-checklist.md) defines
-what local verification may claim.
+Lead owns framing, shared state, dependencies, integration and acceptance;
+Peers keep bounded independent judgment. A required gate follows the rule the
+effective workspace protocol declares. Material questions select minimum
+sufficient independent mandates without fixed counts/axes/families; explicit
+required shapes remain binding. Unavailable required proof blocks that gate.
+Review, executed verification, Lead verdict, Delivery and settlement remain
+separate. New Peer outcomes form fresh seats by default; healthy same-outcome
+phases, corrections and re-review continue the verified owner. Desk task IDs
+and dispatch.reuse do not determine this boundary or grant an exception;
+grantRef remains a claim. Explicit Human exceptions stand. Human-requested
+standby Lead formation binds orientation and the future task without relaxing
+Peer continuity. Degraded context uses authorized handoff without a numeric
+threshold; acceptance, Delivery, closed rework and resource reconciliation
+precede authorized archive, which proves no quiescence.
+
+The existing guarded desk owns exact membership/revision checks, declared
+scope overlap/review pins, effect reservations and observed task/resource
+history. Policy teaches its public operations and uses current projections
+instead of manual duplicate ledgers. Ordinary/Lean prepare emits arguments
+only, and ordinary role injection can succeed with no desk membership;
+manual host verification remains on that path. No source/backend feature,
+permission boundary or new lifecycle principal is added by this migration.
+Grant pointers, review sufficiency, semantic correctness, subjective outcomes,
+actual writer pause and unsupported host quiescence remain agent/Human duties.
+Measured server execution can be consumed as proof for its pinned class;
+shell-reported checks still require independent verification. The allowlisted
+check classes are not arbitrary feature tests. Neither desk qualification nor
+source tests establish installation, live behavior or project acceptance.
+
+Monitoring/council/recovery/parallel policy is not live E2E qualification.
+monitor emits opt-in delta signals only; role tool-delivery exclusions provide
+no shell/CLI isolation. Missing host controls remain explicit. The file map
+owns load paths; [review checklist](review-checklist.md) bounds local proof.
 
 ## Runtime selection
 
 Codex, Pi, Devin and Claude share role bytes through their respective adapters. Human configures
 slp-supervisor/slp-lead with matching role providers and chosen models/settings.
 Supervisor/Lead launches refresh these saved profiles and copy their complete
-provider/model/mode/thinking/features bundles; `modeId` alone follows the
-delegation precedence — plan binding, then protocol `agent_mode` for direct
-spawns, then the bundle's own — rather than verbatim copy. Missing or
+provider/model/mode/thinking/features bundles. A pinned binding/bundle modeId
+wins; protocol agent_mode is the fallback when absent, otherwise the plan
+warns and the Human must resolve it. Missing or
 incompatible settings require Human configuration before the dependent launch.
 
 Peer delegation resolves the assigned repository's .paseo-slp/slp-routing.json
@@ -763,27 +768,22 @@ actual compaction resilience requires separate live provider evidence.
 
 ## Tiny procedure and policy-text reuse
 
-Lead classifies clear, reversible work with clear verification and no change to
-authority/delegation/lifecycle/integrity as tiny, recording its reason. Workspace
-protocol owns the ceremony: a Peer Engineer is the default implementation owner.
-An explicit Human assignment or effective protocol grant may instead authorize
-a bounded direct Lead write. The grant keeps one writer per moving scope,
-candidate proof and every required independent review; tiny classification alone
-does not grant it. The shipped template retains a bounded brief/formation,
-in-session proof, trigger-based independent review and Lead artifact
-inspection/verdict. The template triggers review by material risk
-rather than by recipe; this is a template default, not a new global
-requirement for every custom protocol. A required review gate follows the
-rule its protocol declares. The package selects minimum sufficient independent
-mandates for material questions, without an automatic pair or reviewer count.
-Growing scope/risk requires Lead to reassess the workflow before affected work. Missing or
-older protocols grant no implicit exemption; record the gap and propose a change.
-Without an explicit direct-write grant, authorized implementation runs through
-one Peer Engineer. Only the step needing an exemption waits for a decision,
-without automatically migrating repository tactics or blocking unrelated work.
+The adaptable template retains a bounded inline brief/formation, one writer's
+inner loop, in-session stable proof, local risk-triggered review and Lead
+inspection/verdict; other outcome routes carry their needed grant/proof/
+completion. These tactics are template defaults, not a universal recipe
+catalog or new requirement for custom protocols. Tiny classification alone
+gives no write/review exception. Direct Lead writing follows common policy's
+explicit grant; missing/stale protocols grant no exception. Growing scope/risk
+requires reassessment before dependent work.
 
-Policy read/re-read requirements permit reuse of the full relevant text still
-in context when its source is known unchanged. A summary is not a substitute;
-changed sources, lost context or uncertainty require a new read. The initial
-full workspace-protocol read remains required. Runtime freshness checks for the
-catalog, eligibility, provider availability and Jev receipts are unaffected.
+Onboarding preserves Human decisions and historical template provenance,
+records a newly measured source basis separately, and checks exact bytes/base
+drift within the current grant. Native skill installation, host configuration,
+pool changes and live launch remain separate authority. Optional integrations
+create no default setup gates.
+Full unchanged policy text in context may be reused; a summary cannot replace
+it. Changed/lost/uncertain policy needs re-reading and the first full protocol
+read remains required. Catalog, eligibility, provider and Jev evidence still
+need fresh checks. Lead's applicable independent-review decision reads remain
+explicit in its role entry.

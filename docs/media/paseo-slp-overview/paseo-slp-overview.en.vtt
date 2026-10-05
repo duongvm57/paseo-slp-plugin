@@ -1,0 +1,235 @@
+WEBVTT
+
+NOTE Paseo SLP — how a brief becomes a controlled operation. Explanatory animation of the working source. Not footage of a live daemon and not E2E proof. Voice: OmniVoice (k2-fsa, CC BY-NC) · synthetic male · generated locally
+
+1
+00:00:01.600 --> 00:00:06.680
+Paseo SLP organizes coding agents as a Supervisor, a Lead, and independent Peers.
+
+2
+00:00:06.810 --> 00:00:12.060
+Here's how a brief becomes a controlled operation, and where human judgment still matters.
+
+3
+00:00:13.710 --> 00:00:15.560
+Three owners share the work.
+
+4
+00:00:15.690 --> 00:00:19.020
+Paseo runs sessions, workspaces and agent parentage.
+
+5
+00:00:19.150 --> 00:00:23.510
+The plugin adds role policy, and a runtime that checks recorded facts.
+
+6
+00:00:23.640 --> 00:00:27.050
+The Human keeps intent, authority and final acceptance.
+
+7
+00:00:27.180 --> 00:00:29.590
+And the plugin is not an agent scheduler.
+
+8
+00:00:31.240 --> 00:00:36.010
+Role policy is what a seat reads, layered from common rules down to one assignment.
+
+9
+00:00:36.140 --> 00:00:38.200
+Lower layers narrow, never widen.
+
+10
+00:00:38.330 --> 00:00:43.940
+Enforcement is code, checking membership, ownership and revisions on guarded desk calls.
+
+11
+00:00:44.070 --> 00:00:47.750
+Policy guides judgment. Enforcement guards recorded facts.
+
+12
+00:00:49.400 --> 00:00:52.310
+The SLP Manager activates a published runtime.
+
+13
+00:00:52.440 --> 00:00:57.440
+Verified bytes land in a pinned runtime directory, with launchers and profiles.
+
+14
+00:00:57.570 --> 00:01:01.260
+A binding pins the runtime, Node, transport and daemon home.
+
+15
+00:01:01.390 --> 00:01:05.960
+At launch, a hook or wrapper delivers the role before the provider starts.
+
+16
+00:01:06.090 --> 00:01:10.270
+Rebinding changes future launches; running sessions keep their bytes.
+
+17
+00:01:11.920 --> 00:01:15.440
+A session acts on the desk only through bound membership.
+
+18
+00:01:15.570 --> 00:01:20.790
+It records the exact agent, runtime family, role, directory and binding generation.
+
+19
+00:01:20.920 --> 00:01:25.800
+Every desk call crosses the bridge: fresh identity, capability, strict schema.
+
+20
+00:01:25.930 --> 00:01:30.720
+The desk is an append-only, hash-chained ledger, shared by related worktrees.
+
+21
+00:01:30.850 --> 00:01:33.700
+It guards desk calls. It is not a shell sandbox.
+
+22
+00:01:35.340 --> 00:01:37.340
+Each moving scope has one writer.
+
+23
+00:01:37.470 --> 00:01:42.250
+Review is selected: required, not required, or exempt with an authority pointer.
+
+24
+00:01:42.380 --> 00:01:46.610
+A review round pins the candidate, scope, brief and neutral mandate.
+
+25
+00:01:46.740 --> 00:01:49.000
+Change one, and the review goes stale.
+
+26
+00:01:49.130 --> 00:01:52.620
+Owner and writer can't clear their own independent gate.
+
+27
+00:01:54.270 --> 00:01:57.100
+Managed dispatch is a chain of recorded steps.
+
+28
+00:01:57.230 --> 00:02:01.140
+Reserve the attempt, then create the worker with no work prompt.
+
+29
+00:02:01.270 --> 00:02:05.680
+Verify its observed runtime, labels, parent, workspace and directory.
+
+30
+00:02:05.810 --> 00:02:09.730
+Bind the membership, claim the scope, and only then send the work.
+
+31
+00:02:09.860 --> 00:02:13.290
+Late registration returns seat-pending and sends nothing.
+
+32
+00:02:13.420 --> 00:02:17.740
+A lost create receipt stays uncertain, and is never blindly replaced.
+
+33
+00:02:19.390 --> 00:02:22.570
+A finished prerequisite isn't automatically usable.
+
+34
+00:02:22.700 --> 00:02:28.270
+Readiness needs a qualified result, and availability measured in the consumer's actual base.
+
+35
+00:02:28.400 --> 00:02:32.990
+B and C are landed and qualified, but D's base has only B. So D stays blocked.
+
+36
+00:02:33.120 --> 00:02:37.400
+Reopening A invalidates readiness; history keeps what was consumed.
+
+37
+00:02:39.050 --> 00:02:42.330
+A ledger transaction can't make a host effect atomic.
+
+38
+00:02:42.460 --> 00:02:47.880
+So each effect is split: intent, locked issue, the bounded SDK or Git call, then observe.
+
+39
+00:02:48.010 --> 00:02:50.580
+Lose the receipt, and the effect stays uncertain.
+
+40
+00:02:50.710 --> 00:02:56.410
+Exact replay returns the recorded outcome; reconciliation measures the original identity.
+
+41
+00:02:56.540 --> 00:03:00.710
+A fresh request is not recovery. There's no automatic retry engine.
+
+42
+00:03:02.360 --> 00:03:06.840
+Integration measures the worker's base, its result, and the actual target.
+
+43
+00:03:06.970 --> 00:03:10.680
+A three-way merge keeps unrelated work, and holds conflicts.
+
+44
+00:03:10.810 --> 00:03:15.870
+Stage builds the candidate outside the target; check runs owner-pinned recipes.
+
+45
+00:03:16.000 --> 00:03:20.400
+Land rechecks, records a recovery plan, backs up, applies, and measures.
+
+46
+00:03:20.530 --> 00:03:22.790
+It never commits, pushes, or deploys.
+
+47
+00:03:24.440 --> 00:03:26.450
+Cleanup is gated by proof, too.
+
+48
+00:03:26.580 --> 00:03:30.970
+First, an account binds the original proof and the resource inventory.
+
+49
+00:03:31.100 --> 00:03:34.940
+The stage is removed under its own permit, and only then the backup.
+
+50
+00:03:35.070 --> 00:03:40.070
+Each gets two total cycles. Exhaustion keeps the obligation, instead of looping.
+
+51
+00:03:41.710 --> 00:03:43.530
+Some limits stay explicit.
+
+52
+00:03:43.660 --> 00:03:48.140
+Stop fences new effects, but doesn't prove a running turn was cancelled.
+
+53
+00:03:48.270 --> 00:03:51.220
+Archive doesn't prove processes are quiescent.
+
+54
+00:03:51.350 --> 00:03:54.760
+A grant reference doesn't authenticate a Human grant.
+
+55
+00:03:54.890 --> 00:04:01.380
+Language guidance, quota fallback, Jev routing and supervision are opt-in, not an autonomous scheduler.
+
+56
+00:04:03.030 --> 00:04:09.030
+Work, ownership, review and effects survive interruption, and stay inspectable in Read SLP work.
+
+57
+00:04:09.160 --> 00:04:12.930
+Human judgment and project acceptance remain real decisions.
+
+58
+00:04:13.060 --> 00:04:17.960
+For details and source pins, open docs/plugin-explained.html.

@@ -342,46 +342,27 @@ test('agent.create: slp-* provider without resolvable role fails closed', async 
   }
 });
 
-test('agent.create: selected obligations reach each role without leaking Lead procedure to Peer', async t => {
+test('agent.create: guarded and ordinary operation pointers reach each role without leaking procedures to Peer', async t => {
   const { injection } = makeInjection(t);
   for (const id of HOOK_IDS) {
     const role = id.split('-')[2];
     const out = await injection.agentCreate(createReq(id));
     const prompt = out.config.systemPrompt;
-    assert.match(prompt, /Review selection never waives a Human, assignment or protocol obligation/, id);
-    assert.doesNotMatch(prompt, /does not license merging\s+the axes into one seat|parallel seats on split axes/, id);
+    assert.match(prompt, /Review selection never waives\s+a Human, assignment or protocol obligation/, id);
+    assert.match(prompt, /parent\/report recipient must match your paseo\.parent-agent-id\s+label/, id);
+    assert.match(prompt, /recipient distinct from your\s+parent/, id);
+    assert.match(prompt, /With no agent\s+recipient, report to the sender/, id);
+    assert.match(prompt, /Desk guards apply to admitted tool operations, not arbitrary shell\/filesystem\s+work/, id);
     if (role === 'peer') {
-      assert.match(prompt, /Reviewer and optional Auditor mandates remain independent of the writer and\s+accepting owner/, id);
-      assert.ok(!/Lead records an explicit review selection|Record the review selection and its reason|Required review cannot be weakened/.test(prompt), id);
+      assert.match(prompt, /Reviewer\/Auditor stays independent of writer and accepting owner/, id);
+      assert.ok(!/ordinary\/Lean creation or observation/.test(prompt), id);
       assert.ok(!/When the assignment or protocol\s+requires independent review/.test(prompt), id);
-      assert.ok(!/cannot carry a new\s+delegation/.test(prompt), id);
-      assert.ok(!/New-team delegation|Observe-existing-work|formation record/.test(prompt), `${id} gets no formation doctrine`);
-      // The inbound-route self-check is a Peer-visible self-check (common.md),
-      // not formation doctrine.
-      assert.match(prompt, /paseo\.parent-agent-id label must match/, id);
-      assert.match(prompt, /distinct from your\s+parent/, `${id} keeps the observe-existing carve-out`);
-      assert.match(prompt, /not a hard block/, id);
-      assert.match(prompt, /names no agent\s+recipient/, id);
       continue;
     }
-    assert.match(prompt, /Lead records an explicit review selection before the candidate round/, id);
-    assert.match(prompt, /minimum sufficient independent mandates for material decision-changing questions/, id);
-    assert.match(prompt, /Required review cannot be weakened because seats are unavailable or findings are adverse/, id);
-    assert.equal(/Record the review selection and its reason before the candidate round/.test(prompt), role === 'lead', id);
-    assert.equal(/review-gates\.md when making or revising that decision, including a\s+not-required decision/.test(prompt), role === 'lead', id);
+    assert.match(prompt, /references\/delegation-execution.md/, id);
+    assert.match(prompt, /references\/task-execution.md/, id);
+    assert.match(prompt, /Unavailable\s+required reviewers or adverse findings never relax the gate/, id);
     assert.equal(/When the assignment or protocol\s+requires independent review/.test(prompt), role === 'lead', id);
-    // The C8 formation pins reach both orchestrating roles through the hook too.
-    assert.match(prompt, /Observe-existing-work/, id);
-    assert.match(prompt, /Continuation: same team and ownership/, id);
-    assert.match(prompt, /not evidence of parentage/, id);
-    assert.match(prompt, /not filesystem\s+isolation/, id);
-    assert.match(prompt, /send_agent_prompt to a\s+parentless or differently parented/, id);
-    assert.match(prompt, /second workspace\s+for the same team with no isolation reason/, id);
-    assert.match(prompt, /distinct from your\s+parent/, `${id} keeps the observe-existing carve-out`);
-    assert.match(prompt, /not a hard block/, id);
-    assert.match(prompt, /names no agent\s+recipient/, id);
-    assert.equal(/standalone session never makes\s+it your child/.test(prompt), role === 'supervisor', id);
-    assert.equal(/does not adopt it/.test(prompt), role === 'lead', id);
   }
 });
 

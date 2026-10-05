@@ -106,38 +106,40 @@ test('onboarding Markdown resource links resolve from an installed package', t =
 test('installed common protocol supports combined configuration without losing gates', t => {
   const installed = join(fixture(t), 'release');
   install(root, installed);
-  const base = readFileSync(join(installed, 'src/templates/workspace-protocol.md'), 'utf8');
-  assert.match(base, /^template_sha256:/m);
-  assert.equal(base.match(/^## Repository configuration$/gm).length, 1);
-  for (const field of ['Assignment source', 'Execution scope', 'Delivery and completion point', 'Shared-state controls', 'Lead topology']) {
+  const text = path => readFileSync(join(installed, path), 'utf8');
+  const baseRaw = text('src/templates/workspace-protocol.md');
+  const base = baseRaw.replace(/\s+/gu, ' ');
+  assert.match(baseRaw, /^template_sha256:/m);
+  assert.equal(baseRaw.match(/^## Repository configuration$/gm).length, 1);
+  for (const field of ['Assignment and execution', 'Delivery/completion', 'Shared-state execution']) {
     assert.ok(base.includes(`| ${field} |`), field);
   }
-  assert.match(base, /All four recipes remain available by default/);
-  assert.match(base, /tracker does not\nrequire a separate Task Lead/);
-  assert.match(base, /requires an independent review gate/);
-  assert.match(base, /minimum sufficient independent\s+mandate/);
-  const transition = base.split('## Recipe C')[1].split('## Recipe D')[0];
-  assert.ok(transition.indexOf('| Gate |') < transition.indexOf('| Execute |'));
+  assert.match(base, /One Lead is default; split only for authority\/capacity under a Human formation mandate/);
+  for (const method of ['Lean:', 'Feature:', 'Transition:', 'Investigation:']) assert.ok(base.includes(method), method);
+  assert.match(base, /Configuration fields can coexist and select no Lead type/);
+  assert.match(base, /Independent review triggers across methods/);
+  assert.match(base, /minimum sufficient independent mandates/);
+  const transition = base.split('| Transition:')[1].split('| Investigation:')[0];
+  assert.ok(transition.indexOf('Gate on preparation') < transition.indexOf('execution checkpoint/grant'));
   assert.match(transition, /outcome verdict/);
-  const skill = readFileSync(join(installed, 'skills/paseo-slp-onboarding/SKILL.md'), 'utf8');
+  const skill = text('skills/paseo-slp-onboarding/SKILL.md').replace(/\s+/gu, ' ');
+  const examplesRaw = text('skills/paseo-slp-onboarding/SKILL.md');
+  const examples = examplesRaw.replace(/\s+/gu, ' ');
   assert.ok(!skill.includes('templates/profiles/'));
-  assert.match(skill, /combine every applicable setting/);
-  const examples = readFileSync(join(installed, 'skills/paseo-slp-onboarding/references/repository-configuration.md'), 'utf8');
-  assert.match(skill, /Do not\nadd tracker setup questions or activation gates/);
+  assert.match(skill, /Resolve applicable decisions from evidence\/current grant/);
+  assert.match(skill, /Unused integrations and optional queue\/recipe branches create no setup gates/);
   assert.ok(!base.includes('| Connector and cadence |'));
-  assert.match(examples, /new pricing feature with a database backfill/);
-  assert.match(examples, /Opening a PR does not grant production\nexecution/);
-  // Operational facts live in .paseo-slp/references/; moving them there is
-  // configuration, never a deviation the Overrides table must register.
-  assert.equal(base.match(/^## Repository references$/gm).length, 1);
-  assert.match(base, /`\.paseo-slp\/references\/<topic>\.md`/);
-  assert.match(base, /never adds, relaxes or overrides a rule/);
-  assert.match(base, /never as a grant/);
-  assert.match(base, /live in its checks reference under Repository\nreferences/);
-  assert.match(base, /referenced files is configuration, not an override/);
-  assert.match(skill, /`\.paseo-slp\/references\/<topic>\.md`/);
-  assert.match(skill, /split is configuration, not an Override/);
-  assert.match(examples, /^## Protocol and references$/m);
+  assert.match(examples, /shared-state rehearsal\/ recovery\/reconciliation when relevant/);
+  assert.match(examples, /separate grants and required gates/);
+  assert.equal(baseRaw.match(/^## Repository references$/gm).length, 1);
+  assert.match(base, /operational facts in Repository references/);
+  assert.match(base, /Facts add no authority/);
+  assert.match(base, /verify stale\/missing\/contradicted ones before dependent decisions/);
+  assert.match(base, /Use established checks from the repository\/assignment/);
+  assert.match(base, /wording compression and filled configuration\/references are not overrides/);
+  assert.match(skill, /operational facts need references with decision triggers/);
+  assert.match(skill, /compression\/configuration is no override/);
+  assert.match(examplesRaw, /^## Inspect and choose$/m);
 });
 
 test('launcher loads installed role bytes, excludes private review material, preserves configured custom provider/full-access', t => {
@@ -487,102 +489,47 @@ test('role bundle load paths are the contract: Peer never receives delegation po
   assert.throws(() => roleBundle(installed, 'engineer'), /Unknown role/);
 });
 
-test('standalone bundles deliver selection procedure by role and the no-waiver invariant to every seat', t => {
+test('standalone bundles deliver semantic obligations and conditional operation paths', t => {
   const installed = join(fixture(t), 'release');
   install(root, installed);
-  // Selection and creation procedures ride delegation.md (Supervisor + Lead).
-  // Common obligations reach every role; Peer gets its own mandate invariant.
-  const [supervisor, lead] = ['supervisor', 'lead'].map(role => roleBundle(installed, role, {}).instructions);
-  for (const instructions of [supervisor, lead]) {
-    assert.match(instructions, /Lead records an explicit review selection before the candidate round/, 'explicit selection procedure');
-    assert.match(instructions, /minimum sufficient independent mandates for material decision-changing questions/, 'selected mandates');
-    assert.match(instructions, /Required review cannot be weakened because seats are unavailable or findings are adverse/, 'required obligations');
-    assert.match(instructions, /Review selection never waives a Human, assignment or protocol obligation/, 'common no-waiver invariant');
-    assert.doesNotMatch(instructions, /does not license merging\s+the axes into one seat|parallel seats on split axes/);
-    assert.match(instructions, /cannot carry a new\s+delegation/, 'agent-scoped create_agent rule');
-    // C8 formation pins ride delegation.md into both orchestrating bundles:
-    // the three-way decision table, the formation record, the placement pin
-    // and the post-create parentage verification.
-    assert.match(instructions, /New-team delegation/, 'decision table: new-team row');
-    assert.match(instructions, /Continuation: same team and ownership/, 'decision table: continuation row');
-    assert.match(instructions, /Observe-existing-work/, 'decision table: observe-existing row');
-    assert.match(instructions, /formation record/, 'preflight formation record');
-    assert.match(instructions, /not evidence of parentage/, 'post-create verification');
-    assert.match(instructions, /paseo\.parent-agent-id label must match/, 'inbound-route self-check rides common.md');
-    assert.match(instructions, /distinct from your\s+parent/, 'observe-existing carve-out: recipient need not equal parent');
-    assert.match(instructions, /not a hard block/, 'unexposed label is a recorded gap, not a block');
-    assert.match(instructions, /names no agent\s+recipient/, 'no-named-recipient case is classified, not a block');
-    assert.match(instructions, /not filesystem\s+isolation/, 'workspace placement pin');
-    assert.match(instructions, /send_agent_prompt to a\s+parentless or differently parented/, 'B21 formation-defect trigger');
-    assert.match(instructions, /second workspace\s+for the same team with no isolation reason/, 'B22 placement-defect trigger');
+  const body = (path) => readFileSync(join(installed, path), 'utf8');
+  for (const role of ['supervisor', 'lead', 'peer']) {
+    const instructions = roleBundle(installed, role, {}).instructions;
+    for (const path of ['src/common.md', `src/roles/${role}.md`]) assert.ok(instructions.includes(body(path)));
+    assert.match(instructions, /Review selection never waives\s+a Human, assignment or protocol obligation/);
+    assert.match(instructions, /parent\/report recipient must match your paseo\.parent-agent-id\s+label/);
+    assert.match(instructions, /Unexposed labels are a visibility gap/);
+    if (role === 'peer') {
+      assert.ok(!instructions.includes(body('src/delegation.md')));
+      assert.match(instructions, /Reviewer\/Auditor stays independent of writer and accepting owner/);
+      assert.match(instructions, /You do not spawn\/manage agents/);
+      continue;
+    }
+    assert.ok(instructions.includes(body('src/delegation.md')));
+    for (const ref of ['delegation-execution.md', 'task-execution.md', 'review-gates.md']) {
+      assert.ok(instructions.includes(`references/${ref}`));
+      assert.ok(!instructions.includes(body(`src/references/${ref}`)), `${ref} remains conditional`);
+    }
+    assert.match(instructions, /minimum\s+sufficient independent mandates for material decision-changing questions/);
+    assert.match(instructions, /Unavailable\s+required reviewers or adverse findings never relax the gate/);
   }
-  assert.match(lead, /When the assignment or protocol\s+requires independent review, follow its gate rules and references\/review-gates\.md\.\s+While that gate applies/);
-  assert.match(lead, /Record the review selection and its reason before the candidate round/);
-  assert.match(lead, /review-gates\.md when making or revising that decision, including a\s+not-required decision/);
-  assert.ok(!/Record the review selection and its reason before the candidate round/.test(supervisor), 'selection decision trigger is Lead-scoped');
-  assert.match(lead, /immediately before each\s+decision.*including after resume or compaction; a surviving summary like\s+"Engineer → Reviewer" is not the rule/s);
-  assert.ok(!/When the assignment or protocol\s+requires independent review/.test(supervisor), 'the re-read trigger is Lead-scoped');
-  assert.match(supervisor, /before replying to the Human/, 'B12 protocol-read timing');
-  assert.match(lead, /before your first reply/, 'B12 protocol-read timing');
-  // Role-scoped C8 cues: the observe-vs-establish distinction is Supervisor's;
-  // the conditional parent-label fallback and no-adoption rule are Lead's.
-  assert.match(supervisor, /standalone session never makes\s+it your child/, 'Supervisor new-team vs observe cue');
-  assert.ok(!/standalone session never makes\s+it your child/.test(lead), 'Supervisor cue stays role-scoped');
-  assert.match(lead, /does not adopt it/, 'Lead continuity boundary');
-  assert.match(lead, /does not repair a wrong parent/, 'Lead conditional parent-label fallback');
-  assert.ok(!/does not adopt it/.test(supervisor), 'Lead cue stays role-scoped');
-  const peer = roleBundle(installed, 'peer', {}).instructions;
-  assert.match(peer, /Review selection never waives a Human, assignment or protocol obligation/);
-  assert.match(peer, /Reviewer and optional Auditor mandates remain independent of the writer and\s+accepting owner/);
-  assert.ok(!/Lead records an explicit review selection|Record the review selection and its reason|Required review cannot be weakened/.test(peer), 'Peer gets no Lead selection procedure');
-  assert.ok(!/When the assignment or protocol\s+requires independent review/.test(peer));
-  assert.ok(!/cannot carry a new\s+delegation/.test(peer));
-  assert.ok(!/New-team delegation|Observe-existing-work|formation record/.test(peer), 'Peer gets no formation doctrine');
-  assert.ok(!/not evidence of parentage|not filesystem\s+isolation/.test(peer));
-  // The inbound-route self-check is a Peer-visible self-check on the seat's own
-  // assignment envelope (common.md), not formation doctrine — it must reach Peer.
-  assert.match(peer, /paseo\.parent-agent-id label must match/, 'inbound-route self-check is Peer-visible');
-  assert.match(peer, /distinct from your\s+parent/, 'Peer self-check keeps the observe-existing carve-out');
-  assert.match(peer, /not a hard block/, 'Peer self-check tolerates an unexposed label');
-  assert.match(peer, /names no agent\s+recipient/, 'Peer self-check classifies the no-recipient case');
-  for (const ref of ['orchestration.md', 'review-gates.md']) {
-    assert.ok(!peer.includes(readFileSync(join(installed, 'src/references', ref), 'utf8')), `Peer must not load ${ref} bytes`);
-  }
-  // The shipped protocol template carries the same doctrine: read-on-landing,
-  // trigger-based gate wording, task-scoped rework continuity, create_agent-only seats and the
-  // shared-workspace placement default with the owner-map/receipt record.
-  const template = readFileSync(join(installed, 'src/templates/workspace-protocol.md'), 'utf8');
-  assert.match(template, /when the assignment lands/);
-  assert.match(template, /a fired trigger\s+requires an independent review gate/);
-  assert.match(template, /same write owner and\s+independent review seats available for correction or re-review/);
-  assert.match(template, /bounded task\s+settles after Delivery completes and no correction or re-review remains open/);
-  assert.doesNotMatch(template, /batch archive/);
-  assert.match(template, /agent-scoped create_agent/);
-  assert.match(template, /share the\s+assignment'?s workspace by default/, 'team-workspace default');
-  assert.match(template, /owner map and\s+creation receipts/, 'formation receipts tactic');
-  // B25: split-seat naming convention — slash suffix, never an "axis" suffix.
-  assert.match(template, /Reviewer — <task> \/ Spec/, 'Spec seat naming convention');
-  assert.match(template, /Reviewer — <task> \/ Standard`/, 'Standard seat naming convention, unabbreviated');
-  assert.match(template, /never\s+an "axis" suffix/);
-  // B24: monitoring doctrine enumerates seats by identity, not cwd, and never
-  // infers nonexistence from an empty listing (references ship as locators —
-  // pin the installed bytes directly).
-  const monitoring = readFileSync(join(installed, 'src/references/monitoring.md'), 'utf8');
-  assert.match(monitoring, /never by cwd/, 'seat enumeration is not cwd-scoped');
-  assert.match(monitoring, /empty list_agents result does not prove/, 'empty list is not nonexistence');
-  assert.match(monitoring, /refs\/heads\/<lane>/, 'lane branches carry lane commits');
-  // Installed selection rules preserve explicit obligations and provenance;
-  // no absent decision supplies a fallback pair or a waiver.
-  const gates = readFileSync(join(installed, 'src/references/review-gates.md'), 'utf8');
-  assert.match(gates, /minimum sufficient independent mandates for material decision-changing\s+questions/, 'question-selected mandates');
-  assert.match(gates, /New scope declarations choose an explicit review plan/);
-  assert.match(gates, /An absent explicit selection is an open decision/);
-  assert.match(gates, /including any explicitly required fixed seats or axes/, 'specific required shapes stay binding');
-  assert.match(gates, /A required seat that\s+cannot be supplied makes the dependent gate BLOCKED/);
-  assert.match(gates, /weakened because seats are unavailable or findings are adverse/);
-  assert.match(gates, /`not-required` is a reasoned selection decision[\s\S]+it never waives an otherwise required gate/);
-  assert.match(gates, /`exempt` is an authority-backed waiver of an otherwise required gate/);
-  assert.match(gates, /selected mandates or reason for no review, authority\/rule source, candidate and\s+brief\/scope\/plan revision/, 'selection is pinned in shared task state');
-  assert.match(gates, /`authorityRef`, `ruleRef` and `reason` remain claims/);
-  assert.doesNotMatch(gates, /Without a declaration, the package default is separate Peer seats/);
+  const lead = roleBundle(installed, 'lead', {}).instructions;
+  const supervisor = roleBundle(installed, 'supervisor', {}).instructions;
+  assert.match(lead, /When the assignment or protocol requires independent review/);
+  assert.match(lead, /before a\s+reply or decision depending on repository tactics/);
+  assert.match(supervisor, /before replying or deciding repository tactics/);
+  const direct = body('src/references/delegation-execution.md').replace(/\s+/gu, ' ');
+  assert.match(direct, /agent-scoped create_agent/);
+  assert.match(direct, /actual host parent\/workspace\/cwd and bundle/);
+  assert.match(direct, /parent's pinned workspace, including read-only review/);
+  assert.match(direct, /formation in that brief\/receipt: parent, seat, workspace\/cwd/);
+  assert.match(direct, /Spec or Standard unabbreviated/);
+  assert.match(direct, /Empty inventory alone proves no absence/);
+  const monitoring = body('src/references/monitoring.md').replace(/\s+/gu, ' ');
+  assert.match(monitoring, /not cwd/);
+  assert.match(monitoring, /refs\/heads\/<lane>/);
+  assert.match(monitoring, /Delivery completes and no correction or re-review remains open/);
+  const gates = body('src/references/review-gates.md').replace(/\s+/gu, ' ');
+  assert.match(gates, /required independent mandates, not-required only with no material trigger, or exempt only with explicit waiver authority/);
+  assert.match(gates, /Runtime enforces the declared set.*does not decide sufficiency or risk/);
 });

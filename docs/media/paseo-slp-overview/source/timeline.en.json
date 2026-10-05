@@ -1,0 +1,465 @@
+{
+ "lang": "en",
+ "fps": 30,
+ "width": 1920,
+ "height": 1080,
+ "duration": 261.233,
+ "narration": {
+  "profile": "omnivoice",
+  "provider": "OmniVoice (k2-fsa), local",
+  "model": "k2-fsa/OmniVoice",
+  "voice": "synthetic male narrator (OmniVoice voice design → clone prompt)",
+  "voiceId": null,
+  "instruct": "male, middle-aged, very low pitch",
+  "settings": {
+   "dtype": "bfloat16",
+   "numStep": 32,
+   "speed": 0.95,
+   "seedBase": 20261005,
+   "device": "cpu"
+  },
+  "license": "OmniVoice code Apache-2.0; pre-trained model CC BY-NC (k2-fsa/OmniVoice model card). Audio tokenizer: Boson Higgs Audio 2 Community License — Built with Higgs Materials licensed from Boson AI USA, Inc., Copyright Boson AI USA, Inc., All Rights Reserved and Meta Llama 3 licensed under the Meta Llama 3 Community License, Copyright Meta Platforms, Inc., All Rights Reserved."
+ },
+ "labels": {
+  "honest": "explanatory animation · not live footage",
+  "credit": "Voice: OmniVoice (k2-fsa, CC BY-NC) · synthetic male · generated locally",
+  "titleCredit": "narration voice generated locally with OmniVoice",
+  "poster": "Watch the {dur} overview  ·  English narration + captions",
+  "mp4Title": "Paseo SLP overview (English)"
+ },
+ "scenes": [
+  {
+   "id": "title",
+   "chapter": "Overview",
+   "title": "How a brief becomes a controlled operation",
+   "start": 0.0,
+   "end": 12.91,
+   "last": false,
+   "timing": "sentences",
+   "cues": [
+    {
+     "text": "Paseo SLP organizes coding agents as a Supervisor, a Lead, and independent Peers.",
+     "start": 1.6,
+     "end": 6.43
+    },
+    {
+     "text": "Here's how a brief becomes a controlled operation, and where human judgment still matters.",
+     "start": 6.81,
+     "end": 11.81
+    }
+   ]
+  },
+  {
+   "id": "owners",
+   "chapter": "Who owns what",
+   "title": "Three owners share every operation",
+   "start": 12.91,
+   "end": 30.44,
+   "last": false,
+   "timing": "sentences",
+   "cues": [
+    {
+     "text": "Three owners share the work.",
+     "start": 13.71,
+     "end": 15.31
+    },
+    {
+     "text": "Paseo runs sessions, workspaces and agent parentage.",
+     "start": 15.69,
+     "end": 18.77
+    },
+    {
+     "text": "The plugin adds role policy, and a runtime that checks recorded facts.",
+     "start": 19.15,
+     "end": 23.26
+    },
+    {
+     "text": "The Human keeps intent, authority and final acceptance.",
+     "start": 23.64,
+     "end": 26.8
+    },
+    {
+     "text": "And the plugin is not an agent scheduler.",
+     "start": 27.18,
+     "end": 29.34
+    }
+   ]
+  },
+  {
+   "id": "policy",
+   "chapter": "Policy and enforcement",
+   "title": "Role policy is read. Enforcement is checked.",
+   "start": 30.44,
+   "end": 48.6,
+   "last": false,
+   "timing": "sentences",
+   "cues": [
+    {
+     "text": "Role policy is what a seat reads, layered from common rules down to one assignment.",
+     "start": 31.24,
+     "end": 35.76
+    },
+    {
+     "text": "Lower layers narrow, never widen.",
+     "start": 36.14,
+     "end": 37.95
+    },
+    {
+     "text": "Enforcement is code, checking membership, ownership and revisions on guarded desk calls.",
+     "start": 38.33,
+     "end": 43.69
+    },
+    {
+     "text": "Policy guides judgment. Enforcement guards recorded facts.",
+     "start": 44.07,
+     "end": 47.5
+    }
+   ]
+  },
+  {
+   "id": "install",
+   "chapter": "Install, activate, bind",
+   "title": "A checkout, a published runtime and a session are different objects",
+   "start": 48.6,
+   "end": 71.12,
+   "last": false,
+   "timing": "sentences",
+   "cues": [
+    {
+     "text": "The SLP Manager activates a published runtime.",
+     "start": 49.4,
+     "end": 52.06
+    },
+    {
+     "text": "Verified bytes land in a pinned runtime directory, with launchers and profiles.",
+     "start": 52.44,
+     "end": 57.19
+    },
+    {
+     "text": "A binding pins the runtime, Node, transport and daemon home.",
+     "start": 57.57,
+     "end": 61.01
+    },
+    {
+     "text": "At launch, a hook or wrapper delivers the role before the provider starts.",
+     "start": 61.39,
+     "end": 65.71
+    },
+    {
+     "text": "Rebinding changes future launches; running sessions keep their bytes.",
+     "start": 66.09,
+     "end": 70.02
+    }
+   ]
+  },
+  {
+   "id": "desk",
+   "chapter": "Membership and the desk",
+   "title": "A title is presentation. Membership is identity.",
+   "start": 71.12,
+   "end": 94.54,
+   "last": false,
+   "timing": "sentences",
+   "cues": [
+    {
+     "text": "A session acts on the desk only through bound membership.",
+     "start": 71.92,
+     "end": 75.19
+    },
+    {
+     "text": "It records the exact agent, runtime family, role, directory and binding generation.",
+     "start": 75.57,
+     "end": 80.54
+    },
+    {
+     "text": "Every desk call crosses the bridge: fresh identity, capability, strict schema.",
+     "start": 80.92,
+     "end": 85.55
+    },
+    {
+     "text": "The desk is an append-only, hash-chained ledger, shared by related worktrees.",
+     "start": 85.93,
+     "end": 90.47
+    },
+    {
+     "text": "It guards desk calls. It is not a shell sandbox.",
+     "start": 90.85,
+     "end": 93.45
+    }
+   ]
+  },
+  {
+   "id": "review",
+   "chapter": "Ownership and review",
+   "title": "One writer per scope. Review selected, then pinned.",
+   "start": 94.54,
+   "end": 113.47,
+   "last": false,
+   "timing": "sentences",
+   "cues": [
+    {
+     "text": "Each moving scope has one writer.",
+     "start": 95.34,
+     "end": 97.09
+    },
+    {
+     "text": "Review is selected: required, not required, or exempt with an authority pointer.",
+     "start": 97.47,
+     "end": 102.0
+    },
+    {
+     "text": "A review round pins the candidate, scope, brief and neutral mandate.",
+     "start": 102.38,
+     "end": 106.36
+    },
+    {
+     "text": "Change one, and the review goes stale.",
+     "start": 106.74,
+     "end": 108.75
+    },
+    {
+     "text": "Owner and writer can't clear their own independent gate.",
+     "start": 109.13,
+     "end": 112.37
+    }
+   ]
+  },
+  {
+   "id": "dispatch",
+   "chapter": "Managed dispatch",
+   "title": "The worker receives work only after binding",
+   "start": 113.47,
+   "end": 138.59,
+   "last": false,
+   "timing": "sentences",
+   "cues": [
+    {
+     "text": "Managed dispatch is a chain of recorded steps.",
+     "start": 114.27,
+     "end": 116.85
+    },
+    {
+     "text": "Reserve the attempt, then create the worker with no work prompt.",
+     "start": 117.23,
+     "end": 120.89
+    },
+    {
+     "text": "Verify its observed runtime, labels, parent, workspace and directory.",
+     "start": 121.27,
+     "end": 125.43
+    },
+    {
+     "text": "Bind the membership, claim the scope, and only then send the work.",
+     "start": 125.81,
+     "end": 129.48
+    },
+    {
+     "text": "Late registration returns seat-pending and sends nothing.",
+     "start": 129.86,
+     "end": 133.04
+    },
+    {
+     "text": "A lost create receipt stays uncertain, and is never blindly replaced.",
+     "start": 133.42,
+     "end": 137.49
+    }
+   ]
+  },
+  {
+   "id": "dependencies",
+   "chapter": "Task dependencies",
+   "title": "A finished prerequisite is not necessarily usable",
+   "start": 138.59,
+   "end": 158.25,
+   "last": false,
+   "timing": "sentences",
+   "cues": [
+    {
+     "text": "A finished prerequisite isn't automatically usable.",
+     "start": 139.39,
+     "end": 142.32
+    },
+    {
+     "text": "Readiness needs a qualified result, and availability measured in the consumer's actual base.",
+     "start": 142.7,
+     "end": 148.02
+    },
+    {
+     "text": "B and C are landed and qualified, but D's base has only B. So D stays blocked.",
+     "start": 148.4,
+     "end": 152.74
+    },
+    {
+     "text": "Reopening A invalidates readiness; history keeps what was consumed.",
+     "start": 153.12,
+     "end": 157.15
+    }
+   ]
+  },
+  {
+   "id": "effects",
+   "chapter": "The ledger / effect boundary",
+   "title": "One issued effect, recorded on both sides of the cut",
+   "start": 158.25,
+   "end": 181.56,
+   "last": false,
+   "timing": "sentences",
+   "cues": [
+    {
+     "text": "A ledger transaction can't make a host effect atomic.",
+     "start": 159.05,
+     "end": 162.08
+    },
+    {
+     "text": "So each effect is split: intent, locked issue, the bounded SDK or Git call, then observe.",
+     "start": 162.46,
+     "end": 167.63
+    },
+    {
+     "text": "Lose the receipt, and the effect stays uncertain.",
+     "start": 168.01,
+     "end": 170.33
+    },
+    {
+     "text": "Exact replay returns the recorded outcome; reconciliation measures the original identity.",
+     "start": 170.71,
+     "end": 176.16
+    },
+    {
+     "text": "A fresh request is not recovery. There's no automatic retry engine.",
+     "start": 176.54,
+     "end": 180.46
+    }
+   ]
+  },
+  {
+   "id": "integrate",
+   "chapter": "Integration",
+   "title": "Integrate a delta, preserve unrelated work",
+   "start": 181.56,
+   "end": 203.64,
+   "last": false,
+   "timing": "sentences",
+   "cues": [
+    {
+     "text": "Integration measures the worker's base, its result, and the actual target.",
+     "start": 182.36,
+     "end": 186.59
+    },
+    {
+     "text": "A three-way merge keeps unrelated work, and holds conflicts.",
+     "start": 186.97,
+     "end": 190.43
+    },
+    {
+     "text": "Stage builds the candidate outside the target; check runs owner-pinned recipes.",
+     "start": 190.81,
+     "end": 195.62
+    },
+    {
+     "text": "Land rechecks, records a recovery plan, backs up, applies, and measures.",
+     "start": 196.0,
+     "end": 200.15
+    },
+    {
+     "text": "It never commits, pushes, or deploys.",
+     "start": 200.53,
+     "end": 202.54
+    }
+   ]
+  },
+  {
+   "id": "cleanup",
+   "chapter": "Cleanup",
+   "title": "Cleanup is a proof-gated workflow too",
+   "start": 203.64,
+   "end": 220.92,
+   "last": false,
+   "timing": "sentences",
+   "cues": [
+    {
+     "text": "Cleanup is gated by proof, too.",
+     "start": 204.44,
+     "end": 206.2
+    },
+    {
+     "text": "First, an account binds the original proof and the resource inventory.",
+     "start": 206.58,
+     "end": 210.72
+    },
+    {
+     "text": "The stage is removed under its own permit, and only then the backup.",
+     "start": 211.1,
+     "end": 214.69
+    },
+    {
+     "text": "Each gets two total cycles. Exhaustion keeps the obligation, instead of looping.",
+     "start": 215.07,
+     "end": 219.82
+    }
+   ]
+  },
+  {
+   "id": "limits",
+   "chapter": "Honest boundaries",
+   "title": "What the mechanism does not prove",
+   "start": 220.92,
+   "end": 242.23,
+   "last": false,
+   "timing": "sentences",
+   "cues": [
+    {
+     "text": "Some limits stay explicit.",
+     "start": 221.71,
+     "end": 223.28
+    },
+    {
+     "text": "Stop fences new effects, but doesn't prove a running turn was cancelled.",
+     "start": 223.66,
+     "end": 227.89
+    },
+    {
+     "text": "Archive doesn't prove processes are quiescent.",
+     "start": 228.27,
+     "end": 230.97
+    },
+    {
+     "text": "A grant reference doesn't authenticate a Human grant.",
+     "start": 231.35,
+     "end": 234.51
+    },
+    {
+     "text": "Language guidance, quota fallback, Jev routing and supervision are opt-in, not an autonomous scheduler.",
+     "start": 234.89,
+     "end": 241.13
+    }
+   ]
+  },
+  {
+   "id": "value",
+   "chapter": "Why it helps",
+   "title": "Durable, inspectable work — with real human judgment",
+   "start": 242.23,
+   "end": 261.21,
+   "last": true,
+   "timing": "sentences",
+   "cues": [
+    {
+     "text": "Work, ownership, review and effects survive interruption, and stay inspectable in Read SLP work.",
+     "start": 243.03,
+     "end": 248.78
+    },
+    {
+     "text": "Human judgment and project acceptance remain real decisions.",
+     "start": 249.16,
+     "end": 252.68
+    },
+    {
+     "text": "For details and source pins, open docs/plugin-explained.html.",
+     "start": 253.06,
+     "end": 257.71
+    }
+   ]
+  }
+ ]
+}

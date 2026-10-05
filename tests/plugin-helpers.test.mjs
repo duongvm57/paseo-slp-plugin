@@ -248,9 +248,15 @@ test('Peer carrier locators are allowlisted to the required bundle; a legacy tra
   writeFileSync(join(state, 'work-tracker.json'), '{corrupt');
   assert.equal(roleBundle(installed, 'peer', env).instructions, off.instructions);
 
+  const receipt = JSON.parse(readFileSync(join(installed, 'installed.json'), 'utf8'));
+  const references = receipt.candidate.files.map(entry => entry.path)
+    .filter(path => path.startsWith('src/references/'));
   for (const role of ['supervisor', 'lead']) {
     const entries = policyLocators(installed, role, env);
-    assert.equal(entries.length, 3 + 11, `${role} retains its required bundle and all eleven references`);
+    const expected = ['src/common.md', `src/roles/${role}.md`, 'src/delegation.md', ...references]
+      .map(path => join(installed, path)).sort();
+    assert.deepEqual(entries.map(entry => entry.path).sort(), expected,
+      `${role} retains its required bundle and every receipt-declared reference`);
     assert.ok(entries.some(entry => entry.path === join(installed, 'src/references/jev-routing.md')));
     assert.ok(entries.some(entry => entry.path === join(installed, 'src/references/task-execution.md')));
   }
@@ -293,67 +299,31 @@ test('instructions <role> prints the exact bundle bytes on stdout and metadata o
   assert.match(bad.stderr, /Unknown role/);
 });
 
-test('managed bundles deliver selected obligations and keep Lead procedure separate from Peer mandate', t => {
-  const dir = fixture(t), installed = join(dir, 'release');
+test('managed bundles disclose guarded and ordinary paths while preserving role separation', t => {
+  const installed = join(fixture(t), 'release');
   install(root, installed);
-  const env = {
-    SLP_MANAGED_RUNTIME: '1', SLP_NODE_BIN: '/n/bin/node',
-    SLP_RUNTIME_ROOT: installed, SLP_DAEMON_HOME: '/h',
-  };
-  for (const role of ['supervisor', 'lead']) {
-    const instructions = roleBundle(installed, role, env).instructions;
-    for (const reference of ['delegation-formation.md', 'delegation-execution.md']) {
-      const body = readFileSync(join(installed, 'src/references', reference), 'utf8');
-      assert.ok(instructions.includes(`references/${reference}`), 'procedure has an entry pointer');
-      assert.ok(!instructions.includes(body), 'conditional procedure is not always-loaded');
-      assert.ok(policyLocators(installed, role).some(entry => entry.path.endsWith(`/references/${reference}`) && entry.sha256 === hash(Buffer.from(body))), 'installed procedure remains integrity-addressable');
+  const env = { SLP_MANAGED_RUNTIME: '1', SLP_NODE_BIN: '/n/bin/node', SLP_RUNTIME_ROOT: installed, SLP_DAEMON_HOME: '/h' };
+  for (const role of ['supervisor', 'lead', 'peer']) {
+    const bundle = roleBundle(installed, role, env).instructions;
+    assert.match(bundle, /Review selection never waives\s+a Human, assignment or protocol obligation/);
+    assert.match(bundle, /parent\/report recipient must match your paseo\.parent-agent-id\s+label/);
+    assert.match(bundle, /recipient distinct from your\s+parent/);
+    if (role === 'peer') {
+      assert.match(bundle, /Reviewer\/Auditor stays independent of writer and accepting owner/);
+      assert.ok(!bundle.includes(readFileSync(join(installed, 'src/delegation.md'), 'utf8')));
+      continue;
     }
-    assert.match(instructions, /Lead records an explicit review selection before the candidate round/, role);
-    assert.match(instructions, /minimum sufficient independent mandates for material decision-changing questions/, role);
-    assert.match(instructions, /Required review cannot be weakened because seats are unavailable or findings are adverse/, role);
-    assert.match(instructions, /Review selection never waives a Human, assignment or protocol obligation/, role);
-    assert.doesNotMatch(instructions, /does not license merging\s+the axes into one seat|parallel seats on split axes/, role);
-    assert.match(instructions, /cannot carry a new\s+delegation/, role);
-    assert.match(instructions, /New-team delegation/, role);
-    assert.match(instructions, /Observe-existing-work/, role);
-    assert.match(instructions, /formation record/, role);
-    assert.match(instructions, /not evidence of parentage/, role);
-    assert.match(instructions, /not filesystem\s+isolation/, role);
+    for (const ref of ['delegation-execution.md', 'task-execution.md']) {
+      const body = readFileSync(join(installed, `src/references/${ref}`), 'utf8');
+      assert.ok(bundle.includes(`references/${ref}`));
+      assert.ok(!bundle.includes(body));
+      assert.ok(policyLocators(installed, role).some(entry => entry.path.endsWith(`/references/${ref}`) && entry.sha256 === hash(Buffer.from(body))));
+    }
+    assert.match(bundle, /ordinary\/Lean creation or observation/);
+    assert.match(bundle, /Runtime admission records and verifies reservations/);
   }
-  const leadBundle = roleBundle(installed, 'lead', env).instructions;
-  const supervisorBundle = roleBundle(installed, 'supervisor', env).instructions;
-  assert.match(leadBundle, /When the assignment or protocol\s+requires independent review/);
-  assert.match(leadBundle, /Record the review selection and its reason before the candidate round/);
-  assert.match(leadBundle, /review-gates\.md when making or revising that decision, including a\s+not-required decision/);
-  assert.ok(!/Record the review selection and its reason before the candidate round/.test(supervisorBundle));
-  assert.ok(!/When the assignment or protocol\s+requires independent review/.test(supervisorBundle));
-  assert.match(supervisorBundle, /standalone session never makes\s+it your child/);
-  assert.match(leadBundle, /does not adopt it/);
-  // The same formation pins must reach the managed path: continuation row and
-  // both defect triggers.
-  for (const bundle of [leadBundle, supervisorBundle]) {
-    assert.match(bundle, /Continuation: same team and ownership/, 'decision table: continuation row');
-    assert.match(bundle, /send_agent_prompt to a\s+parentless or differently parented/, 'B21 formation-defect trigger');
-    assert.match(bundle, /second workspace\s+for the same team with no isolation reason/, 'B22 placement-defect trigger');
-  }
-  const peer = roleBundle(installed, 'peer', env).instructions;
-  assert.match(peer, /Review selection never waives a Human, assignment or protocol obligation/);
-  assert.match(peer, /Reviewer and optional Auditor mandates remain independent of the writer and\s+accepting owner/);
-  assert.ok(!/Lead records an explicit review selection|Record the review selection and its reason|Required review cannot be weakened/.test(peer), 'Peer gets no Lead selection procedure');
-  assert.ok(!/When the assignment or protocol\s+requires independent review/.test(peer));
-  assert.ok(!/cannot carry a new\s+delegation/.test(peer));
-  assert.ok(!/New-team delegation|Observe-existing-work|formation record/.test(peer), 'Peer gets no formation doctrine');
-  assert.ok(!/not evidence of parentage|not filesystem\s+isolation/.test(peer));
-  // The inbound-route self-check is a Peer-visible self-check (common.md), not
-  // formation doctrine.
-  assert.match(peer, /paseo\.parent-agent-id label must match/);
-  assert.match(peer, /distinct from your\s+parent/, 'observe-existing carve-out survives');
-  assert.match(peer, /not a hard block/, 'unexposed label is a recorded gap');
-  assert.match(peer, /names no agent\s+recipient/, 'no-named-recipient case is classified');
-  for (const bundle of [leadBundle, supervisorBundle]) {
-    assert.match(bundle, /distinct from your\s+parent/, 'observe-existing carve-out on orchestrating roles');
-  }
-  assert.ok(!peer.includes(readFileSync(join(installed, 'src/references/orchestration.md'), 'utf8')));
+  assert.match(roleBundle(installed, 'lead', env).instructions, /When the assignment or protocol\s+requires independent review/);
+  assert.ok(!/When the assignment or protocol\s+requires independent review/.test(roleBundle(installed, 'supervisor', env).instructions));
 });
 
 // --- inventory: managed vs unmanaged ---------------------------------------
@@ -541,13 +511,13 @@ test('ACP delivery keeps verified core while refreshing language and restoring c
     assert.ok(!next.includes('Spawn kit —') && !next.includes('Policy locators —'));
     assert.match(next, /Policy recovery command: .* instructions /);
     assert.match(next, /Human stop/);
-    assert.match(next, /missing evidence is a gap/);
-    assert.match(next, /Review selection never waives a Human, assignment or protocol obligation/);
-    assert.equal(/Lead records an explicit review selection before the candidate round/.test(next), role !== 'peer');
-    assert.equal(/Required review cannot be weakened because seats are unavailable or findings are adverse/.test(next), role !== 'peer');
-    assert.equal(/Record the review selection and its reason before the candidate round/.test(next), role === 'lead');
-    assert.equal(/review-gates\.md when making or revising that decision, including a\s+not-required decision/.test(next), role === 'lead');
-    assert.equal(/Reviewer and optional Auditor mandates remain independent of the writer and\s+accepting owner/.test(next), role === 'peer');
+    assert.match(next, /Missing task evidence is a gap/);
+    assert.match(next, /Review selection never waives\s+a Human, assignment or protocol obligation/);
+    assert.equal(/Lead's explicit review selection precedes the candidate round/.test(next), role !== 'peer');
+    assert.equal(/Unavailable\s+required reviewers or adverse findings never relax the gate/.test(next), role !== 'peer');
+    assert.equal(/record selection\/reason before the candidate round/.test(next), role === 'lead');
+    assert.equal(/Before each review\s+selection or revision, including not-required, read references\/review-gates\.md/.test(next), role === 'lead');
+    assert.equal(/Reviewer\/Auditor stays independent of writer and accepting owner/.test(next), role === 'peer');
     assert.doesNotMatch(next, /does not license merging\s+the axes into one seat|parallel seats on split axes/);
     assert.match(send('b')[0].text, /Spawn kit —/, 'new session gets its own carrier');
     for (const method of ['session/load', 'session/resume', 'session/fork']) {
@@ -579,24 +549,24 @@ test('ACP delivery keeps verified core while refreshing language and restoring c
 test('tiny policy keeps protocol-owned ceremony separate from required gates and runtime freshness', t => {
   const dir = fixture(t), installed = join(dir, 'release');
   install(root, installed);
-  const lead = roleBundle(installed, 'lead', {}).instructions;
-  const protocol = readFileSync(join(installed, 'src/templates/workspace-protocol.md'), 'utf8');
-  const orchestration = readFileSync(join(installed, 'src/references/orchestration.md'), 'utf8');
-  assert.match(lead, /Peer writing is the managed-implementation\s+default/);
-  assert.match(lead, /A direct Lead write requires an explicit Human assignment that grants it\s+or a current effective protocol grant for clear, reversible work with bounded\s+scope, one writer and exact candidate proof/);
-  assert.match(lead, /a Lead writer never stands in for required\s+independent review/);
-  assert.match(lead, /Without an explicit direct-write grant,\s+use one Peer Engineer as writer/);
-  assert.match(lead, /Tiny\s+classification alone grants no write or review exemption/);
-  assert.match(lead, /A missing or stale\s+protocol grants no exception/);
-  assert.match(lead, /full relevant text already in context/);
-  assert.match(lead, /not runtime\nstate/);
-  assert.match(lead, /first required full workspace-protocol read remains\nmandatory/);
-  assert.match(protocol, /1\. Lead supplies one short inline brief/);
-  assert.match(protocol, /Peer Engineer is the default\s+implementation writer[\s\S]+A direct Lead write requires an explicit Human assignment\s+grant or an effective protocol grant/);
-  assert.match(protocol, /never a triggered review gate/);
-  assert.match(protocol, /2\. Use one writer: a Peer Engineer by default,[\s\S]+or the Lead when the direct-write grant covers the task/);
-  assert.match(protocol, /3\. The writer runs the inner loop/);
-  assert.match(protocol, /4\. Lead inspects the artifact and evidence/);
-  assert.match(protocol, /does not\s+silently inherit\s+these exemptions/);
-  assert.match(orchestration, /Tiny, tightly coupled \| One writer, normally a Peer Engineer; Lead may write only under an explicit Human grant or effective protocol grant for clear, reversible work\. Use the repository tactic, focused proof and any required independent review\./);
+  const lead = roleBundle(installed, 'lead', {}).instructions.replace(/\s+/gu, ' ');
+  const protocol = readFileSync(join(installed, 'src/templates/workspace-protocol.md'), 'utf8').replace(/\s+/gu, ' ');
+  const orchestration = readFileSync(join(installed, 'src/references/orchestration.md'), 'utf8').replace(/\s+/gu, ' ');
+  assert.match(lead, /Peer writing is the managed-implementation default/);
+  assert.match(lead, /direct Lead write requires an explicit Human assignment or current effective protocol grant for clear, reversible work, bounded scope, one writer and exact candidate proof/);
+  assert.match(lead, /Lead writer never stands in for required independent review/);
+  assert.match(lead, /Peer Engineer is the implementation default; apply common policy's explicit direct-write exception when authorized/);
+  assert.match(lead, /Tiny classification reduces repository ceremony, never authority, ownership, parentage or required review/);
+  assert.match(lead, /Tiny labels and missing\/stale protocols grant no exception/);
+  assert.match(lead, /Reuse full relevant policy\/protocol text in context only when its source is known unchanged/);
+  assert.match(lead, /Runtime checks still need fresh catalog hash, eligibility, provider availability and Jev receipts/);
+  assert.match(lead, /first required full workspace-protocol read remains mandatory/);
+  assert.match(protocol, /Lean: short inline brief\/formation/);
+  assert.match(protocol, /Peer is default; direct Lead writes need the grant below/);
+  assert.match(protocol, /Independent review triggers across methods/);
+  assert.match(protocol, /one authorized writer's edit\/check loop/);
+  assert.match(protocol, /paused stable candidate, actual proof and in-session handback/);
+  assert.match(protocol, /Lead inspection\/Gate\/verdict/);
+  assert.match(protocol, /Direct Lead write grant.*None by default; Human may specify clear reversible scope, proof\/review bounds/);
+  assert.match(orchestration, /One Peer Engineer; tiny ceremony comes from the effective protocol\. Direct Lead writes follow common policy's explicit grant/);
 });

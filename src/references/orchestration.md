@@ -1,186 +1,152 @@
-# Topology, independent judgment and handback
+# Project orchestration
 
-Lead reads this procedure for project framing, session continuity, topology,
-independent review, design reconciliation or dependency splitting. Repository thresholds and routing belong
-to .paseo-slp/workspace-protocol.md; these branches describe how to execute a selected method.
-All creation uses the installed delegation procedure and current task authority.
+Use for framing, topology, session continuity, design reconciliation,
+dependencies and integration. The effective protocol chooses repository
+thresholds/methods; the assignment controls scope and authority.
 
-## Frame and select
+## Frame and maintain state
 
-Establish outcome, ownership, exclusions, evidence standard and open decisions.
-Build project context from the assignment and relevant repository evidence:
-product objective, current behavior, architecture and module boundaries, recorded
-decisions, dependencies, existing work and authority. Read the relevant docs/code
-before delegating; distinguish verified facts from assumptions and unresolved
-questions. An unclear boundary blocks only the work that depends on that decision.
-Keep the current task state in the permitted brief, session or notes. For
-multi-owner or changing work, identify the operative brief revision and point to
-material decisions, outcome evidence, notifications, open dependencies and next
-actions. Revise it and notify affected owners through existing routes when
-objective, acceptance, authority, ownership or a material decision changes; a
-single bounded task may use one inline brief. Messages and semantic claims are
-coordination inputs, not proof of work or acceptance. Reconcile material changes
-in Lead's shared state, and after resume/compaction with current repository and
-actor evidence. A checkpoint indexes state; it does not replace source policy.
-Pass each Peer the relevant objective, contracts and constraints, plus evidence
-references; retain project-wide integration context in Lead. Context gathering
-does not authorize implementation, broaden scope or require reading the whole repo.
-For foundation work in an unfamiliar domain, expose missing domain framing and
-owner boundaries before committing to a representation. Human may use an advisory
-session to clarify them. Keep file/API plans provisional as vertical slices reveal
-new lifecycle or dependency facts.
+Read relevant repository evidence before delegation. Establish outcome,
+acceptance, real constraints, provisional design/assumptions, unknowns,
+ownership/exclusions, dependencies and proof. Keep moving writer ownership
+separate from module/state ownership. In an unfamiliar domain, expose missing
+framing and owner boundaries before fixing a representation; Human may use an
+advisory session. Gather only context the decision needs. File/API plans stay
+provisional as slices reveal lifecycle or dependency facts.
 
-Use the smallest topology that supplies the required independent judgment:
+A single bounded task may use one inline brief. For desk-managed work, read
+the current slp_workflow_get projection and amend brief/decisions through its
+tools instead of copying a second owner/revision ledger into notes. Resolve
+omissions and stale pins before decisions; preserve real constraints and
+provisional choices. Notify affected owners when steering or a material
+judgment changes. With no desk path, keep the bounded current brief and
+actual evidence in the authorized timeline/checkpoint. Give Peers only
+relevant context; Lead retains integration context. Messages are claims,
+not acceptance, and policy recovery restores no missing task state.
 
-| Task need | Execution and handback |
+## Select topology
+
+Start with the smallest topology that supplies the required judgment:
+
+| Need | Starting shape |
 |---|---|
-| Tiny, tightly coupled | One writer, normally a Peer Engineer; Lead may write only under an explicit Human grant or effective protocol grant for clear, reversible work. Use the repository tactic, focused proof and any required independent review. |
-| Bounded implementation | Peer Engineer owns writes and proof by default; Lead coordinates and inspects; independent review gate if risk/protocol requires. |
-| Cross-module ownership or lifecycle | Read-only Architect reconstructs boundaries; Lead records the technical decision; Peer Engineer implements by default; independent review gate falsifies the stable result when required. |
-| Multiple plausible foundations or costly lock-in | Independent design lenses or sealed council; Lead reconciles material propositions before implementation. |
-| Large dependency branch | Bounded Peer/lane or dependency Lead, with scope and handback separate from the main objective. |
+| Clear bounded implementation | One Peer Engineer; tiny ceremony comes from the effective protocol. Direct Lead writes follow common policy's explicit grant. |
+| Open ownership/lifecycle/contract | Read-only Architect reconstructs boundaries; Lead decides the contract needed by the slice before implementation. |
+| Plausible alternative foundations or costly lock-in | Independent design lenses or sealed council. |
+| Large disruptive dependency | Bounded Peer/lane or dependency Lead, with separate contract, proof and handback. |
 
-Engineer, Architect, Reviewer, optional Auditor and Scout use the same Peer role. Assign each a
-self-contained question and disposition-specific output (defined in Peer policy).
-Read-only reports stay in the session unless a separate report write scope is
-granted. Record explicit review selection per references/review-gates.md before
-the candidate round: minimum sufficient independent mandates for material
-questions or explicit obligations, or a reasoned not-required decision when none
-applies. An authority-backed exemption is a separate waiver, never inferred from
-size or absent selection. One seat may cover related questions; additional seats
-address distinct unresolved risks or separation needs. Human/protocol-required
-fixed shapes remain binding; inability to supply them is BLOCKED, not permission
-to weaken the gate. Authority/rule references are claims, not grant authentication.
+Dispositions share the Peer role. Assign self-contained questions and the
+Peer policy's outputs; read-only reports stay in-session unless artifact
+writes are granted. Review selection follows review-gates.md, including an
+explicit not-required decision or authorized waiver; a topology label
+supplies neither.
 
 ## Session continuity
 
-Within an ongoing assignment, reuse a suitable existing Peer to preserve its
-context. Send authorized corrections to the same write owner. Ask the same independent
-Reviewer to recheck the new stable candidate and affected findings; reviewing an
-earlier version does not make that Reviewer its implementer. Supply the new
-candidate identity, changes and prior findings, and require current evidence for
-closure and regression assessment. Prior approval never transfers automatically.
+A Peer session owns one bounded assignment/outcome. Form a fresh Peer for a
+new assignment by default, even inside the same project. Reuse reliable
+context only for that assignment's continuation, authorized phases,
+correction or re-review. A new review candidate alone is not a new assignment;
+added scope/grants alone do not make a different outcome continuation.
+Explicit Human-directed formation exceptions and authorized handoffs still
+stand.
 
-Reuse reaches only seats this team created through agent-scoped create_agent —
-the creation that gives the host the parent link, report route and sidebar
-tree. Prompting a standalone session can observe work it already owns, but it
-cannot carry a new delegation: without the parent link the seat has no report
-route and sits outside the Human-inspectable tree.
+The desk's assignment/task IDs and host dispatch.reuse capability do not
+decide a Peer session's outcome boundary or grant a reuse exception. Classify
+from the actual brief/outcome and authority; a grantRef string is a claim,
+not authenticated Human authority. A task ID may represent a phase of the
+same bounded outcome; a different outcome follows fresh-by-default formation
+unless an explicit Human exception applies.
 
-Before reuse, verify the Peer ID, owner/parent relation, owned scope,
-availability, authority, independence and current runtime against the project
-routing policy. Resume through Paseo follow-up; reuse does not authorize a
-model switch or bypass quota fallback/ownership settlement.
-Record why a new session is needed: a new independent lens or sealed seat,
-implementation involvement that invalidates review independence, a distinct scope
-needing separate ownership, or an authorized recovery. A separate session
-supplies independent judgment; it does not by itself require a separate
-workspace — placement follows the delegation procedure's workspace pin, and
-only a declared worktree, repository or lane-isolation need splits it. Scope
-changes require an explicit assignment; they do not automatically require
-discarding useful context.
-An Engineer cannot become the independent Reviewer of its own changes. Lead owns
-the reuse/new-session choice within protocol, budget and Human constraints.
+Send authorized corrections to the same write owner. Continue the same
+independent Reviewer for its new stable candidate, changes and prior findings;
+require current closure and regression evidence. Prior approval never
+transfers. An Engineer cannot independently review its own changes.
+Before reuse, verify ID, owner/parent, scope, availability, authority,
+independence and current runtime against routing policy. Continue only a
+verified team child; observation of standalone work creates no adoption.
+Reuse grants no model switch or bypass of quota/ownership settlement.
+Lead chooses reuse/new seat within protocol, budget and Human constraints;
+record a new seat's reason: new outcome, independent/sealed lens, invalidated
+independence, distinct scope, degraded context or authorized recovery.
+Placement follows delegation's workspace pin, not session freshness.
 
-## Independent design and council
+When degradation makes decisions/evidence unreliable, use the authorized
+handoff path with concrete state, authority, candidate/proof, findings,
+dependencies and resources. Settle the old owner and obtain successor
+acknowledgment before transfer. Reliable compaction may continue; no numeric
+compaction threshold governs it.
+After acceptance, Delivery, closed rework and resource reconciliation under
+monitoring.md, archive settled Peers through authorized host controls. Retain
+idle seats only for assigned rework with an expiry. Unavailable controls or
+unknown quiescence remain explicit; archive grants no authority or proof that
+processes/descendants/resources stopped.
 
-1. Give fresh sessions the problem, evidence and neutral constraints. Withhold the
-   Lead's preferred answer while framing is unresolved. Assign distinct lenses
-   such as ownership/lifecycle versus failure/migration; allow alternatives beyond
-   the Lead's options. Select lenses for distinct decision-changing questions, without
-   a fixed seat or provider-family count.
-2. For sealed work, collect each report before exposing any seat's conclusions to
-   another. Do not fork the Lead or share its prior reasoning as a substitute for
-   independence. If visibility leaks, record the limitation and restore independent
-   judgment when that gate requires it. Do not label contaminated work sealed.
-3. Extract material propositions, verify decision-changing claims and use bounded
-   cross-challenge where disagreement matters. The protocol sets debate limits;
-   adding seats or taking a popularity vote supplies no technical authority.
-4. Lead records one binding decision, supporting evidence, alternatives, strongest
-   counterargument, reversal conditions and unresolved risks. Escalate owner-only
-   product/cost/irreversible decisions with that evidence. Engineering starts when
-   the contract needed by the slice is decided, not when every future detail is known.
+## Independent design
+
+Give fresh sessions neutral problem/evidence/constraints and distinct
+questions before the Lead's preferred answer. For sealed work, collect every
+report before exposing conclusions across seats. Forked reasoning is not
+independence; record leaks and restore the required judgment without claiming
+contaminated work is sealed.
+Verify decision-changing propositions and use bounded cross-challenge where
+needed. Apply the task's effort/stop bounds; additional seats or votes create
+no authority. Lead records one decision with evidence, alternatives, strongest
+counterargument, reversal conditions and risks. Escalate owner-only product,
+cost or irreversible decisions. Start a slice when its needed contract is
+decided; future unknowns need not all be solved.
 
 ## Ownership, isolation and integration
 
-For concurrent lanes, record the writer, owned and excluded scopes, dependencies
-and readiness, shared-resource owners, repository/workspace plus actual cwd and
-worktree paths, integration owner and acceptance owner. One moving scope has one
-writer. The effective repo protocol or Lead tactic chooses shared checkout,
-worktree or another isolation boundary after declaring scopes and resources
-merge-safe. A shared checkout is permitted only when that tactic makes nonconflict
-explicit; workspace IDs alone do not isolate. Overlapping writes require serial
-ownership transfer or a safe decomposition/isolation choice. Verify actual paths
-and the selected base; a worktree may omit pre-existing uncommitted changes, which
-must be identified before the lane starts.
+Before concurrent work, declare merge-safe scopes/resources, writer/exclusions,
+dependencies/readiness, shared-resource and state owners, actual checkout/cwd/
+worktree paths, base, integration owner and acceptance owner. Then choose
+shared checkout, worktrees or another boundary under protocol/Lead tactic.
+Shared checkout requires explicit nonconflict; workspace IDs alone do not
+isolate. Overlap needs serial ownership transfer or safe decomposition/isolation.
+A worktree may omit pre-existing uncommitted work: account for it before start.
 
-Overlapping scopes require serial ownership transfer or decomposition. Read-only
-review needs a frozen candidate. Have writers acknowledge handback and pause; an
-idle lifecycle label alone is insufficient. The receiving owner inspects the
-candidate and dependencies before accepting transfer. Keep integration itself under
-one write owner; Lead retains the decision even when a Peer performs integration.
-Freeze the integrated candidate before acceptance review and keep its writer paused
-through verification.
-Merging/cherry-picking commits and any commit/push still require applicable authority.
-Review the resulting integrated candidate; branch reviews do not prove integration.
+Freeze read-only review candidates with writer acknowledgment/pause; idle
+alone is insufficient. A receiving owner inspects candidate/dependencies before
+transfer. One writer owns integration; Lead retains its decision. Freeze and
+review the integrated result, since lane reviews do not prove integration.
+Merge/cherry-pick, commit and push need their applicable grants.
 
-## Reopen, dependencies and recovery boundaries
+## Resolve failed premises and dependencies
 
-For REOPEN_REQUEST, identify the failed premise and its behavioral consequences;
-stop the incompatible patch, investigate and record the revised contract. Precision,
-cadence, API shape or failure semantics changes that alter requirements are design
-decisions even if discovered in implementation. Tests verify decided behavior;
-they must not invent a field, adapter or mock shape to settle an unknown contract.
-
-For DEPENDENCY_REQUEST, determine the actual owner and minimum interface/result
-needed. A large new domain can go to a separate Lead through Paseo when authority
-allows. Define its objective, exclusions, contract, stable result, proof and return
-recipient. Keep the original Lead on its trajectory as integration/acceptance owner.
-Escalate cross-project authority before assigning writes in another repository.
-For cross-project relay, follow references/governance.md; without an explicit grant
-and a verified recipient route, keep the dependent branch BLOCKED.
-
-For BLOCKED, preserve evidence and state the missing decision, capability or external
-prerequisite. Repeated corrections call for a root-mechanism check, not another local
-patch by default. Lead answers each request with an authorized continuation, revised
-assignment or explicit blocker. Supervisor recovery follows references/governance.md.
+REOPEN_REQUEST identifies the failed premise and behavioral consequence.
+Stop incompatible patches, investigate and record the revised contract;
+precision, cadence, representation/API or failure semantics can change
+requirements. Tests verify settled contracts rather than invent fields,
+adapters or mocks to settle them.
+DEPENDENCY_REQUEST identifies the actual owner and minimum interface/result.
+A separately authorized branch/Lead needs outcome, exclusions, contract,
+stable proof and recipient; retain original integration/acceptance ownership.
+Other-repository writes need explicit authority. For cross-project relay,
+follow references/governance.md; missing grant/route blocks the dependent work.
+BLOCKED names the missing decision/capability/prerequisite with evidence.
+Answer requests with authorized continuation, revised assignment or blocker;
+repeated correction classes follow review-gates.md's mechanism/effort rules.
 
 ## Proof and acceptance
 
-Require exact artifacts/diff (including relevant untracked and pre-existing work),
-actual commands/output/exit codes and a stable identity. Use the installed snapshot
-helper or an exact commit with all relevant working changes accounted for. Record
-external evidence separately; ignored outputs/processes are outside a Git snapshot.
-The helper aggregates untracked nested repository roots with per-sub-repo identity; staged gitlinks snapshot as `{path, indexOid, headOid, state}` — any state other than `clean` lands in top-level `incomplete`, and that submodule scope stays unproven until separately agreed evidence covers it.
+Inspect exact artifacts/diff, relevant pre-existing/untracked work and actual
+proof. Use a complete current desk capture or installed snapshot/full clean
+commit; ignored/external/process evidence needs its own observation.
+report-records.md owns submission/CLI validation. Record consistency proves
+no execution. Inspect measured server check/recipe results with their class,
+output and candidate; independently verify shell-reported checks. Repeat
+valid measured execution only for drift or an unresolved outcome question.
+The desk does not pause writers or prove semantic correctness: keep writers
+paused and the current candidate identical to the reviewed one.
 
-For a handback that claims a candidate or checks, require its `slp-record` block
-and read it with `slp.mjs records <report> --require handback`. Keep the prose as
-the report of record; parser validity and output hashes establish consistency,
-not execution. Lead or CI reruns each claimed check against the identified
-candidate before acceptance. Pass `--repo <absolute-path>` for the verifier's
-candidate checkout when checking referenced output; it overrides roots declared
-in the record. See `references/report-records.md` for field and failure
-semantics.
-
-Keep candidate writers paused during review and verification. A before/after identity
-change invalidates that acceptance attempt. Reviewers report severity, evidence,
-checks and APPROVE/FINDINGS; the write owner supplies proof; Lead issues the project verdict.
-Follow Session continuity for corrections and re-review. Keep unresolved findings visible.
-Adjudicate every material finding with reasons, evidence/counterevidence and residual
-risk within authority under references/review-gates.md; unanimity and reproduction
-alone are not verdict rules. Missing required proof or constraints remain unmet.
-Gate findings repeating one class across consecutive rounds follow
-references/review-gates.md's correction-loop escalation — mechanism
-investigation, affected-site enumeration or invariant refactor within the
-assignment's bounded correction/challenge budget — not another point-fix brief.
-
-Evidence must address real failure mechanisms and the Human outcome. Use integration,
-migration, cancellation, performance or Human product/visual/playtest evidence as
-appropriate; unit-test success cannot substitute for an untested outcome. The Human
-decides subjective or owner-only trade-offs. Complete with candidate, actual checks,
-review evidence, ACCEPT/CHANGES_REQUESTED/BLOCKED and residual risks. Artifact
-acceptance is distinct from Delivery and resource settlement: a bounded task settles
-after Delivery completes and no correction or re-review remains open. Keep the same
-write owner and independent review seats for open rework, then follow
-references/monitoring.md and the repository protocol to reconcile task resources.
-Settlement does not itself archive, kill or reparent sessions.
+Lead adjudicates material findings under review-gates.md. Match evidence to
+the actual outcome, including integration/failure/migration/cancellation/
+performance or Human product/visual/playtest. Status, local tests and scope
+approval do not prove an untested system outcome; Human owns subjective and
+reserved trade-offs. Record ACCEPT/CHANGES_REQUESTED/BLOCKED, current
+candidate, proof and risks. Use slp_task_rule for queue rulings when applicable,
+without treating qualification as the project verdict.
+Delivery and resource settlement use their own grants and completion;
+monitoring.md/report-records.md own those procedures. Open rework keeps
+Session continuity; a continuing lane does not keep a settled task open.
