@@ -41,9 +41,24 @@ verification. Rollout transitions perform no deployment.
 
 ## Tasks and effects
 
-Lead uses the current workflow view to choose outcomes, dependencies,
-proof policy, separate operation grants and effort bounds, then
-slp_task_define. The runtime computes readiness and qualified results from
+Lead chooses outcomes, dependencies, scope/review, proof policy, separate
+operation grants, allowed runtime and effort bounds. slp_task_deliver composes
+declaration, fresh-worker bootstrap and send for one new bounded outcome.
+Supply the semantic task body, runtime pins, text and current assignment CAS;
+shared caller checkout/workspace is the default placement. It internally uses
+the same Core/dispatch admissions, immutable subrequests and current pins.
+Read its result/phases/current view for partial failures; outer ok only means
+the operation receipt was read. Exact replay/slp_operation_get never resumes
+unfinished effects or declares another task. A pending seat needs explicit
+reconciliation followed by separately authorized dispatch send, never a new
+deliver call for the same outcome.
+
+slp_task_get targets one task and optional exact attempt, returning current
+identity/CAS, readiness and compact effect/resource markers without paging
+unrelated assignment history. Workflow pages still own complete historical
+proof, decisions and qualification context. Neither view establishes acceptance.
+For task amendments, phased work or continuation, keep slp_task_define and
+the explicit dispatch phases below. The runtime computes qualified results from
 current pins; consume its reasons rather than reconstruct the state machine.
 A qualified task is no project verdict. Scope is still the moving writer.
 A task ID/dispatch.reuse never determines the Peer outcome boundary or
@@ -53,7 +68,7 @@ authenticates grantRef; apply orchestration.md's Session continuity.
 |---|---|
 | New worker | slp_task_dispatch bootstrap with selected pool option/hash and placement. It reserves, materializes/verifies, creates without work, observes and binds the exact registered membership/scope. |
 | Same-outcome continuation or explicit Human exception | dispatch reuse after the semantic continuity decision; runtime verifies the existing seat but grants no exception. |
-| Deliver work | Refresh returned view/pins, then dispatch send with the neutral brief. seat-pending/sent:false requires slp_task_reconcile of the observed create/registration, then fresh pins; no second create. |
+| Deliver work | Use returned current pins or slp_task_get, then dispatch send with the neutral brief. seat-pending/sent:false requires slp_task_reconcile of the observed create/registration, then fresh pins; no second create. |
 | Output, question, delivery duty | Bound seat uses slp_task_result, slp_task_hold or slp_task_acknowledge. Attach actual evidence, distinguish claims from measurements and return the report to its owner. |
 | Ruling | Current owner uses slp_task_rule or hold ruling with evidence/counterevidence and risks. Reopened prerequisites stay visible; history is not rewritten. |
 | Integration | slp_task_integrate stage → check → land under the exact integration grant, target and recipe IDs. Runtime preserves unrelated target work and pins staged/final proof. Drift or missing proof blocks landing. |
@@ -86,6 +101,6 @@ record sink under report-records.md; the mirror proves no cleanup by itself.
 These protections cover guarded desk operations and their admitted effects,
 not arbitrary filesystem/shell work. Ordinary role creation can remain
 unbound if desk mint/registration fails; Lean/direct delegation follows its
-own manual procedure. Preserve semantic authority, independent judgment,
+own formation/compatibility procedure. Preserve semantic authority, independent judgment,
 actual writer pause, subjective acceptance and unsupported-state gaps.
 Source tests prove implementation, not installation/reload or live E2E.

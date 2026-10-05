@@ -17,8 +17,10 @@ Classify from the actual assignment, not available sessions:
 A direct Human-assigned Lead is valid without a Supervisor. When Human asks
 to form a standby Lead for a future task, record that formation exception:
 read-only orientation and ownership/handback acknowledgment complete its
-first phase, not the future project. The concrete task/grant continues this
-Lead; it relaxes no Peer outcome boundary.
+first phase, not the future project. Its acknowledgment covers current scope,
+report route and readiness; broader document audits belong to the concrete
+task. The concrete task/grant continues this Lead; it relaxes no Peer outcome
+boundary.
 
 Supply outcome/acceptance, real constraints, provisional choices/unknowns,
 owned/excluded scope, current phase/grants, dependencies, relevant skills,
@@ -28,21 +30,49 @@ formation in that brief/receipt: parent, seat, workspace/cwd, reason for any
 isolation and baseline work/resources. Need no separate formation file.
 For parallel work use orchestration.md's actual paths/shared-resource preflight.
 
-## Prepare and create
+## Form and deliver
 
-Use provider-routing.md to select the complete authorized bundle and prepare
-create arguments. prepare validates inputs and renders role/assignment/title;
-it starts no agent or authenticates grants. Pass taskLabel/disposition;
-review taskLabel uses `<task> / <lens>` with Spec or Standard unabbreviated.
-An assignmentFile pointer keeps private bytes outside the observable prompt;
-opt-in snapshot validates/inlines a bounded copy. The daemon never reads it.
+When advertised, use slp_seat_create with requestId, role, taskLabel,
+assignment and grantRef. Lead formation resolves the fresh saved slp-lead
+profile; Peer formation additionally needs explicit runtime option/hash and
+any required Jev decision under provider-routing.md. The bound caller supplies
+native parent/workspace/cwd. No caller request file, copied create arguments
+or task queue enrollment is required. The server creates without work, observes
+the exact native tuple and only then sends the assignment. grantRef is a claim;
+the caller still verifies authority, one writer and review sufficiency.
+The assignment names outcome, constraints, granted effects and proof/handback.
+Assignment được tạo ghi rõ parent agent ID đã xác minh và yêu cầu đúng một
+native report tới parent đó khi handback. Với Lead standby, báo readiness
+riêng với phán quyết kỹ thuật; không tạo vòng acknowledgment qua lại.
 
-Use agent-scoped Paseo create_agent with the emitted record and
-notifyOnFinish=true. Default placement is the parent's pinned workspace,
-including read-only review; a different checkout/lane needs its declared
-paths/reason. If a worktree lacks protocol/references, use authorized
-`slp.mjs materialize <target> --from <source>` and explicit --include inputs
-before preparation; this grants no installation or host edit.
+Read the operation's result and phases, not just its outer ok. Replaying the
+same input reads the immutable receipt; slp_operation_get reads it by original
+kind/requestId. Partial or uncertain create/send never continues on replay. Identity stays
+stable across caller membership epochs; the receipt keeps the original epoch.
+A fresh bound native caller can read its own historical receipt with
+callerEpochMatches=false, but invoking it under another epoch is denied.
+Retained early-format addresses are located without copying or resealing;
+ambiguous, corrupt or over-budget legacy evidence blocks a new invocation.
+Retain any returned agentId and scope, reconcile original host evidence and
+use a separately authorized explicit follow-up only when safe. Receipts retain
+resources and do not establish acceptance or cleanup. SDK create/send path
+này không xác lập finish callback; yêu cầu child gửi đúng một native report
+đến observed parent và dùng monitoring.md cho phần giám sát còn lại. Báo cáo
+đó thiết lập tuyến handback, không phải acceptance.
+
+For an unbound/older host or declared isolated placement, CLI prepare remains
+compatible: use provider-routing.md, prepare --emit create and agent-scoped
+Paseo create_agent with the emitted record and notifyOnFinish=true. Pass
+taskLabel/disposition; review taskLabel uses `<task> / <lens>`. An assignmentFile
+pointer or validated opt-in snapshot remains available on that CLI path.
+Khi compatibility host hỗ trợ final-report callback, dùng callback để lấy
+báo cáo thực tế của child. `notifyOnFinish` hay callback chỉ báo delivery;
+hãy đọc report và evidence trước khi đưa verdict.
+Default placement is the pinned parent workspace, including read-only review;
+a different checkout/lane needs its declared paths/reason. If it lacks
+protocol/references, use authorized `slp.mjs materialize <target> --from <source>`
+and explicit --include inputs before preparation; this grants no installation
+or host edit.
 
 Verify the returned ID against actual host parent/workspace/cwd and bundle.
 Confirm the brief's report route when its first report arrives. Titles,

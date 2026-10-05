@@ -112,6 +112,10 @@ import type { TaskExecutionDeps, TaskTurnEndedEvent } from "./desk-task-executio
 import type { TaskHostApi } from "./desk-task-execution-host.ts";
 import type { TaskRuntimeApi } from "./desk-task-runtime.ts";
 import { buildTaskRecap } from "./runtime/handoff-recap.ts";
+import { DeskSeatCreateInput, DeskOperationGetInput, DeskTaskDeliverInput, DeskTaskGetInput } from "../shared/delegation.ts";
+import { createFormationPlanner, runSeatCreate } from "./desk-formation.ts";
+import { createDeskOperations } from "./desk-operation.ts";
+import { projectTaskCurrent, runTaskDeliver } from "./desk-delivery.ts";
 import { isRejection } from "./desk-runner.ts";
 import {
   captureSeatSnapshot,
@@ -413,6 +417,14 @@ export const DESK_TOOL_CATALOG = [
     mutation: false,
     description: "Read a bounded task recap from the same authorized, revision-pinned workflow projection. Omissions and unresolved obligations remain visible; a recap grants no authority.",
   },
+  { name: "slp_seat_create", visible: true, mutation: true,
+    description: "Form a fresh Lead from its saved profile, or a Lean Peer from explicit pool pins. Server derives parent/workspace, prepares, creates without work, observes and delivers. Immutable replay never repeats effects." },
+  { name: "slp_operation_get", visible: true, mutation: false,
+    description: "Read this caller's exact formation/delivery operation receipt and partial phases by original requestId. Read-only; missing evidence never authorizes resubmission." },
+  { name: "slp_task_deliver", visible: true, mutation: true,
+    description: "Current Lead owner: declare one new bounded task, bootstrap a fresh Peer and send using current derived pins. Partial outcomes remain retained; no scheduler, retry or result acceptance." },
+  { name: "slp_task_get", visible: true, mutation: false,
+    description: "Read one authorized task and optional exact attempt with current identity, CAS pins, readiness and compact effect/resource markers. No unrelated assignment history pages." },
   {
     name: HIDDEN_TOOL,
     visible: false,
@@ -614,9 +626,13 @@ export function createDeskBridge(deps: DeskBridgeDeps) {
   let stableRoot: string | null = null;
   let paths: ReturnType<typeof deskBridgePaths> | null = null;
   let binding: {
+    bindingSha256: string;
     runtimePath: string;
     nodePath: string;
     candidateSha256: string;
+    payloadSha256: string;
+    launchSetSha256: string;
+    launchManifestSha256: string;
     /** The launch-set manifest's bridge pin — the P2-b amend seam records
      *  it; undefined means the bound candidate predates the bridge and no
      *  graft/hello may proceed (fail closed). */
@@ -688,9 +704,13 @@ export function createDeskBridge(deps: DeskBridgeDeps) {
     return {
       stableRoot,
       binding: {
+        bindingSha256: bound.bindingSha256,
         runtimePath: bound.runtimePath,
         nodePath: bound.node.path,
         candidateSha256: bound.candidateSha256,
+        payloadSha256: bound.payloadSha256,
+        launchSetSha256: bound.launchSetSha256,
+        launchManifestSha256: bound.launchManifestSha256,
         bridgeSha256: launchSet.bridgeSha256,
       },
     };
@@ -1004,22 +1024,23 @@ export function createDeskBridge(deps: DeskBridgeDeps) {
   }
 
   function capabilityGate(): DeskRejectionValue | null {
-    // E-P2D-4: `rpcDispatched` is set only when a real daemon→plugin RPC
-    // handler invoked `noteDispatch` — hook-context stashes never count, so
-    // the capability row stays `unknown` until a genuine dispatch lands.
+    // UDS tools depend on this bridge's measured transport, not on the
+    // separate operator plugin-RPC surface. Hook stashes still never count
+    // as RPC evidence; that audit row remains unknown until noteDispatch.
     const { records } = audit({
       now: now().toISOString(),
       observed: {
         rpcDispatched,
         providersSnapshot: null,
         agentsList: null,
+        deskBridge: state.kind === "listening" ? "listening" : "unavailable",
       },
     });
-    const row = records.find(r => r.capabilityId === CAPABILITY_IDS.pluginRpcDispatch);
+    const row = records.find(r => r.capabilityId === CAPABILITY_IDS.deskBridgeTransport);
     if (row?.status !== "supported") {
       return rejection(
         "CAPABILITY_GAP",
-        "the plugin-rpc.dispatch capability row is not supported in this audit",
+        "the desk-bridge.transport capability row is not supported in this audit",
         "dispatch stays closed until the capability audit reports the surface",
       );
     }
@@ -1221,6 +1242,66 @@ export function createDeskBridge(deps: DeskBridgeDeps) {
   }
 
   const TOOL_IMPLS: Record<(typeof DESK_TOOL_CATALOG)[number]["name"], ToolHandler> = {
+    slp_seat_create: defineTool(DeskSeatCreateInput, async ctx => {
+      if (stableRoot === null || binding === null) return rejection("CAPABILITY_GAP", "formation has no verified installed binding", "restore the active runtime");
+      const pinnedRoot = stableRoot;
+      // The listener may outlive an activation/rebind. Resolve the current
+      // receipt and its launch set for each new invocation, then pin that
+      // tuple across every effect. A rebind before the call is admissible
+      // after verification; a rebind after pinning remains fail-closed.
+      let fresh: Awaited<ReturnType<typeof resolveStableRoot>>;
+      try { fresh = await resolveStableRoot(); }
+      catch (error) {
+        if (isRejection(error)) return error;
+        const parsed = isRecord(error) ? DeskErrorCodeSchema.safeParse(error.code) : null;
+        const code = parsed?.success === true ? parsed.data : "CANDIDATE_DRIFT";
+        return rejection(code,
+          "the current installed binding could not be verified before formation",
+          "retain the invocation and reconcile the active binding before a new request");
+      }
+      if (fresh.stableRoot !== pinnedRoot) return rejection(
+        "CANDIDATE_DRIFT",
+        "the active runtime moved outside this bridge's verified stable root",
+        "retain the invocation and start a bridge bound to the current runtime",
+      );
+      const pinnedBinding = fresh.binding;
+      const host = deps.taskHost ?? (() => null);
+      const plan = createFormationPlanner({ runtimePath: pinnedBinding.runtimePath, daemonHome: dirname(pinnedRoot), host });
+      return runSeatCreate(ctx.row, ctx.input, { stableRoot: pinnedRoot, repoKey: ctx.bound.repoKey, host, plan,
+        guard: async () => {
+          if (stopped) return rejection("CAPABILITY_GAP", "bridge stopped during formation", "retain the original operation");
+          const capability = capabilityGate(); if (capability !== null) return capability;
+          const receipt = deps.journal.read(pinnedRoot);
+          const active = receipt?.binding;
+          if (receipt === null || !["ACTIVE", "ACTIVATING"].includes(receipt.state) || active == null
+              || active.bindingSha256 !== pinnedBinding.bindingSha256
+              || active.runtimePath !== pinnedBinding.runtimePath
+              || active.candidateSha256 !== pinnedBinding.candidateSha256
+              || active.payloadSha256 !== pinnedBinding.payloadSha256
+              || active.launchSetSha256 !== pinnedBinding.launchSetSha256
+              || active.launchManifestSha256 !== pinnedBinding.launchManifestSha256
+              || active.node.path !== pinnedBinding.nodePath) {
+            return rejection("CANDIDATE_DRIFT", "active runtime changed during formation", "retain the created seat and reconcile binding");
+          }
+          const fresh = freshRow(ctx.bound); if ("error" in fresh) return fresh.error;
+          const identity = await sdkIdentity(fresh.row); if (identity !== null) return identity;
+          const after = freshRow(ctx.bound); return "error" in after ? after.error : null;
+        },
+      });
+    }),
+    slp_operation_get: defineTool(DeskOperationGetInput, async ({ row, bound, input }) => {
+      if (stableRoot === null || row.agentId === null) return rejection("CAPABILITY_GAP", "operation receipt has no bound caller", "restore desk identity");
+      return createDeskOperations(stableRoot).get({ repoKey: bound.repoKey, membershipId: row.membershipId,
+        agentId: row.agentId, requestId: input.requestId, kind: input.kind });
+    }),
+    slp_task_deliver: defineTool(DeskTaskDeliverInput, async ctx => {
+      const services = await taskServices(ctx, ctx.input);
+      return isRejection(services) ? services : runTaskDeliver({ repoKey: ctx.bound.repoKey, row: ctx.row }, ctx.input, services);
+    }),
+    slp_task_get: defineTool(DeskTaskGetInput, async ({ row, bound, input, seatRead }) => {
+      if (seatRead?.state !== "ok") return rejection("STATE_UNREADABLE", "targeted task view requires a verified ledger", "restore desk readability");
+      return projectTaskCurrent(seatRead.ledger, { repoKey: bound.repoKey, row }, input);
+    }),
     [STATUS_TOOL]: defineTool(z.object({}).strict(), async ({ row, bound, availability, seatRead }) => {
       const limitations: string[] = [];
       if (availability === "recovery-required") {
@@ -1501,11 +1582,17 @@ export function createDeskBridge(deps: DeskBridgeDeps) {
   });
 
   function mcpToolsList() {
-    return TOOLS.filter(t => t.visible).map(t => ({
-      name: t.name,
-      description: t.description,
-      inputSchema: z.toJSONSchema(t.input),
-    }));
+    return TOOLS.filter(t => t.visible).map(t => {
+      const schema = z.toJSONSchema(t.input);
+      return {
+        name: t.name,
+        description: t.description,
+        // MCP ToolSchema requires an object root. Intersecting this root type
+        // with the untouched zod JSON Schema preserves every anyOf/oneOf
+        // branch and its strict additionalProperties constraints.
+        inputSchema: { ...schema, type: "object" },
+      };
+    });
   }
 
   type McpToolResult = { content: { type: "text"; text: string }[]; isError?: true };
@@ -1521,7 +1608,7 @@ export function createDeskBridge(deps: DeskBridgeDeps) {
       return fail(rejection(
         "INVALID_RECORD",
         "tools/call params fail the bridge envelope schema",
-        "the params must be {name, arguments?} within the wire bounds",
+        "the params must be {name, arguments?, _meta?} within the wire bounds",
       ));
     }
     const tool = TOOLS.find(t => t.name === call.data.name);

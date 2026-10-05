@@ -262,3 +262,44 @@ test('role-less input resolves the base family entry directly', async () => {
   const out = await loadCatalog({ schemaVersion: 1, family: 'devin' }, paseo);
   assert.equal(out.resolvedProvider, 'devin');
 });
+
+test('preview budget: a cold-alias refresh that outlives the budget still yields the measured snapshot', async () => {
+  // Real-elapsed check of the live repro: the no-model picker call hung in
+  // providers.refresh until the daemon abandoned the RPC, while the same
+  // snapshot answered ready in ~1s. The bound is real seconds — the handler
+  // must answer inside it with the measured catalog, no fake clock.
+  const loadCatalog = await freshCatalog();
+  const { paseo } = fakePaseo({
+    refresh: () => new Promise(() => {}),
+    snapshot: snapshotEntries([
+      { provider: 'slp-pi-supervisor', status: 'ready', models: [{ id: 'openai/gpt-6-luna' }], modes: [] },
+    ]),
+  });
+  const out = await loadCatalog({ schemaVersion: 1, family: 'pi', role: 'supervisor' }, paseo);
+  assert.equal(out.resolvedProvider, 'slp-pi-supervisor');
+  assert.deepEqual(out.models.map(m => m.id), ['openai/gpt-6-luna']);
+  assert.equal(out.error, null);
+});
+
+test('preview budget: an exhausted warm-up budget never starts loading-entry listings', async () => {
+  // Real-elapsed second bound check: refresh consumes the whole shared
+  // deadline, then the still-loading entry must answer with its measured
+  // state without starting any advisory listing call — expired budget is a
+  // no-start, not a started-then-abandoned call.
+  const loadCatalog = await freshCatalog();
+  const { paseo, calls } = fakePaseo({
+    refresh: () => new Promise(() => {}),
+    snapshot: snapshotEntries([
+      { provider: 'pi', status: 'ready', models: [{ id: 'base-m' }], modes: [] },
+      { provider: 'slp-pi-supervisor', status: 'loading' },
+    ]),
+  });
+  const out = await loadCatalog({ schemaVersion: 1, family: 'pi', role: 'supervisor' }, paseo);
+  assert.equal(calls.listModels, 0, 'expired budget must not start listings');
+  assert.equal(calls.listModes, 0);
+  assert.equal(calls.listFeatures.length, 0);
+  assert.equal(out.resolvedProvider, 'slp-pi-supervisor');
+  assert.match(out.error, /slp-pi-supervisor is loading/);
+  assert.deepEqual(out.models, []);
+  assert.deepEqual(out.modes, []);
+});

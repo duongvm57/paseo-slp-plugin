@@ -534,10 +534,16 @@ export const DeskBridgeAck = z.union([
   }).strict(),
 ]);
 
-/** tools/call parameter envelope — validated before any dispatch. */
+/** tools/call parameter envelope — validated before any dispatch. MCP
+ * request metadata is transport-only: it is never tool arguments, actor
+ * authority or part of a canonical desk command. The raw frame byte cap
+ * also bounds its size. */
 export const DeskBridgeToolCall = z.object({
   name: z.string().min(1).max(WIRE_LIMITS.deskBridgeToolName),
   arguments: z.record(z.string(), z.unknown()).optional(),
+  _meta: z.object({
+    progressToken: z.union([z.string(), z.number()]).optional(),
+  }).catchall(z.unknown()).optional(),
 }).strict();
 
 /** A bridge-emitted JSON-RPC error object: the numeric JSON-RPC code stays

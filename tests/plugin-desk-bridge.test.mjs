@@ -40,6 +40,7 @@ import {
   deskRepoPaths,
   repoKeyFor,
 } from '../plugin/server/desk-store.ts';
+import { auditCapabilities, CAPABILITY_IDS } from '../plugin/server/capabilities.ts';
 import { DESK_TOOL_CATALOG } from '../plugin/server/desk-bridge.ts';
 import { sha256Hex } from '../plugin/server/config-view.ts';
 import {
@@ -48,6 +49,8 @@ import {
   DeskSeatStatus,
   WIRE_LIMITS,
 } from '../plugin/shared/enforcement.ts';
+import { DeskSeatCreateInput } from '../plugin/shared/delegation.ts';
+import { DeskTaskDispatchInput, DeskTaskIntegrateInput } from '../plugin/shared/enforcement.ts';
 
 const REQUEST_CAP = WIRE_LIMITS.deskBridgeRequestBytes;
 const RESPONSE_CAP = WIRE_LIMITS.deskBridgeResponseBytes;
@@ -399,9 +402,33 @@ test('tools/list exposes the visible catalog — hidden and excluded tools absen
     'slp_task_reconcile',
     'slp_task_integrate',
     'slp_task_recap',
+    'slp_seat_create',
+    'slp_operation_get',
+    'slp_task_deliver',
+    'slp_task_get',
   ]);
-  // The catalog row carries a JSON Schema derived from the zod input.
-  assert.equal(reply.result.tools[0].inputSchema.type, 'object');
+  // MCP clients require the public input schema root to be an object even
+  // when zod represents a discriminated union as a top-level anyOf/oneOf.
+  for (const tool of reply.result.tools) {
+    assert.equal(tool.inputSchema.type, 'object', `${tool.name} inputSchema root`);
+  }
+  const byName = new Map(reply.result.tools.map(tool => [tool.name, tool]));
+  const unions = {
+    slp_task_dispatch: ['bootstrap', 'reuse', 'send', 'archive'],
+    slp_task_integrate: ['stage', 'check', 'land', 'reconcile', 'discharge'],
+    slp_seat_create: ['lead', 'peer'],
+  };
+  for (const [name, expectedVariants] of Object.entries(unions)) {
+    const schema = byName.get(name).inputSchema;
+    const branches = schema.oneOf ?? schema.anyOf;
+    assert.ok(Array.isArray(branches) && branches.length === expectedVariants.length, `${name} retains every input branch`);
+    for (const branch of branches) {
+      assert.equal(branch.additionalProperties, false, `${name} branch stays strict`);
+    }
+    const discriminator = name === 'slp_seat_create' ? 'role' : 'phase';
+    assert.deepEqual(branches.map(branch => branch.properties?.[discriminator]?.const).sort(),
+      [...expectedVariants].sort(), `${name} retains its discriminated variants`);
+  }
   // slp_recover_lock / slp_desk_internal and non-desk verbs are never
   // catalog entries.
   for (const forbidden of ['slp_recover_lock', 'slp_desk_internal', 'slp_review_open', 'slp_decision_record', 'slp_deploy']) {
@@ -438,17 +465,21 @@ test('the whole desk tool catalog satisfies DeskBridgeToolEntry (all rows, centr
     'slp_check_run',
     'slp_decision_append',
     'slp_handback_submit',
+    'slp_operation_get',
     'slp_rollout_declare',
     'slp_rollout_transition',
     'slp_scope_declare',
     'slp_scope_review',
     'slp_scope_transition',
+    'slp_seat_create',
     'slp_settlement_export',
     'slp_settlement_record',
     'slp_status',
     'slp_task_acknowledge',
     'slp_task_define',
+    'slp_task_deliver',
     'slp_task_dispatch',
+    'slp_task_get',
     'slp_task_hold',
     'slp_task_integrate',
     'slp_task_recap',
@@ -497,6 +528,27 @@ test('slp_status answers the seat-scoped view and nothing more', async t => {
   assert.equal(view.acceptance, 'not-established-by-this-view');
 });
 
+test('MCP request metadata is transport-only and cannot override seat identity or arguments', async t => {
+  const { reader, conn, row } = await boundSeat(t);
+  const meta = { progressToken: 'local-probe', actorAgentId: 'forged-agent', nested: { grantRef: 'forged-grant' } };
+  const call = params => rpc(reader, conn, { jsonrpc: '2.0', id: 1, method: 'tools/call', params });
+  const reply = await call({ name: 'slp_status', arguments: {}, _meta: meta });
+  assert.notEqual(reply.result.isError, true);
+  const view = DeskSeatStatus.parse(JSON.parse(reply.result.content[0].text));
+  assert.equal(view.seat.membershipId, row.membershipId);
+  assert.equal(view.seat.agentId, 'agent-1');
+  for (const params of [
+    { name: 'slp_status', arguments: {}, _meta: 'invalid' },
+    { name: 'slp_status', arguments: {}, _meta: { progressToken: false } },
+    { name: 'slp_status', arguments: {}, actorAgentId: 'forged-agent' },
+    { name: 'slp_status', arguments: { actorAgentId: 'forged-agent' }, _meta: meta },
+  ]) {
+    const rejected = await call(params);
+    assert.equal(rejected.result.isError, true);
+    assert.equal(JSON.parse(rejected.result.content[0].text).code, 'INVALID_RECORD');
+  }
+});
+
 test('a hidden mechanism entry is rejected with AUTHORITY_REQUIRED', async t => {
   const { reader, conn } = await boundSeat(t);
   const reply = await rpc(reader, conn, {
@@ -533,6 +585,53 @@ test('tool arguments beyond the strict schema are INVALID_RECORD', async t => {
   });
   const rejection = JSON.parse(reply.result.content[0].text);
   assert.equal(rejection.code, 'INVALID_RECORD');
+});
+
+test('native union branches reject discriminator and unknown-field violations before effects', async t => {
+  const effects = [];
+  const taskHost = () => ({
+    providers: { snapshot: async () => { effects.push('providers.snapshot'); return { entries: [] }; } },
+    agents: {
+      ref: () => ({ refresh: async () => ({ agent: LIVE_AGENT }), send: async () => effects.push('agents.send') }),
+      create: async () => { effects.push('agents.create'); return { id: 'unexpected' }; },
+    },
+    workspaces: { ref: () => ({ agents: { create: async () => { effects.push('workspaces.create'); return { id: 'unexpected' }; } } }) },
+  });
+  const { reader, conn } = await boundSeat(t, { taskHost });
+  const dispatch = {
+    requestId: 'union-dispatch', assignmentId: 'asg-fixture', taskId: 'task-fixture',
+    expectedLedgerRevision: 0, expectedBriefRevision: 0, expectedOwnershipRevision: 0,
+    expectedTaskRevision: 1, grantRef: 'human:fixture', attemptId: null, expectedAttemptRevision: 0,
+    runtime: { optionId: 'pool-fixture', catalogSha256: 'a'.repeat(64) },
+    placement: { kind: 'shared-checkout', cwd: '/repo' }, phase: 'bootstrap',
+  };
+  const integrate = {
+    requestId: 'union-integrate', assignmentId: 'asg-fixture', taskId: 'task-fixture', resultId: 'result-fixture',
+    expectedLedgerRevision: 0, expectedResultRevision: 1, expectedAdjudicationRevision: 1,
+    phase: 'stage', integrationActionId: null,
+    grant: { authorityRef: 'human:fixture', paths: ['src/file.ts'], target: { cwd: '/repo' } },
+    verification: { recipeIds: [] }, stageKind: 'content-dir',
+  };
+  const seatCreate = { requestId: 'union-create', role: 'lead', grantRef: 'human:fixture',
+    taskLabel: 'bounded work', assignment: 'Implement the bounded task.' };
+  assert.equal(DeskTaskDispatchInput.safeParse(dispatch).success, true, 'bootstrap branch fixture is valid');
+  assert.equal(DeskTaskIntegrateInput.safeParse(integrate).success, true, 'stage branch fixture is valid');
+  assert.equal(DeskSeatCreateInput.safeParse(seatCreate).success, true, 'Lead branch fixture is valid');
+  const calls = [
+    ['slp_task_dispatch', { ...dispatch, phase: 'send' }],
+    ['slp_task_dispatch', { ...dispatch, callerAgentId: 'forged' }],
+    ['slp_task_integrate', { ...integrate, phase: 'land' }],
+    ['slp_task_integrate', { ...integrate, internalReceipt: true }],
+    ['slp_seat_create', { ...seatCreate, role: 'peer' }],
+    ['slp_seat_create', { ...seatCreate, modeId: 'caller-selected' }],
+  ];
+  let id = 10;
+  for (const [name, args] of calls) {
+    const reply = await rpc(reader, conn, { jsonrpc: '2.0', id: id++, method: 'tools/call', params: { name, arguments: args } });
+    assert.equal(reply.result.isError, true, `${name} must reject the invalid union input`);
+    assert.equal(JSON.parse(reply.result.content[0].text).code, 'INVALID_RECORD', name);
+    assert.deepEqual(effects, [], `${name} rejection occurs before native/provider effects`);
+  }
 });
 
 test('dispatch stays closed while no host SDK context has arrived', async t => {
@@ -900,9 +999,10 @@ test('graft: a payload that never declared the binary refuses to serve it', asyn
 // session-open stash — live SDK reaches the dispatch guards on resume opens
 // ---------------------------------------------------------------------------
 
-test('E-P2D-4: a hook-context stash supplies identity but never dispatch evidence', async t => {
+test('E-P2D-4: hook identity serves UDS tools without claiming operator RPC evidence', async t => {
   const paseoRef = { current: null };
-  const f = await started(t, { paseoRef });
+  let audited;
+  const f = await started(t, { paseoRef, audit: input => { audited = auditCapabilities(input); return audited; } });
   const git = gitRepo(t);
   const handle = 'resume-handle';
   await seedMembership(seedStore(f), repoOf(git), memberRow(handle));
@@ -918,8 +1018,8 @@ test('E-P2D-4: a hook-context stash supplies identity but never dispatch evidenc
   });
   assert.equal(JSON.parse(closed.result.content[0].text).code, 'CAPABILITY_GAP');
   // A session_open hook ctx arrives — the SDK identity surface is now
-  // stashed, but a hook firing is NOT a daemon→plugin RPC dispatch, so the
-  // capability gate still reports plugin-rpc.dispatch as not supported.
+  // stashed. A hook is not operator RPC evidence, but UDS dispatch needs
+  // the listening bridge transport plus that live SDK identity.
   f.bridge.sessionOpenStash({ request: {} }, { paseo: livePaseo(LIVE_AGENT) });
   const hookOnly = await rpc(reader, conn, {
     jsonrpc: '2.0',
@@ -927,9 +1027,10 @@ test('E-P2D-4: a hook-context stash supplies identity but never dispatch evidenc
     method: 'tools/call',
     params: { name: 'slp_status', arguments: {} },
   });
-  const gateRejection = JSON.parse(hookOnly.result.content[0].text);
-  assert.equal(gateRejection.code, 'CAPABILITY_GAP');
-  assert.match(gateRejection.message, /plugin-rpc.dispatch/);
+  const hookView = DeskSeatStatus.parse(JSON.parse(hookOnly.result.content[0].text));
+  assert.equal(hookView.desk.state, 'available');
+  assert.equal(audited.records.find(row => row.capabilityId === CAPABILITY_IDS.pluginRpcDispatch).status, 'unknown');
+  assert.equal(audited.records.find(row => row.capabilityId === CAPABILITY_IDS.deskBridgeTransport).status, 'supported');
   // The create-hook stash behaves identically — hooks never mint evidence.
   // (The graft may still wire config; what it must never do is open the
   // plugin-rpc.dispatch capability row.)
@@ -943,8 +1044,8 @@ test('E-P2D-4: a hook-context stash supplies identity but never dispatch evidenc
     method: 'tools/call',
     params: { name: 'slp_status', arguments: {} },
   });
-  assert.equal(JSON.parse(createHookOnly.result.content[0].text).code, 'CAPABILITY_GAP');
-  // Only a real RPC handler invocation — noteDispatch — opens the row.
+  assert.equal(DeskSeatStatus.parse(JSON.parse(createHookOnly.result.content[0].text)).desk.state, 'available');
+  // An actual operator RPC observation is independent of UDS availability.
   f.bridge.noteDispatch(f.paseoRef.current);
   const open = await rpc(reader, conn, {
     jsonrpc: '2.0',

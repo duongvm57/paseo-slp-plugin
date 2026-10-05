@@ -70,6 +70,7 @@ export function bridgeFixture(t, homePrefix, pin, over = {}) {
     payload,
     paseoRef,
     taskHost: over.taskHost,
+    audit: over.audit,
     detectDaemonHome: () => ({ daemonHome: home, source: 'env' }),
     realpath: realpathSync,
     createStore: over.createStore ?? (root => createDeskStore({ stableRoot: root })),

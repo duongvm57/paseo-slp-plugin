@@ -44,7 +44,7 @@ import { routeDecide, routeDecideSchema } from './jev-routing.ts';
 import { jevRoutingState } from './jev.ts';
 import { resolveHome } from './managed-home.ts';
 import { installPaseo, uninstallPaseo, upgradePaseo, initWorkspace, materializeWorkspace, installHome } from './paseo-install.ts';
-import { inventory } from './inventory.ts';
+import { inventory, liveInventory } from './inventory.ts';
 import { agents } from './agents.ts';
 import { monitor } from './monitor.ts';
 import { notebook } from './notebook.ts';
@@ -69,7 +69,7 @@ const commands: Record<string, CommandSpec> = {
   routes: { flags: ['--paseo-home', '--out'], target: 'repository', usage: 'routes <absolute-repo> [--paseo-home <absolute-home>] [--out <path>]' },
   inventory: { flags: ['--paseo-home'], usage: 'inventory [--paseo-home <absolute-home>]' },
   agents: { flags: ['--paseo-home'], usage: 'agents [--paseo-home <absolute-home>]' },
-  prepare: { flags: ['--check', '--emit', '--schema', '--out'], target: 'request.json', usage: 'prepare <request.json> [--check | --emit create | --schema] [--out <path>]' },
+  prepare: { flags: ['--check', '--emit', '--schema', '--out', '--live', '--paseo-home'], target: 'request.json', usage: 'prepare <request.json> [--check | --emit create | --schema] [--live --paseo-home <absolute-home>] [--out <path>]' },
   'prepare-handoff': { flags: ['--check', '--emit', '--schema', '--out'], target: 'request.json', usage: 'prepare-handoff <request.json> [--check | --emit create | --schema] [--out <path>]' },
   materialize: { flags: ['--from', '--apply', '--include', '--paseo-home'], target: 'repository', usage: 'materialize <repository> --from <source-repository> [--include <repo-path>]... [--paseo-home <absolute-home>] [--apply]' },
   monitor: { flags: [], target: 'request.json', usage: 'monitor <request.json>' },
@@ -103,7 +103,7 @@ try {
       continue;
     }
     if (Object.hasOwn(options, key)) throw new Error(`Repeated option ${key}`);
-    if (key === '--apply' || key === '--reload' || key === '--check' || key === '--schema' || key === '--json' || key === '--bridge') options[key] = true;
+    if (key === '--apply' || key === '--reload' || key === '--check' || key === '--schema' || key === '--json' || key === '--bridge' || key === '--live') options[key] = true;
     else if (key === '--emit') {
       if (args[i + 1]! !== 'create') throw new Error('--emit requires create');
       options[key] = args[++i];
@@ -220,16 +220,27 @@ try {
   else if (command === 'verify') result = verifyInstall(resolve(target!));
   else if (command === 'prepare' || command === 'prepare-handoff') {
     const handoff = command === 'prepare-handoff';
+    let liveRequest: Parameters<typeof launchPlan>[1] | undefined;
+    if (options['--live']) {
+      if (handoff || options['--schema']) throw new Error('--live supports ordinary saved-profile preparation only');
+      const request = readJson(target!) as Parameters<typeof launchPlan>[1];
+      if (!['supervisor', 'lead'].includes(request.role ?? '') || request.binding || request.providers || request.profiles || request.inventoryFile || request.route) {
+        throw new Error('--live requires a Supervisor/Lead request without binding, routing or caller inventory overrides');
+      }
+      const home = resolveHome(options['--paseo-home']);
+      const observed = liveInventory(home);
+      liveRequest = { ...request, paseoHome: home, providers: observed.providers, profiles: observed.profiles };
+    }
     if (options['--schema']) {
       if (target) throw new Error(`${command} --schema takes no request file`);
       result = requestSchema(handoff);
     } else if (options['--check']) {
       // Preflight only: named stage results, never a plan and never a spawn.
       // Exit 1 when any check fails so scripts can gate on it.
-      result = launchCheck(root, readJson(target!) as Parameters<typeof launchCheck>[1], { handoff });
+      result = launchCheck(root, liveRequest ?? readJson(target!) as Parameters<typeof launchCheck>[1], { handoff });
       if (!(result as ReturnType<typeof launchCheck>).ok) process.exitCode = 1;
     } else {
-      const planned = handoff ? handoffPlan(root, readJson(target!) as Parameters<typeof handoffPlan>[1]) : launchPlan(root, readJson(target!) as Parameters<typeof launchPlan>[1]);
+      const planned = handoff ? handoffPlan(root, readJson(target!) as Parameters<typeof handoffPlan>[1]) : launchPlan(root, liveRequest ?? readJson(target!) as Parameters<typeof launchPlan>[1]);
       // --emit create prints an audit artifact: `create` is the create_agent
       // argument record verbatim (initialPrompt, title, settings, workspaceId
       // untrimmed), and modeId/modeIdSource record the resolved mode plus its

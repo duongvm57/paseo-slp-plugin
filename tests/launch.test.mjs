@@ -110,26 +110,26 @@ test('prepare on a non-installed root names the root and the installed CLI, neve
 
 test('spawnKit carries role-scoped approximate MCP tool signatures', t => {
   const { dir, installed } = fixture(t);
-  const orchestrating = ['create_agent', 'send_agent_prompt', 'create_workspace', 'list_workspaces',
+  const orchestrating = ['slp_seat_create', 'slp_seat_create', 'slp_task_deliver', 'slp_task_get', 'slp_operation_get', 'create_agent', 'send_agent_prompt', 'create_workspace', 'list_workspaces',
     'list_providers', 'list_profiles', 'list_agents', 'get_agent_status', 'get_agent_activity',
     'create_heartbeat', 'delete_heartbeat', 'cancel_agent'];
   for (const role of ['supervisor', 'lead']) {
     const plan = launchPlan(installed, { ...request, repository: dir, role, binding: piBinding });
-    assert.match(plan.spawnKit.note, /approximate; verify against live mcp_list_tools/);
+    assert.match(plan.spawnKit.note, /approximate; consult the specific live schema for unfamiliar parameters or a mismatch/);
     assert.deepEqual(plan.spawnKit.tools.map(tool => tool.split('(')[0]), orchestrating);
-    assert.match(plan.spawnKit.tools[0], /labels\?: object/);
+    assert.match(plan.spawnKit.tools[5], /labels\?: object/);
     for (const tool of plan.spawnKit.tools) assert.match(tool, /^[a-z_]+\([^)]*\)$/);
     // The carrier: create_agent transmits only initialPrompt, so the kit must
     // reach the child there, not just at plan level.
     for (const tool of plan.spawnKit.tools) assert.ok(plan.create.initialPrompt.includes(`- ${tool}`));
-    assert.match(plan.create.initialPrompt, /approximate; verify against live mcp_list_tools/);
+    assert.match(plan.create.initialPrompt, /approximate; consult the specific live schema for unfamiliar parameters or a mismatch/);
   }
   const peer = launchPlan(installed, { ...request, repository: dir, role: 'peer', providers, route: catalogFixture(dir) });
-  assert.deepEqual(peer.spawnKit.tools.map(tool => tool.split('(')[0]), ['send_agent_prompt', 'get_agent_status']);
+  assert.deepEqual(peer.spawnKit.tools.map(tool => tool.split('(')[0]), ['slp_task_get', 'send_agent_prompt', 'get_agent_status']);
   // The Peer route resolves a verified slp-*-peer wrapper, which injects the
   // carrier at session entry — the prompt omits it, the plan fields stay.
   assert.ok(!peer.create.initialPrompt.includes('Policy locators —'));
-  assert.equal(peer.spawnKit.tools.length, 2);
+  assert.equal(peer.spawnKit.tools.length, 3);
   assert.throws(() => spawnKit('human'), /Unknown role/);
 });
 
@@ -319,7 +319,7 @@ test('the prompt carrier is dropped only when the target wrapper provably inject
   const live = launchPlan(installed, { ...request, repository: dir, role: 'lead', binding: wrapped, providers: leadProviders });
   assert.ok(!live.create.initialPrompt.includes('Policy locators —'));
   assert.ok(!live.create.initialPrompt.includes('Spawn kit —'));
-  assert.equal(live.spawnKit.tools.length, 12);
+  assert.equal(live.spawnKit.tools.length, 17);
   assert.ok(live.orientation.policyBytes.length > 0);
   // The same wrapper without a live inventory observation keeps the fallback.
   const blind = launchPlan(installed, { ...request, repository: dir, role: 'lead', binding: wrapped });
@@ -531,7 +531,7 @@ test('handoff plans carry modeId, spawnKit and orientation alongside the packet'
   assert.equal(plan.modeId, null);
   assert.equal(plan.modeIdSource, 'none');
   assert.deepEqual(plan.warnings, [NO_MODE_WARNING]);
-  assert.equal(plan.spawnKit.tools.length, 12);
+  assert.equal(plan.spawnKit.tools.length, 17);
   assert.equal(plan.orientation.installedRoot, installed);
   assert.equal(plan.handoff.previousAgentId, 'old-lead');
   assert.equal(plan.handoff.state, 'paused on snapshot', 'legacy free text remains intact');

@@ -1905,7 +1905,10 @@ function attemptEffectGate(
       const scope = ledger.scopes.filter(row => row.assignmentId === attempt.assignmentId && row.scopeId === attempt.boundScopeId).at(-1);
       const transition = ledger.scopeTransitions.filter(row => row.assignmentId === attempt.assignmentId && row.scopeId === attempt.boundScopeId).at(-1);
       if (scope === undefined || scope.revision !== attempt.boundScopeRevision || scope.briefRevision !== task.briefRevision ||
-          scope.ownership?.writerAgentId !== member.agentId || transition?.to !== "claimed") {
+          // A declared scope without ownership can carry read-only work.
+          // Its binding/revision/state still apply; a writer tuple is required
+          // only when the task actually declares writer ownership.
+          (task.scope.ownership !== null && scope.ownership?.writerAgentId !== member.agentId) || transition?.to !== "claimed") {
         return reject("SCOPE_CONFLICT", "writable delivery has no exact current claimed writer scope", "attach, declare and claim atomically before writable delivery");
       }
     }

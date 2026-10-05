@@ -6,14 +6,47 @@ assigned repository pool. A specifically Human-tagged role option or explicit
 Supervisor/Lead experiment remains a separately authorized route, not a
 missing-profile/Peer-pool workaround. Dispositions imply no fixed model.
 
-## Choose and prepare
+## Saved Supervisor/Lead profile
 
-Run `slp.mjs routes <absolute-repository> --paseo-home <home>` to read current
+For ordinary Lead formation, use the saved slp-lead profile through
+slp_seat_create when advertised. It reads the saved bundle and connected
+providers freshly, revalidates before create/send and observes the native
+runtime. Supervisor child formation uses the compatible CLI path below;
+Supervisor can still be the caller forming a Lead. Neither saved-profile
+branch selects a Peer pool or Jev decision.
+Use the host's PASEO_AGENT_ID for an exact get_agent_status lookup when
+available; otherwise slp_status({}) supplies your desk identity/workspace.
+Verify actual parent/report metadata; a missing source needs one bounded
+host lookup and a recorded gap.
+
+For CLI compatibility or a host without the native operation, write a compact
+prepare request with role/repository/workspaceId/assignment
+and optional taskLabel (without a role prefix). Run prepare --live --emit
+create --paseo-home <verified-home>. The helper loads saved profiles, fetches
+providers from that home's live daemon, validates them and emits the exact
+create record. It starts no session and has no configured-only fallback.
+Consult prepare --schema once if the input shape is unknown.
+
+Explicitly supplied live profile/provider arrays remain supported by prepare;
+copy them verbatim or use inventoryFile, not manual transcription. For
+ordinary/Lean launch --emit create already validates the inputs: --check is
+for diagnosing a rejection, not a second required pass.
+
+Preserve the emitted bundle and verify returned settings/parent/placement
+under delegation. Profile/option pins take precedence over protocol
+agent_mode fallback; unresolved mode needs Human. Missing profile or
+unavailable provider blocks that launch, not a search for another runtime.
+Configured managed inventory is not live evidence; inline live providers
+win over inventoryFile. Preparation and host create are not atomic.
+
+## Peer pool
+
+Run slp.mjs routes <absolute-repository> --paseo-home <home> to read current
 source/options/hash. A repository catalog wins even when empty; otherwise
 only the Manager-owned user pool is fallback. Preserve routing_intent;
 report poolDrift/warnings for Human reconciliation, not auto-merging them.
-When `routes` reports `jevRouting.routing` as `shadow`, `armed` or `error`,
-read references/jev-routing.md; skip unconfigured/off. Error blocks the branch.
+When routes reports `jevRouting.routing` as `shadow`, `armed` or `error`, read
+references/jev-routing.md; skip unconfigured/off. Error blocks the branch.
 
 Choose an eligible suitable option under task budget. On desk-managed
 dispatch, supply its optionId/catalogSha256 and any required decision receipt;
@@ -21,19 +54,12 @@ the runtime resolves the complete bundle against fresh host providers and
 rechecks before effects. Consume its rejection instead of duplicating provider/
 mode/feature verification. Configuration status alone proves no live quota.
 
-On ordinary/Lean launch, refresh saved profiles and live list_providers.
-Use prepare with role/repository/workspace/assignment; Peer adds route pins.
-Copy the live provider array verbatim, not the tool envelope/config objects.
-prepare --check validates runtime/route/receipt/settings and --emit create
-renders exact arguments/mode provenance; it starts no session. Use advertised
---schema for input shape. Its catalog validation is not atomic with host
-create: verify actual returned settings/parent/placement under delegation.
-Configured managed inventory providers are not live launch evidence;
-inline live providers win over inventoryFile. Profile/option pins take
-precedence over protocol agent_mode fallback; unresolved mode needs Human.
-Preserve complete emitted settings and exact model IDs including slashes;
-never overlay inherited effort/features or bypass Peer routing with bindings.
-Missing/ineligible pool or unavailable runtime blocks only that launch.
+On ordinary/Lean launch, pass the selected pins to slp_seat_create; the server
+resolves them with the installed launch module and fresh SDK providers.
+CLI compatibility uses live list_providers, Peer route pins in prepare and
+--emit create as above. Preserve complete settings and
+exact model IDs including slashes; never overlay inherited effort/features
+or bypass Peer routing with bindings.
 
 ## Quota and transfer
 

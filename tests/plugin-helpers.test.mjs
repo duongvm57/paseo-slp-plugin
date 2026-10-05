@@ -12,6 +12,7 @@ import { join } from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { install, json, hash } from '../plugin/server/runtime/cli/package.ts';
 import { roleBundle, policyLocators } from '../plugin/server/runtime/cli/role-bundle.ts';
+import { liveInventory } from '../plugin/server/runtime/cli/inventory.ts';
 import { verifyProvider } from '../plugin/server/runtime/cli/binding.ts';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
@@ -155,7 +156,7 @@ test('role instructions carry the spawn kit and policy locators at session entry
   install(root, installed);
   // Unmanaged render: locators resolve under the installation itself.
   const lead = roleBundle(installed, 'lead', {});
-  assert.match(lead.instructions, /\nSpawn kit — role-scoped Paseo MCP signatures \(approximate; verify against live mcp_list_tools\):\n/);
+  assert.match(lead.instructions, /\nSpawn kit — role-scoped Paseo MCP signatures \(approximate; consult the specific live schema for unfamiliar parameters or a mismatch\):\n/);
   assert.ok(lead.instructions.includes('- create_agent(title: string'));
   // The locator set derives from the install receipt: docs/contract.md lives
   // outside the install unit and is never declared.
@@ -569,4 +570,43 @@ test('tiny policy keeps protocol-owned ceremony separate from required gates and
   assert.match(protocol, /Lead inspection\/Gate\/verdict/);
   assert.match(protocol, /Direct Lead write grant.*None by default; Human may specify clear reversible scope, proof\/review bounds/);
   assert.match(orchestration, /One Peer Engineer; tiny ceremony comes from the effective protocol\. Direct Lead writes follow common policy's explicit grant/);
+});
+
+test('live preparation inventories only the verified home and preserves the saved bundle', () => {
+  const home = '/fixture/paseo';
+  const config = json({ daemon: { agentProfiles: [{ id: 'slp-lead', provider: 'slp-codex-lead', model: 'gpt-test', modeId: 'full-access', thinkingOptionId: 'high', featureValues: { fast: false } }] } });
+  const calls = [];
+  const exec = args => {
+    calls.push(args);
+    return json(args[0] === 'daemon'
+      ? { home, localDaemon: 'running', connectedDaemon: 'reachable', serverId: 'fixture-server', listen: '127.0.0.1:6767' }
+      : [{ provider: 'slp-codex-lead', enabled: 'Enabled', status: 'available' }]);
+  };
+  const out = liveInventory(home, { exec, read: () => config });
+  assert.deepEqual(calls, [
+    ['daemon', 'status', '--home', home, '--json'],
+    ['provider', 'ls', '--host', '127.0.0.1:6767', '--json'],
+  ]);
+  assert.deepEqual(out.profiles[0], JSON.parse(config).daemon.agentProfiles[0]);
+  assert.deepEqual(out.providers, [{ id: 'slp-codex-lead', enabled: true, status: 'available' }]);
+  verifyProvider(out.providers, 'slp-codex-lead', () => 'codex');
+  assert.equal(out.hostId, 'fixture-server');
+});
+
+test('live preparation refuses foreign/unreachable hosts and changed profiles without fallback', () => {
+  const home = '/fixture/paseo';
+  const config = json({ daemon: { agentProfiles: [] } });
+  for (const status of [
+    { home: '/foreign', localDaemon: 'running', connectedDaemon: 'reachable', serverId: 's', listen: '127.0.0.1:1' },
+    { home, localDaemon: 'running', connectedDaemon: 'unreachable', serverId: 's', listen: '127.0.0.1:1' },
+  ]) {
+    let calls = 0;
+    assert.throws(() => liveInventory(home, { read: () => config, exec: () => { calls++; return json(status); } }), /mapping is unverified/);
+    assert.equal(calls, 1);
+  }
+  let reads = 0;
+  assert.throws(() => liveInventory(home, {
+    read: () => reads++ === 0 ? config : config + ' ',
+    exec: args => json(args[0] === 'daemon' ? { home, localDaemon: 'running', connectedDaemon: 'reachable', serverId: 's', listen: '127.0.0.1:1' } : []),
+  }), /profiles changed/);
 });

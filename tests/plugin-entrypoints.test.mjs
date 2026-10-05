@@ -110,6 +110,20 @@ export const createLauncherBuilder = () => ({
   async publish() { throw new Error('not exercised by contribute()'); },
   async verify() { throw new Error('not exercised by contribute()'); },
 });
+export const createDeskBridge = deps => {
+  const probe = globalThis.__paseoDeskBridgeProbe;
+  if (probe) probe.deps = deps;
+  return {
+    start() {},
+    state() { return { kind: 'listening' }; },
+    notePaseo(paseo) { if (paseo === undefined) return; deps.paseoRef.current = paseo; if (probe) probe.notePaseo.push(paseo); },
+    noteDispatch(paseo) { if (probe) probe.noteDispatch.push(paseo); },
+    taskTurnEnded() {},
+    agentCreateGraft() {},
+    sessionOpenStash() {},
+    stop() { if (probe) probe.stopCalls++; },
+  };
+};
 `,
   );
   return file;
@@ -117,12 +131,17 @@ export const createLauncherBuilder = () => ({
 
 // Import the real contribute() with the lane-stub resolve hook armed (real
 // lane modules win; stubs only cover lane-isolated worktrees).
-async function importContribute(t) {
+async function importContribute(t, options = {}) {
   const stubFile = writeLaneStubs(t);
   const stubUrl = pathToFileURL(stubFile).href;
   const hooks = registerHooks({
     resolve(specifier, context, nextResolve) {
-      if (context.parentURL?.endsWith('/plugin/index.server.ts') && LANE_SPECIFIERS.has(specifier)) {
+      const parentPath = context.parentURL?.split('?')[0];
+      if (parentPath?.endsWith('/plugin/index.server.ts') && options.deskBridgeProbe === true
+        && specifier === './server/desk-bridge.ts') {
+        return { url: `${stubUrl}#desk-bridge`, shortCircuit: true };
+      }
+      if (parentPath?.endsWith('/plugin/index.server.ts') && LANE_SPECIFIERS.has(specifier)) {
         // Real lane modules first — the stub is only a fallback for
         // lane-isolated worktrees where the sibling module is absent.
         try {
@@ -136,7 +155,9 @@ async function importContribute(t) {
   });
   t.after(() => hooks.deregister());
 
-  const entry = await import(pathToFileURL(join(PLUGIN_DIR, 'index.server.ts')).href);
+  const entryUrl = pathToFileURL(join(PLUGIN_DIR, 'index.server.ts'));
+  if (options.deskBridgeProbe === true) entryUrl.searchParams.set('deskBridgeProbe', 'observer-absent');
+  const entry = await import(entryUrl.href);
   return entry.default;
 }
 
@@ -229,6 +250,7 @@ test('contribute() registers the RPCs plus the two before-hooks, cleanup unregis
       'agent.turn_ended',
       'agent.turn_ended',
       'agent.turn_started',
+      'agent.turn_started',
     ],
   );
   for (const { handler } of onHooks) {
@@ -250,13 +272,17 @@ test('contribute() registers the RPCs plus the two before-hooks, cleanup unregis
       'agent.turn_ended',
       'agent.turn_ended',
       'agent.turn_started',
+      'agent.turn_started',
     ],
   );
   assert.doesNotThrow(() => cleanup(), 'cleanup must be idempotent');
 });
 
-test('contribute() leaves the shadow observer inert when the served home is only a default guess', async t => {
-  const contribute = await importContribute(t);
+test('turn_started stashes the SDK for Desk without the optional observer and cleanup unregisters it', async t => {
+  const deskProbe = { deps: null, notePaseo: [], noteDispatch: [], stopCalls: 0 };
+  globalThis.__paseoDeskBridgeProbe = deskProbe;
+  t.after(() => { if (globalThis.__paseoDeskBridgeProbe === deskProbe) delete globalThis.__paseoDeskBridgeProbe; });
+  const contribute = await importContribute(t, { deskBridgeProbe: true });
   // No PASEO_HOME export → detectDaemonHome() answers source "default" and
   // the observer must stay null: a default-guessed home is never observed
   // (spec §Configuration — a prefill is not proof of host-home mapping).
@@ -274,17 +300,20 @@ test('contribute() leaves the shadow observer inert when the served home is only
   console.warn = line => warnings.push(String(line));
   t.after(() => { console.warn = originalWarn; });
   const registrations = [];
+  const unregistered = [];
   const server = {
     handle() {},
     before() { return () => {}; },
-    on(name, handler) { registrations.push({ name, handler }); return () => {}; },
+    on(name, handler) { registrations.push({ name, handler }); return () => unregistered.push(name); },
   };
   const cleanup = contribute(server);
+  assert.equal(deskProbe.deps.taskHost(), null, 'a resumed ACP turn has no SDK slot before its lifecycle start callback');
+  assert.equal(deskProbe.deps.paseoRef.current, null, 'Desk has no identity context before turn_started');
   // The desk registers membership lifecycle plus positive task-send
   // observation. The optional communication observer remains inert.
   assert.deepEqual(
     registrations.map(r => r.name).sort(),
-    ['agent.archived', 'agent.created', 'agent.turn_ended'],
+    ['agent.archived', 'agent.created', 'agent.turn_ended', 'agent.turn_started'],
     'only desk lifecycle registers without a verified served home; communication supervision stays inert',
   );
   // (c) provenance: driving each handler with an slp-* payload over a
@@ -301,6 +330,7 @@ test('contribute() leaves the shadow observer inert when the served home is only
   const expectedOp = { 'agent.created': 'register', 'agent.archived': 'revoke' };
   for (const { name, handler } of registrations) {
     assert.equal(typeof handler, 'function');
+    if (name === 'agent.turn_started') continue;
     if (name === 'agent.turn_ended') {
       const before = warnings.length;
       await handler({ agent: slpEvent.agent, turnId: 'fixture-turn', outcome: { kind: 'completed' }, timeline: [] }, {});
@@ -313,6 +343,19 @@ test('contribute() leaves the shadow observer inert when the served home is only
     await handler({ agent: { ...slpEvent.agent, provider: 'custom-tool' } }, {});
     assert.equal(warnings.length, beforeSilent, 'a non-slp provider is a silent no-op');
   }
+  const started = registrations.filter(row => row.name === 'agent.turn_started');
+  assert.equal(started.length, 1, 'the SDK stash registers even though observer is absent');
+  const identity = { id: 'agent-1', provider: 'slp-codex-peer', cwd: plainDir, workspaceId: null };
+  const paseo = {
+    agents: { ref: id => ({ refresh: async () => ({ agent: id === identity.id ? identity : null, project: null }) }) },
+  };
+  await started[0].handler({ agent: slpEvent.agent, turnId: 'fixture-start' }, { paseo, signal: new AbortController().signal });
+  assert.strictEqual(deskProbe.deps.taskHost(), paseo, 'TaskHostApi receives the exact lifecycle SDK object');
+  assert.strictEqual(deskProbe.deps.paseoRef.current, paseo, 'Desk bridge identity uses that same SDK object');
+  assert.deepEqual(deskProbe.notePaseo, [paseo]);
+  assert.deepEqual(deskProbe.noteDispatch, [], 'a lifecycle hook never claims RPC dispatch evidence');
+  const refreshed = await deskProbe.deps.paseoRef.current.agents.ref(identity.id).refresh();
+  assert.strictEqual(refreshed.agent, identity, 'the captured Desk identity context can refresh its live agent');
   // L1(3) — the FULL console.warn stream from the spy install (before
   // contribute()) through the whole drive is exactly the two desk
   // diagnostics: no filter, no narrower window — any extra warning
@@ -323,6 +366,8 @@ test('contribute() leaves the shadow observer inert when the served home is only
     'every console.warn from construction through the drive is exactly the two desk diagnostics',
   );
   cleanup();
+  assert.equal(unregistered.filter(name => name === 'agent.turn_started').length, 1, 'cleanup unregisters the independent SDK stash hook');
+  assert.equal(deskProbe.stopCalls, 1);
 });
 
 // ---------------------------------------------------------------------------

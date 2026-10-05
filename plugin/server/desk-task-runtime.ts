@@ -25,7 +25,7 @@ export type TaskRuntimeBinding = {
 export type TaskRuntimeApi = {
   providers: {
     snapshot(options?: { cwd?: string }): Promise<{
-      entries: { provider: string; enabled?: boolean; status: string; error?: string | null }[];
+      entries: { provider: string; enabled?: boolean; status: string; error?: string | null; modes?: { id: string }[] }[];
       error?: string | null;
     }>;
   };

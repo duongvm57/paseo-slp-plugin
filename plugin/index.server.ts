@@ -208,6 +208,14 @@ export default function contribute(server: Parameters<PluginServerContribution>[
         : { type: item.type }),
     });
   });
+  // A resumed ACP turn can dispatch Desk tools before an RPC, create hook,
+  // session_open or turn_ended handler has supplied this process's SDK slot.
+  // Keep this unconditional and independent of the optional observer; it
+  // stashes host identity context only and never marks plugin-RPC evidence.
+  const offDeskContextStart = server.on("agent.turn_started", (_event, { paseo }) => {
+    noteTaskApi(paseo);
+    deskBridge.notePaseo(paseo);
+  });
   // Observer lifecycle hooks — synchronous capture only; every async step
   // (refresh, Jev HTTP, ring write, notify delivery) runs on the observer's
   // own queue.
@@ -224,6 +232,7 @@ export default function contribute(server: Parameters<PluginServerContribution>[
     offDeskRegister();
     offDeskRevoke();
     offTaskEnded();
+    offDeskContextStart();
     offCreated?.();
     offArchived?.();
     offStarted?.();

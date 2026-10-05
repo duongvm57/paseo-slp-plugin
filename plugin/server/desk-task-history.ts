@@ -802,7 +802,11 @@ export function taskHistoryValid(
         attemptAtMint.ownershipRevision !== ownershipRevisionAtMint || attemptAtMint.briefRevision !== issue.briefRevision ||
         issue.briefRevision !== taskAtMint.briefRevision || attemptAtMint.seatPin.provider !== membership.provider ||
         attemptAtMint.seatPin.model !== (issue.body.seat as Record<string, unknown> | undefined)?.model ||
-        membership.createCwd !== attemptAtMint.placement.cwd || attemptAtMint.placement.workspaceId !== (membership.agentId === null ? null : membership.workspaceId)) return false;
+        membership.createCwd !== attemptAtMint.placement.cwd ||
+        // Mint precedes native creation: its unbound row has no observed
+        // workspace yet. The immutable placement still pins the expectation;
+        // once session-open binds the agent, its workspace must match it.
+        (membership.agentId !== null && attemptAtMint.placement.workspaceId !== membership.workspaceId)) return false;
     const latestCreates = new Map<string, Extract<DeskTaskEntryValue, { kind: 'action' }>>();
     for (const item of ledger.taskEntries) {
       if (item.kind !== 'action' || item.actionKind !== 'create' || item.attemptId !== claim.attemptId ||

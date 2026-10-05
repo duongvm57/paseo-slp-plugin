@@ -389,15 +389,32 @@ export function RoutingCard({ colors, target, statusView, routing, catalogs, cat
                   disabled={disabled}
                 />
               </View>
+            ) : roleCatalog && !roleCatalog.error && form.modeId === "" ? (
+              // Successful catalog declaring no modes — nothing to pick and
+              // nothing stored; a free-text "e.g. bypass" would teach a mode
+              // the provider does not have.
+              <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
+                {FAMILY_LABEL[form.family]} declares no modes.
+              </Text>
             ) : (
-              <Field
-                colors={colors}
-                label="Mode"
-                value={form.modeId}
-                onChangeText={routing.setField(role, "modeId")}
-                placeholder="Mode ID — e.g. bypass"
-                disabled={disabled}
-              />
+              <View style={styles.field}>
+                {roleCatalog && !roleCatalog.error ? (
+                  // A stored mode the ready catalog doesn't declare — keep it
+                  // visible as an actionable warning; clearing stays a
+                  // deliberate Human edit, never a silent rewrite.
+                  <Text style={[styles.mutedSmall, { color: colors.statusWarning }]}>
+                    Stored mode &quot;{form.modeId}&quot; is not declared — {FAMILY_LABEL[form.family]} lists no modes.
+                  </Text>
+                ) : null}
+                <Field
+                  colors={colors}
+                  label="Mode"
+                  value={form.modeId}
+                  onChangeText={routing.setField(role, "modeId")}
+                  placeholder={roleCatalog && !roleCatalog.error ? "Leave empty — no modes declared" : "Mode ID — e.g. bypass"}
+                  disabled={disabled}
+                />
+              </View>
             )}
             {featureDefs.loading ? (
               <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>Loading features…</Text>

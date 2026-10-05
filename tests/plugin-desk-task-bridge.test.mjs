@@ -13,25 +13,37 @@ import { WIRE_LIMITS } from '../plugin/shared/enforcement.ts';
 import { install } from '../plugin/server/runtime/cli/package.ts';
 import { readCatalog } from '../plugin/server/runtime/cli/routing.ts';
 import { createDeskSeat } from '../plugin/server/desk-seat.ts';
+import { runTaskCommand } from '../plugin/server/desk-task.ts';
 
 const PIN = sha256Hex(readFileSync(BIN_SOURCE));
 const AT = '2026-01-01T00:00:00.000Z';
 
-async function fixture(t, { execution = false, lostSendAck = false } = {}) {
+async function fixture(t, { execution = false, lostSendAck = false, lostCreateAck = false,
+  formation = false, changeBindingAfterCreate = false } = {}) {
   const git = gitRepo(t, 'slp-task-wire-repo-');
   const lead = memberRow('task-owner', { provider: 'slp-codex-lead', at: AT },
-    { agentId: 'task-owner', role: 'lead', createCwd: git.dir, workspaceId: null });
+    { agentId: 'task-owner', role: 'lead', createCwd: git.dir, workspaceId: formation ? 'wire-workspace' : null });
   const peer = memberRow('task-reader', { provider: 'slp-codex-peer', at: AT },
     { agentId: 'task-reader', createCwd: git.dir, workspaceId: null });
   const members = [lead, peer];
   const effects = [];
   const snapshots = new Map();
+  const hooks = { beforeWorkerRefresh: null };
+  let active = true;
   let store, repoKey, seatHooks;
   const paseo = { agents: { ref: id => ({ refresh: async () => {
-    if (snapshots.has(id)) return { agent: snapshots.get(id), project: null };
+    if (snapshots.has(id)) {
+      if (hooks.beforeWorkerRefresh) await hooks.beforeWorkerRefresh(id);
+      return { agent: snapshots.get(id), project: null };
+    }
     const row = members.find(row => row.agentId === id);
     return { agent: row === undefined ? null : { provider: row.provider, workspaceId: row.workspaceId, archivedAt: null } };
   }, send: async (text, options) => {
+    if (formation) {
+      assert.equal(id, 'formed-lead');
+      effects.push({ kind: 'send', agentId: id, text, messageId: options.messageId });
+      return;
+    }
     const ledger = store.read(repoKey).ledger;
     const attempts = ledger.taskEntries.filter(row => row.kind === 'attempt' && row.host.agentId === id);
     const attempt = attempts.at(-1);
@@ -57,13 +69,29 @@ async function fixture(t, { execution = false, lostSendAck = false } = {}) {
       reason: 'create', purpose: 'interactive', env: { SLP_DESK_HANDLE: minted.handle } });
     await seatHooks.deskRegister({ agent: { id, provider: 'slp-codex-peer', cwd: options.cwd,
       workspaceId: null, parentAgentId: lead.agentId, title: null } });
+    if (lostCreateAck) throw new Error('fixture lost create acknowledgment');
     return { id };
   }, list: async () => ({ entries: [], pageInfo: { hasMore: false } }) },
-  providers: { snapshot: async () => ({ entries: [{ provider: 'slp-codex-peer', enabled: true, status: 'ready' }] }) },
-  workspaces: { ref: () => ({ agents: { create: async () => { throw new Error('workspace create not selected'); } } }) },
+  providers: { snapshot: async () => ({ entries: [{ provider: formation ? 'slp-codex-lead' : 'slp-codex-peer', enabled: true, status: 'ready' }] }) },
+  workspaces: { ref: workspaceId => ({ agents: { create: async options => {
+    if (!formation) throw new Error('workspace create not selected');
+    assert.equal(workspaceId, 'wire-workspace'); assert.equal(options.parent, lead.agentId);
+    assert.equal('prompt' in options, false); assert.equal('cwd' in options, false);
+    effects.push({ kind: 'create', options });
+    snapshots.set('formed-lead', { id: 'formed-lead', provider: 'slp-codex-lead', model: 'fixture-model', cwd: git.dir,
+      workspaceId, archivedAt: null, labels: { ...options.labels, 'paseo.parent-agent-id': options.parent },
+      currentModeId: options.config.modeId, thinkingOptionId: options.config.thinkingOptionId, features: [] });
+    if (changeBindingAfterCreate) active = false;
+    return { id: 'formed-lead' };
+  } } }) },
   };
-  const raw = bridgeFixture(t, 'slp-task-wire-home-', PIN, { paseoRef: { current: paseo }, taskHost: execution ? () => paseo : undefined });
-  if (execution) {
+  let raw;
+  const journal = formation ? { read: () => ({ state: active ? 'ACTIVE' : 'INACTIVE', binding: {
+    launchSetSha256: raw.launchSetSha, runtimePath: raw.runtimePath, node: { path: process.execPath },
+    candidateSha256: raw.candidateSha } }) } : undefined;
+  raw = bridgeFixture(t, 'slp-task-wire-home-', PIN, { paseoRef: { current: paseo },
+    taskHost: execution || formation ? () => paseo : undefined, journal });
+  if (execution || formation) {
     rmSync(raw.runtimePath, { recursive: true });
     install(fileURLToPath(new URL('..', import.meta.url)), raw.runtimePath);
     execFileSync('git', ['-C', git.dir, 'config', 'user.name', 'Fixture']);
@@ -76,6 +104,9 @@ async function fixture(t, { execution = false, lostSendAck = false } = {}) {
       quotaFallback: { enabled: false, optionId: null }, options: [{ id: 'wire-worker', provider: 'codex', roles: ['peer'],
         model: 'fixture-model', modeId: 'full-access', features: {}, enabled: true, availability: 'ready',
         suitableFor: ['coding'], avoidFor: [], notes: 'Fixture' }] }));
+    if (formation) writeFileSync(join(raw.home, 'config.json'), JSON.stringify({ daemon: { agentProfiles: [{
+      id: 'slp-lead', provider: 'slp-codex-lead', model: 'fixture-model', modeId: 'full-access', thinkingOptionId: 'high', featureValues: {},
+    }] } }));
   }
   const f = await startBridge(t, raw);
   assert.equal(f.outcome, 'listening');
@@ -101,7 +132,7 @@ async function fixture(t, { execution = false, lostSendAck = false } = {}) {
     requestId: 'register-task-wire', authorityRef: 'human:fixture', objective: 'Produce a bounded investigation',
   });
   assert.equal(registered.ok, true, JSON.stringify(registered));
-  return { ...f, git, store, repoKey, owner, reader, call, effects, snapshots, seatHooks,
+  return { ...f, git, store, repoKey, owner, reader, call, effects, snapshots, seatHooks, hooks, lead,
     assignmentId: registered.assignmentId, rpcId: () => ++id };
 }
 
@@ -124,7 +155,7 @@ test('the native task catalog fits the relay response and keeps internal receipt
   assert.ok(Buffer.byteLength(JSON.stringify(reply)) <= WIRE_LIMITS.deskBridgeResponseBytes);
   const tasks = reply.result.tools.filter(row => row.name.startsWith('slp_task_'));
   assert.deepEqual(tasks.map(row => row.name).sort(), [
-    'slp_task_acknowledge', 'slp_task_define', 'slp_task_dispatch', 'slp_task_hold', 'slp_task_integrate',
+    'slp_task_acknowledge', 'slp_task_define', 'slp_task_deliver', 'slp_task_dispatch', 'slp_task_get', 'slp_task_hold', 'slp_task_integrate',
     'slp_task_recap', 'slp_task_reconcile', 'slp_task_result', 'slp_task_rule', 'slp_task_stop',
   ]);
   for (const row of tasks) {
@@ -300,4 +331,101 @@ test('a correlated native event cannot write after the worker membership is revo
   assert.deepEqual(f.ledger(), before);
   assert.equal(action().state, 'uncertain');
   assert.equal(f.effects.filter(effect => effect.kind === 'send').length, 1);
+});
+
+function delivery(f, over = {}) {
+  const declared = declaration(f);
+  declared.task.scope = { label: 'Bounded readonly proof', refs: ['human:fixture'], ownership: null,
+    reviewPlan: { kind: 'not-required', authorityRef: 'human:fixture', ruleRef: 'protocol:fixture',
+      reason: 'Readonly fixture; owner verifies findings', lenses: [], exemptionClass: null } };
+  declared.task.grants.create = 'grant:create'; declared.task.grants.send = 'grant:send';
+  declared.task.budgets.maxActionsPerAttempt = 24;
+  return { requestId: 'deliver-wire', assignmentId: f.assignmentId,
+    expectedLedgerRevision: f.store.read(f.repoKey).ledger.revision, expectedBriefRevision: 0, expectedOwnershipRevision: 0,
+    task: declared.task, runtime: { optionId: 'wire-worker', catalogSha256: readCatalog(f.git.dir, f.home).sha256 },
+    text: 'Read only changed.txt and return evidence.', ...over };
+}
+
+test('one semantic delivery crosses real Core create/bind/send and returns targeted current pins without history paging', async t => {
+  const f = await fixture(t, { execution: true });
+  const request = delivery(f);
+  const out = await f.call(f.owner, 'slp_task_deliver', request);
+  assert.equal(out.state, 'recorded', JSON.stringify(out));
+  assert.equal(out.result.delivery.ok, true, JSON.stringify(out));
+  assert.deepEqual(f.effects.map(effect => effect.kind), ['create', 'send']);
+  assert.equal(out.result.current.pins.expectedLedgerRevision, f.store.read(f.repoKey).ledger.revision);
+  const current = await f.call(f.owner, 'slp_task_get', { assignmentId: f.assignmentId, taskId: out.result.taskId, attemptId: out.result.attemptId });
+  assert.equal(current.ok, true, JSON.stringify(current));
+  assert.equal(current.attempt.host.agentId, 'task-worker'); assert.equal('items' in current, false);
+  assert.equal(current.pins.expectedAttemptRevision, current.attempt.revision);
+  const replay = await f.call(f.owner, 'slp_task_deliver', request);
+  assert.equal(replay.receiptSha256, out.receiptSha256); assert.equal(replay.replayed, true);
+  assert.equal(f.effects.length, 2);
+  const altered = await f.call(f.owner, 'slp_task_deliver', { ...request, text: 'Changed' });
+  assert.equal(altered.code, 'IDEMPOTENCY_CONFLICT'); assert.equal(f.effects.length, 2);
+  const receipt = await f.call(f.owner, 'slp_operation_get', { kind: 'task-deliver', requestId: request.requestId });
+  assert.equal(receipt.receiptSha256, out.receiptSha256);
+  const foreignReceipt = await f.call(f.reader, 'slp_operation_get', { kind: 'task-deliver', requestId: request.requestId });
+  assert.equal(foreignReceipt.ok, false);
+  const stale = await f.call(f.owner, 'slp_task_get', { assignmentId: f.assignmentId, taskId: out.result.taskId, expectedLedgerRevision: 0 });
+  assert.equal(stale.code, 'REVISION_CONFLICT');
+  const foreignAttempt = await f.call(f.owner, 'slp_task_get', { assignmentId: f.assignmentId, taskId: out.result.taskId, attemptId: 'foreign' });
+  assert.equal(foreignAttempt.code, 'ACTOR_MISMATCH');
+});
+
+test('managed composition preserves lost-send uncertainty and cannot replay delivery or accept output', async t => {
+  const f = await fixture(t, { execution: true, lostSendAck: true });
+  const request = delivery(f), out = await f.call(f.owner, 'slp_task_deliver', request);
+  assert.equal(out.result.current.entities.find(row => row.kind === 'action' && row.state === 'uncertain')?.state, 'uncertain', JSON.stringify(out));
+  const effects = f.effects.length;
+  await f.call(f.owner, 'slp_task_deliver', request); assert.equal(f.effects.length, effects);
+  assert.equal(f.store.read(f.repoKey).ledger.taskEntries.filter(row => row.kind === 'adjudication').length, 0);
+});
+
+test('managed composition rejects missing separate effect grants and stale CAS before any host effect', async t => {
+  const f = await fixture(t, { execution: true });
+  const missing = delivery(f); missing.task.grants.send = null;
+  assert.equal((await f.call(f.owner, 'slp_task_deliver', missing)).code, 'AUTHORITY_REQUIRED');
+  assert.deepEqual(f.effects, []);
+  const stale = delivery(f, { requestId: 'stale-delivery', expectedLedgerRevision: 0 });
+  const rejected = await f.call(f.owner, 'slp_task_deliver', stale);
+  assert.equal(rejected.result.code, 'REVISION_CONFLICT', JSON.stringify(rejected)); assert.deepEqual(f.effects, []);
+});
+
+for (const drift of [false,true]) {
+ test(`ordinary formation crosses authenticated wire guards; binding drift=${drift} preserves native identity`,async t=>{
+  const f=await fixture(t,{formation:true,changeBindingAfterCreate:drift});
+  const request={requestId:'wire-formation',role:'lead',taskLabel:'formation',assignment:'Read-only orientation and report.',grantRef:'human:fixture'};
+  const out=await f.call(f.owner,'slp_seat_create',request);
+  assert.equal(out.state,'recorded',JSON.stringify(out));
+  if (drift) { assert.equal(out.result.code,'CANDIDATE_DRIFT'); assert.equal(out.result.agentId,'formed-lead'); }
+  else { assert.equal(out.result.state,'host-accepted'); assert.equal(out.result.parent,'task-owner'); assert.equal(out.result.workspaceId,'wire-workspace'); }
+  assert.deepEqual(f.effects.map(effect=>effect.kind),drift?['create']:['create','send']);
+  const count=f.effects.length;
+  const replay=await f.call(f.owner,'slp_seat_create',request); assert.equal(replay.receiptSha256,out.receiptSha256);
+  assert.equal(f.effects.length,count);
+ });
+}
+
+test('composite bootstrap uncertainty retains the exact reservation and never delivers or re-creates on replay',async t=>{
+ const f=await fixture(t,{execution:true,lostCreateAck:true}); const request=delivery(f);
+ const out=await f.call(f.owner,'slp_task_deliver',request);
+ assert.equal(out.state,'recorded',JSON.stringify(out)); assert.equal(out.result.state,'uncertain',JSON.stringify(out));
+ assert.ok(out.result.taskId); assert.ok(out.result.attemptId);
+ assert.deepEqual(f.effects.map(effect=>effect.kind),['create']);
+ await f.call(f.owner,'slp_task_deliver',request); assert.equal(f.effects.length,1);
+});
+
+test('composite send CAS conflict after unrelated commit keeps the bound attempt and issues no native send',async t=>{
+ const f=await fixture(t,{execution:true}); let refreshes=0;
+ f.hooks.beforeWorkerRefresh=async id=>{
+  if(id!=='task-worker'||++refreshes!==2)return;
+  const unrelated=declaration(f); unrelated.requestId='unrelated-task-race';
+  const committed=await runTaskCommand({repoKey:f.repoKey,row:f.lead},{...unrelated,operation:'define'},{store:f.store});
+  assert.equal(committed.ok,true,JSON.stringify(committed));
+ };
+ const request=delivery(f), out=await f.call(f.owner,'slp_task_deliver',request);
+ assert.equal(out.state,'recorded',JSON.stringify(out)); assert.equal(out.result.delivery.code,'REVISION_CONFLICT',JSON.stringify(out));
+ assert.equal(out.result.current.attempt.state,'bound'); assert.deepEqual(f.effects.map(effect=>effect.kind),['create']);
+ await f.call(f.owner,'slp_task_deliver',request); assert.equal(f.effects.length,1);
 });

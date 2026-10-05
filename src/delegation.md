@@ -9,10 +9,11 @@ workspace unless actual worktree/repository/lane isolation requires another;
 workspace IDs alone do not isolate writes.
 
 For an available desk-managed task, read references/task-execution.md and
-use its dispatch phases. Runtime admission records and verifies reservations,
+use its delivery composition or explicit dispatch phases. Runtime admission records and verifies reservations,
 seat pins and effects; consume those receipts instead of duplicating the
 formation ledger. For ordinary/Lean creation or observation, read
-references/delegation-execution.md; its manual verification still applies.
+references/delegation-execution.md; consume native formation receipts or apply
+its manual verification on the compatibility path.
 Before runtime choice/settings/fallback, read references/provider-routing.md.
 Unavailable machinery is a gap, not permission to bypass a required path.
 

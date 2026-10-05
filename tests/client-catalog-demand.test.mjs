@@ -144,3 +144,28 @@ test('a newer manual retry owns a cache key and older responses cannot overwrite
   assert.equal(state.current.featureSets[feature].defs[0].id, 'newer');
   assert.equal(state.current.featuresLoadingFor, null);
 });
+test('an errored empty observation does not satisfy the next demand pass; a usable errored one does', async t => {
+  const { state, rpc, update } = await setup(t);
+  const catalog = rpc.calls.find(call => !call.input.model);
+  const features = rpc.calls.find(call => call.input.model);
+  await act(async () => { catalog.reject(new Error('cold-alias outage')); features.resolve(result('f0')); });
+  assert.equal(state.current.catalogs[scope].error, 'Catalog query failed');
+  const before = rpc.calls.length;
+  await update({ features: [feature, 'codex|peer|model-b|mode-2'] });
+  assert.equal(rpc.calls.length, before + 2, 'new demand re-measures the errored scope plus the new feature key');
+  const refetch = rpc.calls.filter(call => !call.input.model).at(-1);
+  await settle([refetch, rpc.calls.at(-1)], 'recovered');
+  assert.equal(state.current.catalogs[scope].models[0].id, 'recovered');
+  assert.equal(state.current.catalogs[scope].error, null);
+  const settled = rpc.calls.length;
+  await update({ features: ['codex|peer|model-c|mode-3'] });
+  assert.equal(rpc.calls.length, settled + 1, 'recovered scope stays satisfied — only the new feature key fetches');
+  await settle([rpc.calls.at(-1)], 'c');
+  await update({ scopes: [...scopes, { family: 'codex', role: 'lead' }], features: [feature] });
+  const leadCall = rpc.calls.at(-1);
+  await act(async () => leadCall.resolve({ ...result('lead-m'), error: 'provider refresh failed: warm-up' }));
+  const pinned = rpc.calls.length;
+  await update({ features: ['codex|peer|model-d|mode-4'] });
+  assert.equal(rpc.calls.slice(pinned).filter(call => !call.input.model).length, 0,
+    'a usable errored catalog stays satisfied — measured errors are re-read, not re-fetched per demand');
+});

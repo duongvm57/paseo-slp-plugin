@@ -654,12 +654,13 @@ function managedCreateLabels(
  *  missing evidence — uncertain — never an exact verified tuple. Optional
  *  pins verify only when a value was requested, but a request without
  *  reported evidence still fails closed. */
-async function verifySeat(
+export async function verifySeat(
   host: TaskHostApi, agentId: string,
   pin: {
     provider: string; model: string | null; cwd: string;
     workspaceId: string | null; parent: string | null;
     modeId?: string | null; thinkingOptionId?: string | null;
+    modeIdUnsupported?: boolean;
     features?: Record<string, unknown> | null;
     labels?: Readonly<Record<string, string>> | null;
   },
@@ -707,6 +708,9 @@ async function verifySeat(
   // fields; a seat that can't report the request is not the bound seat.
   if (pin.modeId != null && agent.currentModeId !== pin.modeId) {
     mismatches.push(`mode:${agent.currentModeId === undefined ? "unreported" : agent.currentModeId}`);
+  }
+  if (pin.modeIdUnsupported === true && agent.currentModeId !== null) {
+    mismatches.push(`mode:unsupported:${agent.currentModeId === undefined ? "unreported" : String(agent.currentModeId)}`);
   }
   if (pin.thinkingOptionId != null) {
     const reported = agent.thinkingOptionId ?? agent.effectiveThinkingOptionId;

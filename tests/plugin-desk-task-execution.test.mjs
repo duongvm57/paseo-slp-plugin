@@ -34,7 +34,7 @@ import { createDeskSeat, DESK_TASK_CREATE_TICKET_KEY } from '../plugin/server/de
 import { createRoleInjection } from '../plugin/server/role-injection.ts';
 import { fileURLToPath } from 'node:url';
 import { runAssignmentRegister, runHandbackSubmit } from '../plugin/server/desk-handback.ts';
-import { runScopeTransition } from '../plugin/server/desk-scope.ts';
+import { runScopeDeclare, runScopeTransition } from '../plugin/server/desk-scope.ts';
 import { snapshot } from '../plugin/server/runtime/cli/package.ts';
 
 const GIT_ENV = {
@@ -1704,7 +1704,8 @@ async function realDesk(t, options = {}) {
   const registered = await runAssignmentRegister(ctx,{requestId:'register',authorityRef:'grant:desk',objective:'bounded task fixture'},{store});
   assert.equal(registered.ok,true,JSON.stringify(registered));
   const assignmentId = registered.assignmentId;
-  const host = fixtureHost({multi:true});
+  const workspaceId = options.workspaceId ?? null;
+  const host = fixtureHost({multi:true,drift:{workspaceId}});
   const deps = fixtureDeps(w,null,host.api,{runTaskCommand,runTaskEffect});
   deps.store = store;
   deps.task={runTaskCommand,runTaskEffect:async(ctx,input,runnerDeps)=>{
@@ -1731,9 +1732,9 @@ async function realDesk(t, options = {}) {
   });
   const registerCreated = async (opts=host.calls.create.at(-1), handle={id:host.calls.create.length>1?`agent-new-${host.calls.create.length}`:'agent-new'}) => {
     const env=hookEnvs.get(handle.id)??[...hookEnvs.values()].at(-1);assert.ok(env,'membership handle comes from the actual config/env before-hook');
-    await seatHooks.deskBind({agentId:handle.id,workspaceId:null,provider:'slp-codex-peer',cwd:opts.cwd,
+    await seatHooks.deskBind({agentId:handle.id,workspaceId,provider:'slp-codex-peer',cwd:opts.cwd,
       reason:'create',purpose:'interactive',env});
-    await seatHooks.deskRegister({agent:{id:handle.id,workspaceId:null,parentAgentId:'agent-owner',
+    await seatHooks.deskRegister({agent:{id:handle.id,workspaceId,parentAgentId:'agent-owner',
       provider:'slp-codex-peer',cwd:opts.cwd,title:null}});
   };
   const create = host.api.agents.create;
@@ -1746,7 +1747,7 @@ async function realDesk(t, options = {}) {
     assert.equal(attempt.boundScopeId,null,'create does not grant write scope');
     assert.equal(attempt.member,null,'new task does not reuse the prior attached seat');
     assert.equal('prompt' in opts,false);
-    const raw=fixtureNativeCreateRequest(opts),projected={config:raw.config,env:raw.env};
+    const raw=fixtureNativeCreateRequest(opts,{workspaceId,cwd:opts.cwd}),projected={config:raw.config,env:raw.env};
     hookTrace.calls++;assert.deepEqual(Object.keys(projected).sort(),['config','env']);
     const request=options.transformHook?options.transformHook(projected):projected;
     const hooked=await injection.agentCreate({request});
@@ -1763,6 +1764,12 @@ async function realDesk(t, options = {}) {
     if(options.lostCreateAck) throw new Error('fixture lost create response after effect');
     return handle;
   };
+  // A workspace create follows the same native config/env hook and seat
+  // registration path as a direct create; metadata stays outside the hook.
+  host.api.workspaces.ref = id => ({agents:{create:opts=>{
+    assert.equal(id,workspaceId);
+    return host.api.agents.create({...opts,cwd:w.repo});
+  }}});
   const ref = host.api.agents.ref;
   host.api.agents.ref = id => {
     const h=ref(id);
@@ -1772,7 +1779,7 @@ async function realDesk(t, options = {}) {
       assert.ok(a.boundScopeId,'actual scope binding precedes SDK send');
       assert.ok(ledger().scopeTransitions.some(r=>r.scopeId===a.boundScopeId&&r.to==='claimed'));
       const scope=ledger().scopes.find(r=>r.scopeId===a.boundScopeId);
-      assert.equal(scope.ownership.writerAgentId,id);
+      if(scope.ownership!==null)assert.equal(scope.ownership.writerAgentId,id);
       assert.equal(scope.seatAgentId,id);
       const send=ledger().taskEntries.filter(r=>r.kind==='action'&&r.actionKind==='send').at(-1);
       assert.equal(send.state,'issued');
@@ -1795,7 +1802,7 @@ async function realDesk(t, options = {}) {
     expectedLedgerRevision:ledger().revision,expectedBriefRevision:0,expectedOwnershipRevision:0,
     expectedTaskRevision:latestTask(ledger(),assignmentId,latestTaskEntity(ledger(),attemptId).taskId).revision,
     expectedAttemptRevision:latestTaskEntity(ledger(),attemptId).revision});
-  return {w,repo,repoKey,store,ctx,owner,ledger,taskCommand,deps,host,assignmentId,define,bootInput,sendInput,registerCreated,seatHooks,injection,hookTrace,seatWarnings,
+  return {w,repo,repoKey,store,ctx,owner,ledger,taskCommand,deps,host,assignmentId,define,bootInput,sendInput,registerCreated,seatHooks,injection,hookEnvs,hookTrace,seatWarnings,
     get seat(){return ledger().memberships.find(m=>m.agentId==='agent-new');}};
 }
 
@@ -3059,6 +3066,72 @@ for(const changedActor of ['revoked','rebound','open-generation'])test('real Cor
     const denied=await runTaskDispatch(ctx,input,d.deps);assert.equal(denied.ok,false,JSON.stringify(denied));
   });
   assert.equal(d.ledger().revision,before.revision);assert.equal(d.ledger().requests.length,before.requests.length);
+});
+
+test('managed read-only scope without writer ownership delivers through its exact claimed scope',async t=>{
+  const d=await realDesk(t);
+  await d.define('task-1',{scope:{...taskSpec().scope,ownership:null}});
+  const boot=await runTaskDispatch(d.ctx,d.bootInput(),d.deps);
+  assert.equal(boot.state,'bound',JSON.stringify(boot));
+  const attempt=latestTaskEntity(d.ledger(),boot.attemptId);
+  const scope=d.ledger().scopes.find(row=>row.scopeId===attempt.boundScopeId);
+  assert.equal(scope.ownership,null);
+  assert.equal(d.ledger().scopeTransitions.filter(row=>row.scopeId===scope.scopeId).at(-1).to,'claimed');
+  const sent=await runTaskDispatch(d.ctx,{...d.sendInput(boot.attemptId),text:'Read policy and report three facts; no file writes.'},d.deps);
+  assert.equal(sent.sent,true,JSON.stringify(sent));
+  assert.equal(d.host.calls.send.length,1);
+  assert.equal(d.ledger().scopes.find(row=>row.scopeId===scope.scopeId).ownership,null,'delivery creates no writer authority');
+});
+
+test('managed read-only delivery still refuses a redeclared scope outside its claimed revision',async t=>{
+  const d=await realDesk(t);await d.define('task-1',{scope:{...taskSpec().scope,ownership:null}});
+  const boot=await runTaskDispatch(d.ctx,d.bootInput(),d.deps);assert.equal(boot.state,'bound');
+  const attempt=latestTaskEntity(d.ledger(),boot.attemptId);
+  const scope=d.ledger().scopes.find(row=>row.scopeId===attempt.boundScopeId);
+  const declared=await runScopeDeclare(d.ctx,{requestId:'readonly-scope-redeclare',assignmentId:d.assignmentId,
+    scopeId:scope.scopeId,label:scope.label,declarationSha256:scope.declarationSha256,refs:scope.refs,
+    seatAgentId:scope.seatAgentId,expectedBriefRevision:0,ownership:null,reviewPlan:scope.reviewPlan},{store:d.store});
+  assert.equal(declared.ok,true,JSON.stringify(declared));
+  const before=d.ledger();const sent=await runTaskDispatch(d.ctx,d.sendInput(boot.attemptId),d.deps);
+  assert.equal(sent.code,'SCOPE_CONFLICT',JSON.stringify(sent));
+  assert.equal(d.host.calls.send.length,0);
+  assert.equal(d.ledger().taskEntries.length,before.taskEntries.length,'rejection issues no action');
+  assert.equal(d.ledger().requests.at(-1).outcome,'rejected');
+});
+
+test('workspace-pinned task ticket mints unbound then registers and binds its exact workspace',async t=>{
+  const workspaceId='workspace-owned';
+  const d=await realDesk(t,{workspaceId});await d.define();
+  const boot=await runTaskDispatch(d.ctx,d.bootInput('task-1',{
+    placement:{kind:'shared-checkout',cwd:d.w.repo,baseRef:d.w.head,workspaceId},
+  }),d.deps);
+  assert.equal(boot.state,'bound',JSON.stringify({boot,warnings:d.seatWarnings}));
+  assert.equal(d.hookTrace.mints,1);assert.equal(d.hookTrace.nativeEffects,1);
+  assert.equal(d.seat.workspaceId,workspaceId);assert.ok(d.seat.registeredAt);
+  assert.equal(d.seat.capacityClaim.version,2);
+  assert.equal(latestTaskEntity(d.ledger(),boot.attemptId).member.membershipId,d.seat.membershipId);
+  assert.equal(d.seatWarnings.length,0,JSON.stringify(d.seatWarnings));
+});
+
+test('workspace-pinned unbound task claim refuses foreign workspace registration without ledger writes',async t=>{
+  const workspaceId='workspace-owned';
+  const d=await realDesk(t,{workspaceId,delayedRegistration:true,
+    afterMint:({store,repoKey})=>{const r=store.read(repoKey);assert.equal(r.state,'ok');
+      assert.equal(r.ledger.memberships.at(-1).workspaceId,null);},
+  });await d.define();
+  const boot=await runTaskDispatch(d.ctx,d.bootInput('task-1',{
+    placement:{kind:'shared-checkout',cwd:d.w.repo,baseRef:d.w.head,workspaceId},
+  }),d.deps);
+  assert.equal(boot.state,'seat-pending',JSON.stringify({boot,warnings:d.seatWarnings}));
+  const before=d.ledger();
+  // The raw handle stays in the fixture hook's env, never in persisted rows.
+  await d.seatHooks.deskBind({agentId:'agent-new',workspaceId:'workspace-foreign',provider:'slp-codex-peer',cwd:d.w.repo,
+    reason:'create',purpose:'interactive',env:d.hookEnvs.get('agent-new')});
+  assert.equal(d.ledger().revision,before.revision);
+  assert.equal(d.ledger().memberships.at(-1).agentId,null);
+  await d.registerCreated();
+  assert.equal(d.seat.workspaceId,workspaceId);
+  assert.equal(d.ledger().memberships.length,before.memberships.length);
 });
 
 for(const bad of ['malformed-ticket','foreign-ticket','wrong-model','wrong-provider','wrong-cwd','wrong-mode','wrong-thinking','wrong-features'])test('actual config/env-only hook denies '+bad+' before native fixture effect',async t=>{

@@ -58,6 +58,37 @@ export interface ProviderCatalogApi {
 // failures degrade that one call to legacy without latching.
 let snapshotUnsupported = false;
 
+// Preview budget for advisory warm-up waits. This RPC rides a
+// daemon-handled request deadline, and a cold managed alias can hold the
+// rediscovery refresh — or a loading entry's listing resolution — in
+// provider warm-up far past it (observed: the picker call timed out while
+// the same snapshot answered in ~1s once the provider was warm). One
+// deadline covers both waits, so the handler answers with the measured
+// snapshot state instead of being pinned open.
+const WARMUP_BUDGET_MS = 10_000;
+
+/** Await lazy `work` for at most `ms`; expiry resolves `onTimeout()`. The
+ *  thunk is only invoked inside a positive budget — an expired budget
+ *  returns the measured fallback without starting unbudgeted work. Once
+ *  started, an abandoned call keeps settling unused with its handlers
+ *  attached, so a late settlement or rejection is consumed, not unhandled. */
+const within = async <T>(work: () => Promise<T>, ms: number, onTimeout: () => T): Promise<T> => {
+  if (ms <= 0) return onTimeout();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      work(),
+      new Promise<T>(resolve => {
+        timer = setTimeout(() => resolve(onTimeout()), ms);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+};
+
+const joinErrors = (errors: string[]) => [...new Set(errors)].join("; ");
+
 // The catalog is read-only and advisory — queried on the role's managed
 // provider entry (slp-<family>-<role>) when the daemon answers
 // providers.snapshot, matching how the host's own agent profile resolves
@@ -118,27 +149,38 @@ export async function loadCatalog(input: CatalogRequest, paseo: ProviderCatalogA
       })),
       modes: (modesPayload?.modes ?? []).map(m => ({ id: m.id, label: m.label ?? m.id })),
       features: featuresPayload?.features ?? [],
-      error: errors.length > 0 ? errors.join("; ") : null,
+      error: errors.length > 0 ? joinErrors(errors) : null,
     };
   };
 
   if (!snapshotUnsupported) {
     if (typeof paseo.providers.snapshot === "function") {
       try {
+        // Shared deadline for advisory warm-up: the refresh below and a
+        // loading entry's listing resolution draw from one budget, so the
+        // worst-case wait stays inside the preview bound.
+        const warmupDeadline = Date.now() + WARMUP_BUDGET_MS;
         // The first picker query for a scope has no model. Ask the daemon to
         // rediscover this managed provider before reading its snapshot, so a
         // changed CLI behind a stable alias is visible when SLP opens. Feature
         // queries reuse that catalog instead of repeating a costly refresh.
+        // The refresh is best-effort warm-up: past the budget it is abandoned
+        // without an error — the snapshot read carries the measured entry
+        // state, so a slow rediscovery is not itself a catalog failure.
         let refreshError: string | null = null;
         if (!input.model && typeof paseo.providers.refresh === "function") {
-          try {
-            await paseo.providers.refresh({
+          const refresh = paseo.providers.refresh.bind(paseo.providers);
+          refreshError = await within(
+            () => refresh({
               ...(input.cwd ? { cwd: input.cwd } : {}),
               providers: [preferredId],
-            });
-          } catch (error) {
-            refreshError = error instanceof Error ? error.message : String(error);
-          }
+            }).then(
+              () => null,
+              (error: unknown) => error instanceof Error ? error.message : String(error),
+            ),
+            warmupDeadline - Date.now(),
+            () => null,
+          );
         }
         const snapshot = await paseo.providers.snapshot(input.cwd ? { cwd: input.cwd } : undefined);
         const errors: string[] = [];
@@ -149,15 +191,27 @@ export async function loadCatalog(input: CatalogRequest, paseo: ProviderCatalogA
           // The daemon just proved snapshot-capable — a missing entry is a
           // real absence, not a reason to re-ask the legacy endpoints.
           errors.push(`provider ${preferredId} not found in providers.snapshot`);
-          return { schemaVersion: 1 as const, models: [], modes: [], features: [], error: errors.join("; ") };
+          return { schemaVersion: 1 as const, models: [], modes: [], features: [], error: joinErrors(errors) };
         }
         if (entry.status === "loading") {
           // "loading" is a warmup transient, not a catalog answer — resolve
           // through the per-provider listings, which await the in-flight
           // warmup server-side, instead of returning a status string the
-          // client would cache as a terminal error.
-          const resolved = await listCatalog(entry.provider, errors);
-          return { ...resolved, resolvedProvider: entry.provider };
+          // client would cache as a terminal error. The resolution shares
+          // the warm-up budget: past it, the measured entry state is the
+          // answer rather than an RPC the daemon eventually abandons.
+          const resolved = await within(() => listCatalog(entry.provider, errors), warmupDeadline - Date.now(), () => null);
+          if (resolved !== null) return { ...resolved, resolvedProvider: entry.provider };
+          const timedOut = snapshotEntryCatalog(entry);
+          if (timedOut.error) errors.push(timedOut.error);
+          return {
+            schemaVersion: 1 as const,
+            resolvedProvider: entry.provider,
+            models: timedOut.models,
+            modes: timedOut.modes,
+            features: [],
+            error: joinErrors(errors),
+          };
         }
         const mapped = snapshotEntryCatalog(entry);
         if (mapped.error) errors.push(mapped.error);
@@ -184,7 +238,7 @@ export async function loadCatalog(input: CatalogRequest, paseo: ProviderCatalogA
           models: mapped.models,
           modes: mapped.modes,
           features,
-          error: errors.length > 0 ? errors.join("; ") : null,
+          error: errors.length > 0 ? joinErrors(errors) : null,
         };
       } catch (error) {
         // Capability absence is the only latch condition: the daemon

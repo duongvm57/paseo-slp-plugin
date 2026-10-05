@@ -105,13 +105,23 @@ export function useCatalogCache(target: TargetValue | null, key: string | null,
       (async () => {
         for (const scope of scopes) {
           if (!ticket.isCurrent() || generation.current !== owner) return;
-          if (owner.catalogs[scope] === undefined) await fetch(scope, false);
+          // An errored observation with no usable payload does not satisfy
+          // demand: cold-alias warm-up pinned transient failures as terminal
+          // until a manual retry, so the next demand pass re-measures. A
+          // result carrying data stays satisfied — its error is advisory.
+          const cached = owner.catalogs[scope];
+          if (cached === undefined || (cached.error !== null && cached.models.length === 0)) {
+            await fetch(scope, false);
+          }
         }
       })(),
       (async () => {
         for (const feature of features) {
           if (!ticket.isCurrent() || generation.current !== owner) return;
-          if (owner.features[feature] === undefined) await fetch(feature, true);
+          const cached = owner.features[feature];
+          if (cached === undefined || (cached.error !== null && cached.defs.length === 0)) {
+            await fetch(feature, true);
+          }
         }
       })(),
     ]);
