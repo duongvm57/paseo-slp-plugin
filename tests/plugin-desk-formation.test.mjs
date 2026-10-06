@@ -135,7 +135,7 @@ test('production planner uses fresh saved bundles, ready SDK providers and exact
   const planner = createFormationPlanner({ runtimePath, daemonHome: f.root, host: () => f.host });
   const plan = await planner(f.row, f.input);
   assert.deepEqual(plan.create.settings, f.plan.create.settings); assert.equal(plan.create.provider, f.plan.create.provider);
-  assert.equal(plan.create.workspaceId, 'workspace'); assert.match(plan.create.initialPrompt, /Tuyến handback: parent agent ID đã xác minh là parent\./);
+  assert.equal(plan.create.workspaceId, 'workspace'); assert.match(plan.create.initialPrompt, /Handback route: the verified parent agent ID is parent\./);
   assert.deepEqual(calls, [{ cwd: f.root }]);
   f.host.providers.snapshot = async () => ({ entries: [{ provider: 'slp-codex-lead', enabled: true, status: 'loading', modes: [{ id: 'full-access' }] }] });
   await assert.rejects(planner(f.row, f.input), error => error.code === 'INVALID_RECORD' && /validation failed/.test(error.message));

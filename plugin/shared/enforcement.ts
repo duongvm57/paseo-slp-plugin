@@ -2,9 +2,12 @@ import { DESK_REJECTION_LIMITS, DESK_RECOVERY_LIMITS, DESK_RECOVERY_RESULTS } fr
 // Shared enforcement wire/view contracts for the mechanize-enforcement desk
 // (P0). Same boundary rules as contracts.ts: shared/ modules may import only
 // zod, react-family specifiers and @getpaseo/plugin — no node builtins. This
-// file holds client-safe wire and view shapes ONLY: durable ledger records
+// file holds client-safe wire and view shapes: durable ledger records
 // (assignments, memberships, candidates, review/decision/settlement state)
-// are server-internal schemas and must not live here.
+// are server-internal schemas and must not live here. One named exception:
+// the v9 task entry rows (`DeskTaskEntry` and its members) are defined here
+// because the closed workflow projection returns them verbatim and the
+// durable store validates its `taskEntries` table against the same schema.
 //
 // Two guarantees the schemas encode by shape:
 //   - `acceptance` is a literal "not-established-by-this-view" — a read view
@@ -2751,6 +2754,9 @@ export const DeskTaskArtifactRef = z
   .strict();
 export type DeskTaskArtifactRefValue = z.infer<typeof DeskTaskArtifactRef>;
 
+// Durable v9 task entry rows — the header's named exception: desk-store
+// validates `taskEntries` with DeskTaskEntry and the workflow projection's
+// `taskEntry` item carries the same row verbatim.
 const DeskTaskEntryStamp = {
   entryId: DeskEntityId,
   assignmentId: DeskEntityId,

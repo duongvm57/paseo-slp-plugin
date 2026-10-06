@@ -171,10 +171,10 @@ test('slp_seat_create adopts a newly verified binding when it changes before inv
   assert.equal(f.effects.creates[0].options.parent, 'parent');
   assert.equal(f.effects.creates[0].options.labels['slp.formation'], out.phases[1].value.label);
   assert.equal(f.effects.creates[0].options['notifyOnFinish'], undefined, 'finish callback is not the report or acceptance route');
-  assert.match(f.effects.sends[0].text, /Tuyến handback: parent agent ID đã xác minh là parent\./);
-  assert.match(f.effects.sends[0].text, /Ở handback, gửi đúng một native report đến parent đã xác minh ở trên\./);
-  assert.match(f.effects.sends[0].text, /Thông báo hoàn tất chỉ báo sự kiện; nó không thay báo cáo hoặc xác lập acceptance\./);
-  assert.match(f.effects.sends[0].text, /Với Lead standby, thông báo readiness riêng; readiness không phải phán quyết kỹ thuật\./);
+  assert.match(f.effects.sends[0].text, /Handback route: the verified parent agent ID is parent\./);
+  assert.match(f.effects.sends[0].text, /At handback, send exactly one native report to the verified parent above\./);
+  assert.match(f.effects.sends[0].text, /A finish notification only signals the event; it does not replace the report or establish acceptance\./);
+  assert.match(f.effects.sends[0].text, /A standby Lead reports readiness separately; readiness is not a technical verdict\./);
   assert.equal(f.effects.sends.length, 1, 'formation sends one assignment; it does not create an acknowledgment loop');
   assert.equal(out.result.notification, 'native-finish-callback-not-established; child reports to observed parent');
 });

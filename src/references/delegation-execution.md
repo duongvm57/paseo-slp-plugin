@@ -41,9 +41,9 @@ or task queue enrollment is required. The server creates without work, observes
 the exact native tuple and only then sends the assignment. grantRef is a claim;
 the caller still verifies authority, one writer and review sufficiency.
 The assignment names outcome, constraints, granted effects and proof/handback.
-Assignment được tạo ghi rõ parent agent ID đã xác minh và yêu cầu đúng một
-native report tới parent đó khi handback. Với Lead standby, báo readiness
-riêng với phán quyết kỹ thuật; không tạo vòng acknowledgment qua lại.
+The created assignment names the verified parent agent ID and requires exactly
+one native report to that parent at handback. A standby Lead reports readiness
+separately from technical verdicts; create no back-and-forth acknowledgment loop.
 
 Read the operation's result and phases, not just its outer ok. Replaying the
 same input reads the immutable receipt; slp_operation_get reads it by original
@@ -55,19 +55,19 @@ Retained early-format addresses are located without copying or resealing;
 ambiguous, corrupt or over-budget legacy evidence blocks a new invocation.
 Retain any returned agentId and scope, reconcile original host evidence and
 use a separately authorized explicit follow-up only when safe. Receipts retain
-resources and do not establish acceptance or cleanup. SDK create/send path
-này không xác lập finish callback; yêu cầu child gửi đúng một native report
-đến observed parent và dùng monitoring.md cho phần giám sát còn lại. Báo cáo
-đó thiết lập tuyến handback, không phải acceptance.
+resources and do not establish acceptance or cleanup. This SDK create/send
+path establishes no finish callback; require the child to send exactly one
+native report to the observed parent and use monitoring.md for the remaining
+observation. That report establishes the handback route, not acceptance.
 
 For an unbound/older host or declared isolated placement, CLI prepare remains
 compatible: use provider-routing.md, prepare --emit create and agent-scoped
 Paseo create_agent with the emitted record and notifyOnFinish=true. Pass
 taskLabel/disposition; review taskLabel uses `<task> / <lens>`. An assignmentFile
 pointer or validated opt-in snapshot remains available on that CLI path.
-Khi compatibility host hỗ trợ final-report callback, dùng callback để lấy
-báo cáo thực tế của child. `notifyOnFinish` hay callback chỉ báo delivery;
-hãy đọc report và evidence trước khi đưa verdict.
+When a compatibility host supports a final-report callback, use it to retrieve
+the child's actual report. `notifyOnFinish` or a callback signals delivery only;
+read the report and evidence before giving a verdict.
 Default placement is the pinned parent workspace, including read-only review;
 a different checkout/lane needs its declared paths/reason. If it lacks
 protocol/references, use authorized `slp.mjs materialize <target> --from <source>`

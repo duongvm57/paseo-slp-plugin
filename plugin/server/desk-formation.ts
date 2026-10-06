@@ -65,7 +65,7 @@ export function createFormationPlanner(deps: {
     let planned: Omit<Plan, "modeSupport">;
     try { planned = launch.launchPlan(deps.runtimePath, {
       repository: row.createCwd, workspaceId: row.workspaceId, role: input.role,
-      assignment: `${input.assignment}\nTuyến handback: parent agent ID đã xác minh là ${row.agentId}.\nỞ handback, gửi đúng một native report đến parent đã xác minh ở trên.\nThông báo hoàn tất chỉ báo sự kiện; nó không thay báo cáo hoặc xác lập acceptance.\nVới Lead standby, thông báo readiness riêng; readiness không phải phán quyết kỹ thuật.\nTham chiếu authority (claim): ${input.grantRef}`,
+      assignment: `${input.assignment}\nHandback route: the verified parent agent ID is ${row.agentId}.\nAt handback, send exactly one native report to the verified parent above.\nA finish notification only signals the event; it does not replace the report or establish acceptance.\nA standby Lead reports readiness separately; readiness is not a technical verdict.\nAuthority reference (claim): ${input.grantRef}`,
       taskLabel: input.taskLabel, paseoHome: deps.daemonHome,
       providers: observed.entries.map(entry => ({ id: entry.provider, enabled: entry.enabled === true,
         status: entry.status === "ready" && !entry.error ? "available" : "unavailable" })),
@@ -94,7 +94,7 @@ export function createFormationPlanner(deps: {
         ...planned,
         warnings: [
           ...(planned.warnings ?? []).filter(warning => !warning.startsWith("no modeId resolved (")),
-          "Nhà cung cấp hiện quảng cáo modes=[]; plugin bỏ trường modeId khi tạo native seat.",
+          "The selected provider advertises modes=[]; the plugin omits modeId when creating the native seat.",
         ],
         modeSupport: { provider, modes: modeIds },
       };
