@@ -1,5 +1,5 @@
 // One ordinary/Lean invocation: fresh plan → durable issue → native create
-// without work → positive tuple observation → durable send. No queue needed.
+// without work → positive tuple observation → durable send (or caller handoff). No queue needed.
 import { pathToFileURL } from "node:url";
 import { join } from "node:path";
 import { candidateModulePath } from "./candidate-module.ts";
@@ -136,6 +136,10 @@ export async function runSeatCreate(row: MembershipValue, input: DeskSeatCreateI
   if (row.agentId === null || !["lead", "supervisor"].includes(row.role)) return reject("AUTHORITY_REQUIRED", "only an orchestrating bound seat can form a child");
   const identity: OperationIdentity = { repoKey: deps.repoKey, membershipId: row.membershipId,
     agentId: row.agentId, kind: "seat-create", requestId: input.requestId };
+  // The intent binds the input exactly as received (absent stays absent, so an
+  // earlier receipt replays unchanged). The "caller" default applies only here
+  // at execution; absent vs explicit "caller" are different bodies.
+  const delivery = input.delivery ?? "caller";
   return createDeskOperations(deps.stableRoot).run(identity, input, async phase => {
     const hostApi = deps.host();
     if (hostApi === null) return reject("CAPABILITY_GAP", "the connected SDK is unavailable");
@@ -190,6 +194,14 @@ export async function runSeatCreate(row: MembershipValue, input: DeskSeatCreateI
     const sendPlan = await prepare(); if ("ok" in sendPlan) return { ...sendPlan, agentId };
     if (canonicalSha256({ create: sendPlan.create, modeSupport: sendPlan.modeSupport }) !== pin) return { ...reject("ROUTE_DRIFT", "bundle or provider mode evidence changed before assignment delivery"), agentId };
     const beforeSend = await deps.guard(); if (beforeSend !== null) return { ...beforeSend, agentId };
+    if (delivery === "caller") {
+      const promptSha256 = canonicalSha256(create.initialPrompt);
+      phase("delivery-handed-off", { agentId, promptSha256 });
+      return { ok: true, state: "awaiting-caller-delivery", agentId, workspaceId: verification.workspaceId, parent: verification.parent,
+        sent: false, verification, runtime: { provider: create.provider, ...create.settings, modeSupport: plan.modeSupport }, resourceDisposition: "retained",
+        delivery: { tool: "send_agent_prompt", agentId, notifyOnFinish: true, prompt: create.initialPrompt, promptSha256 },
+        notification: "caller must send the exact prompt with send_agent_prompt notifyOnFinish=true; the finish notification is an event, not the report or acceptance" };
+    }
     phase("send-issued", { agentId, messageId: label, promptSha256: canonicalSha256(create.initialPrompt) });
     try { await host.agents.ref(agentId).send(create.initialPrompt, { messageId: label }); }
     catch { return { ok: true, state: "send-uncertain", agentId, sent: null, verification, resourceDisposition: "retained" }; }

@@ -7,6 +7,7 @@ import { basename, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { install } from '../plugin/server/runtime/cli/package.ts';
 import { createDeskBridge } from '../plugin/server/desk-bridge.ts';
+import { canonicalSha256 } from '../plugin/server/config-view.ts';
 import { createDeskStore } from '../plugin/server/desk-store.ts';
 import { auditCapabilities } from '../plugin/server/capabilities.ts';
 import { DESK_BRIDGE_PROTOCOL } from '../plugin/shared/enforcement.ts';
@@ -161,7 +162,7 @@ test('slp_seat_create adopts a newly verified binding when it changes before inv
   const f = await boundFormationSeat(t);
   f.setBinding(f.candidates[1]);
 
-  const out = await callTool(f, 1, 'slp_seat_create', seatCreate('before-invoke'));
+  const out = await callTool(f, 1, 'slp_seat_create', { ...seatCreate('before-invoke'), delivery: 'server' });
   assert.equal(out.state, 'recorded', JSON.stringify(out));
   assert.equal(out.result.state, 'host-accepted', JSON.stringify(out));
   assert.equal(out.acceptance, 'not-established-by-this-receipt');
@@ -179,13 +180,30 @@ test('slp_seat_create adopts a newly verified binding when it changes before inv
   assert.equal(out.result.notification, 'native-finish-callback-not-established; child reports to observed parent');
 });
 
+test('slp_seat_create defaults to caller delivery: no SDK send and an exact send_agent_prompt notifyOnFinish handoff', async t => {
+  const f = await boundFormationSeat(t);
+  const out = await callTool(f, 1, 'slp_seat_create', seatCreate('caller-delivery'));
+  assert.equal(out.state, 'recorded', JSON.stringify(out));
+  assert.equal(out.result.state, 'awaiting-caller-delivery', JSON.stringify(out.result));
+  assert.equal(f.effects.creates.length, 1); assert.equal(f.effects.sends.length, 0);
+  assert.equal(out.result.sent, false);
+  const handoff = out.result.delivery;
+  assert.equal(handoff.tool, 'send_agent_prompt'); assert.equal(handoff.notifyOnFinish, true); assert.equal(handoff.agentId, 'child');
+  assert.equal(handoff.promptSha256, canonicalSha256(handoff.prompt));
+  assert.match(handoff.prompt, /A finish notification only signals the event; it does not replace the report or establish acceptance\./);
+  assert.equal(out.phases.at(-1).name, 'delivery-handed-off'); assert.equal(out.phases.at(-1).value.promptSha256, handoff.promptSha256);
+  const replay = await callTool(f, 2, 'slp_seat_create', seatCreate('caller-delivery'));
+  assert.equal(replay.replayed, true); assert.equal(replay.receiptSha256, out.receiptSha256);
+  assert.equal(f.effects.creates.length, 1); assert.equal(f.effects.sends.length, 0);
+});
+
 test('Pi lead with a fresh empty mode catalog creates without inventing or inheriting a permission mode', async t => {
   const profile = {
     id: 'slp-lead', provider: 'slp-pi-lead', model: 'openai-codex/gpt-6-luna', modeId: null,
     thinkingOptionId: 'medium', featureValues: {},
   };
   const f = await boundFormationSeat(t, { profile, providerModes: [], reportedModeId: null });
-  const out = await callTool(f, 1, 'slp_seat_create', seatCreate('pi-no-mode'));
+  const out = await callTool(f, 1, 'slp_seat_create', { ...seatCreate('pi-no-mode'), delivery: 'server' });
   assert.equal(out.state, 'recorded', JSON.stringify(out));
   assert.equal(out.result.state, 'host-accepted', JSON.stringify(out.result));
   assert.equal(f.effects.creates.length, 1);

@@ -496,10 +496,13 @@ profile's explicit mode to appear in it. Bundle and mode evidence stay pinned
 through create and delivery. CLI preparation and
 isolated/manual formation stay compatible. Supplied grantRef remains a claim;
 authority, one writer, sufficient independent review and semantic acceptance
-remain with the caller/Human. The managed SDK path has no established finish
-callback, so its assignment requests one explicit child-to-parent report;
-compatibility hosts may expose a final-report callback, which supplies report
-delivery only and does not establish acceptance.
+remain with the caller/Human. Only host MCP create_agent/send_agent_prompt arm a
+finish notification, so server-side SDK send ("delivery": "server") has none.
+The default delivery "caller" creates and observes the seat, then returns
+awaiting-caller-delivery with the exact prompt and sha256; the caller sends it
+via send_agent_prompt notifyOnFinish=true. Either way the assignment requests
+one explicit child-to-parent report; a finish notification signals the event
+only and does not establish acceptance.
 
 slp_task_deliver composes existing define/bootstrap/send for a new bounded task.
 Callers supply task scope/review, proof, dependencies, separate create/send grants,

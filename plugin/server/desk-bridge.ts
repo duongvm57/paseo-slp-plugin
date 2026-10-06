@@ -418,7 +418,7 @@ export const DESK_TOOL_CATALOG = [
     description: "Read a bounded task recap from the same authorized, revision-pinned workflow projection. Omissions and unresolved obligations remain visible; a recap grants no authority.",
   },
   { name: "slp_seat_create", visible: true, mutation: true,
-    description: "Form a fresh Lead from its saved profile, or a Lean Peer from explicit pool pins. Server derives parent/workspace, prepares, creates without work, observes and delivers. Immutable replay never repeats effects." },
+    description: "Form a Lead (saved profile) or Lean Peer (pool pins). Derives parent/workspace, creates without work, observes, then returns the exact prompt for the caller's send_agent_prompt notifyOnFinish=true (delivery=caller, default) or sends it (delivery=server)" },
   { name: "slp_operation_get", visible: true, mutation: false,
     description: "Read this caller's exact formation/delivery operation receipt and partial phases by original requestId. Read-only; missing evidence never authorizes resubmission." },
   { name: "slp_task_deliver", visible: true, mutation: true,

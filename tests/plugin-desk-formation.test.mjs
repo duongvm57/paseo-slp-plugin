@@ -40,8 +40,8 @@ function fixture(t) {
     snapshot: () => snapshot, setSnapshot: value => { snapshot = value; }, run: (data = input) => runSeatCreate(row, data, deps) };
 }
 
-test('ordinary formation derives native parent/placement, observes exact runtime and sends once without a caller file', async t => {
-  const f = fixture(t), out = await f.run();
+test('delivery server: ordinary formation derives native parent/placement, observes exact runtime and sends once without a caller file', async t => {
+  const f = fixture(t), serverInput = { ...f.input, delivery: 'server' }, out = await f.run(serverInput);
   assert.equal(out.state, 'recorded', JSON.stringify(out));
   assert.equal(out.result.state, 'host-accepted', JSON.stringify(out));
   assert.deepEqual(f.effects.map(row => row.kind), ['create', 'send']);
@@ -50,9 +50,9 @@ test('ordinary formation derives native parent/placement, observes exact runtime
   assert.deepEqual(create.config, { provider: 'slp-codex-lead/model/variant', modeId: 'full-access', thinkingOptionId: 'high', featureValues: { fast_mode: true } });
   assert.equal(out.result.parent, 'parent'); assert.equal(out.result.workspaceId, 'workspace');
   const before = f.effects.length;
-  const replay = await f.run(); assert.equal(replay.replayed, true); assert.equal(replay.receiptSha256, out.receiptSha256);
+  const replay = await f.run(serverInput); assert.equal(replay.replayed, true); assert.equal(replay.receiptSha256, out.receiptSha256);
   assert.equal(f.effects.length, before);
-  const changed = await f.run({ ...f.input, assignment: 'Different work' });
+  const changed = await f.run({ ...serverInput, assignment: 'Different work' });
   assert.equal(changed.code, 'IDEMPOTENCY_CONFLICT'); assert.equal(f.effects.length, before);
 });
 
@@ -74,10 +74,44 @@ for (const effect of ['create', 'send']) {
     const f = fixture(t);
     if (effect === 'create') f.host.workspaces.ref = () => ({ agents: { create: async () => { f.effects.push({ kind: 'create' }); throw new Error('lost'); } } });
     else f.host.agents.ref = () => ({ refresh: async () => ({ agent: f.snapshot(), project: null }), send: async () => { f.effects.push({ kind: 'send' }); throw new Error('lost'); } });
-    const out = await f.run(); assert.equal(out.result.state, `${effect}-uncertain`);
-    const count = f.effects.length; await f.run(); assert.equal(f.effects.length, count);
+    const input = { ...f.input, delivery: 'server' };
+    const out = await f.run(input); assert.equal(out.result.state, `${effect}-uncertain`);
+    const count = f.effects.length; await f.run(input); assert.equal(f.effects.length, count);
   });
 }
+
+test('default delivery hands the exact prompt to the caller without an SDK send and replay repeats no effect', async t => {
+  const f = fixture(t), out = await f.run();
+  assert.equal(out.state, 'recorded', JSON.stringify(out));
+  const result = out.result, promptSha256 = canonicalSha256(f.plan.create.initialPrompt);
+  assert.equal(result.state, 'awaiting-caller-delivery'); assert.equal(result.sent, false);
+  assert.equal(result.resourceDisposition, 'retained'); assert.equal(result.parent, 'parent'); assert.equal(result.agentId, 'child');
+  assert.deepEqual(result.delivery, { tool: 'send_agent_prompt', agentId: 'child', notifyOnFinish: true, prompt: f.plan.create.initialPrompt, promptSha256 });
+  assert.deepEqual(f.effects.map(row => row.kind), ['create']);
+  assert.deepEqual(out.phases.map(phase => phase.name), ['prepared', 'create-issued', 'create-returned', 'create-observed', 'delivery-handed-off']);
+  assert.deepEqual(out.phases[4].value, { agentId: 'child', promptSha256 });
+  const replay = await f.run(); assert.equal(replay.replayed, true); assert.equal(replay.receiptSha256, out.receiptSha256);
+  assert.equal(f.effects.length, 1);
+  // The intent binds the body as received: absent replays its receipt; explicit "caller"/"server" are different bodies.
+  assert.equal((await f.run({ ...f.input, delivery: 'caller' })).code, 'IDEMPOTENCY_CONFLICT');
+  assert.equal((await f.run({ ...f.input, delivery: 'server' })).code, 'IDEMPOTENCY_CONFLICT');
+  assert.equal(f.effects.length, 1);
+});
+
+test('drift or revoked authority before caller handoff blocks it exactly as it blocks a server send', async t => {
+  for (const delivery of [undefined, 'caller', 'server']) {
+    const f = fixture(t); let plans = 0;
+    f.deps.plan = async () => { plans++; return plans < 3 ? f.plan : { create: { ...f.plan.create, settings: { ...f.plan.create.settings, modeId: 'auto' } }, modeSupport: f.plan.modeSupport }; };
+    const input = delivery === undefined ? f.input : { ...f.input, delivery };
+    const out = await f.run(input); assert.equal(out.result.code, 'ROUTE_DRIFT'); assert.equal(out.result.agentId, 'child');
+    assert.deepEqual(f.effects.map(row => row.kind), ['create']);
+    assert.equal(out.phases.some(phase => ['delivery-handed-off', 'send-issued'].includes(phase.name)), false);
+    const second = fixture(t);
+    second.deps.guard = async () => second.effects.length ? { ok: false, code: 'STALE_EPOCH', message: 'revoked', recovery: 'stop' } : null;
+    const revoked = await second.run(input); assert.equal(revoked.result.code, 'STALE_EPOCH');
+    assert.equal(revoked.phases.some(phase => ['delivery-handed-off', 'send-issued'].includes(phase.name)), false);
+  }
+});
 
 test('bundle drift and ended actor authority block the next effect after create', async t => {
   const f = fixture(t);
@@ -119,6 +153,8 @@ test('unsafe receipt ancestry admits no effect', async t => {
 test('strict convenience inputs cannot inject identity/settings, waive task grants or reuse a seat', () => {
   const input = { requestId: 'r', role: 'lead', taskLabel: 'bounded', assignment: 'work', grantRef: 'human:form' };
   assert.equal(DeskSeatCreateInput.safeParse(input).success, true);
+  for (const delivery of ['caller', 'server']) assert.equal(DeskSeatCreateInput.safeParse({ ...input, delivery }).success, true);
+  assert.equal(DeskSeatCreateInput.safeParse({ ...input, delivery: 'other' }).success, false);
   for (const extra of [{ parent: 'other' }, { workspaceId: 'other' }, { settings: {} }, { runtime: {} }, { labels: {} }]) {
     assert.equal(DeskSeatCreateInput.safeParse({ ...input, ...extra }).success, false);
   }

@@ -10,7 +10,7 @@ missing-profile/Peer-pool workaround. Dispositions imply no fixed model.
 
 For ordinary Lead formation, use the saved slp-lead profile through
 slp_seat_create when advertised. It reads the saved bundle and connected
-providers freshly, revalidates before create/send and observes the native
+providers freshly, revalidates before create/delivery and observes the native
 runtime. Supervisor child formation uses the compatible CLI path below;
 Supervisor can still be the caller forming a Lead. Neither saved-profile
 branch selects a Peer pool or Jev decision.

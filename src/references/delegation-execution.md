@@ -38,7 +38,12 @@ profile; Peer formation additionally needs explicit runtime option/hash and
 any required Jev decision under provider-routing.md. The bound caller supplies
 native parent/workspace/cwd. No caller request file, copied create arguments
 or task queue enrollment is required. The server creates without work, observes
-the exact native tuple and only then sends the assignment. grantRef is a claim;
+the exact native tuple and only then hands off the assignment. By default
+(delivery "caller") it does not send: the result is awaiting-caller-delivery
+with delivery.prompt; send exactly that prompt through send_agent_prompt with
+notifyOnFinish=true so the host arms the finish callback. delivery "server"
+sends in the server without a callback; use it only when none is needed.
+grantRef is a claim;
 the caller still verifies authority, one writer and review sufficiency.
 The assignment names outcome, constraints, granted effects and proof/handback.
 The created assignment names the verified parent agent ID and requires exactly
@@ -55,10 +60,12 @@ Retained early-format addresses are located without copying or resealing;
 ambiguous, corrupt or over-budget legacy evidence blocks a new invocation.
 Retain any returned agentId and scope, reconcile original host evidence and
 use a separately authorized explicit follow-up only when safe. Receipts retain
-resources and do not establish acceptance or cleanup. This SDK create/send
-path establishes no finish callback; require the child to send exactly one
-native report to the observed parent and use monitoring.md for the remaining
-observation. That report establishes the handback route, not acceptance.
+resources and do not establish acceptance or cleanup. Replay returns the receipt
+and never sends. Server send
+establishes no finish callback. Either way require the child to send exactly
+one native report to the observed parent and use monitoring.md for remaining
+observation. A finish notification only signals the event; that native
+report establishes the handback route; neither establishes acceptance.
 
 For an unbound/older host or declared isolated placement, CLI prepare remains
 compatible: use provider-routing.md, prepare --emit create and agent-scoped

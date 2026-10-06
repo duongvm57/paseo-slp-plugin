@@ -72,7 +72,7 @@ async function fixture(t, { execution = false, lostSendAck = false, lostCreateAc
     if (lostCreateAck) throw new Error('fixture lost create acknowledgment');
     return { id };
   }, list: async () => ({ entries: [], pageInfo: { hasMore: false } }) },
-  providers: { snapshot: async () => ({ entries: [{ provider: formation ? 'slp-codex-lead' : 'slp-codex-peer', enabled: true, status: 'ready' }] }) },
+  providers: { snapshot: async () => ({ entries: [{ provider: formation ? 'slp-codex-lead' : 'slp-codex-peer', enabled: true, status: 'ready', ...(formation ? { modes: [{ id: 'full-access' }] } : {}) }] }) },
   workspaces: { ref: workspaceId => ({ agents: { create: async options => {
     if (!formation) throw new Error('workspace create not selected');
     assert.equal(workspaceId, 'wire-workspace'); assert.equal(options.parent, lead.agentId);
@@ -395,7 +395,7 @@ test('managed composition rejects missing separate effect grants and stale CAS b
 for (const drift of [false,true]) {
  test(`ordinary formation crosses authenticated wire guards; binding drift=${drift} preserves native identity`,async t=>{
   const f=await fixture(t,{formation:true,changeBindingAfterCreate:drift});
-  const request={requestId:'wire-formation',role:'lead',taskLabel:'formation',assignment:'Read-only orientation and report.',grantRef:'human:fixture'};
+  const request={requestId:'wire-formation',role:'lead',taskLabel:'formation',assignment:'Read-only orientation and report.',grantRef:'human:fixture',delivery:'server'};
   const out=await f.call(f.owner,'slp_seat_create',request);
   assert.equal(out.state,'recorded',JSON.stringify(out));
   if (drift) { assert.equal(out.result.code,'CANDIDATE_DRIFT'); assert.equal(out.result.agentId,'formed-lead'); }

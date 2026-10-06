@@ -8,6 +8,8 @@ const formation = {
   requestId: id, grantRef: ref,
   taskLabel: z.string().min(1).max(100).regex(/^[^\r\n]+$/),
   assignment: text,
+  // Absent means "caller": the caller delivers through host send_agent_prompt so the host arms finish notification.
+  delivery: z.enum(["caller", "server"]).optional(),
 };
 /** Placement/parent come from the authenticated seat, never caller labels.
  * Profiles and complete settings are server-resolved, with no overrides. */
