@@ -30,6 +30,77 @@ npm test -- tests/plugin-desk-store.test.mjs
 node scripts/test-isolated.mjs tests/plugin-desk-store.test.mjs   # same thing
 ```
 
+### Reusable full-suite evidence
+
+A full `npm test` takes minutes and a host shell may cut its output, so run it
+once per candidate in record mode and share the result:
+
+```bash
+node scripts/test-isolated.mjs --slp-record=/tmp/<run>/full [--slp-baseline=<earlier>/receipt.json]
+```
+
+Read only `<dir>/receipt.json` and the short summary it prints; do not parse
+the end of the stream. `<dir>` must exist as a parent and be outside the
+repository (a missing parent, a dangling symlink or a path inside the repo is a
+usage error, exit 2, nothing written). `--slp-baseline` needs `--slp-record`. The wrapper strips its own `--slp-*` flags, writes
+`test.log` and `events.jsonl` (both pinned by sha256), and writes `receipt.json` atomically when the run
+ends. The receipt pins the candidate snapshot (head and sha256, measured before
+and after the run, with a `stable` flag: snapshot identical before and after
+the run (endpoint measurement; changes reverted mid-run are not detected)), forwarded argv, test files, node
+version, platform, CPU count, load, times, exit code, signal, counts, failing
+tests (name, file, line), the log sha256 and `node_modules/.package-lock.json`.
+`status` is `pass` only when node exited 0, the structured counts agree with the
+exit code and the candidate did not change; a signal, crash, missing counts or
+drift gives `invalid`, and SIGINT/SIGTERM/SIGHUP gives `interrupted` (the child
+process tree and the temporary `PASEO_HOME` are removed, exit is 128+signal).
+A run the wrapper cannot call a pass never exits 0. `selection` is
+`default-suite` only when the wrapper forwards no argument to node (its own
+`--slp-*` flags do not count): no file and no flag at all. Any argument, filter
+or not, makes it `partial`. Node counts a name filter that matches nothing as one
+passing file, so only a `selection: default-suite` receipt is full-suite
+evidence. The record-mode argv is forwarded verbatim; the wrapper only adds its
+reporter flags. A baseline that cannot be read is recorded as
+`baseline: { path, error }`. `--slp-baseline` lists new, fixed and unchanged
+failures against an earlier receipt and warns when node, platform, argv, file
+list or snapshot differ; the exit code stays node's own.
+
+Reuse rule: a receipt supports another seat's claim only when it is
+`selection: default-suite`, its snapshot sha256, argv/file list and
+node/platform all match the candidate under question and its status is `pass`,
+or its fail-set equals the known baseline. A known baseline is a fail-set
+compared with `--slp-baseline` against a baseline receipt of the same pins
+(snapshot differences are reported, the other pins must match). The
+reader decides whether to reuse it. If the candidate changed, rerun, or the
+Lead names a narrower test from the table below with the reason. The acceptance
+owner still replays the evidence itself (R1/R2 in `AGENTS.md`). Never run two
+full suites at once: contention makes `desk frame read timed out` flake.
+
+Signals and limits. The test child shares the wrapper's process group. On
+SIGINT/SIGTERM/SIGHUP the wrapper sends SIGTERM to each child and descendant
+PID it recorded and SIGKILL to them 3 s later; it does not signal the process
+group, which would hit the caller's shell or npm. It then removes the temporary
+`PASEO_HOME` and exits 128+signal; record mode writes an `interrupted` receipt.
+Because the child shares the wrapper's group, a SIGKILL sent to the wrapper's process group (the usual host timeout kill)
+kills the whole tree. A SIGKILL aimed only at the
+wrapper pid is best effort: the runner and its children are orphaned and keep
+running, so kill them by pid. In both SIGKILL cases the temporary `PASEO_HOME`
+under `/tmp/slp-test-home-*` is left behind, and no receipt is written (a
+receipt from an earlier run in the same directory is removed at start).
+Cleanup covers only the descendants recorded when the signal arrived: a
+descendant spawned during the shutdown window, or one that daemonised (left the
+tree), can escape it. A green run does not sweep for leftover grandchildren
+either; an exit 0 says nothing about stray processes.
+
+Keeping the turn. A seat that owns a full-suite run holds its turn with a
+bounded foreground wait and calls it again until done; ending the turn while the
+suite runs in the background makes Paseo report `idle`. Each call stays under
+the host shell timeout and stops when `receipt.json` exists or the wrapper has
+died:
+
+```bash
+while pgrep -f -- "--slp-record=$DIR" >/dev/null && [ ! -f "$DIR/receipt.json" ]; do sleep 5; done
+```
+
 Which test covers which area, from what each file imports:
 
 | Area (code) | Tests |
@@ -47,6 +118,7 @@ Which test covers which area, from what each file imports:
 | `plugin/server/runtime/cli/*` (install, launch, inventory, monitor, notebook, host config, profiles, package) | `install`, `local`, `materialize`, `launch`, `inventory`, `monitor`, `notebook`, `runtime-core-install` |
 | `plugin/server/runtime/cli/candidate-verify.ts`, `report-records.ts`, `report-semantics.ts` | `candidate-verify`, `verify-handback-cli`, `report-records` |
 | `scripts/review-copy.mjs`, `scripts/runtime-graph.mjs` | `review-copy`, `runtime-graph` |
+| `scripts/test-isolated.mjs` | `test-isolated` |
 | `e2e/*.mjs` (collector, criteria, evidence, fixture, scenarios, stop-watcher) | `harness-cli`, `harness-gate`, `harness-ledger`, `harness-review`, `stop-watcher` |
 | Role policy text (`src/`, protocol template) | `policy-doctrine` |
 
