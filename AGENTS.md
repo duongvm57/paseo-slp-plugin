@@ -81,9 +81,19 @@ belongs to another workstream.
 ## Required Artifacts
 
 - `feature_list.json` — feature state tracker (source of truth for scope and status)
-- `progress.md` — session continuity log
+- `progress.md` — session continuity log (current state only, not an append log)
 - `session-handoff.md` — optional, for multi-session work
 - `init.sh` — standard startup and verification path (mirrors CI `validate`)
+
+## Documentation Map
+
+- `ARCHITECTURE.md` — system map and entry points
+- `docs/DESIGN.md` → `docs/design-docs/` — decision docs with a status index
+- `docs/PLANS.md` → `docs/exec-plans/` — dated plans, completed archive, tech-debt tracker
+- `docs/product-specs/` — per-capability specs
+- `docs/references/` — verification path and repo caveats
+- `docs/generated/` — regenerated artifacts (e.g. payload manifest)
+- `docs/QUALITY_SCORE.md`, `docs/RELIABILITY.md`, `docs/SECURITY.md`, `docs/PRODUCT_SENSE.md`, `docs/FRONTEND.md` — quality/reliability/security/product surfaces
 
 ## Definition of Done
 
