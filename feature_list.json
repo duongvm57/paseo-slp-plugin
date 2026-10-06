@@ -1,0 +1,36 @@
+{
+  "features": [
+    {
+      "id": "feat-001",
+      "name": "Verification baseline",
+      "description": "Clean checkout runs ./init.sh green: npm ci, typecheck, check, check:plugin-payload, npm test (PASEO_HOME-isolated)",
+      "dependencies": [],
+      "status": "in-progress",
+      "evidence": "feat/enforcement-mechanization has 76 pre-existing WIP test failures (baseline verified against clean worktree); npm test stays red until enforcement work lands"
+    },
+    {
+      "id": "feat-002",
+      "name": "Enforcement mechanization",
+      "description": "C2 cleanup/pointer cycles + EF-1 apply-recovery test families currently failing on this branch — tracked by tests/plugin-*.test.mjs and tests/policy-doctrine.test.mjs",
+      "dependencies": ["feat-001"],
+      "status": "in-progress",
+      "evidence": "76 failing tests on feat/enforcement-mechanization at 7bd59a1"
+    },
+    {
+      "id": "feat-003",
+      "name": "Session-state harness adoption decision",
+      "description": "Decide whether feature_list.json/progress.md/session-handoff.md become the repo's session protocol or stay a trial — open decision, needs Human authority",
+      "dependencies": [],
+      "status": "not-started",
+      "evidence": ""
+    },
+    {
+      "id": "feat-004",
+      "name": "Docs sync for harness artifacts",
+      "description": "If the harness stays, route it from docs/contract.md or workspace-protocol so it is discoverable policy, not loose files",
+      "dependencies": ["feat-003"],
+      "status": "not-started",
+      "evidence": ""
+    }
+  ]
+}
