@@ -24,3 +24,23 @@ additive layer for a trial period.
 - Harness files must never enter `installUnitPaths` — payload stays clean.
 - `progress.md` is a *current-state snapshot*, not an append-only log; durable
   history lives in `docs/exec-plans/` (dated files, archived when done).
+
+## Boundary with the plugin itself
+
+This repo also self-installs the plugin (`.paseo-slp/` is present and managed).
+Verified write-surface split — no path conflicts:
+
+- **Plugin-owned**: `.paseo-slp/` (workspace-protocol.md, slp-routing.json,
+  notebook.md — gitignored Supervisor state), the install destination
+  (`installed.json`, `paseo-binding.json`, payload copy). `stageEntries`
+  uses `wx` + preserve — the plugin never overwrites existing repo files.
+- **Harness-owned**: root session-state files + `docs/` structure.
+- **Near-name pairs** (same idea, different layer — do not merge):
+  `session-handoff.md` (session file) vs `docs/work-continuity.md` (desk
+  receipt ownership transfer); `progress.md` (committed session log) vs
+  `.paseo-slp/notebook.md` (gitignored Supervisor state); `init.sh` (verify
+  path) vs `install.sh` (plugin installer entry).
+- **Footgun**: `materialize --include` can stage arbitrary repo-relative
+  paths — never point it at harness files, or stale copies propagate into
+  worktrees (it preserves existing files, so the copy would silently win in a
+  fresh checkout that lacks the real one).
