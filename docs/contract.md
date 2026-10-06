@@ -853,3 +853,17 @@ it. Changed/lost/uncertain policy needs re-reading and the first full protocol
 read remains required. Catalog, eligibility, provider and Jev evidence still
 need fresh checks. Lead's applicable independent-review decision reads remain
 explicit in its role entry.
+
+## Session protocol
+
+Session-level workflow is owned by the harness layer documented in AGENTS.md
+(Startup Workflow, Working Rules, Definition of Done, End of Session,
+Verification Commands). State artifacts: `feature_list.json` (scope + status),
+`progress.md` (current-state snapshot), `session-handoff.md` (multi-session
+handoff), `init.sh` (verification path mirroring CI `validate`).
+
+Durable records live in `docs/exec-plans/` (dated plans + completed archive +
+tech-debt tracker); design decisions live in `docs/design-docs/` (status index).
+This section routes to them; it does not restate their content. On any
+conflict, this contract and `AGENTS.md`'s contributor contract take precedence
+over the harness layer.
