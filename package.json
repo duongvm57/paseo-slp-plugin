@@ -11,8 +11,9 @@
     "paseo-slp": "bin/slp.mjs"
   },
   "scripts": {
-    "install:slp": "node bin/slp.mjs install --paseo-home --apply --reload",
-    "test": "node --test tests/*.test.mjs",
+    "install:slp": "node bin/slp.mjs install --paseo-home",
+    "install:slp:apply": "node bin/slp.mjs install --paseo-home --apply --reload",
+    "test": "node scripts/test-isolated.mjs",
     "e2e": "node e2e/cli.mjs",
     "check": "node bin/slp.mjs identity",
     "generate:plugin-payload": "node scripts/generate-plugin-payload.mjs",

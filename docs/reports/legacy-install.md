@@ -10,8 +10,9 @@
 ## Installation
 
 ```bash
-npm run install:slp
-# or: ./install.sh
+npm run install:slp          # preview only (dry run, writes nothing)
+npm run install:slp:apply    # --apply --reload: writes and reloads
+# or: ./install.sh           # always applies
 ```
 
 Without a local clone, straight from GitHub:

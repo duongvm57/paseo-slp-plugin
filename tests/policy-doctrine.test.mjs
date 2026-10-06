@@ -291,6 +291,6 @@ test('resulting policy/install graph has no dangling or retired active pointers'
   for (const role of ['supervisor', 'lead', 'peer']) assert.ok(unit.includes(`src/roles/${role}.md`));
   const sha = createHash('sha256').update(raw(template)).digest('hex');
   assert.match(raw(protocol), new RegExp(`^current_source_template_sha256: '${sha}'$`, 'm'));
-  assert.match(raw(protocol), /^version: '13'$/m);
+  assert.match(raw(protocol), /^version: '14'$/m);
   assert.match(raw(protocol), /^template_sha256: 'c5b6db392e3d9646d931cda658c3364fe64287caf1f9717ad323681f2e860ad1'$/m);
 });

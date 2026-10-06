@@ -226,9 +226,7 @@ runtime cho các session còn đang chạy. Sau đó chạy `paseo plugin remove
 Từ source checkout, cài dependency bằng `npm ci`, rồi chạy các kiểm tra local:
 
 ```bash
-slp_check_home=$(mktemp -d)
-trap 'rm -rf "$slp_check_home"' EXIT
-env -i HOME="$HOME" PATH="$PATH" PASEO_HOME="$slp_check_home" npm test
+npm test                          # tự chạy trong PASEO_HOME tạm, cách ly
 npm run typecheck
 npm run check                     # xem identity của install unit
 npm run check:plugin-payload       # xác minh payload đã sinh còn khớp nguồn
@@ -258,6 +256,7 @@ Tài liệu chi tiết viết bằng tiếng Anh.
 | [docs/task-execution.md](docs/task-execution.md) | Queue native, dispatch có điều phối, proof dependency, tích hợp và reconciliation |
 | [docs/contract.md](docs/contract.md)             | Mỗi file sở hữu gì, trước khi bạn sửa nó                                        |
 | [docs/development.md](docs/development.md)       | Test, trạng thái xác minh và bộ E2E                                             |
+| [docs/decisions/](docs/decisions/)               | Quyết định bền vững, mỗi quyết định một file: quyết gì, ai quyết, vì sao        |
 | [AGENTS.md](AGENTS.md)                           | Các quy tắc contributor và agent tuân theo trong repo này                       |
 
 Hợp đồng kỹ thuật của từng tính năng nằm trong [docs/spec/](docs/spec/).

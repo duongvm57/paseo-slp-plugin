@@ -1,8 +1,8 @@
 ---
-version: '13'
+version: '14'
 owner: 'duongvm (Human)'
 applies_to: 'paseo-slp source repository'
-last_reviewed: '2026-10-04'
+last_reviewed: '2026-10-06'
 package_version: '0.4.0'
 template_sha256: 'c5b6db392e3d9646d931cda658c3364fe64287caf1f9717ad323681f2e860ad1'
 template_source: 'source checkout; unreleased working candidate'
@@ -103,6 +103,7 @@ lifecycle rules. Release remains Human authority.
 | Release | Release actions reserved in AGENTS.md; Human authority |
 | Work state | Lead timeline for judgments; current desk projection for admitted operations when used; durable notes under .local-checks/ |
 | Delivery/completion | Artifact and evidence for Human acceptance unless the assignment specifies otherwise |
+| Settlement | Decisions made on the Human's behalf and in-task rulings go into the PR description; durable decisions go to `docs/decisions/` within the same candidate. SLP boundary: AGENTS.md §SLP boundary |
 
 ## Repository references
 
@@ -119,3 +120,6 @@ the newly measured source basis, not a rewritten historical provenance.
 Version 13 retires replaced manual ceremony under the Human structural
 refactor grant; guarded desk operations use their current projection.
 Authority, required review, local R1/R2 and ordinary-path proof remain binding.
+Version 14 adds the Settlement row (PR description for in-task rulings,
+`docs/decisions/` for durable ones) and a pointer to the AGENTS.md SLP boundary;
+nothing else changes.

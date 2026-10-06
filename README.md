@@ -227,9 +227,7 @@ profiles and keeps the runtime files for sessions still running), then run
 From a source checkout, install dependencies with `npm ci`, then run the local checks:
 
 ```bash
-slp_check_home=$(mktemp -d)
-trap 'rm -rf "$slp_check_home"' EXIT
-env -i HOME="$HOME" PATH="$PATH" PASEO_HOME="$slp_check_home" npm test
+npm test                          # runs in a temporary, isolated PASEO_HOME
 npm run typecheck
 npm run check                     # inspect the install-unit identity
 npm run check:plugin-payload       # verify the generated payload is current
@@ -257,6 +255,7 @@ After editing it, run `node scripts/generate-readme-diagrams.mjs`; use `--check`
 | [docs/task-execution.md](docs/task-execution.md) | Native task queue, supervised dispatch, dependency proof, integration and reconciliation |
 | [docs/contract.md](docs/contract.md)             | What every file owns, before you change it                                      |
 | [docs/development.md](docs/development.md)       | Tests, verification status and the E2E harness                                  |
+| [docs/decisions/](docs/decisions/)               | Durable decisions, one file each: what was decided, by whom and why             |
 | [AGENTS.md](AGENTS.md)                           | The rules contributors and agents follow in this repository                     |
 
 Technical contracts for individual capabilities live under [docs/spec/](docs/spec/).

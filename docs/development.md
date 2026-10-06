@@ -6,17 +6,52 @@ are in [AGENTS.md](../AGENTS.md).
 ## Testing
 
 ```bash
-slp_check_home=$(mktemp -d)
-trap 'rm -rf "$slp_check_home"' EXIT
-env -i HOME="$HOME" PATH="$PATH" PASEO_HOME="$slp_check_home" npm test
+npm test
 npm run typecheck
 npm run check
 npm run check:plugin-payload
 ```
 
-The isolated home and clean environment keep managed runtime and enabled
-service settings out of test fixtures. The canonical-fixture check currently
-requires `tmpdir()` to resolve to `/tmp`; local runs here use that default.
+This is the order in `.github/workflows/ci.yml`. `npm test` runs
+`scripts/test-isolated.mjs`: it creates a temporary `PASEO_HOME`, runs
+`node --test` with a clean environment (only `HOME`, `PATH` and that
+`PASEO_HOME`), forwards the exit code and removes the directory. An inherited
+live `PASEO_HOME`, managed runtime or enabled service therefore cannot reach
+test fixtures, so no manual `env -i`/`mktemp` wrapper is needed. CI still sets
+its own temporary home around `npm test`; that is redundant but harmless. The
+canonical-fixture check currently requires `tmpdir()` to resolve to `/tmp`;
+local runs here use that default.
+
+Run one file (or a few) through the same wrapper; arguments are passed to
+`node --test` after the isolation is set up:
+
+```bash
+npm test -- tests/plugin-desk-store.test.mjs
+node scripts/test-isolated.mjs tests/plugin-desk-store.test.mjs   # same thing
+```
+
+Which test covers which area, from what each file imports:
+
+| Area (code) | Tests |
+|---|---|
+| `plugin/server/desk-store.ts`, `desk-assignment.ts`, `desk-ownership.ts` | `plugin-desk-store`, `plugin-desk-store-migrations`, `plugin-desk-continuity`, `plugin-desk-workflow-continuity` |
+| `plugin/server/desk-scope.ts`, `desk-rollout.ts`, `desk-check-runner.ts`, `desk-settlement.ts`, `desk-handback.ts` | `plugin-desk-scope`, `plugin-desk-rollout`, `plugin-desk-check-freshness`, `plugin-desk-settlement`, `plugin-desk-handback`, `plugin-desk-records-parity`, `plugin-workflow-view` |
+| `plugin/server/desk-task*.ts`, `desk-task-execution-*.ts` | `plugin-desk-task-*` (access, bridge, capacity, capacity-boundaries, contract, core, execution, host, runtime), `plugin-desk-workflow-tasks`, `plugin-task-recap` |
+| `plugin/server/desk-bridge.ts`, `desk-seat.ts`, `desk-operation.ts`, `desk-formation.ts` | `plugin-desk-bridge`, `plugin-desk-seat`, `plugin-desk-operation`, `plugin-desk-formation`, `plugin-desk-formation-bridge` |
+| `plugin/server/desk-recovery.ts`, `runtime/lock-holder.ts`, `runtime/cli/desk-recovery.ts` | `plugin-desk-recovery`, `plugin-lock-holder`, `desk-recovery-cli` |
+| `plugin/server/enforcement.ts`, `runtime-pin.ts`, `injection-binding.ts`, `role-injection.ts` | `plugin-enforcement`, `plugin-runtime-pin`, `plugin-injection-binding`, `plugin-role-injection` |
+| `plugin/server/manager.ts`, `config-transaction.ts`, `state-store.ts`, `materializer.ts`, `launchers.ts`, `executables.ts` | `plugin-transaction`, `plugin-recovery`, `plugin-routing`, `plugin-materializer`, `plugin-launchers`, `plugin-families`, `plugin-helpers`, `plugin-provider-catalog`, `plugin-entrypoints`, `runtime-layout` |
+| `plugin/server/jev.ts`, `plugin/server/runtime/cli/jev*.ts`, `routing.ts` | `plugin-jev`, `jev`, `routing`, `routing-criteria`, `runtime-state` |
+| `plugin/server/supervision/*`, `plugin/shared/supervision.ts` | `plugin-supervision`, `plugin-supervision-capture`, `-card`, `-delivery`, `-observer` |
+| `plugin/client/*` (cards, catalog demand, workflow panel, manager state) | `client-catalog-demand`, `client-target-async`, `client-workflow-view`, `plugin-ui`; hooks load through `tests/helpers/*-entry.mts` |
+| `plugin/server/runtime/cli/*` (install, launch, inventory, monitor, notebook, host config, profiles, package) | `install`, `local`, `materialize`, `launch`, `inventory`, `monitor`, `notebook`, `runtime-core-install` |
+| `plugin/server/runtime/cli/candidate-verify.ts`, `report-records.ts`, `report-semantics.ts` | `candidate-verify`, `verify-handback-cli`, `report-records` |
+| `scripts/review-copy.mjs`, `scripts/runtime-graph.mjs` | `review-copy`, `runtime-graph` |
+| `e2e/*.mjs` (collector, criteria, evidence, fixture, scenarios, stop-watcher) | `harness-cli`, `harness-gate`, `harness-ledger`, `harness-review`, `stop-watcher` |
+| Role policy text (`src/`, protocol template) | `policy-doctrine` |
+
+All paths in the Tests column are `tests/<name>.test.mjs`. The table lists the
+primary tests per area, not every test that touches a module.
 
 Local checks cover the manager's transaction/recovery logic, the
 materializer, launch-shim generation, config preservation, protocol and the
