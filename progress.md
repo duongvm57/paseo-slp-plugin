@@ -4,7 +4,7 @@
 
 **Last Updated:** 2026-10-06 ~07:15 UTC
 **Session ID:** devin-9ed6bbf0bae0448a865ce4dbd6af147a
-**Active Feature:** feat-004 — route harness entry points from docs/contract.md
+**Active Feature:** none — harness install complete; feat-001/002 owned by enforcement workstream
 
 ## Status
 
@@ -14,6 +14,7 @@
 - [x] `init.sh` mirrors CI validate exactly (npm ci → typecheck → check → check:plugin-payload → npm test with isolated PASEO_HOME)
 - [x] `harness doctor`-equivalent run: `validate-harness.mjs` scores 100/100
 - [x] `feat-003` harness adoption: session-state chosen, PR #41 closed, design-docs updated
+- [x] `feat-004` contract routing: `docs/contract.md` Session protocol section added
 
 ### What's In Progress
 
@@ -23,8 +24,7 @@
 
 ### What's Next
 
-1. Route harness entry points from `docs/contract.md` or workspace-protocol (feat-004)
-2. First real use: cold session executes one `feature_list.json` item end-to-end
+1. First real use: a cold session executes one `feature_list.json` item end-to-end via the harness — the actual acceptance test
 
 ## Blockers / Risks
 
