@@ -25,3 +25,10 @@ skills-lock.json
 .beads-credential-key
 .beads/proxieddb/
 *.gate.lock*
+
+# Harness core maintenance binary
+scripts/bin/harness
+scripts/bin/harness.exe
+
+# Harness install backups
+.harness-backup/

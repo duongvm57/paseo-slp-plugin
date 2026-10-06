@@ -1,0 +1,110 @@
+{
+  "schema_version": 1,
+  "core_version": "0.1.10",
+  "files": [
+    {
+      "path": "AGENTS.md",
+      "upstream_sha256": "d034c93fcce8a4ed46d2857b92d39ad1a7d3240102ef9ddc2eb35a8eb6020dcb"
+    },
+    {
+      "path": ".agents/skills/audit-onboarding-proposal/SKILL.md",
+      "upstream_sha256": "a5362994d70221bfc26bb9dc814426eb52f9a728dc828421a31d0fe704c0b370"
+    },
+    {
+      "path": ".agents/skills/audit-onboarding-proposal/agents/openai.yaml",
+      "upstream_sha256": "1f822840d05d627c43e8dcb87a8c54ef28e52c24cba72cf6950c142e360e1a81"
+    },
+    {
+      "path": ".agents/skills/audit-onboarding-proposal/scripts/validate_evidence_capsule.py",
+      "upstream_sha256": "6d9503db59137b6df758157ab9d225c75253523c4fed9e70dc7f61c787fdea84"
+    },
+    {
+      "path": ".agents/skills/encode-invariant/SKILL.md",
+      "upstream_sha256": "025d099757786d203462d8f2a56431c4e995b679caf0ce757bb7e31b366b8a46"
+    },
+    {
+      "path": ".agents/skills/encode-invariant/agents/openai.yaml",
+      "upstream_sha256": "cfa2b4c5263b09f8d51dbabb575fb2597378be54f4b09205bea0a98cd562b2ac"
+    },
+    {
+      "path": ".agents/skills/improve-harness/SKILL.md",
+      "upstream_sha256": "22c9ddae0396d0884b759f2372685ab74ea29ce40a7d876829a28088ebc8fb30"
+    },
+    {
+      "path": ".agents/skills/improve-harness/agents/openai.yaml",
+      "upstream_sha256": "77982c7e2c70c3becb5076c2ce10eefb49ada39f53ed01da930f092fe6d263c5"
+    },
+    {
+      "path": ".agents/skills/onboard-repository/SKILL.md",
+      "upstream_sha256": "dd63e9828c45b0e07449d1b58f41e797f1c569b7787111a4ad9797c95a2586ce"
+    },
+    {
+      "path": ".agents/skills/onboard-repository/agents/openai.yaml",
+      "upstream_sha256": "0992cf606b2680397e6aee60db3d39c62aa3d5773acaeefc2f4f1e18103537e9"
+    },
+    {
+      "path": ".agents/skills/onboard-repository/references/evidence-capsule-v1.md",
+      "upstream_sha256": "b9e1f9208842e725289469d0976b3e65670a30ee7f69be6d799cf4ba2a19fadb"
+    },
+    {
+      "path": ".agents/skills/onboard-repository/references/evidence-capsule-v2.md",
+      "upstream_sha256": "fb8454f138178b8a1166467006c9fe9b8a533029b9bb78a0f9ba846c91f16642"
+    },
+    {
+      "path": ".agents/skills/onboard-repository/scripts/emit_evidence_bundle.py",
+      "upstream_sha256": "c849badb5ad720b150caebaf5961457cfecba9127a9811652e691a68bdd34454"
+    },
+    {
+      "path": ".agents/skills/onboard-repository/scripts/render_patch.py",
+      "upstream_sha256": "9e6b5c4b148e78171695ab964757e792d2a67b32517d08ad113df8de2da9cb38"
+    },
+    {
+      "path": "docs/WORKFLOW.md",
+      "upstream_sha256": "b76b94a895adf1c105ea5535db53059008c701c76481aa0d9c54b32389945652"
+    },
+    {
+      "path": "docs/README.md",
+      "upstream_sha256": "3482f4d46e1a0f22d2d06b3f2ffbdf31b0443e29db1efc9f0c8844629f3ea866"
+    },
+    {
+      "path": "docs/patterns/encoding-invariants.md",
+      "upstream_sha256": "c49f7fe5c5995e11f095c70791f731874c8cb8e1cdabef36d26581aa0a25ffd5"
+    },
+    {
+      "path": "docs/product/README.md",
+      "upstream_sha256": "72e7901c5d2fedb874340146125515b47ce2598d99568f9eaa3ae193b0d8920f"
+    },
+    {
+      "path": "docs/plans/README.md",
+      "upstream_sha256": "4b8203c4a199fc7ba06fec0ac3c3b779c7104660ba9374095a8c087c292a29b9"
+    },
+    {
+      "path": "docs/plans/active/README.md",
+      "upstream_sha256": "a05d6098af9a87cb8c2423cf7f09499afb24239a65c64d7bb0d3fbbe7d2c07e2"
+    },
+    {
+      "path": "docs/plans/completed/README.md",
+      "upstream_sha256": "204d6027628c7450727eb24a36d57ea58280e4644d02ee1551a00c781c9f4c00"
+    },
+    {
+      "path": "docs/decisions/README.md",
+      "upstream_sha256": "22943f63368fb0d8aead5e8bc2c0142eb37384287cf50100e421796af019bd4a"
+    },
+    {
+      "path": "docs/templates/application-runbook.md",
+      "upstream_sha256": "1e87f2189066dd0469555406c9ef63c3939e53adfcb23494d2f13f0b9552a72d"
+    },
+    {
+      "path": "docs/templates/decision.md",
+      "upstream_sha256": "e92ba7a5b7bc10ce6c213af75a191619fc305c3945cdd55d4dc6bac72dcd42c1"
+    },
+    {
+      "path": "docs/templates/exec-plan.md",
+      "upstream_sha256": "111c40ea8ab63a03561fdb54f235358546788b3a4e1bb26f220da8db50db92b9"
+    },
+    {
+      "path": "docs/templates/harness-improvement.md",
+      "upstream_sha256": "cbdab1aefab8a38840cc408ce512e16f63acbbcdb0acacf271599e149a5ea608"
+    }
+  ]
+}
