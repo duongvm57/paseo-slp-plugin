@@ -1,6 +1,6 @@
 # Harness Model Choice
 
-**Status:** Proposed — needs Human authority
+**Status:** Decided — session-state harness (PR #42)
 **Date:** 2026-10-06
 
 ## Question
@@ -26,8 +26,16 @@ Two harness philosophies now exist on parallel branches of
    session-state files own per-session protocol. Requires a demarcation note
    so `docs/plans/` vs `docs/exec-plans/` don't conflict.
 
+## Resolution
+
+PR #41 closed 2026-10-06 — repository-harness dropped. Session-state harness
+is the repo's session protocol; `docs/plans/`-style ADR surface is covered by
+`docs/exec-plans/` + `docs/design-docs/` instead. Open points below resolved
+by that choice.
+
 ## Open points
 
-- Whether `feature_list.json` duplicates or complements `docs/plans/`.
-- Whether provenance/update machinery is worth keeping for a hand-maintained
-  layer.
+- ~~Whether `feature_list.json` duplicates or complements `docs/plans/`.~~
+  moot — `docs/plans/` not adopted
+- ~~Whether provenance/update machinery is worth keeping~~
+  moot — layer is hand-maintained

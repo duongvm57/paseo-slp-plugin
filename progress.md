@@ -2,9 +2,9 @@
 
 ## Current State
 
-**Last Updated:** 2026-10-06 05:00 UTC
+**Last Updated:** 2026-10-06 ~07:15 UTC
 **Session ID:** devin-9ed6bbf0bae0448a865ce4dbd6af147a
-**Active Feature:** feat-002 — enforcement mechanization (branch WIP, not owned by this session)
+**Active Feature:** feat-004 — route harness entry points from docs/contract.md
 
 ## Status
 
@@ -13,6 +13,7 @@
 - [x] Session-state harness installed: `init.sh`, `feature_list.json`, `progress.md`, `session-handoff.md`, `AGENTS.md` workflow sections
 - [x] `init.sh` mirrors CI validate exactly (npm ci → typecheck → check → check:plugin-payload → npm test with isolated PASEO_HOME)
 - [x] `harness doctor`-equivalent run: `validate-harness.mjs` scores 100/100
+- [x] `feat-003` harness adoption: session-state chosen, PR #41 closed, design-docs updated
 
 ### What's In Progress
 
@@ -22,17 +23,16 @@
 
 ### What's Next
 
-1. Human decision: keep session-state harness, or drop in favor of repository-harness (PR #41), or both
-2. If kept: route artifacts from `docs/contract.md` per `feat-004`
+1. Route harness entry points from `docs/contract.md` or workspace-protocol (feat-004)
+2. First real use: cold session executes one `feature_list.json` item end-to-end
 
 ## Blockers / Risks
 
 - [ ] `npm test` fails 76 tests on base branch: not caused by this PR — verified identical on clean `origin/feat/enforcement-mechanization`
-- [ ] Two harness philosophies coexist in repo history (PR #41 vs this branch): decide one owner for session protocol
 
 ## Decisions Made
 
-- **Session-state layer**: adopted course-model harness (feature_list/progress/handoff/init.sh) as additive layer; contributor contract in `AGENTS.md` left untouched — harness sections appended below it
+- **Session-state layer**: adopted as the session protocol (PR #41 alternative dropped); contributor contract in `AGENTS.md` untouched — harness sections appended below it
 - **Verification path**: `./init.sh` mirrors `.github/workflows/ci.yml` `validate` job exactly, including `PASEO_HOME` isolation
 
 ## Files Modified This Session

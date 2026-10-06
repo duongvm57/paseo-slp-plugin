@@ -1,7 +1,7 @@
 # Plan: Session-State Harness Trial
 
 **Created:** 2026-10-06
-**Status:** awaiting Human decision
+**Status:** decision made — session-state adopted
 
 ## Objective
 
@@ -19,15 +19,14 @@ it becomes the repo's session protocol (feat-003 in `feature_list.json`).
 1. [x] Install core artifacts (`init.sh`, `feature_list.json`, `progress.md`,
    `session-handoff.md`, AGENTS.md sections)
 2. [x] Add docs structure (design-docs, exec-plans, product-specs, references)
-3. [ ] Human picks harness owner: PR #42 vs PR #41 vs layered
-4. [ ] If kept: route harness entry points from `docs/contract.md` (feat-004)
+3. [x] Human picked session-state (PR #41 closed)
+4. [ ] Route harness entry points from `docs/contract.md` (feat-004)
 5. [ ] First real use: a cold session executes one `feature_list.json` item
    end-to-end using only the harness files — that is the actual acceptance test
 
 ## Open Decisions
 
-- Single model vs layered (see `docs/design-docs/harness-model-choice.md`)
-- Whether `feature_list.json` and `docs/plans/` (from PR #41) merge or split
+- ~~Single model vs layered~~ decided: session-state (`docs/design-docs/harness-model-choice.md`)
 
 ## Verification
 

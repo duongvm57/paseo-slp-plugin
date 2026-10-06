@@ -1,14 +1,15 @@
 # Session Harness Layer
 
-**Status:** Accepted (as trial)
+**Status:** Accepted
 **Date:** 2026-10-06
 **PR:** #42
 
 ## Decision
 
 Adopt the course-model session-state harness (`init.sh`, `feature_list.json`,
-`progress.md`, `session-handoff.md`, `AGENTS.md` workflow sections) as an
-additive layer for a trial period.
+`progress.md`, `session-handoff.md`, `AGENTS.md` workflow sections) as the
+repo's session protocol (repository-harness alternative dropped, PR #41
+closed).
 
 ## Rationale
 
