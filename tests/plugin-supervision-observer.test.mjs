@@ -3026,7 +3026,7 @@ test('D2: a notify-… gate reason clears once the recipient is usable again —
 
 test('D2: a notify-… reason belongs to its recipient — a changed route never carries it to the new recipient, and nothing is sent', async t => {
   const home = makeHome(t);
-  const NEW_SUP = '55555555-5555-4555-8555-555555555555'; // not a known agent
+  const NEW_SUP = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'; // no constant or agent in this file uses it — refresh returns null
   writeRoutes(home, [route({ mode: 'notify', pendingDelayMs: 40 })]);
   const agents = liveAgents({ [SUP]: snap(SUP, 'slp-codex-peer') });
   const ask = makeAsk([PENDING]);
@@ -3038,15 +3038,15 @@ test('D2: a notify-… reason belongs to its recipient — a changed route never
   // pendingDelayMs differs in length: the observer's config cache stamps
   // `mtimeMs:size`, and two UUIDs alone leave the size unchanged.
   writeRoutes(home, [route({ mode: 'notify', pendingDelayMs: 4000, supervisorAgentId: NEW_SUP })]);
+  // Stage a — before any event or pass: the view reads the route, so the old
+  // recipient's reason is not shown for the new route.
+  assert.equal(observer.shadow(stableRoot).gates[LEAD] ?? null, null, 'the previous recipient\'s reason is not shown before any pass');
+  // Stage b — a valid pass runs for the new recipient: its own check shows.
   observer.onCreated(peerHook(PEER2), paseo);
   observer.onTurn(peerTurn({ peerId: PEER2, turnId: 'turn-p2' }), paseo);
   await settle(observer);
-  // The old recipient's reason is never shown for the new route: the view is
-  // null, or the new recipient's own check (unknown agent) — never kept for,
-  // or fallen back to, another seat.
-  const shownGate = observer.shadow(stableRoot).gates[LEAD] ?? null;
-  assert.notEqual(shownGate, 'notify-recipient-not-slp-supervisor', 'the previous recipient\'s reason is not shown');
-  assert.ok([null, 'notify-recipient-not-found'].includes(shownGate), `gate: ${shownGate}`);
+  assert.equal(observer.shadow(stableRoot).gates[LEAD], 'notify-recipient-not-found', 'the new recipient\'s own reason (unknown agent)');
+  assert.ok(paseo.refreshed.includes(NEW_SUP), 'the new recipient was probed');
   assert.equal(paseo.sent.length, 0, 'a changed route never sends — to anyone');
   assert.equal(deliveryRows(home).length, 0, 'no reservation');
 });
