@@ -85,6 +85,8 @@ const HTTP_TIMEOUT_MS = 5_000;
 // case expires.
 const DEFER_RETRY_MIN_MS = 30_000;
 const DEFER_RETRY_MAX_MS = 10 * 60_000;
+// Display-only recipient probe cadence (no finding to deliver).
+const RECIPIENT_PROBE_MS = 5 * 60_000;
 const MAX_DIAGNOSTIC_REASONS = 20;
 const CASES_FILE = join("state", "supervision-cases.json");
 
@@ -302,6 +304,7 @@ export interface ObserverDeps {
   localGate?: (evidence: EvidencePayload) => string | null;
   httpTimeoutMs?: number;
   deferRetryMs?: number;
+  recipientProbeMs?: number;
 }
 
 export function createSupervisionObserver(deps: ObserverDeps) {
@@ -313,6 +316,7 @@ export function createSupervisionObserver(deps: ObserverDeps) {
   const evidenceGate = deps.localGate ?? localGate;
   const httpTimeoutMs = deps.httpTimeoutMs ?? HTTP_TIMEOUT_MS;
   const deferMin = deps.deferRetryMs ?? DEFER_RETRY_MIN_MS;
+  const probeMs = deps.recipientProbeMs ?? RECIPIENT_PROBE_MS;
   // Live cases pin their attempt records (the no-repeat authority); `cases`
   // is declared below and read lazily.
   const deliveries = createDeliveryStore(stableRoot, { now, uuid, liveCases: () => new Set(cases.keys()) });
@@ -363,6 +367,8 @@ export function createSupervisionObserver(deps: ObserverDeps) {
   const startMeta = new Map<string, { seq: number; overlapped: boolean; at: number }>();
   const openTurns = new Map<string, Set<string>>(); // leadId → started-not-ended turnIds
   const routeReasons = new Map<string, string>();
+  const notifyReasonFor = new Map<string, string>(); // leadId → recipient the notify-… reason was recorded for
+  const probedAt = new Map<string, number>(); // `${leadId}\0${recipient}` → last display-only probe
   const diagnostics = { droppedEvents: 0, reasons: [] as string[] };
   let lastPaseo: PaseoLike | undefined;
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -481,7 +487,7 @@ export function createSupervisionObserver(deps: ObserverDeps) {
       // discard at accept-time.
       clearBodies(item);
       item.dirty = true;
-      recordRing(item, stateOf(item), item.gatedReason);
+      recordRing(item, stateOf(item), item.gatedReason ?? reasonOf(item));
     }
     for (const job of jobs) {
       if (job.t === "turn-end") scrubCaptureBodies(job.capture);
@@ -702,6 +708,8 @@ export function createSupervisionObserver(deps: ObserverDeps) {
     const withCases = new Set([...cases.values()].map(item => item.leadId));
     for (const leadId of routeReasons.keys()) {
       if (explicitRoute(config, leadId) === undefined && !knownLeads.has(leadId) && !withCases.has(leadId)) routeReasons.delete(leadId);
+      // A notify-… reason is only meaningful for the recipient it was recorded for.
+      dropStaleNotifyReason(leadId, routeFor(leadId));
     }
   };
 
@@ -1332,7 +1340,7 @@ export function createSupervisionObserver(deps: ObserverDeps) {
       // Every applied mutation bumps the case's evaluation basis — an
       // in-flight assessment must not accept against stale evidence.
       if (mutated) { item.evidenceVersion += 1; item.dirty = true; }
-      recordRing(item, stateOf(item), item.gatedReason);
+      recordRing(item, stateOf(item), item.gatedReason ?? reasonOf(item));
     }
   }
 
@@ -1400,6 +1408,23 @@ export function createSupervisionObserver(deps: ObserverDeps) {
     return bytesOf(reduced) <= MAX_EVIDENCE_BYTES ? reduced : null;
   };
 
+  const setNotifyReason = (leadId: string, recipient: string, reason: string): void => {
+    routeReasons.set(leadId, `notify-${reason}`);
+    notifyReasonFor.set(leadId, recipient);
+  };
+  const clearNotifyReason = (leadId: string): void => {
+    if (routeReasons.get(leadId)?.startsWith("notify-")) routeReasons.delete(leadId);
+    notifyReasonFor.delete(leadId);
+  };
+  /** A notify-… reason belongs to the recipient it was recorded for: once the
+   *  Lead's route stops notifying, or names another recipient, it is dropped
+   *  — never carried over to the new recipient. */
+  const dropStaleNotifyReason = (leadId: string, route: EffectiveRoute | null): void => {
+    if (!(routeReasons.get(leadId)?.startsWith("notify-") ?? false)) return;
+    if (route === null || route.mode !== "notify" || route.supervisorAgentId === null ||
+        notifyReasonFor.get(leadId) !== route.supervisorAgentId) clearNotifyReason(leadId);
+  };
+
   const gateClose = (item: Case, reason: string): void => {
     routeReasons.set(item.leadId, reason);
     item.disposition = "unknown";
@@ -1421,7 +1446,10 @@ export function createSupervisionObserver(deps: ObserverDeps) {
       gateClose(item, gate.reason);
       return;
     }
-    routeReasons.delete(item.leadId);
+    // Keep notify-… reasons for the current recipient: only a recipient check
+    // (dispatch or probe) or a changed/non-notify route clears them.
+    dropStaleNotifyReason(item.leadId, route);
+    if (!(routeReasons.get(item.leadId)?.startsWith("notify-") ?? false)) routeReasons.delete(item.leadId);
     if (item.gatedReason !== null) { closeCase(item, "unknown", item.gatedReason); return; }
     if (item.expiresAt <= now()) { closeCase(item, "unknown", VISIBILITY.caseExpired); return; }
     const paseo = lastPaseo;
@@ -1804,7 +1832,7 @@ export function createSupervisionObserver(deps: ObserverDeps) {
     const paseo = lastPaseo;
     if (paseo === undefined) return;
     const routeKey = routeKeyOf(route);
-    if (tombstoned(recipient)) { setDelivery(item, "blocked", recipient, "recipient-archived", axes); routeReasons.set(item.leadId, "notify-recipient-archived"); return; }
+    if (tombstoned(recipient)) { setDelivery(item, "blocked", recipient, "recipient-archived", axes); setNotifyReason(item.leadId, recipient, "recipient-archived"); return; }
     let snapshot: PaseoAgentSnapshot | null | undefined;
     try {
       snapshot = (await bounded(paseo.agents.ref(recipient).refresh(), signal))?.agent;
@@ -1826,11 +1854,11 @@ export function createSupervisionObserver(deps: ObserverDeps) {
     }
     const check = checkRecipient(snapshot, recipient);
     if (!check.ok) {
-      routeReasons.set(item.leadId, `notify-${check.reason}`);
+      setNotifyReason(item.leadId, recipient, check.reason);
       setDelivery(item, "blocked", recipient, check.reason, axes);
       return;
     }
-    if (routeReasons.get(item.leadId)?.startsWith("notify-")) routeReasons.delete(item.leadId);
+    clearNotifyReason(item.leadId);
     if (check.running) { deferDelivery(item, recipient, "recipient-running", axes); return; }
     const still = eligibleFindings(item, recipient).filter(axis => axes.includes(axis));
     if (still.length === 0) return;
@@ -1870,7 +1898,7 @@ export function createSupervisionObserver(deps: ObserverDeps) {
       // An unusable attempt history blocks every notify Lead visibly until
       // the file is repaired — never reset, never overwritten.
       if (reserved.reason.startsWith("delivery-store-")) {
-        routeReasons.set(item.leadId, `notify-${reserved.reason}`);
+        setNotifyReason(item.leadId, recipient, reserved.reason);
         diag(reserved.reason);
       }
       setDelivery(item, "blocked", recipient, reserved.reason, still);
@@ -1898,6 +1926,40 @@ export function createSupervisionObserver(deps: ObserverDeps) {
     setDelivery(item, "deferred", recipient, reason, axes);
   }
 
+  /** Display-only recipient check (from the pending-delay checkpoint on —
+   *  the point where a brief/handback alert could go out) for a notify route
+   *  with nothing to deliver: surfaces an unusable recipient on the Manager gate. Never
+   *  sends, reserves, changes the delivery, creates a finding or redirects. */
+  async function probeRecipient(item: Case, route: EffectiveRoute, recipient: string): Promise<void> {
+    const paseo = lastPaseo;
+    if (paseo === undefined) return;
+    const key = `${item.leadId}\0${recipient}`;
+    const last = probedAt.get(key);
+    if (last !== undefined && now() - last < probeMs) return;
+    probedAt.set(key, now());
+    const routeKey = routeKeyOf(route);
+    const show = (reason: string | null): void => {
+      if (reason !== null) setNotifyReason(item.leadId, recipient, reason);
+      else clearNotifyReason(item.leadId);
+    };
+    if (tombstoned(recipient)) { show("recipient-archived"); return; }
+    let snapshot: PaseoAgentSnapshot | null | undefined;
+    let failed = false;
+    try {
+      snapshot = (await bounded(paseo.agents.ref(recipient).refresh(), signal))?.agent;
+    } catch {
+      if (signal.aborted) return;
+      failed = true;
+    }
+    if (signal.aborted) return;
+    if (!cases.has(item.id) || !observeGate().ok) return;
+    if (routeKeyOf(routeFor(item.leadId)) !== routeKey || tombstoned(recipient) ||
+        tombstoned(item.leadId) || tombstoned(item.peerId)) return;
+    if (failed) { show(VISIBILITY.recipientRefreshFailed); return; }
+    const check = checkRecipient(snapshot, recipient);
+    show(check.ok ? null : check.reason);
+  }
+
   /** One pass over open cases: dispatch eligible findings on notify routes
    *  (one attempt per finding and recipient), then apply closure rules. */
   async function dispatchPass(): Promise<void> {
@@ -1910,6 +1972,7 @@ export function createSupervisionObserver(deps: ObserverDeps) {
       const route = routeFor(item.leadId);
       if (route === null) { closeCase(item, "unknown", unroutedReason(item.leadId)); continue; }
       item.route = { source: route.source, mode: route.mode };
+      dropStaleNotifyReason(item.leadId, route);
       // A recipient that was blocked stays blocked for this case until the
       // route names a different one — no refresh loop on an unusable seat.
       const blocked = item.delivery?.state === "blocked" && item.delivery.recipient === route.supervisorAgentId;
@@ -1917,6 +1980,7 @@ export function createSupervisionObserver(deps: ObserverDeps) {
           (item.retryAt === null || item.retryAt <= now()) && observeGate().ok) {
         const axes = eligibleFindings(item, route.supervisorAgentId);
         if (axes.length > 0) await dispatch(item, route, route.supervisorAgentId, axes);
+        else if (item.evidence.pendingDelayElapsed || now() >= item.due) await probeRecipient(item, route, route.supervisorAgentId);
       }
       if (cases.has(item.id) && item.axes !== null) settle(item);
     }
@@ -1955,6 +2019,13 @@ export function createSupervisionObserver(deps: ObserverDeps) {
     for (const item of cases.values()) {
       if (!item.timerUsed) times.push(item.due);
       if (item.retryAt !== null && item.delivery?.state === "deferred") times.push(item.retryAt);
+      // A displayed notify-… reason is re-probed after the throttle window
+      // (no other event may follow the checkpoint tick).
+      const recipient = routeReasons.get(item.leadId)?.startsWith("notify-") ? notifyReasonFor.get(item.leadId) : undefined;
+      if (recipient !== undefined && item.timerUsed) {
+        const at = (probedAt.get(`${item.leadId}\0${recipient}`) ?? now()) + probeMs;
+        times.push(at > now() ? at : now() + probeMs);
+      }
       times.push(item.expiresAt);
     }
     const next = Math.min(...times);
@@ -1993,7 +2064,13 @@ export function createSupervisionObserver(deps: ObserverDeps) {
         : known.workspaceId !== explicit.leadWorkspaceId ? "lead-workspace-mismatch"
         : null;
       // A down Jev gate is the daemon-wide cause and outranks per-Lead waiting.
-      gates[leadId] = routeReasons.get(leadId) ?? (gate.ok ? pending : gate.reason);
+      // A notify-… reason is shown only for the recipient it was recorded for
+      // under a route that still notifies — a pure read, whatever pass ran.
+      const recorded = routeReasons.get(leadId);
+      const shown = recorded?.startsWith("notify-")
+        ? (() => { const route = routeFor(leadId); return route?.mode === "notify" && route.supervisorAgentId !== null && notifyReasonFor.get(leadId) === route.supervisorAgentId ? recorded : undefined; })()
+        : recorded;
+      gates[leadId] = shown ?? (gate.ok ? pending : gate.reason);
     }
     return {
       observations: entries,

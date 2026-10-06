@@ -410,7 +410,15 @@ Supervisor (or the default recipient): brief/handback findings only after the
 pending-delay checkpoint, linked mishandling immediately, at most once per
 finding and recipient. Before every send the recipient is refreshed (exact
 slp-<family>-supervisor, not archived, active status) and the route rechecked
-after every await; a changed route cancels and never falls back. The attempt
+after every await; a changed route cancels and never falls back. While a
+notify route has an open case past its pending-delay checkpoint and no
+deliverable finding, a throttled display-only probe refreshes the recipient
+and surfaces an unusable one as a `notify-…` gate reason (never sends,
+reserves, redirects or blocks); the reason belongs to that recipient, is shown only
+for the route's current recipient (a pure read) and is dropped when the route changes recipient or stops notifying, and a displayed
+reason is re-probed after the throttle window; an inconclusive
+assessment keeps its `assessment-inconclusive` reason on the case — still
+neither a finding nor acceptance. The attempt
 is persisted before the SDK send; an unreadable, corrupt or schema-invalid
 attempt history (or a failed write) refuses every reservation with a visible
 reason and is never reset or overwritten; failure or timeout is recorded

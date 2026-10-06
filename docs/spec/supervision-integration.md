@@ -427,6 +427,27 @@ pass after each drain:
   (mode, recipient, source) and archive state must be unchanged; otherwise
   the dispatch is canceled and never redirected. An unavailable recipient
   blocks delivery with a visible reason (`notify-recipient-…`).
+- **Recipient probe (display only).** While a notify route has an open
+  case past its pending-delay checkpoint, a non-null unblocked recipient
+  and no eligible finding, the dispatch pass refreshes the recipient at most once per Lead and recipient
+  every 5 min (bounded, abortable) and runs the same predicate: unusable →
+  gate reason `notify-<reason>` (refresh failure
+  `notify-recipient-refresh-failed`); usable → a `notify-` reason is
+  cleared. The result is revalidated after the await like a dispatch. The
+  probe never sends, reserves an attempt, changes the case's delivery,
+  creates a finding or changes the recipient. `notify-…` reasons are bound
+  to the recipient they were recorded for — the gate view shows one only while the Lead's route still notifies that same recipient (a pure read, independent of any pass): they survive case evaluation and
+  clear on a successful check, or at once (dispatch pass, evaluation or
+  retention sweep) when the route names another recipient or stops
+  notifying — never carried to the new recipient. While a reason is
+  displayed, the scheduler re-probes after the throttle window without
+  needing another host event. Limit: only open cases are probed, so a
+  Lead with no open case past its checkpoint is not checked; and a
+  recipient that goes bad before any case reaches a checkpoint shows
+  nothing until then. An assessment that stays inconclusive (confidence below
+  the threshold or `unknown`) keeps `assessment-inconclusive` /
+  `handling-pending` as the case reason across Lead turn-end and gate-down
+  re-records; it remains neither a finding nor acceptance.
 - **Deferral.** A `running` Supervisor is not prompted (the host would
   interrupt its turn); the dispatch re-checks with backoff (30 s doubling to
   10 min) until the recipient is idle or the case closes. A refresh failure
