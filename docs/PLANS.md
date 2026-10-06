@@ -17,3 +17,10 @@ Entry point for execution planning. Detailed documents live in `docs/exec-plans/
   History = exec-plans + git log.
 - Deferred items go to `tech-debt-tracker.md` with an explicit reason, not
   into a memory or a chat message.
+
+Demarcation: `docs/task-execution.md` and `docs/work-coordination.md` describe
+the *desk* runtime feature (Lead-decomposed assignments with receipts) — not
+contributor planning. exec-plans tracks what contributors intend to change;
+the desk tracks what a running assignment is doing. `docs/reports/` holds
+retrospective diagnostics — different from tech-debt, which is forward-looking
+deferred work.

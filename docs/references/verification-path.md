@@ -1,6 +1,8 @@
 # Reference: Verification Path
 
 The repo's verification ladder, cheapest first. `./init.sh` runs all of it.
+`docs/development.md` covers the contributor test workflow generally; this
+file is the terse gate list for sessions.
 
 | Step | Command | What it proves |
 |---|---|---|

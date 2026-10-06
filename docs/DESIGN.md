@@ -9,7 +9,11 @@ Repo-level docs that already carry design weight (kept, not duplicated):
 
 - `docs/contract.md` — candidate contract + file ownership + authority model
 - `docs/architecture.md` — component architecture
-- `docs/spec/` — specifications
+- `docs/spec/` — specifications and pre-decision investigations
+
+Demarcation: `spec/` holds explorations that may or may not have produced a
+decision; `design-docs/` is the decision register — once a spec's question
+settles, record the outcome as a design-docs entry, not a new spec.
 - `docs/review-checklist.md` — review gates as practiced
 
 Rule: a decision that changes authority, delegation, evidence, or payload shape
