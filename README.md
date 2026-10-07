@@ -21,7 +21,7 @@ Open **Read SLP work** to inspect registered work without reconstructing it from
 
 ![Paseo SLP: Human intent and acceptance, Lead and independent Peers, optional Supervisor, and a durable repository desk for work, review, proof and handoff](docs/images/slp-overview.svg)
 
-https://github.com/user-attachments/assets/c4211582-997c-429e-96c1-438d5a13f11e
+https://github.com/user-attachments/assets/fccf190e-1356-4ff0-88f6-b8998df677bd
 
 ## How work progresses
 

@@ -21,7 +21,7 @@ Mở **Read SLP work** để xem công việc đã đăng ký mà không phải 
 
 ![Paseo SLP: mục tiêu và nghiệm thu của Human, Lead cùng Peer độc lập, Supervisor tùy chọn và desk bền vững cho công việc, review, proof và handoff](docs/images/slp-overview.svg)
 
-https://github.com/user-attachments/assets/d444a0dc-010d-44b8-9592-e56340cee54b
+https://github.com/user-attachments/assets/526dc8ed-e701-4e15-bd8c-52697be7bc4e
 
 ## Công việc diễn ra thế nào
 
