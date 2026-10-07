@@ -97,9 +97,9 @@ function idOf(line) {
  *  cap is enforced on the RAW bytes so an unterminated flood still surfaces
  *  as a rejection, not growth; an over-cap frame is swallowed whole up to
  *  its newline — the flood's tail never re-parses as a fresh request. */
-function lineSplitter(onLine, onOverflow) {
-  let pending = Buffer.alloc(0);
-  let dropping = false;
+function lineSplitter(onLine, onOverflow, state) {
+  let pending = state?.pending ?? Buffer.alloc(0);
+  let dropping = state?.dropping ?? false;
   const step = () => {
     let start = 0;
     for (;;) {
@@ -144,6 +144,12 @@ function lineSplitter(onLine, onOverflow) {
       return step();
     },
     resume: step,
+    takeState() {
+      const state = { pending, dropping };
+      pending = Buffer.alloc(0);
+      dropping = false;
+      return state;
+    },
   };
 }
 
@@ -266,6 +272,11 @@ export async function run({ env, platform, stdin, stdout, stderr, connect, selfS
     return code;
   };
 
+  // Only bytes not yet handed to socket.write survive a reconnect. A write
+  // accepted by the old socket may already have executed at the desk and
+  // must never be replayed. EOF belongs to stdin, not the socket session.
+  let stdinState;
+  let stdinEnded = false;
   for (let cycle = 0; ; cycle += 1) {
     // ---- connect + handshake -----------------------------------------
     let socket = null;
@@ -360,7 +371,7 @@ export async function run({ env, platform, stdin, stdout, stderr, connect, selfS
     // buffer stays within its high-water mark. A bad frame never leaves
     // this process; typed replies share the stdout sink's backpressure.
     let dead = false;
-    let stdinEnded = false;
+    let inputDetached = false;
     let stdinPausedByUs = false;
     let socketPausedByUs = false;
     const pauseStdin = () => {
@@ -418,9 +429,10 @@ export async function run({ env, platform, stdin, stdout, stderr, connect, selfS
         }
       }
     };
-    const splitStdin = lineSplitter(line => onStdinLine(line), stdinOverflow);
+    const splitStdin = lineSplitter(line => onStdinLine(line), stdinOverflow, stdinState);
+    stdinState = undefined;
     const resumeStdin = () => {
-      if (dead || !stdinPausedByUs) return;
+      if (dead || inputDetached || !stdinPausedByUs) return;
       stdinPausedByUs = false;
       if (splitStdin.resume() === false) {
         stdinPausedByUs = true;
@@ -452,13 +464,6 @@ export async function run({ env, platform, stdin, stdout, stderr, connect, selfS
       if (!socket.destroyed) socket.end();
     };
     stdin.once('end', onStdinEnd);
-    // Adding a 'data' listener does NOT un-pause a stream — after the
-    // teardown pause this stays paused forever and the buffered frames
-    // (and a pending 'end') would never be delivered to the new cycle.
-    // The 'end' listener attaches first so a synchronous 'end' on resume
-    // is not missed.
-    if (stdin.isPaused()) stdin.resume();
-
     // socket → stdout: cap enforced here too — the adapter is trusted to
     // stay under it, but a violation must not reach the MCP client raw.
     const socketOverflow = () => {
@@ -523,8 +528,19 @@ export async function run({ env, platform, stdin, stdout, stderr, connect, selfS
     if (helloResult.rest && helloResult.rest.length > 0) onSocketData(helloResult.rest);
 
     const sessionEnd = await new Promise(resolve => {
-      socket.once('close', () => resolve('close'));
-      socket.once('error', () => resolve('error'));
+      const endSession = reason => {
+        // Old stdout drains must not consume input into a dead socket while
+        // its response splitter is still flushing during teardown.
+        inputDetached = true;
+        resolve(reason);
+      };
+      socket.once('close', () => endSession('close'));
+      socket.once('error', () => endSession('error'));
+      // Consume the carried remainder before resuming the source. If EOF
+      // already arrived, resumeStdin half-closes only after that remainder
+      // drains; no second stdin 'end' event is needed.
+      stdinPausedByUs = true;
+      resumeStdin();
     });
     // No more bytes arrive; the sink-side drain still honors stdout
     // backpressure, released by write callbacks or by the sink dying.
@@ -560,8 +576,9 @@ export async function run({ env, platform, stdin, stdout, stderr, connect, selfS
     });
     dead = true;
     socket.destroy();
+    stdinState = splitStdin.takeState();
 
-    if (stdinEnded) {
+    if (stdinEnded && stdinState.pending.length === 0) {
       stdinPausedByUs = false;
       return finish(0);
     }
