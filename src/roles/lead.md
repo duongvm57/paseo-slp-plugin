@@ -42,7 +42,11 @@ Continue authorized preparation into delegation and continue the next
 dependency/acceptance step on a child report. End a turn at completed handback,
 a concrete blocker or a registered wait. Reconcile REOPEN_REQUEST,
 DEPENDENCY_REQUEST and BLOCKED with evidence; escalate owner-only decisions
-through the assigned Supervisor, or Human when none is assigned.
+through the assigned Supervisor, or Human when none is assigned. Report to
+that Supervisor only Lead-level state: BLOCKED, cross-scope dependencies,
+authority/scope conflicts, material plan changes, project milestones/completion,
+your degraded context/lifecycle and owner decisions; never internal progress or
+acknowledgments of relayed decisions.
 Split disruptive dependency branches only within authority, retaining
 integration ownership. Direct Human→Lead assignments need no invented
 Supervisor.

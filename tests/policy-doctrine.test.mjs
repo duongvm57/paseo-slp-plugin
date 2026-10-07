@@ -173,6 +173,19 @@ test('monitoring stays event-first with bounded owned wakes and no guessed clean
   pins('src/common.md', /When only armed events remain and no local action is useful, end the turn with text/);
 });
 
+test('Lead pushes Lead-level state; Supervisor checks objective continuity on every wake', () => {
+  // Triggers live in role bytes (system prompt) so they survive compaction.
+  pins('src/roles/lead.md', /Report to that Supervisor only Lead-level state: BLOCKED, cross-scope dependencies/,
+    /project milestones\/completion, your degraded context\/lifecycle and owner decisions; never internal progress or acknowledgments of relayed decisions/);
+  pins('src/roles/supervisor.md', /inspect Lead, not each Peer, when a report, finish, Human question or wake calls for it/,
+    /On every wake, before answering or relaying, confirm each wait blocking the Human objective has a live owner and wake path from Lead-level activity, not reported status/,
+    /Take a stalled objective or a wait within your own authority to Human with options; restating a report is no supervision/,
+    /arm a bounded Lead-level heartbeat under monitoring.md/);
+  pins(monitoring, /no material delta and a live objective need no intervention/,
+    /Peers report material decisions.*to Lead, bounded with evidence and attention needed; Lead reports to Supervisor under its role/);
+  pins(protocol, /arms one Lead-level fallback heartbeat.*intermediate reports keep it, and it is deleted at Lead handback, Human stop or reassignment/);
+});
+
 test('governance owns evidence-led investigation, bounded contact and authorized cross-project relay', () => {
   pins('src/roles/supervisor.md', /Lead owns project technical decisions and acceptance/,
     /unless Human grants recovery contact with a named Peer.*Keep that contact bounded/,
@@ -291,7 +304,7 @@ test('resulting policy/install graph has no dangling or retired active pointers'
   for (const role of ['supervisor', 'lead', 'peer']) assert.ok(unit.includes(`src/roles/${role}.md`));
   const sha = createHash('sha256').update(raw(template)).digest('hex');
   assert.match(raw(protocol), new RegExp(`^current_source_template_sha256: '${sha}'$`, 'm'));
-  assert.match(raw(protocol), /^version: '14'$/m);
+  assert.match(raw(protocol), /^version: '15'$/m);
   assert.match(raw(protocol), /^template_sha256: 'c5b6db392e3d9646d931cda658c3364fe64287caf1f9717ad323681f2e860ad1'$/m);
 });
 

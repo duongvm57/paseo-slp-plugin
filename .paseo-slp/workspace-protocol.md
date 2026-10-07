@@ -1,8 +1,8 @@
 ---
-version: '14'
+version: '15'
 owner: 'duongvm (Human)'
 applies_to: 'paseo-slp source repository'
-last_reviewed: '2026-10-06'
+last_reviewed: '2026-10-07'
 package_version: '0.4.0'
 template_sha256: 'c5b6db392e3d9646d931cda658c3364fe64287caf1f9717ad323681f2e860ad1'
 template_source: 'source checkout; unreleased working candidate'
@@ -57,6 +57,10 @@ Use installed Session continuity for fresh Peer assignments, healthy
 same-assignment phases/rework and evidence-based handoff. Keep an idle
 session only for assigned rework with an expiry. Monitoring needs an
 assignment, owner and stop condition; it creates no hidden continuation.
+A Supervisor observing a Lead whose Peers hold outstanding work arms one
+Lead-level fallback heartbeat (about 30 minutes, expiring within 8 hours);
+intermediate reports keep it, and it is deleted at Lead handback, Human stop
+or reassignment.
 
 ## Gate
 

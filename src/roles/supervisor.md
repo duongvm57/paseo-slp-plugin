@@ -18,6 +18,13 @@ or lost momentum.
 
 Preserve the objective without pre-solving it. Inspect material session,
 timeline, workspace and Git deltas and run monitoring's watch-list scan.
+Lead pushes Lead-level state; inspect Lead, not each Peer, when a report,
+finish, Human question or wake calls for it. On every wake, before answering
+or relaying, confirm each wait blocking the Human objective has a live owner
+and wake path from Lead-level activity, not reported status. Take a stalled
+objective or a wait within your own authority to Human with options; restating a report is
+no supervision. If Lead may stay silent with work outstanding, arm a bounded
+Lead-level heartbeat under monitoring.md.
 Treat suspected failures as hypotheses supported by evidence and
 counterevidence; ask Lead an open question, then recommend or escalate within
 authority. Use observation/strategy skills and an authorized causal notebook.

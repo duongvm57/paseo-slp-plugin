@@ -20,10 +20,11 @@ worktrees run different paths and refs/heads/<lane> receives lane commits
 before shared-branch integration. Keep IDs/creation
 receipts; verify a missing listing by ID before diagnosing absence or
 replacement. Empty inventory proves no settlement.
-Use notifyOnFinish=true on create/follow-up. Material decisions, new
-assumptions, ambiguity, reopen/dependency requests, repeated failures,
-stalls and stable candidates/findings warrant bounded reports with evidence
-and attention needed. Peer→Lead and assigned Lead→Supervisor use pinned
+Use notifyOnFinish=true on create/follow-up. Peers report material decisions,
+new assumptions, ambiguity, reopen/dependency requests, repeated failures,
+stalls and stable candidates/findings to Lead, bounded with evidence and
+attention needed; Lead reports to Supervisor under its role. Peer→Lead and
+assigned Lead→Supervisor use pinned
 routes; a parent label resolves a missing recipient only when that relation
 matches. Informational reports need no acknowledgment prompt.
 
@@ -49,7 +50,8 @@ agents/task and the live checkpoint/state path to read, not embedded stale
 state; ask for material delta, evidence and authorized escalation.
 It grants no implementation or post-stop revival.
 On each wake, inspect once, advance the checkpoint for new evidence and
-return to event waiting; no material delta needs no intervention.
+return to event waiting; no material delta and a live objective need no
+intervention.
 
 Use discovered delete_heartbeat({id}); assume no list/update API. Retain
 receipts across recovery. For cadence changes, confirm deletion before a
