@@ -208,6 +208,10 @@ const sendInputSchema = z.object({ agentId: z.string().min(1), prompt: z.string(
 // rendering (pinned by a test that renders the real bundle).
 const CARRIER_HEAD_RE = /^Spawn kit — role-scoped Paseo MCP signatures \(.*\):$/;
 const CARRIER_LOCATORS_RE = /^Policy locators — .+:$/;
+// Current renderers state the runtime directory once on its own line and list
+// locators relative to it; retained runtimes put an absolute path on every
+// locator line and no directory line. Both shapes parse.
+const CARRIER_DIRECTORY_RE = /^Directory: .+\/$/;
 const CARRIER_LOCATOR_RE = /^- .+ — (\d+ bytes, sha256 [0-9a-f]{64}|declared but missing on disk)$/;
 type LaunchEnvelope = { matched: false } | { matched: true; assignment: string | null };
 const stripLaunchEnvelope = (text: string, expectedRole: string, expectedFamily?: FamilyId): LaunchEnvelope => {
@@ -267,6 +271,7 @@ export function stripAcpRolePrefix(
     while (i < lines.length && (lines[i] ?? "").startsWith("- ")) i += 1;
     if (!CARRIER_LOCATORS_RE.test(lines[i] ?? "")) return null;
     i += 1;
+    if (CARRIER_DIRECTORY_RE.test(lines[i] ?? "")) i += 1;
     const firstLocator = i;
     while (i < lines.length && CARRIER_LOCATOR_RE.test(lines[i] ?? "")) i += 1;
     if (i === firstLocator) return null;

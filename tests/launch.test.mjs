@@ -415,8 +415,12 @@ test('orientation carries mechanical locators only', t => {
   assert.equal(lead.orientation.policyBytes.length, expectedPolicy.length);
   // Carrier: locators must survive into initialPrompt on the fallback path
   // (stock piBinding is not an injecting wrapper, so the carrier stays).
-  assert.ok(lead.create.initialPrompt.includes(`- ${join(installed, 'src/common.md')} — `));
-  assert.ok(lead.create.initialPrompt.includes(`${join(installed, 'src/common.md')} — ${readFileSync(join(installed, 'src/common.md')).length} bytes, sha256 ${hash(readFileSync(join(installed, 'src/common.md')))}`));
+  const locatorBlock = lead.create.initialPrompt.split('Policy locators — ')[1];
+  assert.equal(locatorBlock.split(installed).length - 1, 1, 'runtime directory is stated once in the carrier');
+  assert.ok(locatorBlock.includes(`\nDirectory: ${installed}/\n`));
+  const commonBytes = readFileSync(join(installed, 'src/common.md'));
+  assert.ok(locatorBlock.includes(`\n- src/common.md — ${commonBytes.length} bytes, sha256 ${hash(commonBytes)}\n`), 'relative line with full sha256');
+  assert.equal(locatorBlock.split('\n- ').length - 1, expectedPolicy.length);
   assert.ok(!lead.create.initialPrompt.includes('docs/contract.md'));
   // A Peer bundle omits delegation.md and passes the routed catalog hash through.
   const route = catalogFixture(dir);

@@ -198,17 +198,25 @@ test('historical carrier captions remain recognizable without deriving grammar f
     'absolute paths; size/sha256 were measured when these role instructions loaded; verify the file found is the one measured',
     'retained installed-candidate caption',
   ]) {
-    const carrier = `\nSpawn kit — role-scoped Paseo MCP signatures (historical note):\n- old_tool(args)\nPolicy locators — ${caption}:\n- /retained/src/common.md — 12 bytes, sha256 ${digest}\n- /retained/src/roles/peer.md — declared but missing on disk\n`;
+    const head = `\nSpawn kit — role-scoped Paseo MCP signatures (historical note):\n- old_tool(args)\nPolicy locators — ${caption}:\n`;
+    // Retained runtimes rendered an absolute path on every locator line.
+    const retained = `${head}- /retained/src/common.md — 12 bytes, sha256 ${digest}\n- /retained/src/roles/peer.md — declared but missing on disk\n`;
+    // Current producers state the directory once and list relative locators.
+    const current = `${head}Directory: /retained/\n- src/common.md — 12 bytes, sha256 ${digest}\n- src/roles/peer.md — declared but missing on disk\n`;
     assert.equal(carrierBlock({ note: 'historical note', tools: ['old_tool(args)'] }, [
       { path: '/retained/src/common.md', bytes: 12, sha256: digest },
       { path: '/retained/src/roles/peer.md', missing: true },
-    ], caption), carrier, 'producer renders the independent historical bytes');
-    const wrapped = `SLP role=peer\nRetained policy bytes.\n${terminal}${carrier}Do X.`;
-    assert.equal(stripAcpRolePrefix(wrapped, 'peer', 'devin'), 'Do X.', caption);
-    const got = capture(peerEvent('devin', [user(wrapped), asst('done')]), ROUTED);
-    assert.equal(got.brief.value.text, 'Do X.');
-    assert.equal(stripAcpRolePrefix(wrapped.replace('Policy locators — ', 'Policy locations — '), 'peer'), null);
-    assert.equal(stripAcpRolePrefix(wrapped.replace(digest, 'A'.repeat(64)), 'peer'), null);
+    ], caption, '/retained'), current, 'producer renders the independent current bytes');
+    for (const carrier of [retained, current]) {
+      const wrapped = `SLP role=peer\nRetained policy bytes.\n${terminal}${carrier}Do X.`;
+      assert.equal(stripAcpRolePrefix(wrapped, 'peer', 'devin'), 'Do X.', caption);
+      const got = capture(peerEvent('devin', [user(wrapped), asst('done')]), ROUTED);
+      assert.equal(got.brief.value.text, 'Do X.');
+      assert.equal(stripAcpRolePrefix(wrapped.replace('Policy locators — ', 'Policy locations — '), 'peer'), null);
+      assert.equal(stripAcpRolePrefix(wrapped.replace(digest, 'A'.repeat(64)), 'peer'), null);
+    }
+    // A directory line with no locator lines after it is not a carrier.
+    assert.equal(stripAcpRolePrefix(`SLP role=peer\nRetained policy bytes.\n${terminal}${head}Directory: /retained/\nDo X.`, 'peer'), null);
   }
 });
 

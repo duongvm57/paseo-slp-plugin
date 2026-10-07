@@ -192,8 +192,8 @@ function orientation(root: string, role: string, routing?: ResolvedBinding['rout
 // The carrier is the self-contained block that actually reaches the spawned
 // seat: create_agent transmits only create.initialPrompt, so plan-level
 // spawnKit/orientation alone would never arrive. carrierBlock() (shared with
-// role-bundle) repeats the same data in compact text — absolute policy
-// locators (missing markers included) and the approximate kit signatures —
+// role-bundle) repeats the same data in compact text — the runtime directory
+// once and policy locators relative to it (missing markers included) and the approximate kit signatures —
 // with no file contents inlined. This caption is pinned by contract: the
 // values are plan-time, measured where prepare ran.
 
@@ -293,7 +293,7 @@ function plan(root: string, request: LaunchRequest, packet: HandoffPacket | null
       provider: `${binding.provider}/${binding.model}`,
       workspaceId: request.workspaceId,
       initialPrompt: prompt(root, role, assignment, binding)
-        + (targetInjectsCarrier(role, binding, request.providers) ? '' : carrierBlock(kit, manifest.policyBytes, PLAN_LOCATOR_CAPTION))
+        + (targetInjectsCarrier(role, binding, request.providers) ? '' : carrierBlock(kit, manifest.policyBytes, PLAN_LOCATOR_CAPTION, root))
         + (packet ? handoffNotice(role, packet) : ''),
       settings: {
         ...(modeId != null ? { modeId } : {}),

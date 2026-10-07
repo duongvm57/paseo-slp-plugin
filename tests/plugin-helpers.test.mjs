@@ -165,16 +165,23 @@ test('role instructions carry the spawn kit and policy locators at session entry
   // instead of vanishing from the list.
   rmSync(join(installed, 'src/references/review-gates.md'));
   const missing = roleBundle(installed, 'lead', {});
-  assert.ok(missing.instructions.includes(`- ${join(installed, 'src/references/review-gates.md')} — declared but missing on disk`));
+  assert.ok(missing.instructions.includes('\n- src/references/review-gates.md — declared but missing on disk\n'));
   const common = readFileSync(join(installed, 'src/common.md'));
-  assert.ok(lead.instructions.includes(`- ${join(installed, 'src/common.md')} — ${common.length} bytes, sha256 ${hash(common)}`));
+  assert.ok(lead.instructions.includes(`\n- src/common.md — ${common.length} bytes, sha256 ${hash(common)}\n`));
+  // The runtime directory is stated once; locator lines carry no absolute prefix.
+  assert.equal(lead.instructions.split(`\nDirectory: ${installed}/\n`).length - 1, 1);
+  assert.equal(lead.instructions.split('Policy locators — ')[1].split(installed).length - 1, 1);
+  assert.ok(!lead.instructions.split('Policy locators — ')[1].includes(`- ${installed}`));
   // Session-entry caption: measured at load, never plan-time/prepare wording.
-  assert.match(lead.instructions, /Policy locators — absolute paths; size\/sha256 were measured when these role instructions loaded/);
+  assert.match(lead.instructions, /Policy locators — relative to Directory; size\/sha256 measured at load;/);
   assert.ok(!/plan-time|prepare checked/.test(lead.instructions));
-  // Locators sort by absolute path — the list carries no bundle-order hint.
-  const locatorPaths = lead.instructions.split('\n')
-    .filter(line => line.startsWith(`- ${installed}/`))
+  // Locators sort by path — the list carries no bundle-order hint — and
+  // directory + relative path reconstructs the absolute locator.
+  const locatorPaths = lead.instructions.split('Policy locators — ')[1].split('\n').slice(2)
+    .filter(line => /^- src\/.+ — /.test(line))
     .map(line => line.slice(2).split(' — ')[0]);
+  assert.ok(locatorPaths.length > 3);
+  assert.deepEqual(locatorPaths, policyLocators(installed, 'lead').map(entry => entry.path.slice(installed.length + 1)));
   assert.deepEqual(locatorPaths, [...locatorPaths].sort());
   // Managed render derives locators from SLP_RUNTIME_ROOT, not the checkout.
   const managed = roleBundle(installed, 'peer', {
@@ -185,8 +192,8 @@ test('role instructions carry the spawn kit and policy locators at session entry
   assert.ok(managed.instructions.includes('- send_agent_prompt(agentId: string'));
   assert.ok(managed.instructions.includes('- get_agent_status(agentId: string)'));
   assert.ok(!managed.instructions.includes('- create_agent('));
-  assert.ok(!managed.instructions.includes(`- ${join(installed, 'src/delegation.md')}`));
-  assert.ok(managed.instructions.includes(`- ${join(installed, 'src/roles/peer.md')} — `));
+  assert.ok(!managed.instructions.includes('\n- src/delegation.md — '));
+  assert.ok(managed.instructions.includes('\n- src/roles/peer.md — '));
   // Opt-out: prompt() appends the carrier itself, so the inline copy skips it.
   const bare = roleBundle(installed, 'lead', {}, { carrier: false });
   assert.ok(!bare.instructions.includes('Spawn kit —'));
@@ -229,8 +236,8 @@ test('Peer carrier locators are allowlisted to the required bundle; a legacy tra
   mkdirSync(state, { recursive: true });
   const env = managedEnv(home, { SLP_RUNTIME_ROOT: installed });
   const paths = instructions => instructions.split('\n')
-    .filter(line => line.startsWith(`- ${installed}/`))
-    .map(line => line.slice(2).split(' — ')[0]);
+    .filter(line => /^- src\/.+ — /.test(line))
+    .map(line => join(installed, line.slice(2).split(' — ')[0]));
   const peerLocators = [join(installed, 'src/common.md'), join(installed, 'src/roles/peer.md')].sort();
 
   const off = roleBundle(installed, 'peer', env);
