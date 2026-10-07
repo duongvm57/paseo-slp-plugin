@@ -14,7 +14,6 @@ env:
   # coverage gate re-measures the partition and fails closed on any missing,
   # duplicate or extra shard.
   SHARD_COUNT: '4'
-  PASEO_CLI_MODULES: ${{ runner.temp }}/paseo-cli/lib/node_modules/@getpaseo/cli/node_modules
 
 jobs:
   test-shard:
@@ -33,8 +32,10 @@ jobs:
 
       - name: Install Paseo host modules for parity coverage
         run: |
-          npm install --global --prefix "${RUNNER_TEMP}/paseo-cli" --no-audit --no-fund "@getpaseo/cli@0.10.0"
-          test -f "${PASEO_CLI_MODULES}/@getpaseo/server/dist/server/server/daemon-config-store.js"
+          MODS="$RUNNER_TEMP/paseo-cli/lib/node_modules/@getpaseo/cli/node_modules"
+          npm install --global --prefix "$RUNNER_TEMP/paseo-cli" --no-audit --no-fund "@getpaseo/cli@0.10.0"
+          test -f "$MODS/@getpaseo/server/dist/server/server/daemon-config-store.js"
+          echo "PASEO_CLI_MODULES=$MODS" >> "$GITHUB_ENV"
 
       - run: npm ci
 
