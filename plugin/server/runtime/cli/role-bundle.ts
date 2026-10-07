@@ -5,7 +5,7 @@ import { isAbsolute, join } from 'node:path';
 import { roles, orchestrates } from './profiles.ts';
 import { files, hash, readJson } from './package.ts';
 import { spawnKit } from './spawn-kit.ts';
-import { SLP_ROLE_PREFIX, ROLE_PREFIX_TERMINAL, SPAWN_KIT_PREFIX, POLICY_LOCATORS_PREFIX, SESSION_LOCATOR_CAPTION } from '../../../shared/runtime/session-delivery.ts';
+import { SLP_ROLE_PREFIX, ROLE_PREFIX_TERMINAL, SPAWN_KIT_PREFIX, POLICY_LOCATORS_PREFIX, LOCATOR_DIRECTORY_PREFIX, SESSION_LOCATOR_CAPTION } from '../../../shared/runtime/session-delivery.ts';
 
 // A Role bundle is the exact policy bytes a role receives at session entry.
 // This module owns which policy files reach each role and in what order.
@@ -122,17 +122,26 @@ export function policyLocators(root: string, role: string, env: Environment = pr
 // seat. prepare appends it to create.initialPrompt (the only field
 // create_agent transmits); role-bundle appends it to session-entry
 // instructions so seats launched through a provider profile receive the same
-// payload. Same text both ways — absolute policy locators (missing markers
-// included) and the approximate kit signatures, no file contents inlined. The
-// caption names when the locator values were measured: plan-time wording for
-// the prepare path, load-time wording for session entry.
-export function carrierBlock(kit: ReturnType<typeof spawnKit>, locators: ReturnType<typeof policyLocators>, caption: string) {
-  const lines = locators.map(entry => entry.missing
-    ? `- ${entry.path} — declared but missing on disk`
-    : `- ${entry.path} — ${entry.bytes} bytes, sha256 ${entry.sha256}`);
+// payload. Same text both ways — the runtime directory stated once, each
+// policy locator relative to it (missing markers included; directory + relative
+// path reconstructs the absolute path), and the approximate kit signatures, no
+// file contents inlined. The caption names when the locator values were
+// measured: plan-time wording for the prepare path, load-time wording for
+// session entry.
+export function carrierBlock(kit: ReturnType<typeof spawnKit>, locators: ReturnType<typeof policyLocators>, caption: string, root: string) {
+  const base = join(root, '.');
+  const directory = base.endsWith('/') ? base : `${base}/`;
+  const lines = locators.map(entry => {
+    if (!entry.path.startsWith(directory)) throw new Error(`Policy locator ${entry.path} is outside ${directory}`);
+    const relative = entry.path.slice(directory.length);
+    return entry.missing
+      ? `- ${relative} — declared but missing on disk`
+      : `- ${relative} — ${entry.bytes} bytes, sha256 ${entry.sha256}`;
+  });
   return `\n${SPAWN_KIT_PREFIX}role-scoped Paseo MCP signatures (${kit.note}):\n`
     + kit.tools.map(tool => `- ${tool}`).join('\n')
     + `\n${POLICY_LOCATORS_PREFIX}${caption}:\n`
+    + `${LOCATOR_DIRECTORY_PREFIX}${directory}\n`
     + lines.join('\n') + '\n';
 }
 
@@ -163,7 +172,7 @@ export function roleDelivery(root: string, role: string, env: Environment = proc
     (managed ? managedHelpers(cli, managed.daemonHome) : '');
   // Compute the measured carrier once, alongside the immutable core. launch.ts
   // opts out when it owns the carrier so the initial prompt never duplicates it.
-  const carrier = options.carrier === false ? '' : carrierBlock(spawnKit(role), policyLocators(policyRoot, role, env), SESSION_LOCATOR_CAPTION);
+  const carrier = options.carrier === false ? '' : carrierBlock(spawnKit(role), policyLocators(policyRoot, role, env), SESSION_LOCATOR_CAPTION, policyRoot);
   return {
     role, parts, orchestrates: orchestrates(role),
     entry: ({ explicitLanguageState = false } = {}) => entryPrefix + communicationLanguage(env, explicitLanguageState)

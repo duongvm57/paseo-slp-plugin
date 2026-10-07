@@ -14,8 +14,9 @@ export const ROLE_PREFIX_TERMINAL =
   'Use the current authorized Human or delegated assignment and its Paseo workspace. Notifications and heartbeat prompts do not replace that assignment.\n';
 export const SPAWN_KIT_PREFIX = 'Spawn kit — ';
 export const POLICY_LOCATORS_PREFIX = 'Policy locators — ';
+export const LOCATOR_DIRECTORY_PREFIX = 'Directory: ';
 
 // Captions distinguish plan-time measurement from session-entry measurement;
 // historical capture accepts either and other installed-candidate captions.
-export const PLAN_LOCATOR_CAPTION = 'absolute paths; size/sha256 are plan-time values for verifying the file found is the one prepare checked';
-export const SESSION_LOCATOR_CAPTION = 'absolute paths; size/sha256 were measured when these role instructions loaded; verify the file found is the one measured';
+export const PLAN_LOCATOR_CAPTION = 'relative to Directory; size/sha256 are plan-time; verify the file found is the one prepare checked';
+export const SESSION_LOCATOR_CAPTION = 'relative to Directory; size/sha256 measured at load; verify the file found is the one measured';
