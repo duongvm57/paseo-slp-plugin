@@ -17,7 +17,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { tmpdir } from 'node:os';
@@ -292,6 +292,20 @@ test('turn_started stashes the SDK for Desk without the optional observer and cl
   const prevHome = process.env.PASEO_HOME;
   delete process.env.PASEO_HOME;
   t.after(() => { if (prevHome !== undefined) process.env.PASEO_HOME = prevHome; });
+  // Hermetic default home: with PASEO_HOME unset, detectDaemonHome() resolves
+  // join(homedir(), '.paseo') and contribute() realpaths it for the desk-seat
+  // stableRoot — point HOME at a fixture dir holding a real .paseo so the
+  // test never depends on the ambient user home. The default source still
+  // leaves the observer inert; only the desk handshake pair registers.
+  const defaultHome = mkdtempSync(join(tmpdir(), 'paseo-entry-defaulthome-'));
+  mkdirSync(join(defaultHome, '.paseo'));
+  const prevHomeDir = process.env.HOME;
+  process.env.HOME = defaultHome;
+  t.after(() => {
+    if (prevHomeDir === undefined) delete process.env.HOME;
+    else process.env.HOME = prevHomeDir;
+    rmSync(defaultHome, { recursive: true, force: true });
+  });
   // L1(3) — the warn spy is installed BEFORE contribute(): the observation
   // window covers construction and the whole drive, so a warning emitted
   // during contribute() itself cannot escape the oracle.

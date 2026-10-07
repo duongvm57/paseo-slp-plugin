@@ -77,6 +77,36 @@ Lead names a narrower test from the table below with the reason. The acceptance
 owner still replays the evidence itself (R1/R2 in `AGENTS.md`). Never run two
 full suites at once: contention makes `desk frame read timed out` flake.
 
+CI sharding. `--shard=<index>/<count>` runs one deterministic slice of the
+default suite (a weight-balanced partition — files ordered by measured solo
+duration where `scripts/test-suite.mjs` carries a measured table, line count
+as the fallback for unknown files, name as tiebreak, each file going to the
+currently lightest shard; that module is the single enumeration/partition
+source); the receipt is labelled `selection: shard` with its `{ index, of }`
+and the flag refuses every other argument except `--test-concurrency=<n>`
+(which only caps parallelism, never narrows the slice), so a slice can never
+pose as the full suite. CI (`.github/workflows/ci.yml`) runs `test-shard`
+jobs (shard matrix on Node 24, each with its own temporary `PASEO_HOME`) and
+keeps the `validate (24)` check as the aggregator: it runs even when a shard
+failed, was cancelled or was skipped (`if: !cancelled()`), and
+`scripts/test-shards-gate.mjs` consumes the actual `needs.test-shard.result`
+— success continues; failure, cancellation, skip or anything unexpected exits
+1, failing the required check by name. Scope: that named failure covers
+shard/dependency cancellation while the workflow is still running; a
+workflow-wide Human cancellation is GitHub's own cancellation and may skip or
+cancel `validate (24)` — never claimed as a guaranteed named failure. The job
+then downloads the shard receipts and `scripts/test-shards-verify.mjs`
+re-measures coverage — every shard present, passing, internally consistent
+(one stable candidate pin, all counts nonnegative integers with
+`passed == tests` and zero failed/cancelled/skipped/todo, counts equal to the
+events global summary, argv exactly the slice, pinned log/events readable
+beside the receipt with matching hashes, per-file event summaries exhaustive,
+disjoint and summing to the global counts, one lock identity), each file list
+equal to the deterministic partition of the freshly enumerated suite — before
+typecheck/check/check:plugin-payload. Any shard failure, cancellation,
+missing artifact or coverage gap fails the required check by name. Outside
+CI, plain `npm test` still runs the full suite unchanged.
+
 Signals and limits. The test child shares the wrapper's process group. On
 SIGINT/SIGTERM/SIGHUP the wrapper sends SIGTERM to each child and descendant
 PID it recorded and SIGKILL to them 3 s later; it does not signal the process

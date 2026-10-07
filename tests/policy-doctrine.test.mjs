@@ -51,7 +51,7 @@ test('bounded direct Lead writes need actual grants and required independent rev
 
 test('formation distinguishes managed admissions from ordinary host verification', () => {
   pins('src/delegation.md', /task-execution.md.*Runtime admission records and verifies reservations, seat pins and effects/,
-    /ordinary\/Lean creation or observation.*delegation-execution.md.*manual verification still applies/);
+    /ordinary\/Lean creation or observation.*delegation-execution.md; consume native formation receipts or apply its manual verification on the compatibility path/);
   pins(direct, /Its parent creates Lead\/Peer through agent-scoped create_agent/,
     /Verify the returned ID against actual host parent\/workspace\/cwd and bundle/,
     /Confirm the brief's report route when its first report arrives/,

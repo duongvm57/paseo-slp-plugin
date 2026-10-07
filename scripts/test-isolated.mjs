@@ -8,14 +8,19 @@
 //   --slp-record=<dir>       write <dir>/test.log, <dir>/events.jsonl and an
 //                            atomic <dir>/receipt.json; stdout gets a short summary
 //   --slp-baseline=<receipt> compare this run's failures with a previous receipt
+//   --shard=<index>/<count>  run one deterministic slice of the default suite
+//                            (scripts/test-suite.mjs); the receipt is labelled
+//                            selection "shard" and the flag refuses any other
+//                            argument, so a slice can never pose as the full suite
 // A receipt pins measurements only; deciding to reuse it belongs to the reader.
 import { execFileSync, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { closeSync, existsSync, lstatSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync,
+import { closeSync, existsSync, lstatSync, mkdirSync, mkdtempSync, openSync, readFileSync,
   realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { cpus, loadavg, tmpdir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { defaultSuiteFiles, shardFiles } from './test-suite.mjs';
 
 const self = fileURLToPath(import.meta.url);
 // SLP_TEST_ISOLATED_ROOT points the wrapper at another repository; it exists so
@@ -42,17 +47,18 @@ const iso = () => new Date().toISOString();
 const load = () => ({ loadavg: loadavg().map(n => Math.round(n * 100) / 100) });
 
 function parseArgs(argv) {
-  let record = null, baseline = null;
+  let record = null, baseline = null, shard = null;
   const args = [];
   for (const arg of argv) {
     if (arg.startsWith('--slp-record=')) record = arg.slice('--slp-record='.length);
     else if (arg.startsWith('--slp-baseline=')) baseline = arg.slice('--slp-baseline='.length);
+    else if (arg.startsWith('--shard=')) shard = arg.slice('--shard='.length);
     else args.push(arg);
   }
-  return { record, baseline, args };
+  return { record, baseline, shard, args };
 }
 
-const defaults = () => readdirSync(join(root, 'tests')).filter(name => name.endsWith('.test.mjs')).sort().map(name => join('tests', name));
+const defaults = () => defaultSuiteFiles(root);
 const isTestFile = arg => !arg.startsWith('-') && (/\.(?:mjs|js|cjs|mts|ts)$/.test(arg) || existsSync(resolve(root, arg)));
 
 /** Fail-closed reading of the reporter events: anything unreadable is `invalid`. */
@@ -141,7 +147,7 @@ function writeReceipt(dir, receipt) {
   renameSync(temp, target);
 }
 
-const { record, baseline, args } = parseArgs(process.argv.slice(2));
+const { record, baseline, shard, args } = parseArgs(process.argv.slice(2));
 const isEntry = process.argv[1] && realpathSync(process.argv[1]) === realpathSync(self);
 
 /** Live descendants of a pid, from the process table. */
@@ -161,11 +167,26 @@ const signalAll = (pids, sig) => { for (const pid of pids) { try { process.kill(
 
 async function main() {
   if (baseline !== null && record === null) usage('--slp-baseline requires --slp-record');
+  let shardPlan = null;
+  if (shard !== null) {
+    const match = /^(\d+)\/(\d+)$/.exec(shard);
+    if (!match || Number(match[1]) < 1 || Number(match[1]) > Number(match[2])) {
+      usage(`--shard must be <index>/<count> with 1 <= index <= count: ${shard}`);
+    }
+    // --test-concurrency only caps parallelism, it cannot narrow the file set;
+    // anything else could filter the slice out of coverage.
+    const nonConcurrency = args.filter(arg => !/^--test-concurrency=\d+$/.test(arg));
+    if (nonConcurrency.length !== 0) usage('--shard cannot be combined with file or narrowing node --test arguments (only --test-concurrency=<n> is allowed)');
+    shardPlan = { index: Number(match[1]), of: Number(match[2]) };
+  }
   const explicit = args.some(isTestFile);
-  const files = explicit ? args.filter(isTestFile) : defaults();
-  const forwarded = explicit ? args : [...args, ...files];
-  // Allowlist of nothing: any argument for node may narrow the run, so only an argument-free run is the default suite.
-  const selection = args.length === 0 ? 'default-suite' : 'partial';
+  const files = shardPlan ? shardFiles(root, defaults(), shardPlan.index, shardPlan.of)
+    : explicit ? args.filter(isTestFile) : defaults();
+  const forwarded = shardPlan ? [...args, ...files] : explicit ? args : [...args, ...files];
+  // Allowlist of nothing: any argument for node may narrow the run, so only an
+  // argument-free run is the default suite; a --shard slice is always labelled
+  // "shard" and carries its index/count, never the full-suite label.
+  const selection = shardPlan ? 'shard' : args.length === 0 ? 'default-suite' : 'partial';
 
   let dir = null, snapshot = null;
   if (record !== null) {
@@ -241,6 +262,7 @@ async function main() {
   const receipt = {
     schema: 'test-isolated-receipt/1',
     selection,
+    ...(shardPlan ? { shard: shardPlan } : {}),
     status: outcome.status,
     reason: outcome.reason,
     candidate: { before: pinOf(before), after: pinOf(after), stable },

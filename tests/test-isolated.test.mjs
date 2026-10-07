@@ -5,6 +5,7 @@ import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFile
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { defaultSuiteFiles, shardFiles } from '../scripts/test-suite.mjs';
 
 const repo = join(dirname(fileURLToPath(import.meta.url)), '..');
 const wrapper = join(repo, 'scripts', 'test-isolated.mjs');
@@ -149,6 +150,55 @@ test('--slp-baseline without --slp-record is a usage error', async t => {
   const { code, stderr } = await run(work, ['--slp-baseline=/nowhere.json', 'tests/pass.mjs']);
   assert.equal(code, 2);
   assert.match(stderr, /requires --slp-record/);
+});
+
+const tiny = name => ({ [`${name}.test.mjs`]: `import test from 'node:test';\ntest('${name} works', () => {});\n` });
+
+test('--shard runs one deterministic slice of the default suite and labels the receipt "shard"', async t => {
+  const names = ['alpha.mjs', 'beta.mjs', 'gamma.mjs', 'delta.mjs', 'epsilon.mjs'];
+  const extra = Object.assign({}, ...names.map(tiny));
+  const { work, record } = fixtureRepo(t, [], extra);
+  const first = await run(work, [`--shard=1/2`, `--slp-record=${record}-1`]);
+  const second = await run(work, [`--shard=2/2`, `--slp-record=${record}-2`]);
+  assert.equal(first.code, 0, first.stdout);
+  assert.equal(second.code, 0, second.stdout);
+  const suite = defaultSuiteFiles(work);
+  const [firstShard, secondShard] = [1, 2].map(index => shardFiles(work, suite, index, 2));
+  for (const [receiptDir, expected, index] of [[`${record}-1`, firstShard, 1], [`${record}-2`, secondShard, 2]]) {
+    const receipt = receiptOf(receiptDir);
+    assert.equal(receipt.selection, 'shard', 'a slice never claims the full-suite label');
+    assert.deepEqual(receipt.shard, { index, of: 2 });
+    assert.deepEqual(receipt.files, expected);
+    assert.deepEqual(receipt.argv, expected);
+    assert.equal(receipt.status, 'pass');
+  }
+  assert.deepEqual([...firstShard, ...secondShard].sort(), suite, 'the two shards cover the suite exactly once');
+  const repeat = await run(work, [`--shard=1/2`, `--slp-record=${record}-3`]);
+  assert.equal(repeat.code, 0);
+  assert.deepEqual(receiptOf(`${record}-3`).files, firstShard, 'the partition is deterministic');
+  const capped = await run(work, [`--shard=2/2`, '--test-concurrency=1', `--slp-record=${record}-4`]);
+  assert.equal(capped.code, 0, capped.stdout);
+  const cappedReceipt = receiptOf(`${record}-4`);
+  assert.deepEqual(cappedReceipt.files, secondShard);
+  assert.deepEqual(cappedReceipt.argv, ['--test-concurrency=1', ...secondShard], 'the concurrency cap rides along in argv');
+});
+
+test('--shard refuses other arguments and malformed specs without running anything', async t => {
+  const { work, record } = fixtureRepo(t, ['pass.mjs']);
+  for (const argv of [
+    ['--shard=1/2', 'tests/pass.mjs'],
+    ['--shard=1/2', '--test-name-pattern=pass'],
+    ['--shard=0/2'],
+    ['--shard=3/2'],
+    ['--shard=x'],
+    ['--shard=1/'],
+  ]) {
+    const { code, stderr } = await run(work, argv);
+    assert.equal(code, 2, `${argv.join(' ')} must be a usage error`);
+    assert.match(stderr, /--shard/);
+    assert.ok(!stderr.includes(' at '), 'no stack trace');
+  }
+  assert.ok(!existsSync(record), 'no receipt was written');
 });
 
 test('the reporter role never depends on the environment: a marker variable cannot skip a failing run', async t => {

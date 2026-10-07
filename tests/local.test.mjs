@@ -521,9 +521,9 @@ test('standalone bundles deliver semantic obligations and conditional operation 
   const direct = body('src/references/delegation-execution.md').replace(/\s+/gu, ' ');
   assert.match(direct, /agent-scoped create_agent/);
   assert.match(direct, /actual host parent\/workspace\/cwd and bundle/);
-  assert.match(direct, /parent's pinned workspace, including read-only review/);
+  assert.match(direct, /Default placement is the pinned parent workspace, including read-only review/);
   assert.match(direct, /formation in that brief\/receipt: parent, seat, workspace\/cwd/);
-  assert.match(direct, /Spec or Standard unabbreviated/);
+  assert.match(direct, /review taskLabel uses `<task> \/ <lens>`/);
   assert.match(direct, /Empty inventory alone proves no absence/);
   const monitoring = body('src/references/monitoring.md').replace(/\s+/gu, ' ');
   assert.match(monitoring, /not cwd/);
@@ -532,4 +532,5 @@ test('standalone bundles deliver semantic obligations and conditional operation 
   const gates = body('src/references/review-gates.md').replace(/\s+/gu, ' ');
   assert.match(gates, /required independent mandates, not-required only with no material trigger, or exempt only with explicit waiver authority/);
   assert.match(gates, /Runtime enforces the declared set.*does not decide sufficiency or risk/);
+  assert.match(gates, /Spec and Standards are optional descriptive lenses unless the effective rule requires them/);
 });
