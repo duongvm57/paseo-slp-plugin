@@ -222,6 +222,32 @@ To remove it, choose **Deactivate** on the SLP manager first (this removes the p
 profiles and keeps the runtime files for sessions still running), then run
 `paseo plugin remove paseo-slp`. Details are in [docs/operations.md](docs/operations.md#upgrading).
 
+### Migrating from 0.6.0 or earlier
+
+With no agents running, use the update/reload command above, then open **SLP → Inspect**
+and run **Rebind**. Saved role preferences and the shared Peer pool are preserved.
+No reinstall or manual state migration is normally needed.
+
+Check these only if they apply to your installation:
+
+- **Node:** the daemon host now needs Node `>=22.18.0 <23.0.0 || >=23.6.0`
+  for native TypeScript. Upgrade older Node versions before rebinding.
+- **Repository protocol:** update old tracker/Beads instructions in
+  `.paseo-slp/workspace-protocol.md` using the refreshed onboarding skill and
+  [current template](src/templates/workspace-protocol.md). The plugin does not overwrite
+  this file. Existing explicit review requirements remain binding until you change them.
+- **Tracker integration:** the tracker card, RPCs and `slp.mjs tracker` command are removed.
+  Legacy settings and `.beads/` data are left untouched and no longer used by the plugin;
+  they do not need deleting to upgrade.
+- **Custom scripts:** imports from removed `src/*.mjs` modules need to use the
+  [documented CLI](docs/cli.md). For standalone installs, `npm run install:slp` now
+  previews; `npm run install:slp:apply` applies.
+- **Standalone → plugin:** follow [the migration guide](docs/reports/legacy-install.md#migrating-to-the-plugin)
+  to remove the old standalone binding before activation; both paths own the same IDs.
+
+If Inspect reports a configuration conflict or `RECOVERY_REQUIRED`, use
+**Reconcile → inspect** and resolve the reported entries before retrying Rebind.
+
 ## Development
 
 From a source checkout, install dependencies with `npm ci`, then run the local checks:

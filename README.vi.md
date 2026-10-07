@@ -221,6 +221,32 @@ Muốn gỡ, chọn **Deactivate** trên SLP manager trước. Bước này gỡ
 runtime cho các session còn đang chạy. Sau đó chạy `paseo plugin remove paseo-slp`. Chi tiết ở
 [docs/operations.md](docs/operations.md#upgrading).
 
+### Migrate từ 0.6.0 trở xuống
+
+Khi không có agent đang chạy, dùng lệnh update/reload ở trên, rồi mở **SLP → Inspect**
+và chạy **Rebind**. Lựa chọn role đã lưu và Peer pool dùng chung được giữ lại.
+Thông thường không cần cài lại hay migrate state bằng tay.
+
+Chỉ xử lý các mục sau nếu bản cài của bạn có liên quan:
+
+- **Node:** máy daemon nay cần Node `>=22.18.0 <23.0.0 || >=23.6.0`
+  để nạp TypeScript trực tiếp. Nâng Node cũ trước khi rebind.
+- **Protocol của repo:** cập nhật hướng dẫn tracker/Beads cũ trong
+  `.paseo-slp/workspace-protocol.md` bằng onboarding skill mới và
+  [template hiện tại](src/templates/workspace-protocol.md). Plugin không ghi đè file này.
+  Yêu cầu review đã ghi rõ vẫn có hiệu lực đến khi bạn thay đổi.
+- **Tracker integration:** đã bỏ tracker card, RPC và lệnh `slp.mjs tracker`.
+  Cấu hình cũ và dữ liệu `.beads/` được giữ nguyên, plugin không còn dùng chúng;
+  không cần xóa để upgrade.
+- **Script tự viết:** nếu import module `src/*.mjs` đã bị bỏ, chuyển sang
+  [CLI được tài liệu hóa](docs/cli.md). Với standalone install, `npm run install:slp`
+  nay chỉ preview; `npm run install:slp:apply` mới apply.
+- **Standalone → plugin:** theo [hướng dẫn migration](docs/reports/legacy-install.md#migrating-to-the-plugin)
+  để gỡ binding standalone cũ trước khi activate; hai cách cài dùng chung ID.
+
+Nếu Inspect báo conflict cấu hình hoặc `RECOVERY_REQUIRED`, dùng
+**Reconcile → inspect**, xử lý entry được báo rồi thử Rebind lại.
+
 ## Phát triển
 
 Từ source checkout, cài dependency bằng `npm ci`, rồi chạy các kiểm tra local:
