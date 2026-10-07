@@ -64,10 +64,12 @@ reporter flags. A baseline that cannot be read is recorded as
 failures against an earlier receipt and warns when node, platform, argv, file
 list or snapshot differ; the exit code stays node's own.
 
-Reuse rule: a receipt supports another seat's claim only when it is
-`selection: default-suite`, its snapshot sha256, argv/file list and
-node/platform all match the candidate under question and its status is `pass`,
-or its fail-set equals the known baseline. A known baseline is a fail-set
+Reuse rule: the claim decides which receipt qualifies. A full-suite claim needs
+`selection: default-suite`; a narrow claim may use a `partial` receipt but only
+for exactly its argv and file list, never as full-suite evidence. Either way
+the receipt's snapshot sha256, argv/file list and node/platform must all match
+the candidate under question and its status must be `pass`, or its fail-set
+must equal the known baseline. A known baseline is a fail-set
 compared with `--slp-baseline` against a baseline receipt of the same pins
 (snapshot differences are reported, the other pins must match). The
 reader decides whether to reuse it. If the candidate changed, rerun, or the
@@ -173,6 +175,9 @@ copy. Ignored dependencies, build
 outputs, processes and external proof are not included. Regular-file staging
 intent is not mirrored. Install any needed dependencies only within the audit's
 grant, and record those prerequisites separately.
+
+Probes on a fixture repo pass `SLP_TEST_ISOLATED_ROOT` explicitly on every
+command, because the host shell keeps no env between calls.
 
 The caller owns the copy, probe resources and removal after settlement. Copying
 is neither a sandbox nor a check execution or acceptance receipt. Preserve the

@@ -30,9 +30,9 @@ Return the disposition's result:
 
 | Disposition | Handback |
 |---|---|
-| Engineer | Exact artifacts/diff, stable current desk capture, installed-helper snapshot or full clean commit, actual commands/output/exits and proof of your writes. |
+| Engineer | Exact artifacts/diff, stable current desk capture, installed-helper snapshot or full clean commit, actual commands/output/exits and proof of your writes. Self-check your delta: per changed mechanism, which enumeration may be missing, which docs sentence describes it, which failure class lacks a falsifying test; evidence or "unknown". |
 | Architect | Reconstructed problem, ownership/lifecycle/failure semantics, alternatives, recommendation, strongest counterargument and reversal conditions. |
-| Reviewer | Falsify the stable candidate within the mandate. APPROVE or FINDINGS with severity counts, top findings, paths/evidence, checks and unverifiable claims; no ACK needed. Reviewer/Auditor stays independent of writer and accepting owner. |
+| Reviewer | Falsify the stable candidate within the mandate. APPROVE or FINDINGS with severity counts, top findings, paths/evidence, checks and unverifiable claims; no ACK needed. Write findings as trigger → consequence → evidence → counterevidence/unknown, list coverage checked/unchecked, and keep probes hygienic: write only in assigned scratch, timeout long commands below the host limit, kill only recorded PIDs (no glob/pattern `rm`/`kill`), pass env explicitly per command, read summary/receipt before long logs. Reviewer/Auditor stays independent of writer and accepting owner. |
 | Scout | Sources, observed facts, inferences and unknowns. |
 
 Include assumptions, risks and unfinished dependencies in every handback,

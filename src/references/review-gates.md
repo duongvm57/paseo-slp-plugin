@@ -30,22 +30,23 @@ standing review; a new no-trigger decision cannot erase a required old gate.
 
 ## Independent seats and briefs
 
-Reviewers are distinct from writer and accepting owner, with separate
-judgment, neutral context and a stable candidate. One seat may assess related
-questions; added seats address distinct unresolved risk or separation needs.
-Reviewer/Auditor are bounded Peer dispositions, not permanent phases.
-Provider-family diversity may help but proves no independence or default
-quota. An unavailable optional lens does not block adequate selection;
-a specifically required lens does.
-Spec and Standards are optional descriptive lenses unless the effective rule
-requires them. Spec checks objective/acceptance with requirement citations;
-Standards checks documented conventions, separates hard violations from
-judgment and skips tooling-established facts. Other mandates may test
-ownership, lifecycle, failure, migration, authority, integrity or proof.
+Reviewers are distinct from writer and accepting owner, with separate judgment,
+neutral context and a stable candidate. One seat may assess related questions,
+with Lead ordering lenses by risk; added seats address distinct unresolved risk
+or separation needs. Reviewer/Auditor are bounded Peer dispositions, not
+permanent phases. Provider-family diversity may help but proves no independence
+or default quota. An unavailable optional lens does not block adequate
+selection; a specifically required lens does. Spec and Standards are optional
+descriptive lenses unless the effective rule requires them. Spec checks
+objective/acceptance with requirement citations; Standards checks documented
+conventions, separates hard violations from judgment and skips
+tooling-established facts. Other mandates may test ownership, lifecycle,
+failure, migration, authority, integrity or proof.
 
 A fresh first-review brief gives objective/acceptance, actual authority
 constraints, exact candidate, mandate/lens, relevant source paths, facts,
-unknowns and focused proof questions. Withhold desired verdict, writer
+unknowns and focused proof questions, each falsifiable, drawn from facts and
+carrying no conclusion. Withhold desired verdict, writer
 identity and prior findings. Reviewer verifies candidate identity before work;
 drift invalidates the attempt.
 For same-assignment re-review, continue that independent seat with new
@@ -55,7 +56,14 @@ keys. A replacement receives a neutral first brief. Sealed design follows
 orchestration.md's visibility boundary.
 Reports stay in-session unless artifact writes are assigned. Bind findings
 to mandate/source, evidence/checks and unverifiable claims; distinguish
-confirmed failures, hypotheses and hard violations/judgment.
+confirmed failures, hypotheses and hard violations/judgment, and state which
+failure classes were checked and which were not. A reviewer may send findings
+first, naming pending proof, then its own addendum. It may rely on a valid
+measured result bound to the same candidate pin, command and scope instead of
+rerunning it; rerun or probe narrowly only on pin drift, a missing/invalid
+result or an unresolved proof question such as the test's own strength. A
+narrow result proves only its scope; verification sufficiency, R1/R2 replay and
+acceptance stay with Lead.
 
 ## Verify and adjudicate
 
@@ -81,10 +89,15 @@ candidate and re-enter the declared gate; previous approval does not transfer.
 Consecutive same-class findings call for mechanism investigation,
 affected-site enumeration and evidence-supported invariant repair, not an
 unbounded point-fix queue. A property/enumeration test may verify the settled
-invariant. Apply task/protocol correction/review/challenge effort and stop
+invariant. A ruling requiring repair may state the property to restore
+(structurally fail-closed where possible, e.g. allowlist over blacklist; not
+the implementation), the docs/tests still describing the replaced mechanism and
+any trade-off to publish when chosen; an accepted risk reopens only on new
+evidence. Apply task/protocol correction/review/challenge effort and stop
 bounds; establish an authorized bound before continuing if absent.
 Stop at sufficient proof, unresolved premise/prerequisite or exhaustion.
-Exhaustion is not ACCEPT: resolve the prerequisite or escalate strategy/
-resources. Recurrence after mechanism work reopens the premise/strategy.
-Any repair follows common policy's writer grant; changing candidate, seat or
-session neither resets obligations nor expands the bound.
+Exhaustion is not ACCEPT but a checkpoint: the seat reports what was and was
+not checked; Lead extends, records a proof gap or escalates strategy/resources.
+Recurrence after mechanism work reopens the premise/strategy. Any repair
+follows common policy's writer grant; changing candidate, seat or session
+neither resets obligations nor expands the bound.

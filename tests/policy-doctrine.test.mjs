@@ -294,3 +294,20 @@ test('resulting policy/install graph has no dangling or retired active pointers'
   assert.match(raw(protocol), /^version: '14'$/m);
   assert.match(raw(protocol), /^template_sha256: 'c5b6db392e3d9646d931cda658c3364fe64287caf1f9717ad323681f2e860ad1'$/m);
 });
+
+test('review method tools stay conditional and keep Lead obligations', () => {
+  pins(review, /Lead ordering lenses by risk/, /each falsifiable, drawn from facts and carrying no conclusion/,
+    /state which failure classes were checked and which were not/,
+    /send findings first, naming pending proof, then its own addendum/,
+    /rely on a valid measured result bound to the same candidate pin, command and scope instead of rerunning it/,
+    /rerun or probe narrowly only on pin drift, a missing\/invalid result or an unresolved proof question/,
+    /narrow result proves only its scope; verification sufficiency, R1\/R2 replay and acceptance stay with Lead/,
+    /state the property to restore.*allowlist over blacklist; not the implementation.*trade-off to publish when chosen; an accepted risk reopens only on new evidence/,
+    /Exhaustion is not ACCEPT but a checkpoint.*Lead extends, records a proof gap or escalates/);
+  pins('src/roles/peer.md', /which enumeration may be missing, which docs sentence describes it, which failure class lacks a falsifying test; evidence or "unknown"/,
+    /trigger → consequence → evidence → counterevidence\/unknown, list coverage checked\/unchecked/,
+    /write only in assigned scratch.*kill only recorded PIDs.*pass env explicitly per command, read summary\/receipt before long logs/);
+  pins('docs/development.md', /the claim decides which receipt qualifies.*full-suite claim needs `selection: default-suite`.*narrow claim may use a `partial` receipt but only for exactly its argv and file list, never as full-suite evidence/,
+    /Either way the receipt's snapshot sha256, argv\/file list and node\/platform must all match/,
+    /pass `SLP_TEST_ISOLATED_ROOT` explicitly on every command/);
+});
