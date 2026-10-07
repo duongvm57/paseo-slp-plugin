@@ -75,8 +75,7 @@ jobs:
           path: ${{ runner.temp }}/shard-records
 
       - name: Verify shard coverage
-        run: node scripts/test-shards-verify.mjs "${RUNNER_TEMP}/shard-records" \
-          "--expect-node=${{ matrix.node }}" "--expect-count=${{ env.SHARD_COUNT }}"
+        run: node scripts/test-shards-verify.mjs "${RUNNER_TEMP}/shard-records" "--expect-node=${{ matrix.node }}" "--expect-count=${{ env.SHARD_COUNT }}"
 
       - run: npm run typecheck
 
