@@ -15,6 +15,12 @@
 //    an oversized or malformed inbound frame is rejected with a typed
 //    diagnostic and a JSON-RPC error frame on stdout; the connection and
 //    the process stay alive;
+//  - both directions are flow-controlled: the producer (stdin or socket)
+//    is paused whenever its sink (socket or stdout) is full and resumes on
+//    drain — queued bytes stay bounded by the sink's highWaterMark plus at
+//    most one in-flight frame, ordering is preserved, and every exit path
+//    flushes pending stdout bytes before returning (process.exit after
+//    run() cannot cut pending frames);
 //  - Windows has no usable transport — startup emits a typed
 //    CAPABILITY_GAP diagnostic and exits non-zero (no fake named-pipe
 //    adapter);
@@ -84,32 +90,33 @@ function idOf(line) {
   return null;
 }
 
-/** An incremental raw-byte line splitter. Complete lines arrive as Buffer
- *  segments including no newline; the cap is enforced on the RAW bytes so
- *  an unterminated flood still surfaces as a rejection, not growth. An
- *  over-cap frame is swallowed whole up to its newline — the flood's tail
- *  never re-parses as a fresh request. */
+/** An incremental raw-byte line splitter with cooperative pause. `feed`
+ *  returns false when the consumer asked to wait (its sink is full): the
+ *  unconsumed tail stays buffered under the raw cap and `resume()` continues
+ *  the loop, so a chunk carrying many frames never floods a full sink. The
+ *  cap is enforced on the RAW bytes so an unterminated flood still surfaces
+ *  as a rejection, not growth; an over-cap frame is swallowed whole up to
+ *  its newline — the flood's tail never re-parses as a fresh request. */
 function lineSplitter(onLine, onOverflow) {
   let pending = Buffer.alloc(0);
   let dropping = false;
-  return chunk => {
-    pending = pending.length === 0 ? chunk : Buffer.concat([pending, chunk]);
+  const step = () => {
     let start = 0;
     for (;;) {
       const nl = pending.indexOf(0x0a, start);
       if (nl === -1) {
         if (dropping) {
           pending = Buffer.alloc(0);
-          return;
+          return true;
         }
         if (pending.length - start > LINE_CAP) {
-          onOverflow(pending.subarray(start).length);
+          const wait = onOverflow(pending.length - start) === 'wait';
           dropping = true;
           pending = Buffer.alloc(0);
-        } else {
-          pending = pending.subarray(start);
+          return !wait;
         }
-        return;
+        pending = pending.subarray(start);
+        return true;
       }
       if (dropping) {
         start = nl + 1;
@@ -119,10 +126,24 @@ function lineSplitter(onLine, onOverflow) {
       const line = pending.subarray(start, nl);
       // A complete over-cap line is already terminated — reject it and
       // resume on the next frame; no swallow needed.
-      if (line.length > LINE_CAP) onOverflow(line.length);
-      else onLine(line);
+      if (line.length > LINE_CAP) {
+        if (onOverflow(line.length) === 'wait') {
+          pending = pending.subarray(nl + 1);
+          return false;
+        }
+      } else if (onLine(line) === 'wait') {
+        pending = pending.subarray(nl + 1);
+        return false;
+      }
       start = nl + 1;
     }
+  };
+  return {
+    feed(chunk) {
+      pending = pending.length === 0 ? chunk : Buffer.concat([pending, chunk]);
+      return step();
+    },
+    resume: step,
   };
 }
 
@@ -172,15 +193,78 @@ export async function run({ env, platform, stdin, stdout, stderr, connect, selfS
     pid: process.pid,
   }) + '\n';
 
-  /** Write with drain backpressure. Resolves false when the sink died. */
-  const writeTo = (sink, bytes) =>
-    new Promise(resolve => {
-      const flush = sink.write(bytes, error => {
-        if (error) resolve(false);
-      });
-      if (flush) resolve(true);
-      else sink.once('drain', () => resolve(true));
+  /** Bounded write with real backpressure. Returns 'flushed' when the sink
+   *  accepted the bytes without crossing its high-water mark, 'full' when
+   *  the caller must pause its producer. `resume(reason)` fires at most
+   *  once, and only on:
+   *   - 'drain' — the sink's own drain event emptied the buffer;
+   *   - 'error' — the write callback carried an error, or the sink emitted
+   *     'error'/'close' first. A dead sink abandons an in-flight write
+   *     without calling its callback, so the wait must be released by the
+   *     sink's own lifecycle events, not just the write callback.
+   *  A successful write callback NEVER resumes the producer: it fires when
+   *  the kernel/driver accepted the bytes, which is exactly when queued
+   *  bytes can still sit above the mark — resuming there would creep the
+   *  buffer one frame per callback instead of holding it to the mark.
+   *  write(true) means accepted, never flushed.
+   *  `settledWrite(error)` observes the write callback itself (terminal
+   *  flush accounting); listeners owed to a sink stay bounded to one
+   *  drain + one error + one close and are removed on settle. */
+  const boundedWrite = (sink, bytes, resume, settledWrite) => {
+    let settled = false;
+    const onDrain = () => once('drain');
+    const onDead = () => once('error');
+    const once = reason => {
+      if (settled) return;
+      settled = true;
+      sink.removeListener('drain', onDrain);
+      sink.removeListener('error', onDead);
+      sink.removeListener('close', onDead);
+      resume(reason);
+    };
+    const flush = sink.write(bytes, error => {
+      settledWrite?.(error);
+      if (error) once('error');
     });
+    if (!flush) {
+      sink.once('drain', onDrain);
+      sink.once('error', onDead);
+      sink.once('close', onDead);
+    }
+    return flush ? 'flushed' : 'full';
+  };
+
+  // Terminal-boundary preservation: process.exit after run() must not cut
+  // pending stdout frames, so every exit path waits until every accepted
+  // write callback has fired (or the sink died) before returning. Counting
+  // write callbacks — not awaiting 'drain' — is what makes this safe while
+  // writableLength > 0 with writableNeedDrain false: 'drain' may never emit
+  // for bytes that never crossed the high-water mark.
+  let stdoutPendingFlushes = 0;
+  let stdoutIdleCallback = null;
+  const writeStdout = (bytes, resume) => {
+    stdoutPendingFlushes += 1;
+    return boundedWrite(stdout, bytes, resume, () => {
+      stdoutPendingFlushes = Math.max(0, stdoutPendingFlushes - 1);
+      if (stdoutPendingFlushes === 0 && stdoutIdleCallback) {
+        const done = stdoutIdleCallback;
+        stdoutIdleCallback = null;
+        done();
+      }
+    });
+  };
+  const flushStdout = () => new Promise(resolve => {
+    // A destroyed sink abandons in-flight writes without calling their
+    // callbacks — the count can never settle, so close/error releases it.
+    if (stdoutPendingFlushes === 0 || stdout.destroyed || stdout.closed) return resolve();
+    stdoutIdleCallback = () => resolve();
+    stdout.once('error', () => resolve());
+    stdout.once('close', () => resolve());
+  });
+  const finish = async code => {
+    await flushStdout();
+    return code;
+  };
 
   for (let cycle = 0; ; cycle += 1) {
     // ---- connect + handshake -----------------------------------------
@@ -246,7 +330,7 @@ export async function run({ env, platform, stdin, stdout, stderr, connect, selfS
     if (!helloResult.ok) {
       diag(helloResult.code ?? 'CAPABILITY_GAP', `desk handshake failed: ${helloResult.reason}`);
       socket.destroy();
-      return 1;
+      return finish(1);
     }
     const ack = helloResult.ack;
     if (
@@ -261,73 +345,179 @@ export async function run({ env, platform, stdin, stdout, stderr, connect, selfS
         : 'desk rejected the handshake';
       diag(code, message);
       socket.destroy();
-      return 1;
+      return finish(1);
     }
 
     // ---- relay --------------------------------------------------------
-    // stdin → socket: cap + well-formedness enforced; a bad frame never
-    // leaves this process.
+    // Both directions are flow-controlled: the producer (stdin or socket)
+    // is paused whenever its sink (socket or stdout) is full and resumes as
+    // accepted write callbacks fire — queued sink bytes stay bounded by the
+    // sink's highWaterMark plus at most one in-flight frame, and ordering
+    // is preserved. While paused mid-chunk, the splitter holds only that
+    // chunk's unconsumed remainder (every complete line ≤ LINE_CAP, the
+    // partial tail ≤ LINE_CAP — this is a chunk-size bound, not a LINE_CAP
+    // bound on the whole remainder) and the paused source's own native
+    // buffer stays within its high-water mark. A bad frame never leaves
+    // this process; typed replies share the stdout sink's backpressure.
+    let dead = false;
+    let stdinEnded = false;
+    let stdinPausedByUs = false;
+    let socketPausedByUs = false;
+    const pauseStdin = () => {
+      if (!stdinPausedByUs && !stdinEnded) {
+        stdinPausedByUs = true;
+        stdin.pause();
+      }
+    };
+    const pauseSocket = () => {
+      if (!socketPausedByUs) {
+        socketPausedByUs = true;
+        if (!socket.destroyed) socket.pause();
+      }
+    };
+    const toStdout = (bytes, resume) => writeStdout(bytes, reason => {
+      if (reason === 'error') socket.destroy();
+      else resume();
+    });
     const stdinOverflow = () => {
       diag('REQUEST_TOO_LARGE', `stdin frame over the ${LINE_CAP}-byte cap — dropped`);
-      void writeTo(stdout, errorFrame(null, `REQUEST_TOO_LARGE: request frame exceeds ${LINE_CAP} bytes`, 'REQUEST_TOO_LARGE') + '\n');
+      if (toStdout(errorFrame(null, `REQUEST_TOO_LARGE: request frame exceeds ${LINE_CAP} bytes`, 'REQUEST_TOO_LARGE') + '\n', resumeStdin) === 'full') {
+        pauseStdin();
+        return 'wait';
+      }
     };
     const onStdinLine = line => {
+      if (dead) return;
       const text = decodeFrame(line);
       if (text === null) {
         diag('INVALID_RECORD', 'stdin frame is not valid UTF-8 — dropped');
-        void writeTo(stdout, errorFrame(null, 'slp-desk: malformed NDJSON frame') + '\n');
+        if (toStdout(errorFrame(null, 'slp-desk: malformed NDJSON frame') + '\n', resumeStdin) === 'full') {
+          pauseStdin();
+          return 'wait';
+        }
         return;
       }
       try {
         JSON.parse(text);
       } catch {
         diag('INVALID_RECORD', 'stdin frame is not valid JSON — dropped');
-        void writeTo(stdout, errorFrame(idOf(text), 'slp-desk: malformed NDJSON frame') + '\n');
+        if (toStdout(errorFrame(idOf(text), 'slp-desk: malformed NDJSON frame') + '\n', resumeStdin) === 'full') {
+          pauseStdin();
+          return 'wait';
+        }
         return;
       }
       if (line.length > 0) {
-        void writeTo(socket, Buffer.concat([line, Buffer.from('\n')])).then(ok => {
-          if (!ok) socket.destroy();
+        const state = boundedWrite(socket, Buffer.concat([line, Buffer.from('\n')]), reason => {
+          if (reason === 'error') socket.destroy();
+          else resumeStdin();
         });
+        if (state === 'full') {
+          pauseStdin();
+          return 'wait';
+        }
       }
     };
-    const splitStdin = lineSplitter(onStdinLine, stdinOverflow);
-    const onStdinData = chunk => splitStdin(chunk);
+    const splitStdin = lineSplitter(line => onStdinLine(line), stdinOverflow);
+    const resumeStdin = () => {
+      if (dead || !stdinPausedByUs) return;
+      stdinPausedByUs = false;
+      if (splitStdin.resume() === false) {
+        stdinPausedByUs = true;
+        return;
+      }
+      if (stdinEnded) {
+        if (!socket.destroyed) socket.end();
+      } else {
+        stdin.resume();
+      }
+    };
+    const onStdinData = chunk => {
+      if (dead) return;
+      if (splitStdin.feed(chunk) === false) pauseStdin();
+    };
     stdin.on('data', onStdinData);
 
-    let stdinEnded = false;
+    // A paused producer can still emit 'end': every buffered chunk was
+    // already handed to the splitter, so the raw stream reaches EOF while a
+    // remainder waits on a full sink. Half-close only after that remainder
+    // has drained — closing early would drop frames mid-session.
     const onStdinEnd = () => {
       stdinEnded = true;
-      socket.end();
+      if (stdinPausedByUs) return;
+      if (splitStdin.resume() === false) {
+        stdinPausedByUs = true;
+        return;
+      }
+      if (!socket.destroyed) socket.end();
     };
     stdin.once('end', onStdinEnd);
+    // Adding a 'data' listener does NOT un-pause a stream — after the
+    // teardown pause this stays paused forever and the buffered frames
+    // (and a pending 'end') would never be delivered to the new cycle.
+    // The 'end' listener attaches first so a synchronous 'end' on resume
+    // is not missed.
+    if (stdin.isPaused()) stdin.resume();
 
     // socket → stdout: cap enforced here too — the adapter is trusted to
     // stay under it, but a violation must not reach the MCP client raw.
     const socketOverflow = () => {
       diag('RESPONSE_TOO_LARGE', `socket frame over the ${LINE_CAP}-byte cap — replaced with a typed error`);
-      void writeTo(stdout, errorFrame(null, `RESPONSE_TOO_LARGE: response frame exceeds ${LINE_CAP} bytes`, 'RESPONSE_TOO_LARGE') + '\n');
+      if (toStdout(errorFrame(null, `RESPONSE_TOO_LARGE: response frame exceeds ${LINE_CAP} bytes`, 'RESPONSE_TOO_LARGE') + '\n', resumeSocket) === 'full') {
+        pauseSocket();
+        return 'wait';
+      }
     };
     const onSocketLine = line => {
+      if (dead) return;
       const text = decodeFrame(line);
       if (text === null) {
         diag('INVALID_RECORD', 'socket frame is not valid UTF-8 — replaced with a typed error');
-        void writeTo(stdout, errorFrame(null, 'slp-desk: malformed frame from desk adapter') + '\n');
+        if (toStdout(errorFrame(null, 'slp-desk: malformed frame from desk adapter') + '\n', resumeSocket) === 'full') {
+          pauseSocket();
+          return 'wait';
+        }
         return;
       }
       try {
         JSON.parse(text);
       } catch {
         diag('INVALID_RECORD', 'socket frame is not valid JSON — replaced with a typed error');
-        void writeTo(stdout, errorFrame(null, 'slp-desk: malformed frame from desk adapter') + '\n');
+        if (toStdout(errorFrame(null, 'slp-desk: malformed frame from desk adapter') + '\n', resumeSocket) === 'full') {
+          pauseSocket();
+          return 'wait';
+        }
         return;
       }
-      void writeTo(stdout, Buffer.concat([line, Buffer.from('\n')])).then(ok => {
-        if (!ok) socket.destroy();
-      });
+      if (toStdout(Buffer.concat([line, Buffer.from('\n')]), resumeSocket) === 'full') {
+        pauseSocket();
+        return 'wait';
+      }
     };
-    const splitSocket = lineSplitter(onSocketLine, socketOverflow);
-    const onSocketData = chunk => splitSocket(chunk);
+    const splitSocket = lineSplitter(line => onSocketLine(line), socketOverflow);
+    // Resolves the close-time drain of the socket splitter — bytes the
+    // adapter already wrote must reach stdout before the session ends.
+    let socketDrainWaiter = null;
+    const resumeSocket = () => {
+      if (dead) return;
+      if (socketPausedByUs) {
+        socketPausedByUs = false;
+        if (splitSocket.resume() === false) {
+          socketPausedByUs = true;
+          return;
+        }
+        if (!socket.destroyed) socket.resume();
+      }
+      if (socketDrainWaiter && splitSocket.resume() !== false) {
+        const done = socketDrainWaiter;
+        socketDrainWaiter = null;
+        done();
+      }
+    };
+    const onSocketData = chunk => {
+      if (dead) return;
+      if (splitSocket.feed(chunk) === false) pauseSocket();
+    };
     socket.on('data', onSocketData);
     // Bytes the ack parser already consumed past the ack line replay first.
     if (helloResult.rest && helloResult.rest.length > 0) onSocketData(helloResult.rest);
@@ -336,17 +526,52 @@ export async function run({ env, platform, stdin, stdout, stderr, connect, selfS
       socket.once('close', () => resolve('close'));
       socket.once('error', () => resolve('error'));
     });
+    // No more bytes arrive; the sink-side drain still honors stdout
+    // backpressure, released by write callbacks or by the sink dying.
+    // Pause stdin before detaching: removing the 'data' listener does NOT
+    // stop a flowing stream — frames or 'end' arriving in the
+    // detach→re-attach window would be emitted to nobody and dropped.
+    // The stream stays paused across reconnect and is released either by
+    // the next cycle's own 'data' listener or by the exit path.
+    if (!stdinEnded && !stdinPausedByUs) {
+      stdinPausedByUs = true;
+      stdin.pause();
+    }
     stdin.removeListener('data', onStdinData);
     stdin.removeListener('end', onStdinEnd);
     socket.removeListener('data', onSocketData);
+    // `socketPausedByUs` is the drain signal: a 'wait' inside the splitter
+    // always goes through pauseSocket(), so unpaused means fully consumed.
+    // A sink that already died releases immediately — 'close' fired before
+    // the once-listener could observe it.
+    await new Promise(resolve => {
+      const finish = () => {
+        socketDrainWaiter = null;
+        stdout.removeListener('error', finish);
+        stdout.removeListener('close', finish);
+        resolve();
+      };
+      socketDrainWaiter = finish;
+      stdout.once('error', finish);
+      stdout.once('close', finish);
+      if (stdout.destroyed || stdout.closed) return finish();
+      resumeSocket();
+      if (!socketPausedByUs) finish();
+    });
+    dead = true;
     socket.destroy();
 
-    if (stdinEnded) return 0;
+    if (stdinEnded) {
+      stdinPausedByUs = false;
+      return finish(0);
+    }
     // Mid-session drop: reconnect on the same bounded budget, then give
     // up typed rather than hanging forever.
     if (cycle >= 1) {
+      stdinPausedByUs = false;
+      stdin.resume();
       diag('CAPABILITY_GAP', `desk socket lost (${sessionEnd}) and the reconnect budget is spent`);
-      return 1;
+      return finish(1);
     }
     diag('CAPABILITY_GAP', `desk socket lost (${sessionEnd}) — reconnecting once`);
   }
