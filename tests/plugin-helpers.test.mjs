@@ -556,7 +556,7 @@ test('tiny policy keeps protocol-owned ceremony separate from required gates and
   assert.match(lead, /Peer writing is the managed-implementation default/);
   assert.match(lead, /direct Lead write requires an explicit Human assignment or current effective protocol grant for clear, reversible work, bounded scope, one writer and exact candidate proof/);
   assert.match(lead, /Lead writer never stands in for required independent review/);
-  assert.match(lead, /Peer Engineer is the implementation default; apply common policy's explicit direct-write exception when authorized/);
+  assert.match(lead, /Peer writing is the managed-implementation default\. A direct Lead write requires an explicit Human assignment/);
   assert.match(lead, /Tiny classification reduces repository ceremony, never authority, ownership, parentage or required review/);
   assert.match(lead, /Tiny labels and missing\/stale protocols grant no exception/);
   assert.match(lead, /Reuse full relevant policy\/protocol text in context only when its source is known unchanged/);

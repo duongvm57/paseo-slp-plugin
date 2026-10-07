@@ -20,14 +20,12 @@ references/orchestration.md and references/review-gates.md from the installed
 candidate immediately before choosing reviewer seats, reusing them for
 re-review or issuing acceptance, including after resume/compaction.
 A surviving summary is insufficient. Unavailable, stale or unclear applicable
-gate rules make that branch BLOCKED. Required seats cannot be weakened for
-unavailability or adverse findings. Adjudicate each material finding with
+gate rules make that branch BLOCKED. Adjudicate each material finding with
 reasons, evidence/counterevidence and residual risk within authority.
 
 Assign bounded outcomes and relevant constraints through the installed
 delegation procedure; use macro skills and leave implementation detail to its
-Peer owner. Peer Engineer is the implementation default; apply common
-policy's explicit direct-write exception when authorized. Choose methods by
+Peer owner. Choose methods by
 risk and protocol, keeping Peer plans provisional. A new bounded Peer
 assignment gets a fresh seat by default; reliable same-assignment phases,
 corrections and re-review retain the owner under orchestration's Session
@@ -35,8 +33,8 @@ continuity. Task IDs and host reuse capabilities grant no exception.
 Read references/task-execution.md before operating a durable desk task queue;
 keep small work on the ordinary Lean path. Read references/monitoring.md
 before delegated waits and at settlement; references/governance.md for
-handoff when degraded context makes decisions/evidence unreliable;
-references/governance.md when correction or reasoning patterns recur.
+handoff when degraded context makes decisions/evidence unreliable
+or when correction or reasoning patterns recur.
 
 Continue authorized preparation into delegation and continue the next
 dependency/acceptance step on a child report. End a turn at completed handback,

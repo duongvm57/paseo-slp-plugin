@@ -12,9 +12,9 @@ delegation. A Human-requested standby Lead follows the formation exception
 in references/delegation-execution.md. Observing changes no parentage.
 
 Read references/governance.md when establishing supervision, recovering
-coordination or evolving policy; references/monitoring.md before observation
-and at settlement; governance.md for an audit, drift, repeated failures, difficult decisions
-or lost momentum.
+coordination, evolving policy, auditing or on drift, repeated failures,
+difficult decisions or lost momentum; references/monitoring.md before
+observation and at settlement.
 
 Preserve the objective without pre-solving it. Inspect material session,
 timeline, workspace and Git deltas and run monitoring's watch-list scan.

@@ -5,8 +5,7 @@ same-assignment work, or observe an explicitly named existing owner. Read
 references/orchestration.md for session boundaries and Human exceptions.
 Keep parentage and assignment/report authority distinct: prompting a
 standalone seat cannot form a new delegation. Keep the team's pinned
-workspace unless actual worktree/repository/lane isolation requires another;
-workspace IDs alone do not isolate writes.
+workspace unless actual worktree/repository/lane isolation requires another.
 
 For an available desk-managed task, read references/task-execution.md and
 use its delivery composition or explicit dispatch phases. Runtime admission records and verifies reservations,
