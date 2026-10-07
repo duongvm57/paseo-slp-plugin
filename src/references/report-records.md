@@ -20,7 +20,7 @@ report actual artifacts, output and unfinished work, even with measured capture.
 
 For ordinary/Lean reports, or referenced-file verification, run managed
 `bin/slp.mjs records <report> --require handback --repo <absolute-checkout>`.
-Use a column-1 slp-record fence and advertised schema. The verifier's --repo
+Use a column-1 slp-record fence and advertised schema; `slp.mjs record-build` can draft one with shas taken from output files. The verifier's --repo
 wins over declared roots, constrains outputRef and checks UTF-8 output hashes.
 Inline output wins over outputRef; sha:null records missing evidence, never
 success. Treat validation errors as unfinished proof. Parser validity and

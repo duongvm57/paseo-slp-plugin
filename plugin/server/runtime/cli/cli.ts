@@ -7,6 +7,9 @@ interface CommandSpec {
 interface CliOptions {
   [key: string]: string | string[] | boolean | undefined;
   '--include'?: string[];
+  '--evidence'?: string[];
+  '--base'?: string;
+  '--since'?: string;
   '--expect-file'?: string[];
   '--paseo-home'?: string;
   '--from'?: string;
@@ -53,6 +56,8 @@ import { extractRecords, recordSchema, requireRecordKind, RECORD_KINDS } from '.
 import { renderSlpReport } from '../report-semantics.ts';
 import { verifyHandback, VerifyError } from './candidate-verify.ts';
 import { deskRecover, DeskRecoverUsage } from './desk-recovery.ts';
+import { reviewPacket, assertOutsideRepository, assertRegularFile } from './review-packet.ts';
+import { recordBuild } from './record-build.ts';
 
 // One entry per command: the flags it accepts, the required positional target
 // (--schema stands in for it where offered), whether it takes an optional
@@ -76,6 +81,8 @@ const commands: Record<string, CommandSpec> = {
   'route-decide': { flags: ['--paseo-home', '--schema', '--out'], target: 'request.json', usage: 'route-decide <request.json> [--schema] [--out <path>] [--paseo-home <absolute-home>]' },
   notebook: { flags: ['--paseo-home'], target: 'repository', usage: 'notebook <repository> [--paseo-home <absolute-home>]' },
   records: { flags: ['--kind', '--require', '--repo', '--schema', '--render'], target: 'path|-', usage: 'records <path|-> [--kind handback|settlement] [--require handback|settlement] [--repo <absolute-path>] [--schema] | records --render <file|-> [--repo <absolute-path>]' },
+  'review-packet': { flags: ['--base', '--since', '--evidence', '--out'], target: 'repository', usage: 'review-packet <absolute-repo> --base <git-ref> [--since <earlier-candidate-dir|snapshot.json>] [--evidence <absolute-file>]... [--out <path-outside-repo>]' },
+  'record-build': { flags: ['--out'], target: 'request.json', usage: 'record-build <request.json> [--out <path-outside-repo>]' },
   'verify-handback': { flags: ['--repo', '--paseo-home', '--expect-contract', '--expect-file', '--expect-parent', '--expect-workspace', '--expect-runtime'], target: 'report', usage: 'verify-handback <report-path> --repo <absolute-repo> --expect-contract <repo-path>=<sha256> [--expect-file <repo-path>=<sha256>]... [--expect-runtime <candidateSha256>] [--paseo-home [<absolute-home>]] [--expect-parent <agentId>] [--expect-workspace <workspaceId>]' },
   instructions: { target: 'role', usage: 'instructions <role>' },
   status: { flags: ['--paseo-home'], usage: 'status [--paseo-home <absolute-home>]' },
@@ -94,11 +101,11 @@ try {
   const options: CliOptions = {};
   for (let i = 0; i < args.length; i++) {
     const key = args[i]!;
-    if (key === '--include' || key === '--expect-file') {
+    if (key === '--include' || key === '--expect-file' || key === '--evidence') {
       // Repeatable: each use appends one repository-relative path to stage /
-      // one artifact pin for verify-handback.
+      // one artifact pin for verify-handback / one evidence file for review-packet.
       const value = args[++i];
-      if (value === undefined || value.startsWith('-')) throw new Error(key === '--include' ? '--include requires a repository-relative path' : '--expect-file requires <repo-relative-path>=<sha256>');
+      if (value === undefined || value.startsWith('-')) throw new Error(key === '--include' ? '--include requires a repository-relative path' : key === '--evidence' ? '--evidence requires an absolute file path' : '--expect-file requires <repo-relative-path>=<sha256>');
       (options[key] ??= []).push(value);
       continue;
     }
@@ -123,6 +130,10 @@ try {
         if (!isAbsolute(args[i + 1]!)) throw new Error(`Absolute path required for ${key}`);
         options[key] = args[++i];
       } else options[key] = resolveHome(); // bare flag: managed mode resolves SLP_DAEMON_HOME/PASEO_HOME or fails, never ~/.paseo
+    } else if (key === '--base' || key === '--since') {
+      const value = args[++i];
+      if (!value || value.startsWith('-')) throw new Error(`${key} requires a value`);
+      options[key] = value;
     } else if (key === '--kind' || key === '--require' || key === '--repo') {
       const value = args[++i];
       if (!value || value.startsWith('-')) throw new Error(`${key} requires a value`);
@@ -143,6 +154,7 @@ try {
   for (const key of Object.keys(options)) if (!spec?.flags?.includes(key)) throw new Error(`${key} is not valid for ${command}`);
   const prepareModes = ['--check', '--emit', '--schema'].filter(key => options[key]);
   if (prepareModes.length > 1) throw new Error(`${prepareModes.join(' and ')} are separate modes — pick one`);
+  if (command === 'review-packet' && !options['--base']) throw new Error('review-packet requires --base <git-ref>');
   if (command === 'upgrade' && !options['--from']) throw new Error('upgrade requires --from <previous-installation>');
   if (command === 'materialize' && !options['--from']) throw new Error('materialize requires --from <source-repository>');
   if (options['--reload'] && !options['--apply']) throw new Error('--reload requires --apply');
@@ -197,6 +209,18 @@ try {
       result = { records, errors: parsed.errors, warnings: parsed.warnings };
       if (parsed.errors.length) process.exitCode = 1;
     }
+  }
+  else if (command === 'review-packet') {
+    result = reviewPacket(resolve(target!), { base: options['--base']!, since: options['--since'], evidence: options['--evidence'], out: options['--out'] });
+  }
+  else if (command === 'record-build') {
+    assertRegularFile(target!, 'request file');
+    const request = readJson(target!) as Parameters<typeof recordBuild>[0];
+    const repository = (request as { repository?: unknown } | null)?.repository;
+    if (options['--out'] && typeof repository === 'string' && isAbsolute(repository)) assertOutsideRepository(repository, options['--out'], '--out');
+    const built = recordBuild(request);
+    renderedOutput = built.fence;
+    for (const warning of built.warnings) process.stderr.write(`warning: ${(warning as { message: string }).message}\n`);
   }
   else if (command === 'verify-handback') {
     // Read-only claim verification (P1): the engine owns pin validation, so
@@ -346,10 +370,11 @@ try {
   } else throw new Error(usage);
   // --out persists the RESULT bytes — the response, never the request file —
   // so an audit artifact cannot silently hold the request instead.
-  if (result !== undefined && options['--out']) {
+  const persisted = result !== undefined ? json(result) : command === 'record-build' ? renderedOutput : undefined;
+  if (persisted !== undefined && options['--out']) {
     const out = resolve(options['--out']);
     mkdirSync(dirname(out), { recursive: true });
-    writeFileSync(out, json(result));
+    writeFileSync(out, persisted);
   }
   if (renderedOutput !== undefined) process.stdout.write(renderedOutput);
   else if (result !== undefined) process.stdout.write(json(result));

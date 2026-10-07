@@ -119,6 +119,7 @@ Which test covers which area, from what each file imports:
 | `plugin/client/*` (cards, catalog demand, workflow panel, manager state) | `client-catalog-demand`, `client-target-async`, `client-workflow-view`, `plugin-ui`; hooks load through `tests/helpers/*-entry.mts` |
 | `plugin/server/runtime/cli/*` (install, launch, inventory, monitor, notebook, host config, profiles, package) | `install`, `local`, `materialize`, `launch`, `inventory`, `monitor`, `notebook`, `runtime-core-install` |
 | `plugin/server/runtime/cli/candidate-verify.ts`, `report-records.ts`, `report-semantics.ts` | `candidate-verify`, `verify-handback-cli`, `report-records` |
+| `plugin/server/runtime/cli/review-packet.ts`, `record-build.ts` | `review-tools` |
 | `scripts/review-copy.mjs`, `scripts/runtime-graph.mjs` | `review-copy`, `runtime-graph` |
 | `scripts/test-isolated.mjs` | `test-isolated` |
 | `e2e/*.mjs` (collector, criteria, evidence, fixture, scenarios, stop-watcher) | `harness-cli`, `harness-gate`, `harness-ledger`, `harness-review`, `stop-watcher` |

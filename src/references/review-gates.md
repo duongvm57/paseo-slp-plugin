@@ -48,7 +48,7 @@ constraints, exact candidate, mandate/lens, relevant source paths, facts,
 unknowns and focused proof questions, each falsifiable, drawn from facts and
 carrying no conclusion. Withhold desired verdict, writer
 identity and prior findings. Reviewer verifies candidate identity before work;
-drift invalidates the attempt.
+drift invalidates the attempt. Lead may attach a facts-only review packet (`slp.mjs review-packet`).
 For same-assignment re-review, continue that independent seat with new
 candidate, changes and its own prior findings to assess closure/regression;
 broaden for new material risk. Other lenses' findings/verdicts are not answer
