@@ -210,6 +210,7 @@ async function main() {
   const home = mkdtempSync(join(tmpdir(), 'slp-test-home-'));
   const clean = { PASEO_HOME: home, PATH: process.env.PATH ?? '' };
   if (process.env.HOME) clean.HOME = process.env.HOME;
+  if (process.env.PASEO_CLI_MODULES !== undefined) clean.PASEO_CLI_MODULES = process.env.PASEO_CLI_MODULES;
   const startedAt = new Date();
   const before = record !== null ? measure() : null;
   const startLoad = load();
