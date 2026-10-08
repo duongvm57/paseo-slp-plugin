@@ -36,6 +36,7 @@ import {
   type DeskTaskIntegrationCleanupObserverRequest, type DeskTaskIntegrationCleanupObserverResponse as CleanupObserverResponse,
 } from "./desk-task.ts";
 import type { TaskRuntimeBinding, TaskRuntimeSelection } from "./desk-task-runtime.ts";
+import { taskDeliveryTrailer } from "./desk-delivery-trailer.ts";
 import type { RunnerCtx } from "./desk-runner.ts";
 import { readLedger, isRejection } from "./desk-runner.ts";
 import type { DeskStore, LedgerValue, MembershipValue } from "./desk-store.ts";
@@ -906,6 +907,20 @@ async function dispatchSend(
   if (isRejection(ledger)) return ledger;
   const attempt = latestAttempt(ledger, attemptId);
   if (attempt === null) return rejected("ACTOR_MISMATCH", `unknown attempt ${attemptId}`, "dispatch reserves attempts before sends");
+  if (ctx.row.agentId === null) return rejected("ACTOR_MISMATCH", "send has no verified native sender", "restore the live sender membership");
+  const textSha256 = sha256Hex(input.text);
+  // Preserve immutable historical subrequests: pre-trailer sends retain their
+  // original Lead-text hash/body and are never retrofitted on exact replay.
+  const originalSend = taskEntriesOf(ledger, "action").find(row => row.kind === "action" && row.actionKind === "send"
+    && row.requestId === subRequestId(input.requestId, "send-intent") && row.actorAgentId === ctx.row.agentId
+    && row.assignmentId === input.assignmentId && row.attemptId === attemptId);
+  const legacy = originalSend?.kind === "action" && originalSend.body !== null && !Object.hasOwn(originalSend.body, "deliveryTrailer");
+  const deliveryTrailer = legacy ? "" : taskDeliveryTrailer(textSha256, input.assignmentId, input.taskId, attemptId, ctx.row.agentId);
+  const sentText = input.text + deliveryTrailer;
+  if (!legacy && Buffer.byteLength(sentText) > WIRE_LIMITS.deskTaskText) {
+    return rejected("REQUEST_TOO_LARGE", "text plus the desk delivery trailer exceeds the prompt byte budget", "shorten text; the desk never truncates the Lead's text");
+  }
+  const sentPins = legacy ? {} : { deliveryTrailer, sentTextSha256: sha256Hex(sentText), sentTextBytes: Buffer.byteLength(sentText) };
   if (stopHeld(attempt)) return rejected("STOP_REQUESTED", "the attempt is stop-requested", "reconcile before any new effect");
   if (attempt.member === null || !["bound", "dispatched", "running"].includes(attempt.state)) {
     return { ok: true, attemptId, state: "seat-pending", sent: false,
@@ -943,12 +958,11 @@ async function dispatchSend(
   // Delayed registration binds only through explicit reconciliation. Send
   // preserves its caller's initial CAS and never advances its own scope first.
 
-  const textSha256 = sha256Hex(input.text);
   const messageId = effectIdentity("send", input.requestId);
   const intent = await deps.task.runTaskEffect(ctx, {
     operation: "intent", requestId: subRequestId(input.requestId, "send-intent"), attemptId,
     actionKind: "send",
-    body: { textSha256, messageId, grantRef: input.grantRef, controlPins: dispatchControlPins(input) },
+    body: { textSha256, messageId, grantRef: input.grantRef, controlPins: dispatchControlPins(input), ...sentPins },
   }, taskDeps(ctx, deps));
   if (isRejection(intent)) return intent;
   const sendActionId = intent.actionId ?? null;
@@ -967,7 +981,7 @@ async function dispatchSend(
   let accepted = false;
   let sendError: string | null = null;
   try {
-    await host.agents.ref(agentId).send(input.text, { messageId });
+    await host.agents.ref(agentId).send(sentText, { messageId });
     accepted = true;
   } catch (error) {
     sendError = String((error as Error).message ?? error).slice(0, 512);

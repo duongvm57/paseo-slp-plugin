@@ -353,6 +353,9 @@ test('one semantic delivery crosses real Core create/bind/send and returns targe
   assert.equal(out.state, 'recorded', JSON.stringify(out));
   assert.equal(out.result.delivery.ok, true, JSON.stringify(out));
   assert.deepEqual(f.effects.map(effect => effect.kind), ['create', 'send']);
+  const sentBytes = Buffer.from(f.effects[1].text);
+  assert.deepEqual(sentBytes.subarray(0, Buffer.byteLength(request.text)), Buffer.from(request.text));
+  assert.equal(f.effects[1].text, `${request.text}\n\nDesk delivery (claim; no authority grant):\nLead text sha256: ${sha256Hex(request.text)}\nAssignment id: ${JSON.stringify(f.assignmentId)}\nTask id: ${JSON.stringify(out.result.taskId)}\nAttempt id: ${JSON.stringify(out.result.attemptId)}\nHandback route: the verified parent agent ID is ${JSON.stringify(f.lead.agentId)}.\n`);
   assert.equal(out.result.current.pins.expectedLedgerRevision, f.store.read(f.repoKey).ledger.revision);
   const current = await f.call(f.owner, 'slp_task_get', { assignmentId: f.assignmentId, taskId: out.result.taskId, attemptId: out.result.attemptId });
   assert.equal(current.ok, true, JSON.stringify(current));
@@ -361,10 +364,13 @@ test('one semantic delivery crosses real Core create/bind/send and returns targe
   const replay = await f.call(f.owner, 'slp_task_deliver', request);
   assert.equal(replay.receiptSha256, out.receiptSha256); assert.equal(replay.replayed, true);
   assert.equal(f.effects.length, 2);
+  assert.deepEqual(Buffer.from(f.effects[1].text), sentBytes);
   const altered = await f.call(f.owner, 'slp_task_deliver', { ...request, text: 'Changed' });
   assert.equal(altered.code, 'IDEMPOTENCY_CONFLICT'); assert.equal(f.effects.length, 2);
   const receipt = await f.call(f.owner, 'slp_operation_get', { kind: 'task-deliver', requestId: request.requestId });
   assert.equal(receipt.receiptSha256, out.receiptSha256);
+  assert.deepEqual(receipt.result, out.result);
+  assert.equal(f.effects.length, 2);
   const foreignReceipt = await f.call(f.reader, 'slp_operation_get', { kind: 'task-deliver', requestId: request.requestId });
   assert.equal(foreignReceipt.ok, false);
   const stale = await f.call(f.owner, 'slp_task_get', { assignmentId: f.assignmentId, taskId: out.result.taskId, expectedLedgerRevision: 0 });

@@ -554,7 +554,10 @@ test('send gates on registered membership then correlates messageId', async t =>
   assert.equal(send2.state, 'running');
   assert.equal(host.calls.send.length, 1);
   const { text, opts } = host.calls.send[0];
-  assert.equal(text, 'do the work');
+  assert.equal(text, 'do the work\n\nDesk delivery (claim; no authority grant):\n' +
+    'Lead text sha256: 443270cdc607ba1eacf02db71d38a805a6eea51b2e41688e12614c634b8643d0\n' +
+    'Assignment id: "asg-1"\nTask id: "task-1"\nAttempt id: "att-1"\n' +
+    'Handback route: the verified parent agent ID is "agent-owner".\n');
   assert.equal(opts.messageId, send2.messageId);
   assert.equal(opts.messageId, effectIdentity('send', 'req-s2'));
 
@@ -1533,4 +1536,3 @@ test('real Core+Git: diamond isolates B/C, serializes one integration target, an
   assert.equal((await runTaskDispatch(d.ctx,d.sendInput(dBoot.attemptId,'send-D'),d.deps)).sent,true);
   assert.equal(d.host.calls.create.length,4);assert.equal(d.host.calls.send.length,4);
 });
-

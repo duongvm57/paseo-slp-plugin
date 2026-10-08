@@ -1,7 +1,8 @@
 // Semantic composition over the existing task owner. This module owns no
 // task transitions: define/bootstrap/send still cross the Core admission seam.
 import type { DeskTaskDeliverInputValue, DeskTaskGetInputValue } from "../shared/delegation.ts";
-import type { DeskRejectionValue } from "../shared/enforcement.ts";
+import { WIRE_LIMITS, type DeskRejectionValue } from "../shared/enforcement.ts";
+import { taskDeliveryTrailerBudget } from "./desk-delivery-trailer.ts";
 import { MAX_RPC_BYTES } from "../shared/contracts.ts";
 import { canReadDeskWorkflow } from "./desk-assignment.ts";
 import { effectiveOwner, type LedgerValue } from "./desk-store.ts";
@@ -56,6 +57,11 @@ export async function runTaskDeliver(ctx: RunnerCtx, input: DeskTaskDeliverInput
   const ops = createDeskOperations(deps.scratch.stableRoot);
   return ops.run({ repoKey: ctx.repoKey, agentId: ctx.row.agentId, membershipId: ctx.row.membershipId,
     kind: "task-deliver", requestId: input.requestId }, input, async phase => {
+    // Existing receipts replay before this new-admission check. Reserve the
+    // unknown IDs before Core define/bootstrap or any native effect.
+    if (Buffer.byteLength(input.text) + taskDeliveryTrailerBudget(input.assignmentId, ctx.row.agentId!) > WIRE_LIMITS.deskTaskText) {
+      return reject("REQUEST_TOO_LARGE", "text plus the reserved desk delivery trailer exceeds the prompt byte budget; shorten text");
+    }
     const taskDeps = { store: deps.store, observe: createTaskObserver(ctx, deps) };
     phase("define-issued", { requestId: subRequestId(input.requestId, "define") });
     const defined = await runTaskCommand(ctx, {
