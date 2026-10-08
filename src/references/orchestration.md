@@ -30,7 +30,7 @@ Start with the smallest topology that supplies the required judgment:
 
 | Need | Starting shape |
 |---|---|
-| Clear bounded implementation | One Peer Engineer; tiny ceremony comes from the effective protocol. Direct Lead writes follow common policy's explicit grant. |
+| Clear bounded implementation | One Peer Engineer; tiny ceremony comes from the effective protocol. Direct Lead writes follow delegation policy's explicit grant. |
 | Open ownership/lifecycle/contract | Read-only Architect reconstructs boundaries; Lead decides the contract needed by the slice before implementation. |
 | Plausible alternative foundations or costly lock-in | Independent design lenses or sealed council. |
 | Large disruptive dependency | Bounded Peer/lane or dependency Lead, with separate contract, proof and handback. |

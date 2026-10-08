@@ -4,9 +4,7 @@ Keep prose as the bounded judgment; a v1 slp-record projects those same facts.
 Candidate/check claims need a handback record; report-only work may omit it
 or use candidate:null. Use the installed `records --schema` for exact fields
 and advertised optional structured reports/recaps; do not copy schema/parser
-algorithms into task instructions. The minimum handback has seat role/
-disposition, verdict, candidate identity and actual checks with cmd/exit/sha.
-A full clean commit or snapshot identifies bytes, not running processes.
+algorithms into task instructions.
 
 ## Submit or verify
 
@@ -18,8 +16,10 @@ leave outputRef unreadable: actual referenced-evidence validation still
 needs the CLI or authorized evidence inspection. Pause source writes and
 report actual artifacts, output and unfinished work, even with measured capture.
 
-For ordinary/Lean reports, or referenced-file verification, run managed
+For ordinary/Lean reports or referenced-file verification, run managed
 `bin/slp.mjs records <report> --require handback --repo <absolute-checkout>`.
+Measure handback claims: `slp.mjs verify-handback <report> --repo <absolute-checkout> --expect-contract <repo-path>=<sha256> --paseo-home <verified-home>`.
+Build facts-only review input: `slp.mjs review-packet <absolute-checkout> --base <git-ref>`.
 Use a column-1 slp-record fence and advertised schema; `slp.mjs record-build` can draft one with shas taken from output files. The verifier's --repo
 wins over declared roots, constrains outputRef and checks UTF-8 output hashes.
 Inline output wins over outputRef; sha:null records missing evidence, never
@@ -30,7 +30,17 @@ checks or inspects trustworthy candidate-bound measured execution.
 Optional slp-report read/ran/authority/findings remain claims. Rendering keeps
 original evidence fence bytes. handoff.recapInputs uses only supplied sources,
 exposes omissions/conflicting pins and proves no settlement, acknowledgment
-or transfer. Use these when they improve retrieval, not as extra ceremony.
+or transfer.
+
+## Mutation evidence
+
+R1: every mutation log, including the acceptance owner's replay, carries the
+verbatim `sha256sum <test file>` output captured immediately before each mutant
+run, plus product hashes before, mutant and after revert, and candidate identity;
+a declared meta hash alone is insufficient.
+R2: the acceptance owner's replay of a mutant, with its pinned log, is the
+evidence of record; the writer's log is supporting; any sha mismatch between
+log, meta and the handback candidate voids the claim without proof of intent.
 
 ## Receiving-owner settlement
 

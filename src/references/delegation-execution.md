@@ -10,7 +10,7 @@ Classify from the actual assignment, not available sessions:
 
 | Assignment | Action |
 |---|---|
-| New bounded team/outcome | Its parent creates Lead/Peer through agent-scoped create_agent. |
+| New bounded team/outcome | Its parent forms Lead/Peer under Form and deliver. |
 | Reliable continuation/correction/re-review or phase of the same outcome | send_agent_prompt to the verified child with the added grant. |
 | Observe existing work | Pin owner ID, observation scope and explicit report recipient; retain real parentage and write owner. |
 
@@ -32,8 +32,11 @@ For parallel work use orchestration.md's actual paths/shared-resource preflight.
 
 ## Form and deliver
 
-When advertised, use slp_seat_create with requestId, role, taskLabel,
-assignment and grantRef. Lead formation resolves the fresh saved slp-lead
+slp_status shows which desk tools are bound; when slp_seat_create is bound,
+use it by default with requestId, role, taskLabel, assignment and grantRef.
+grantRef is a declared pointer to the Human grant (e.g. assignment sentence
+and date), a claim, never authenticated; verify authority, one writer and review sufficiency.
+Lead formation resolves the fresh saved slp-lead
 profile; Peer formation additionally needs explicit runtime option/hash and
 any required Jev decision under provider-routing.md. The bound caller supplies
 native parent/workspace/cwd. No caller request file, copied create arguments
@@ -43,8 +46,6 @@ the exact native tuple and only then hands off the assignment. By default
 with delivery.prompt; send exactly that prompt through send_agent_prompt with
 notifyOnFinish=true so the host arms the finish callback. delivery "server"
 sends in the server without a callback; use it only when none is needed.
-grantRef is a claim;
-the caller still verifies authority, one writer and review sufficiency.
 The assignment names outcome, constraints, granted effects and proof/handback.
 The created assignment names the verified parent agent ID and requires exactly
 one native report to that parent at handback. A standby Lead reports readiness
@@ -60,26 +61,19 @@ Retained early-format addresses are located without copying or resealing;
 ambiguous, corrupt or over-budget legacy evidence blocks a new invocation.
 Retain any returned agentId and scope, reconcile original host evidence and
 use a separately authorized explicit follow-up only when safe. Receipts retain
-resources and do not establish acceptance or cleanup. Replay returns the receipt
-and never sends. Server send
-establishes no finish callback. Either way require the child to send exactly
-one native report to the observed parent and use monitoring.md for remaining
-observation. A finish notification only signals the event; that native
+resources and do not establish acceptance or cleanup. Use monitoring.md for
+remaining observation. A finish notification only signals the event; that native
 report establishes the handback route; neither establishes acceptance.
 
-For an unbound/older host or declared isolated placement, CLI prepare remains
-compatible: use provider-routing.md, prepare --emit create and agent-scoped
-Paseo create_agent with the emitted record and notifyOnFinish=true. Pass
-taskLabel/disposition; review taskLabel uses `<task> / <lens>`. An assignmentFile
-pointer or validated opt-in snapshot remains available on that CLI path.
-When a compatibility host supports a final-report callback, use it to retrieve
-the child's actual report. `notifyOnFinish` or a callback signals delivery only;
-read the report and evidence before giving a verdict.
+For unbound/older hosts or declared isolated placement, use provider-routing.md, prepare --emit create
+and agent-scoped Paseo create_agent with its emitted record and notifyOnFinish=true;
+pass taskLabel/disposition (review taskLabel uses `<task> / <lens>`).
+assignmentFile or validated opt-in snapshot supplies the brief. Use an available
+final-report callback to retrieve the actual report; inspect its evidence before a verdict.
 Default placement is the pinned parent workspace, including read-only review;
-a different checkout/lane needs its declared paths/reason. If it lacks
-protocol/references, use authorized `slp.mjs materialize <target> --from <source>`
-and explicit --include inputs before preparation; this grants no installation
-or host edit.
+a different checkout/lane needs declared paths/reason; if protocol/references
+are missing, use authorized `slp.mjs materialize <target> --from <source>` with
+explicit --include inputs before preparation, without installation/host authority.
 
 Verify the returned ID against actual host parent/workspace/cwd and bundle.
 Confirm the brief's report route when its first report arrives. Titles,

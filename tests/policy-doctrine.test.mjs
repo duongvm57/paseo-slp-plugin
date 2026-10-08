@@ -36,23 +36,36 @@ test('all seats receive communication, stop and recovery responsibilities', () =
     /identifiers, paths and commands verbatim/,
     /Human stop overrides objectives and callbacks: stop work and follow-ups immediately/,
     /policy recovery restores no task state/,
-    /known unchanged.*summary is insufficient.*fresh catalog hash/);
+    /known unchanged.*sha256sum.*delivered Policy locators.*summary is insufficient.*fresh catalog hash/,
+    /Measure a file with wc -c before reading it; read large files in bounded ranges/,
+    /Resume only on a new Human instruction/,
+    /First full reads of applicable policy files are required; delivered full text counts/,
+    /once per session.*get_agent_status on your PASEO_AGENT_ID.*snapshot.labels\["paseo.parent-agent-id"\].*complete managed attempt evidence.*re-verify only after context loss or a new binding/);
 });
 
 test('bounded direct Lead writes need actual grants and required independent review', () => {
   pins('src/common.md', /Peer writing is the managed-implementation default/,
+    /Peer uses the authorized project pool option/,
+    /Tiny labels and missing\/stale protocols grant no exception/,
+    /Review selection never waives a Human, assignment or protocol obligation/,
+    /A Lead writer never stands in for required independent review/);
+  pins('src/delegation.md', /Supervisor\/Lead use saved profiles/,
     /direct Lead write requires an explicit Human assignment or current effective protocol grant/,
     /clear, reversible work, bounded scope, one writer and exact candidate proof/,
-    /Lead writer never stands in for required independent review/,
-    /Tiny labels and missing\/stale protocols grant no exception/,
-    /Review selection never waives a Human, assignment or protocol obligation/);
+    /cancel only their owned task agents through Paseo cancel_agent.*stop their task-local wakes.*preserve sessions\/artifacts/);
   pins(template, /Direct Lead write grant.*None by default/);
+  pins('docs/contract.md', /Common policy owns authority, language, host boundaries, one writer, required gates, inbound route, Human stop and recovery; delegation owns the direct-Lead-write exception/);
 });
 
 test('formation distinguishes managed admissions from ordinary host verification', () => {
-  pins('src/delegation.md', /task-execution.md.*Runtime admission records and verifies reservations, seat pins and effects/,
-    /ordinary\/Lean creation or observation.*delegation-execution.md; consume native formation receipts or apply its manual verification on the compatibility path/);
-  pins(direct, /Its parent creates Lead\/Peer through agent-scoped create_agent/,
+  pins('src/delegation.md', /dispatching desk tasks, not forming seats.*task-execution.md.*consume admission receipts for reservations, seat pins and effects/,
+    /ordinary\/Lean creation or observation.*delegation-execution.md for native receipts or compatibility verification/);
+  pins(direct, /Its parent forms Lead\/Peer under Form and deliver/,
+    /slp_status shows which desk tools are bound; when slp_seat_create is bound, use it by default/,
+    /delivery.prompt; send exactly that prompt through send_agent_prompt with notifyOnFinish=true/,
+    /grantRef is a declared pointer to the Human grant.*assignment sentence and date.*claim, never authenticated/,
+    /For unbound\/older hosts or declared isolated placement.*prepare --emit create.*agent-scoped Paseo create_agent/,
+    /different checkout\/lane needs declared paths\/reason/,
     /Verify the returned ID against actual host parent\/workspace\/cwd and bundle/,
     /Confirm the brief's report route when its first report arrives/,
     /Empty inventory alone proves no absence/,
@@ -113,7 +126,10 @@ test('scope tools pin declared plans and candidates while prompt policy owns suf
   pins(review, /Runtime enforces the declared set.*does not decide sufficiency or risk/,
     /reviewPlan:null opts into legacy Spec\/Standards compatibility/,
     /Dropping mandates after adverse findings to evade obligations is prohibited/,
-    /Outside those tools.*manually keep candidate\/declaration\/mandate current/);
+    /Outside those tools.*manually keep candidate\/declaration\/mandate current/,
+    /slp_scope_declare → slp_scope_transition claim → Engineer slp_handback_submit.*observe.*slp_scope_transition submit-for-review → reviewers slp_scope_review → slp_scope_transition review-observed → approve\/advance/,
+    /slp_workflow_get.*observedCandidateId.*snapshotSha256.*head.*round.*revision.*mandate.*pins/,
+    /Drop SLP_\* and PASEO_HOME from the environment before running a suite in a probe/);
   pins(desk, /slp_scope_declare.*slp_scope_transition.*slp_scope_review/,
     /independent actor and candidate\/revision pins/);
 });
@@ -130,8 +146,15 @@ test('proof consumes measured execution and independently verifies remaining cla
 
 test('handback uses actual schema/submit and preserves referenced-evidence gap', () => {
   pins('src/roles/peer.md', /Candidate\/check claims|candidate or checks/,
-    /slp_handback_submit.*observed capture\/gaps.*ordinary CLI validation or referenced evidence/);
-  pins(records, /Candidate\/check claims need a handback record; report-only work may omit it or use candidate:null/,
+    /Installed policy directory in the bundle resolves references\/report-records.md/,
+    /Run checks after the final write; a receipt predating the last delta does not cover it/,
+    /ordinary CLI validation or referenced evidence/,
+    /slp_handback_submit.*observed capture\/gaps/);
+  pins(records, /slp.mjs verify-handback <report> --repo <absolute-checkout> --expect-contract <repo-path>=<sha256> --paseo-home <verified-home>/,
+    /slp.mjs review-packet <absolute-checkout> --base <git-ref>/,
+    /R1: every mutation log, including the acceptance owner's replay.*verbatim `sha256sum <test file>` output captured immediately before each mutant run.*product hashes before, mutant and after revert.*candidate identity/,
+    /R2: the acceptance owner's replay.*pinned log.*evidence of record.*writer's log.*supporting.*sha mismatch between log, meta and.*handback candidate voids the claim/,
+    /Candidate\/check claims need a handback record; report-only work may omit it or use candidate:null/,
     /records --schema.*exact fields/,
     /slp_handback_submit.*observedCandidateId\/gaps/,
     /stored claim, pending observation.*proves neither execution nor acceptance/,
@@ -166,7 +189,8 @@ test('unsupported stop, quiescence, cold succession and Human principal remain e
 });
 
 test('monitoring stays event-first with bounded owned wakes and no guessed cleanup', () => {
-  pins(monitoring, /notifyOnFinish=true/,
+  pins(monitoring, /If timeline access fails.*provider unregistered or CLI cannot reach the daemon home.*record the gap.*host's get_agent_activity.*read-only.*daemon home's agent records.*permitted evidence.*do not probe CLI subcommands/,
+    /notifyOnFinish=true/,
     /bounded fallback for gaps in event coverage/,
     /Each heartbeat owner deletes its recorded task heartbeat and records the receipt/,
     /missing authorized controls leave unknown settlement without a new work prompt/);
@@ -177,7 +201,8 @@ test('Lead pushes Lead-level state; Supervisor checks objective continuity on ev
   // Triggers live in role bytes (system prompt) so they survive compaction.
   pins('src/roles/lead.md', /Report to that Supervisor only Lead-level state: BLOCKED, cross-scope dependencies/,
     /project milestones\/completion, your degraded context\/lifecycle and owner decisions; never internal progress or acknowledgments of relayed decisions/);
-  pins('src/roles/supervisor.md', /inspect Lead, not each Peer, when a report, finish, Human question or wake calls for it/,
+  pins('src/roles/supervisor.md', /scan the Signal list in references\/monitoring.md/,
+    /inspect Lead, not each Peer, when a report, finish, Human question or wake calls for it/,
     /On every wake, before answering or relaying, confirm each wait blocking the Human objective has a live owner and wake path from Lead-level activity, not reported status/,
     /Take a stalled objective or a wait within your own authority to Human with options; restating a report is no supervision/,
     /arm a bounded Lead-level heartbeat under monitoring.md/);
@@ -190,12 +215,14 @@ test('governance owns evidence-led investigation, bounded contact and authorized
   pins('src/roles/supervisor.md', /Lead owns project technical decisions and acceptance/,
     /unless Human grants recovery contact with a named Peer.*Keep that contact bounded/,
     /reconcile evidence and proposed changes into Lead's shared state before direction changes/);
-  pins(governance, /Human may grant recovery contact with a named Peer for a bounded purpose/,
+  pins(governance, /Resolve.*notebook.*Expose.*supervisor_notebook/,
+    /Read the tail only when the assignment or a decision needs it/,
+    /Human may grant recovery contact with a named Peer for a bounded purpose/,
     /reconcile exchange, evidence\/proposed change into its current brief\/checkpoint before direction changes/,
     /Contact alone grants no Peer write, objective\/priority\/technical verdict, integration or acceptance authority/,
     /Relay only when the current assignment explicitly grants it and recipient Lead\/route are verified/,
     /Missing grant, route or data authority makes the dependent branch BLOCKED/,
-    /Treat.*as hypotheses.*what disproves it.*within authority/);
+    /read anti-patterns.md and select relevant hypotheses.*what disproves it.*within authority/);
 });
 
 test('workflow investigation reaches the conditional twenty-pattern evidence catalogue', () => {
@@ -229,7 +256,8 @@ test('context handoff keeps concrete state, old-owner settlement and successor a
 });
 
 test('mechanism recurrence still reopens premise under authorized bounds', () => {
-  pins(review, /same authorized writer.*same independent seat/,
+  pins(review, /Any repair needs an authorized write phase; direct Lead writes follow delegation policy's explicit grant/,
+    /same authorized writer.*same independent seat/,
     /Consecutive same-class findings call for mechanism investigation/,
     /establish an authorized bound before continuing if absent/,
     /Exhaustion is not ACCEPT.*Recurrence after mechanism work reopens the premise\/strategy/);
@@ -246,7 +274,8 @@ test('onboarding adapts actual decision/tool paths without mandatory queue setup
 });
 
 test('routing delegates actual bundle checks to runtime without granting fallback authority', () => {
-  pins('src/references/provider-routing.md', /optionId\/catalogSha256.*runtime resolves the complete bundle against fresh host providers/,
+  pins('src/references/provider-routing.md', /common policy's once-per-session route verification.*PASEO_AGENT_ID is unavailable.*slp_status\(\{\}\).*one bounded host lookup.*missing parent\/report metadata as a gap/,
+    /optionId\/catalogSha256.*runtime resolves the complete bundle against fresh host providers/,
     /jevRouting.routing` as `shadow`, `armed` or `error`.*read references\/jev-routing.md; skip unconfigured\/off.*Error blocks the branch/,
     /ordinary\/Lean launch.*live list_providers/,
     /refresh routes.*quotaFallbackFrom/,
@@ -260,7 +289,8 @@ test('routing delegates actual bundle checks to runtime without granting fallbac
 
 test('role gate-policy reads stay conditional even with desk-enforced pins', () => {
   pins('src/roles/lead.md', /When the assignment or protocol requires independent review/,
-    /re-read.*references\/orchestration.md and references\/review-gates.md.*immediately before choosing reviewer seats/,
+    /Before choosing reviewer seats, re-review or acceptance, use applicable gate rules in references\/orchestration.md and references\/review-gates.md under common policy's hash-anchored reuse.*Re-read only on mismatch, lost context \(including compaction\) or uncertainty/,
+    /After mandatory reads, the next action is formation or dispatch; orientation is not a stopping point/,
     /Unavailable, stale or unclear applicable gate rules make that branch BLOCKED/);
 });
 
@@ -314,7 +344,7 @@ test('review method tools stay conditional and keep Lead obligations', () => {
     /send findings first, naming pending proof, then its own addendum/,
     /rely on a valid measured result bound to the same candidate pin, command and scope instead of rerunning it/,
     /rerun or probe narrowly only on pin drift, a missing\/invalid result or an unresolved proof question/,
-    /narrow result proves only its scope; verification sufficiency, R1\/R2 replay and acceptance stay with Lead/,
+    /narrow result proves only its scope; verification sufficiency, R1\/R2 replay \(report-records.md\) and acceptance stay with Lead/,
     /state the property to restore.*allowlist over blacklist; not the implementation.*trade-off to publish when chosen; an accepted risk reopens only on new evidence/,
     /Exhaustion is not ACCEPT but a checkpoint.*Lead extends, records a proof gap or escalates/);
   pins('src/roles/peer.md', /which enumeration may be missing, which docs sentence describes it, which failure class lacks a falsifying test; evidence or "unknown"/,

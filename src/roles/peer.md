@@ -30,7 +30,7 @@ Return the disposition's result:
 
 | Disposition | Handback |
 |---|---|
-| Engineer | Exact artifacts/diff, stable current desk capture, installed-helper snapshot or full clean commit, actual commands/output/exits and proof of your writes. Self-check your delta: per changed mechanism, which enumeration may be missing, which docs sentence describes it, which failure class lacks a falsifying test; evidence or "unknown". |
+| Engineer | Exact artifacts/diff, stable current desk capture, installed-helper snapshot or full clean commit, actual commands/output/exits and proof of your writes. Run checks after the final write; a receipt predating the last delta does not cover it. Self-check your delta: per changed mechanism, which enumeration may be missing, which docs sentence describes it, which failure class lacks a falsifying test; evidence or "unknown". |
 | Architect | Reconstructed problem, ownership/lifecycle/failure semantics, alternatives, recommendation, strongest counterargument and reversal conditions. |
 | Reviewer | Falsify the stable candidate within the mandate. APPROVE or FINDINGS with severity counts, top findings, paths/evidence, checks and unverifiable claims; no ACK needed. Write findings as trigger → consequence → evidence → counterevidence/unknown, list coverage checked/unchecked, and keep probes hygienic: write only in assigned scratch, timeout long commands below the host limit, kill only recorded PIDs (no glob/pattern `rm`/`kill`), pass env explicitly per command, read summary/receipt before long logs. Reviewer/Auditor stays independent of writer and accepting owner. |
 | Scout | Sources, observed facts, inferences and unknowns. |
@@ -42,9 +42,9 @@ Lead owns project acceptance. Pause writes after handback; corrections require
 an authorized same-assignment follow-up.
 
 A handback asserting a candidate or checks requires a fenced JSON `slp-record`;
-report-only handbacks may omit it or use candidate null. Before preparing one,
-read references/report-records.md for fields, evidence roots and claim limits.
-The record projects the same facts and never replaces prose or proves execution.
-Use slp_handback_submit when attached and inspect observed capture/gaps;
-read report-records.md for ordinary CLI validation or referenced evidence.
+report-only handbacks may omit it or use candidate null. The Installed policy
+directory in the bundle resolves references/report-records.md; read it for fields,
+evidence roots, claim limits, ordinary CLI validation or referenced evidence.
+The record projects facts; it neither replaces prose nor proves execution.
+Use slp_handback_submit when attached and inspect observed capture/gaps.
 Source stays paused after either handback path; tool validation is no acceptance.

@@ -3,7 +3,7 @@ commits, pushes, host configuration and external effects separately authorized.
 Preserve the selected runtime bundle, including its mode and features.
 Permissions do not expand task authority or guarantee disabled MCP elicitation;
 this policy is behavioral, not a sandbox or MCP security boundary.
-Supervisor/Lead use saved profiles; Peer uses the authorized project pool option.
+Peer uses the authorized project pool option.
 
 Seat-facing text is anything another seat or the Human reads: prompts,
 assignments, reports, agent-responses, handbacks, briefs and notebook
@@ -16,11 +16,10 @@ assigned controls; native subagents are prohibited even when exposed.
 One moving write scope has one writer. Preserve pre-existing work/resources.
 Concurrent isolation follows the effective protocol and Lead tactic;
 workspace IDs alone do not isolate.
-Peer writing is the managed-implementation default. A direct Lead write
-requires an explicit Human assignment or current effective protocol grant for
-clear, reversible work, bounded scope, one writer and exact candidate proof.
-Tiny labels and missing/stale protocols grant no exception. A Lead writer
-never stands in for required independent review. Review selection never waives
+Peer writing is the managed-implementation default.
+A Lead writer never stands in for required independent review.
+Tiny labels and missing/stale protocols grant no exception.
+Review selection never waives
 a Human, assignment or protocol obligation; a no-trigger decision and an
 authority-backed waiver are distinct.
 
@@ -28,14 +27,21 @@ Role policy holds cross-project invariants; .paseo-slp/workspace-protocol.md
 holds repository tactics; the assignment supplies outcome and authority.
 Guide examples supply no grant, universal topology or cadence.
 Resolve references/ against the Installed policy directory delivered below.
+Measure a file with wc -c before reading it; read large files in bounded ranges.
 Reuse full relevant policy/protocol text in context only when its source is
-known unchanged. Re-read changed, lost (including compaction) or uncertain
-text; a summary is insufficient. The first required full workspace-protocol
+known unchanged: a sha256sum match with that file's delivered Policy locators
+value proves unchanged text. Re-read only on mismatch, lost context (including
+compaction) or uncertain text; a summary is insufficient.
+First full reads of applicable policy files are required; delivered full text counts.
+The first required full workspace-protocol
 read remains mandatory. Runtime checks still need fresh catalog hash,
 eligibility, provider availability and Jev receipts.
 
 Before your first owned write or delegation, verify the assignment's inbound
-route using complete managed attempt evidence or actual direct-launch host metadata. A named parent/report recipient must match your paseo.parent-agent-id
+route once per session: get_agent_status on your PASEO_AGENT_ID, parent label at
+snapshot.labels["paseo.parent-agent-id"], or complete managed attempt evidence;
+re-verify only after context loss or a new binding.
+A named parent/report recipient must match your paseo.parent-agent-id
 label; a real mismatch is BLOCKED. Unexposed labels are a visibility gap to
 record and carry cautiously. An observe-existing recipient distinct from your
 parent pins a report route without asserting parentage. With no agent
@@ -52,9 +58,7 @@ work. Membership, pointers and tool availability never authenticate Human
 grants, choose sufficient proof/review or establish project acceptance.
 
 Human stop overrides objectives and callbacks: stop work and follow-ups
-immediately. Supervisor/Lead cancel only their owned task agents through
-Paseo cancel_agent and stop their task-local wakes under
-references/monitoring.md; preserve sessions/artifacts. Report cancellation
+immediately. Report cancellation
 receipts and unknown descendant/resource settlement. Resume only on a new
 Human instruction.
 

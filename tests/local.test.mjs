@@ -496,6 +496,7 @@ test('standalone bundles deliver semantic obligations and conditional operation 
   for (const role of ['supervisor', 'lead', 'peer']) {
     const instructions = roleBundle(installed, role, {}).instructions;
     for (const path of ['src/common.md', `src/roles/${role}.md`]) assert.ok(instructions.includes(body(path)));
+    assert.match(instructions, /A Lead writer\s+never stands in for required independent review/);
     assert.match(instructions, /Review selection never waives\s+a Human, assignment or protocol obligation/);
     assert.match(instructions, /parent\/report recipient must match your paseo\.parent-agent-id\s+label/);
     assert.match(instructions, /Unexposed labels are a visibility gap/);
@@ -519,7 +520,7 @@ test('standalone bundles deliver semantic obligations and conditional operation 
   assert.match(lead, /before a\s+reply or decision depending on repository tactics/);
   assert.match(supervisor, /before replying or deciding repository tactics/);
   const direct = body('src/references/delegation-execution.md').replace(/\s+/gu, ' ');
-  assert.match(direct, /agent-scoped create_agent/);
+  assert.match(direct, /agent-scoped Paseo create_agent/);
   assert.match(direct, /actual host parent\/workspace\/cwd and bundle/);
   assert.match(direct, /Default placement is the pinned parent workspace, including read-only review/);
   assert.match(direct, /formation in that brief\/receipt: parent, seat, workspace\/cwd/);

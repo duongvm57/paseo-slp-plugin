@@ -5,8 +5,7 @@ decision-changing questions or explicit Human/assignment/protocol obligations.
 Record a selection before the candidate round: questions/obligations,
 mandates or no-trigger reason, authority/rule source, candidate,
 brief/scope/plan revision, authorized effort bound and stop condition.
-Absent selection is an open decision; tiny size is no waiver. Required seats,
-axes and obligations remain binding despite unavailability or adverse findings;
+Required seats, axes and obligations remain binding despite unavailability or adverse findings;
 an unavailable required seat makes the gate BLOCKED.
 
 ## Declare and use the gate
@@ -14,12 +13,14 @@ an unavailable required seat makes the gate BLOCKED.
 Choose required independent mandates, not-required only with no material
 trigger, or exempt only with explicit waiver authority. Source/reason/grant
 pointers remain claims, not authenticated Human decisions. Tiny labels supply
-no waiver. An unavailable required shape blocks its dependent gate.
-With desk scope tools, declare this decision once, submit the stable observed
-candidate and read current qualification in slp_workflow_get. Runtime enforces
-the declared set, independent writer/owner separation and current
+no waiver.
+Desk round: slp_scope_declare → slp_scope_transition claim → Engineer
+slp_handback_submit and observe → slp_scope_transition submit-for-review →
+reviewers slp_scope_review → slp_scope_transition review-observed → approve/advance;
+use slp_workflow_get to resolve observedCandidateId to the candidate's snapshotSha256
+and head, and obtain current round, revision and mandate pins.
+Runtime enforces the declared set, independent writer/owner separation and current
 brief/mandate/candidate pins; it does not decide sufficiency or risk.
-Follow typed conflicts instead of recreating plan/staleness algorithms in notes.
 Explicit reviewPlan:null opts into legacy Spec/Standards compatibility;
 new decisions use named plans. Preserve historical obligations and use a fresh
 round for authorized requirement changes. Dropping mandates after adverse
@@ -62,8 +63,9 @@ first, naming pending proof, then its own addendum. It may rely on a valid
 measured result bound to the same candidate pin, command and scope instead of
 rerunning it; rerun or probe narrowly only on pin drift, a missing/invalid
 result or an unresolved proof question such as the test's own strength. A
-narrow result proves only its scope; verification sufficiency, R1/R2 replay and
+narrow result proves only its scope; verification sufficiency, R1/R2 replay (report-records.md) and
 acceptance stay with Lead.
+Drop SLP_* and PASEO_HOME from the environment before running a suite in a probe.
 
 ## Verify and adjudicate
 
@@ -98,6 +100,7 @@ bounds; establish an authorized bound before continuing if absent.
 Stop at sufficient proof, unresolved premise/prerequisite or exhaustion.
 Exhaustion is not ACCEPT but a checkpoint: the seat reports what was and was
 not checked; Lead extends, records a proof gap or escalates strategy/resources.
-Recurrence after mechanism work reopens the premise/strategy. Any repair
-follows common policy's writer grant; changing candidate, seat or session
+Recurrence after mechanism work reopens the premise/strategy. Any repair needs
+an authorized write phase; direct Lead writes follow delegation policy's explicit
+grant; changing candidate, seat or session
 neither resets obligations nor expands the bound.

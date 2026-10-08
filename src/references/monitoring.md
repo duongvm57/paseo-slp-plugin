@@ -1,7 +1,6 @@
 # Observe, wait and settle
 
 Supervisor/Lead use this before observation/delegated waits and at settlement.
-Events/detectors/heartbeats signal attention; judgment remains with the owner.
 The package is no background lifecycle runner. If supported, opt-in
 `slp.mjs monitor` is an on-demand delta scan producing signal candidates,
 not verdicts or live turns.
@@ -14,6 +13,9 @@ timeline/report access, heartbeat controls and cross-session reports are
 separate capabilities. For managed tasks consume their bound attempt/effect receipts; for direct
 formation verify actual parent/workspace/report route under delegation-execution.md.
 Record unexposed metadata and retain the assigned recipient.
+If timeline access fails (provider unregistered or CLI cannot reach the daemon
+home): record the gap, use the host's get_agent_activity; a read-only look at
+the daemon home's agent records is permitted evidence; do not probe CLI subcommands.
 
 Enumerate seats by parentage, assignment labels and provider prefix, not cwd:
 worktrees run different paths and refs/heads/<lane> receives lane commits

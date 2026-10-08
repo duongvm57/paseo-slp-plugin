@@ -239,8 +239,8 @@ The current Human assignment supplies outcome, scope, phase/grants, proof and
 handback. Supervisor/Lead read the effective protocol on entry; Peer receives
 relevant constraints unless explicitly assigned a full read. No global role is
 written to AGENTS.md. Common policy owns authority, language, host boundaries,
-one writer, direct-Lead-write exception, required gates, inbound route,
-Human stop and recovery. Roles carry responsibilities and decision triggers;
+one writer, required gates, inbound route,
+Human stop and recovery; delegation owns the direct-Lead-write exception. Roles carry responsibilities and decision triggers;
 conditional references own procedures. The recursive install unit and receipt-derived locators track the resulting
 policy graph; core common/role/delegation loader paths remain stable. Formation
 is consolidated into ordinary delegation and onboarding decision resources

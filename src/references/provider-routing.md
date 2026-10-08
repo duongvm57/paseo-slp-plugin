@@ -14,10 +14,9 @@ providers freshly, revalidates before create/delivery and observes the native
 runtime. Supervisor child formation uses the compatible CLI path below;
 Supervisor can still be the caller forming a Lead. Neither saved-profile
 branch selects a Peer pool or Jev decision.
-Use the host's PASEO_AGENT_ID for an exact get_agent_status lookup when
-available; otherwise slp_status({}) supplies your desk identity/workspace.
-Verify actual parent/report metadata; a missing source needs one bounded
-host lookup and a recorded gap.
+Use common policy's once-per-session route verification. If PASEO_AGENT_ID
+is unavailable, slp_status({}) supplies your desk identity/workspace for one
+bounded host lookup; record missing parent/report metadata as a gap.
 
 For CLI compatibility or a host without the native operation, write a compact
 prepare request with role/repository/workspaceId/assignment

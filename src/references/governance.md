@@ -17,7 +17,8 @@ Choose effort by risk/budget while preserving explicit Human profiles.
 
 Resolve an authorized causal notebook path or indexed timeline, write owner
 and retrieval method. Expose its location in supervisor_notebook or the first
-visible reply. Notebook scope is separate from implementation; missing durable
+visible reply. Read the tail only when the assignment or a decision needs it.
+Notebook scope is separate from implementation; missing durable
 retrieval leaves a handback gap. Store no state in installed policy.
 For material observations, record task/date, Lead/session/candidate and
 sources; observation/counterevidence; hypothesis/mechanism; impact/open
@@ -81,15 +82,9 @@ For pattern-specific evidence/questions during workflow audit, material
 drift/failure, repeated correction or uncertain architecture/reasoning,
 read anti-patterns.md and select relevant hypotheses.
 
-Treat apparent compliance, fixed foundations, repeated workarounds, shared
-moving scope, self-benchmarks, mock-shaped proof, unnecessary abstraction,
-polling, ceremony, biased/forked framing, Lead distraction, misplaced skills,
-status-as-acceptance, Supervisor overreach, test-invented contracts and
-context drift as hypotheses. Ask: which actual failure changes the outcome,
+Ask: which actual failure changes the outcome,
 what disproves it, who owns the state/decision, and which smallest action
 resolves it within authority? Examine neutral briefs, real contracts,
 checkout/resource conditions, current candidates and causal history rather
 than apply a permanent audit checklist. A redesign proposal needs impact,
-local alternatives, costs and reversal conditions too. Independence permits
-challenge, not an obligation to disagree. Keep useful causal observations,
-remove ceremony whose recurrence evidence supplies no decision value.
+local alternatives, costs and reversal conditions too.

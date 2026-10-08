@@ -316,6 +316,7 @@ test('managed bundles disclose guarded and ordinary paths while preserving role 
     assert.match(bundle, /Review selection never waives\s+a Human, assignment or protocol obligation/);
     assert.match(bundle, /parent\/report recipient must match your paseo\.parent-agent-id\s+label/);
     assert.match(bundle, /recipient distinct from your\s+parent/);
+    assert.match(bundle, /A Lead writer\s+never stands in for required independent review/);
     if (role === 'peer') {
       assert.match(bundle, /Reviewer\/Auditor stays independent of writer and accepting owner/);
       assert.ok(!bundle.includes(readFileSync(join(installed, 'src/delegation.md'), 'utf8')));
@@ -328,7 +329,7 @@ test('managed bundles disclose guarded and ordinary paths while preserving role 
       assert.ok(policyLocators(installed, role).some(entry => entry.path.endsWith(`/references/${ref}`) && entry.sha256 === hash(Buffer.from(body))));
     }
     assert.match(bundle, /ordinary\/Lean creation or observation/);
-    assert.match(bundle, /Runtime admission records and verifies reservations/);
+    assert.match(bundle, /consume admission receipts for reservations, seat pins and effects/);
   }
   assert.match(roleBundle(installed, 'lead', env).instructions, /When the assignment or protocol\s+requires independent review/);
   assert.ok(!/When the assignment or protocol\s+requires independent review/.test(roleBundle(installed, 'supervisor', env).instructions));
@@ -563,8 +564,8 @@ test('tiny policy keeps protocol-owned ceremony separate from required gates and
   assert.match(lead, /Peer writing is the managed-implementation default/);
   assert.match(lead, /direct Lead write requires an explicit Human assignment or current effective protocol grant for clear, reversible work, bounded scope, one writer and exact candidate proof/);
   assert.match(lead, /Lead writer never stands in for required independent review/);
-  assert.match(lead, /Peer writing is the managed-implementation default\. A direct Lead write requires an explicit Human assignment/);
-  assert.match(lead, /Tiny classification reduces repository ceremony, never authority, ownership, parentage or required review/);
+  assert.match(lead, /Supervisor\/Lead use saved profiles/);
+  assert.match(lead, /Tiny classification reduces ceremony, never authority, ownership, parentage or required review/);
   assert.match(lead, /Tiny labels and missing\/stale protocols grant no exception/);
   assert.match(lead, /Reuse full relevant policy\/protocol text in context only when its source is known unchanged/);
   assert.match(lead, /Runtime checks still need fresh catalog hash, eligibility, provider availability and Jev receipts/);
@@ -576,7 +577,7 @@ test('tiny policy keeps protocol-owned ceremony separate from required gates and
   assert.match(protocol, /paused stable candidate, actual proof and in-session handback/);
   assert.match(protocol, /Lead inspection\/Gate\/verdict/);
   assert.match(protocol, /Direct Lead write grant.*None by default; Human may specify clear reversible scope, proof\/review bounds/);
-  assert.match(orchestration, /One Peer Engineer; tiny ceremony comes from the effective protocol\. Direct Lead writes follow common policy's explicit grant/);
+  assert.match(orchestration, /One Peer Engineer; tiny ceremony comes from the effective protocol\. Direct Lead writes follow delegation policy's explicit grant/);
 });
 
 test('live preparation inventories only the verified home and preserves the saved bundle', () => {
