@@ -116,6 +116,39 @@ const text = (value: unknown) => typeof value === 'string' && value ? value : nu
 const millis = (value: unknown) => { const ms = typeof value === 'number' ? value : Date.parse(value as string); return Number.isFinite(ms) ? ms : null; };
 const kinds = ['attention', 'follow-up-round', 'idle-dirty', 'scope-drift', 'test-mirror', 'file-churn', 'tool-mix', 'correction-cadence'];
 
+// One threshold table owns defaults, numeric validation and schema bounds.
+const thresholdRules = {
+  idleMinutes: { type: 'number', exclusiveMinimum: 0, default: 20, error: 'must be positive' },
+  churnScans: { type: 'number', exclusiveMinimum: 0, default: 2, error: 'must be positive' },
+  toolWindow: { type: 'integer', exclusiveMinimum: 0, default: 20, error: 'must be a positive integer' },
+  cadenceEdits: { type: 'integer', exclusiveMinimum: 0, default: 3, error: 'must be a positive integer' },
+  toolShare: { type: 'number', exclusiveMinimum: 0, maximum: 1, default: 0.8, error: 'must be in (0, 1]' },
+} as const;
+const thresholdProperties = Object.fromEntries(Object.entries(thresholdRules).map(([key, { error: _error, ...schema }]) => [key, schema]));
+const absolutePath = { type: ['string', 'null'], description: 'Absolute filesystem path; null behaves like omission' };
+export function monitorSchema() {
+  return {
+    type: 'object', required: ['agents'], additionalProperties: true,
+    properties: {
+      paseoHome: { ...absolutePath, description: 'Absolute daemon home; omitted/null uses the managed binding or PASEO_HOME, then ~/.paseo when unmanaged' },
+      agents: {
+        type: 'array', minItems: 1, description: 'Agent ids must be unique',
+        items: {
+          type: 'object', required: ['id'], additionalProperties: true,
+          properties: {
+            id: { type: 'string', minLength: 1 }, cwd: absolutePath,
+            scope: { type: ['array', 'null'], items: { type: 'string', minLength: 1 } },
+          },
+        },
+      },
+      thresholds: { type: ['object', 'null'], additionalProperties: true, properties: thresholdProperties },
+      devinSessionsDb: absolutePath,
+      signals: { type: ['array', 'null'], items: { type: 'string', enum: kinds }, default: kinds },
+      stateFile: { ...absolutePath, description: 'Absolute checkpoint path; the scan rewrites it when supplied' },
+    },
+  };
+}
+
 // A missing, non-repo or failing cwd is an evidence gap, never a crash. HEAD
 // doubles as the commit marker for follow-up tracking; %ct records the last
 // commit time as evidence.
@@ -206,14 +239,17 @@ export function monitor(request: MonitorRequest) {
     }
   }
   if (request.thresholds != null && !record(request.thresholds)) throw new Error('request.thresholds must be a JSON object');
-  const thresholds = { idleMinutes: 20, churnScans: 2, toolWindow: 20, toolShare: 0.8, cadenceEdits: 3, ...request.thresholds };
-  for (const key of ['idleMinutes', 'churnScans'] as const) {
-    if (!Number.isFinite(thresholds[key]) || thresholds[key] <= 0) throw new Error(`thresholds.${key} must be positive`);
+  const thresholds = {
+    ...Object.fromEntries(Object.entries(thresholdRules).map(([key, rule]) => [key, rule.default])),
+    ...request.thresholds,
+  } as Required<NonNullable<MonitorRequest['thresholds']>>;
+  for (const key of Object.keys(thresholdRules) as (keyof typeof thresholdRules)[]) {
+    const rule = thresholdRules[key];
+    const value = thresholds[key];
+    if (!Number.isFinite(value) || value <= rule.exclusiveMinimum
+      || (rule.type === 'integer' && !Number.isInteger(value))
+      || ('maximum' in rule && value > rule.maximum)) throw new Error(`thresholds.${key} ${rule.error}`);
   }
-  for (const key of ['toolWindow', 'cadenceEdits'] as const) {
-    if (!Number.isInteger(thresholds[key]) || thresholds[key] <= 0) throw new Error(`thresholds.${key} must be a positive integer`);
-  }
-  if (!Number.isFinite(thresholds.toolShare) || thresholds.toolShare <= 0 || thresholds.toolShare > 1) throw new Error('thresholds.toolShare must be in (0, 1]');
   if (request.devinSessionsDb != null && !isAbsolute(request.devinSessionsDb)) throw new Error('Absolute devinSessionsDb required');
   const wanted = request.signals ?? kinds;
   if (!Array.isArray(wanted) || wanted.some(kind => !kinds.includes(kind))) throw new Error(`signals must be a subset of ${kinds.join(', ')}`);

@@ -16,9 +16,35 @@ import { assertMeasurable, isInside } from './review-packet.ts';
 // unreadable output is an error — never `sha: null`, which a Lead would have
 // to notice and chase.
 const INLINE_LIMIT = 64 * 1024;
-const REQUEST_KEYS = new Set(['repository', 'seat', 'verdict', 'checks']);
-const SEAT_KEYS = new Set(['role', 'disposition', 'agentId']);
-const CHECK_KEYS = new Set(['cmd', 'exit', 'outputFile']);
+// The strict key allowlists below come from the published contract itself.
+const nonemptyString = { type: 'string', pattern: '\\S' };
+const absolutePath = { ...nonemptyString, description: 'Absolute filesystem path' };
+const requestContract = {
+  type: 'object', additionalProperties: false,
+  required: ['repository', 'seat', 'verdict', 'checks'],
+  properties: {
+    repository: absolutePath,
+    seat: {
+      type: 'object', additionalProperties: false, required: ['role', 'disposition'],
+      properties: {
+        role: nonemptyString, disposition: nonemptyString,
+        agentId: { type: ['string', 'null'], pattern: '\\S' },
+      },
+    },
+    verdict: { type: ['string', 'null'], enum: [...HANDBACK_VERDICTS, null] },
+    checks: {
+      type: 'array', minItems: 1,
+      items: {
+        type: 'object', additionalProperties: false, required: ['cmd', 'exit', 'outputFile'],
+        properties: { cmd: nonemptyString, exit: { type: 'integer' }, outputFile: absolutePath },
+      },
+    },
+  },
+};
+export function recordBuildSchema() { return requestContract; }
+const REQUEST_KEYS = new Set(Object.keys(requestContract.properties));
+const SEAT_KEYS = new Set(Object.keys(requestContract.properties.seat.properties));
+const CHECK_KEYS = new Set(Object.keys(requestContract.properties.checks.items.properties));
 const text = (value: unknown): value is string => typeof value === 'string' && value.trim() !== '';
 const isObject = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
 

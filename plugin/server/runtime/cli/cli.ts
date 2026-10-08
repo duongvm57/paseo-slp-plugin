@@ -39,7 +39,7 @@ import { fileURLToPath } from 'node:url';
 import { resolve, isAbsolute, join, dirname } from 'node:path';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
-import { identity, install, uninstall, update, verifyInstall, snapshot, readJson, json } from './package.ts';
+import { missingRuntimeMessage, MissingInstalledRuntimeError, identity, install, uninstall, update, verifyInstall, snapshot, readJson, json } from './package.ts';
 import { launchPlan, handoffPlan, launchCheck, requestSchema } from './launch.ts';
 import { roleBundle } from './role-bundle.ts';
 import { readCatalog } from './routing.ts';
@@ -49,15 +49,15 @@ import { resolveHome } from './managed-home.ts';
 import { installPaseo, uninstallPaseo, upgradePaseo, initWorkspace, materializeWorkspace, installHome } from './paseo-install.ts';
 import { inventory, liveInventory } from './inventory.ts';
 import { agents } from './agents.ts';
-import { monitor } from './monitor.ts';
+import { monitor, monitorSchema } from './monitor.ts';
 import { notebook } from './notebook.ts';
 import { localTarget, runtimeStatus } from './runtime-state.ts';
 import { extractRecords, recordSchema, requireRecordKind, RECORD_KINDS } from './report-records.ts';
 import { renderSlpReport } from '../report-semantics.ts';
-import { verifyHandback, VerifyError } from './candidate-verify.ts';
+import { verifyHandback } from './candidate-verify.ts';
 import { deskRecover, DeskRecoverUsage } from './desk-recovery.ts';
 import { reviewPacket, assertOutsideRepository, assertRegularFile } from './review-packet.ts';
-import { recordBuild } from './record-build.ts';
+import { recordBuild, recordBuildSchema } from './record-build.ts';
 
 // One entry per command: the flags it accepts, the required positional target
 // (--schema stands in for it where offered), whether it takes an optional
@@ -74,15 +74,15 @@ const commands: Record<string, CommandSpec> = {
   routes: { flags: ['--paseo-home', '--out'], target: 'repository', usage: 'routes <absolute-repo> [--paseo-home <absolute-home>] [--out <path>]' },
   inventory: { flags: ['--paseo-home'], usage: 'inventory [--paseo-home <absolute-home>]' },
   agents: { flags: ['--paseo-home'], usage: 'agents [--paseo-home <absolute-home>]' },
-  prepare: { flags: ['--check', '--emit', '--schema', '--out', '--live', '--paseo-home'], target: 'request.json', usage: 'prepare <request.json> [--check | --emit create | --schema] [--live --paseo-home <absolute-home>] [--out <path>]' },
-  'prepare-handoff': { flags: ['--check', '--emit', '--schema', '--out'], target: 'request.json', usage: 'prepare-handoff <request.json> [--check | --emit create | --schema] [--out <path>]' },
+  prepare: { flags: ['--check', '--emit', '--schema', '--out', '--live', '--paseo-home'], target: 'request.json', usage: 'prepare <request.json|-> [--check | --emit create | --schema] [--live --paseo-home <absolute-home>] [--out <path>]' },
+  'prepare-handoff': { flags: ['--check', '--emit', '--schema', '--out'], target: 'request.json', usage: 'prepare-handoff <request.json|-> [--check | --emit create | --schema] [--out <path>]' },
   materialize: { flags: ['--from', '--apply', '--include', '--paseo-home'], target: 'repository', usage: 'materialize <repository> --from <source-repository> [--include <repo-path>]... [--paseo-home <absolute-home>] [--apply]' },
-  monitor: { flags: [], target: 'request.json', usage: 'monitor <request.json>' },
-  'route-decide': { flags: ['--paseo-home', '--schema', '--out'], target: 'request.json', usage: 'route-decide <request.json> [--schema] [--out <path>] [--paseo-home <absolute-home>]' },
+  monitor: { flags: ['--schema'], target: 'request.json', usage: 'monitor <request.json|-> [--schema]' },
+  'route-decide': { flags: ['--paseo-home', '--schema', '--out'], target: 'request.json', usage: 'route-decide <request.json|-> [--schema] [--out <path>] [--paseo-home <absolute-home>]' },
   notebook: { flags: ['--paseo-home'], target: 'repository', usage: 'notebook <repository> [--paseo-home <absolute-home>]' },
   records: { flags: ['--kind', '--require', '--repo', '--schema', '--render'], target: 'path|-', usage: 'records <path|-> [--kind handback|settlement] [--require handback|settlement] [--repo <absolute-path>] [--schema] | records --render <file|-> [--repo <absolute-path>]' },
   'review-packet': { flags: ['--base', '--since', '--evidence', '--out'], target: 'repository', usage: 'review-packet <absolute-repo> --base <git-ref> [--since <earlier-candidate-dir|snapshot.json>] [--evidence <absolute-file>]... [--out <path-outside-repo>]' },
-  'record-build': { flags: ['--out'], target: 'request.json', usage: 'record-build <request.json> [--out <path-outside-repo>]' },
+  'record-build': { flags: ['--schema', '--out'], target: 'request.json', usage: 'record-build <request.json|-> [--schema] [--out <path-outside-repo>]' },
   'verify-handback': { flags: ['--repo', '--paseo-home', '--expect-contract', '--expect-file', '--expect-parent', '--expect-workspace', '--expect-runtime'], target: 'report', usage: 'verify-handback <report-path> --repo <absolute-repo> --expect-contract <repo-path>=<sha256> [--expect-file <repo-path>=<sha256>]... [--expect-runtime <candidateSha256>] [--paseo-home [<absolute-home>]] [--expect-parent <agentId>] [--expect-workspace <workspaceId>]' },
   instructions: { target: 'role', usage: 'instructions <role>' },
   status: { flags: ['--paseo-home'], usage: 'status [--paseo-home <absolute-home>]' },
@@ -95,10 +95,18 @@ const root = fileURLToPath(new URL('../../../../', import.meta.url) as import('n
 const argv = process.argv.slice(2);
 const [command, ...rest] = argv;
 let [target, ...args] = rest[0]?.startsWith('--') ? [undefined, ...rest] : rest;
+const options: CliOptions = {};
+const readRequest = (path: string): unknown => path === '-' ? JSON.parse(readFileSync(0, 'utf8')) : readJson(path);
+// Home resolution belongs to the facade: package.ts remains usable as the
+// self-contained snapshot module in retained candidates and capture fixtures.
+const runtimeDiagnostic = (runtimeRoot: string) => {
+  let home: string | undefined;
+  try { home = resolveHome(options['--paseo-home']); } catch { /* keep the original missing-runtime hint */ }
+  return missingRuntimeMessage(runtimeRoot, home);
+};
 let parsed = false; // argument parse finished — desk-recover distinguishes usage errors from operational ones
 let renderedOutput: string | undefined;
 try {
-  const options: CliOptions = {};
   for (let i = 0; i < args.length; i++) {
     const key = args[i]!;
     if (key === '--include' || key === '--expect-file' || key === '--evidence') {
@@ -144,7 +152,7 @@ try {
       const value = args[++i];
       if (!value || value.startsWith('-')) throw new Error(`${key} requires a value`);
       options[key] = value;
-    } else if (!key.startsWith('-')) {
+    } else if (key === '-' || !key.startsWith('-')) {
       // Positional target may come after flags (e.g. prepare --check req.json).
       if (target !== undefined) throw new Error(`Unexpected argument ${key}`);
       target = key;
@@ -170,7 +178,7 @@ try {
   // --out persists the response bytes — never the request file. Reject early
   // when it resolves to the request path so the input record is never
   // destroyed by its own result.
-  if (options['--out'] && target && spec?.target === 'request.json' && resolve(options['--out']) === resolve(target!)) throw new Error('--out must not resolve to the request file — it writes the response, never the request');
+  if (options['--out'] && target && target !== '-' && spec?.target === 'request.json' && resolve(options['--out']) === resolve(target!)) throw new Error('--out must not resolve to the request file — it writes the response, never the request');
   let result: unknown;
   parsed = true;
   if (command === 'identity') result = identity(root);
@@ -214,13 +222,18 @@ try {
     result = reviewPacket(resolve(target!), { base: options['--base']!, since: options['--since'], evidence: options['--evidence'], out: options['--out'] });
   }
   else if (command === 'record-build') {
-    assertRegularFile(target!, 'request file');
-    const request = readJson(target!) as Parameters<typeof recordBuild>[0];
-    const repository = (request as { repository?: unknown } | null)?.repository;
-    if (options['--out'] && typeof repository === 'string' && isAbsolute(repository)) assertOutsideRepository(repository, options['--out'], '--out');
-    const built = recordBuild(request);
-    renderedOutput = built.fence;
-    for (const warning of built.warnings) process.stderr.write(`warning: ${(warning as { message: string }).message}\n`);
+    if (options['--schema']) {
+      if (target) throw new Error('record-build --schema takes no request file');
+      result = recordBuildSchema();
+    } else {
+      if (target !== '-') assertRegularFile(target!, 'request file');
+      const request = readRequest(target!) as Parameters<typeof recordBuild>[0];
+      const repository = (request as { repository?: unknown } | null)?.repository;
+      if (options['--out'] && typeof repository === 'string' && isAbsolute(repository)) assertOutsideRepository(repository, options['--out'], '--out');
+      const built = recordBuild(request);
+      renderedOutput = built.fence;
+      for (const warning of built.warnings) process.stderr.write(`warning: ${(warning as { message: string }).message}\n`);
+    }
   }
   else if (command === 'verify-handback') {
     // Read-only claim verification (P1): the engine owns pin validation, so
@@ -247,7 +260,7 @@ try {
     let liveRequest: Parameters<typeof launchPlan>[1] | undefined;
     if (options['--live']) {
       if (handoff || options['--schema']) throw new Error('--live supports ordinary saved-profile preparation only');
-      const request = readJson(target!) as Parameters<typeof launchPlan>[1];
+      const request = readRequest(target!) as Parameters<typeof launchPlan>[1];
       if (!['supervisor', 'lead'].includes(request.role ?? '') || request.binding || request.providers || request.profiles || request.inventoryFile || request.route) {
         throw new Error('--live requires a Supervisor/Lead request without binding, routing or caller inventory overrides');
       }
@@ -261,10 +274,13 @@ try {
     } else if (options['--check']) {
       // Preflight only: named stage results, never a plan and never a spawn.
       // Exit 1 when any check fails so scripts can gate on it.
-      result = launchCheck(root, liveRequest ?? readJson(target!) as Parameters<typeof launchCheck>[1], { handoff });
+      result = launchCheck(root, liveRequest ?? readRequest(target!) as Parameters<typeof launchCheck>[1], { handoff });
+      for (const check of (result as ReturnType<typeof launchCheck>).checks) {
+        if (check.error?.startsWith('No installed runtime at ')) check.error = runtimeDiagnostic(root);
+      }
       if (!(result as ReturnType<typeof launchCheck>).ok) process.exitCode = 1;
     } else {
-      const planned = handoff ? handoffPlan(root, readJson(target!) as Parameters<typeof handoffPlan>[1]) : launchPlan(root, liveRequest ?? readJson(target!) as Parameters<typeof launchPlan>[1]);
+      const planned = handoff ? handoffPlan(root, readRequest(target!) as Parameters<typeof handoffPlan>[1]) : launchPlan(root, liveRequest ?? readRequest(target!) as Parameters<typeof launchPlan>[1]);
       // --emit create prints an audit artifact: `create` is the create_agent
       // argument record verbatim (initialPrompt, title, settings, workspaceId
       // untrimmed), and modeId/modeIdSource record the resolved mode plus its
@@ -280,7 +296,7 @@ try {
       // Explicit helper invocation only — Jev is never called from prepare, a
       // schedule or a background loop. A decline is a successful decision run
       // whose answer is "no suitable option": emit the receipt and exit 1.
-      result = await routeDecide(readJson(target!) as Parameters<typeof routeDecide>[0], { home: options['--paseo-home'] });
+      result = await routeDecide(readRequest(target!) as Parameters<typeof routeDecide>[0], { home: options['--paseo-home'] });
       if ((result as Awaited<ReturnType<typeof routeDecide>>).declined) process.exitCode = 1;
     }
   }
@@ -294,7 +310,12 @@ try {
   else if (command === 'status') result = runtimeStatus(options['--paseo-home']);
   else if (command === 'init') result = initWorkspace(root, target!, Boolean(options['--apply']), options['--routing-from']);
   else if (command === 'materialize') result = materializeWorkspace(options['--from']!, target!, Boolean(options['--apply']), { includePaths: options['--include'] ?? [], home: resolveHome(options['--paseo-home']) });
-  else if (command === 'monitor') result = monitor(readJson(target!) as Parameters<typeof monitor>[0]);
+  else if (command === 'monitor') {
+    if (options['--schema']) {
+      if (target) throw new Error('monitor --schema takes no request file');
+      result = monitorSchema();
+    } else result = monitor(readRequest(target!) as Parameters<typeof monitor>[0]);
+  }
   else if (command === 'instructions') {
     // Raw preview: the exact bytes roleBundle would inject, unwrapped — stdout
     // stays diffable against a live bundle; provenance goes to stderr. A
@@ -379,7 +400,10 @@ try {
   if (renderedOutput !== undefined) process.stdout.write(renderedOutput);
   else if (result !== undefined) process.stdout.write(json(result));
 } catch (error) {
-  console.error(error instanceof VerifyError ? `${(error as RuntimeError).code}: ${(error as RuntimeError).message}` : (error as RuntimeError).message);
+  const failure = error as RuntimeError;
+  const message = error instanceof MissingInstalledRuntimeError ? runtimeDiagnostic(error.root) : failure.message;
+  const prefix = failure.code === undefined ? '' : `${failure.code}: `;
+  console.error(prefix && !message.startsWith(prefix) ? prefix + message : message);
   // desk-recover alone reserves exit 2 for usage errors — argument-parse
   // failures (before `parsed` is set) and DeskRecoverUsage thrown while
   // resolving its inputs. Every other command keeps exit 1.

@@ -2,7 +2,7 @@ import type { CandidateIdentity, InstalledManifest, NestedSnapshot, Snapshot, Sn
 import type { RuntimeError } from './types.ts';
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, readdirSync, lstatSync, readlinkSync, mkdirSync, writeFileSync, copyFileSync, rmSync, renameSync, realpathSync } from 'node:fs';
-import { resolve, join } from 'node:path';
+import { resolve, join, isAbsolute } from 'node:path';
 import { execFileSync } from 'node:child_process';
 
 export const hash = (bytes: string | NodeJS.ArrayBufferView) => createHash('sha256').update(bytes).digest('hex');
@@ -56,6 +56,39 @@ export function identity(root: string): CandidateIdentity {
   const entries = installUnitPaths(root).map(path => ({ path, sha256: hash(readFileSync(join(root, path))) }));
   return { sha256: hash(json(entries)), files: entries };
 }
+// A receipt lookup supplies diagnostic guidance only. It does not verify,
+// activate, redirect to or write the recorded runtime. Missing/corrupt/stale
+// guidance must not mask the original installed.json failure.
+function missingRuntimeFallback(root: string) {
+  return `No installed runtime at ${root} (missing installed.json receipt). `
+    + `Run the CLI from the installed runtime instead: node <installed-root>/bin/slp.mjs <command> — `
+    + `<installed-root> is the directory 'install <dir>' or plugin activation wrote (the managed role `
+    + `instructions name it); verify it with 'verify <installed-root>'.`;
+}
+export function missingRuntimeMessage(root: string, home?: string) {
+  const fallback = missingRuntimeFallback(root);
+  try {
+    if (home === undefined || !isAbsolute(home)) return fallback;
+    const daemonHome = home;
+    const receiptPath = join(daemonHome, 'slp-runtime/state/receipt.json');
+    if (!lstatSync(receiptPath).isFile()) return fallback;
+    const receipt = readJson(receiptPath) as { state?: unknown; binding?: { runtimePath?: unknown } } | null;
+    if (receipt?.state !== 'ACTIVE' && receipt?.state !== 'ACTIVATING') return fallback;
+    const runtimePath = receipt?.binding?.runtimePath;
+    if (typeof runtimePath !== 'string' || !isAbsolute(runtimePath)) return fallback;
+    const cliPath = join(runtimePath, 'bin/slp.mjs');
+    if (!lstatSync(cliPath).isFile()) return fallback;
+    // Quote the path as one literal shell argument, including spaces and '$'.
+    const quotedCli = "'" + cliPath.replaceAll("'", "'\\''") + "'";
+    return `No installed runtime at ${root} (missing installed.json receipt). `
+      + `Recorded runtime CLI: node ${quotedCli} <command>. `
+      + `Verify the recorded runtime with 'verify ${runtimePath}'.`;
+  } catch { return fallback; }
+}
+export class MissingInstalledRuntimeError extends Error {
+  root: string;
+  constructor(root: string) { super(missingRuntimeFallback(root)); this.root = root; }
+}
 // Missing receipt, unreadable receipt and tampered package are three different
 // failures: only the first means "not installed". Corrupt JSON or a vanished
 // payload file must never collapse into the install hint.
@@ -63,10 +96,7 @@ export function verifyInstall(root: string): InstalledManifest {
   let expected;
   try { expected = (readJson(join(root, 'installed.json')) as InstalledManifest); }
   catch (error) {
-    if ((error as RuntimeError).code === 'ENOENT' || (error as RuntimeError).code === 'ENOTDIR') throw new Error(`No installed runtime at ${root} (missing installed.json receipt). `
-      + `Run the CLI from the installed runtime instead: node <installed-root>/bin/slp.mjs <command> — `
-      + `<installed-root> is the directory 'install <dir>' or plugin activation wrote (the managed role `
-      + `instructions name it); verify it with 'verify <installed-root>'.`);
+    if ((error as RuntimeError).code === 'ENOENT' || (error as RuntimeError).code === 'ENOTDIR') throw new MissingInstalledRuntimeError(root);
     if (error instanceof SyntaxError) throw new Error(`installed.json at ${root} is not valid JSON: ${(error as RuntimeError).message}`);
     throw error;
   }
