@@ -133,7 +133,7 @@ export function decideDeskOwnership(ledger: Readonly<LedgerValue>, command: Reco
   const lead = requireLead(actor, "ownership custody moves only between registered leads", "seats participate in workflow but never hold or receive ownership");
   if (lead !== null) return lead;
   const assignment = ledger.assignments.find(row => row.assignmentId === cmd.assignmentId);
-  if (assignment === undefined) return reject("AUTHORITY_REQUIRED", "the assignment is not registered on this desk", "ownership mutations require the durable assignment binding");
+  if (assignment === undefined) return reject("AUTHORITY_REQUIRED", "the assignment is not registered on this desk", "look up registered assignments with slp_status; tell the Lead to register the assignment under the current Human grant");
   if (assignment.state !== "open") return reject("AUTHORITY_REQUIRED", "the assignment is closed", "closed assignments retain history and accept no ownership mutations");
   const owner = effectiveOwner(ledger, assignment);
 

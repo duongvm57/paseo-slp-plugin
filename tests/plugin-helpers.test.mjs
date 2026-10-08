@@ -88,15 +88,15 @@ test('managed bundle renders verified Node, the stable runtime CLI and explicit 
   // Commands that accept --paseo-home render it explicitly.
   for (const line of [
     'routes <repository>', 'inventory', 'agents', 'notebook <repository>',
-    'install <dir>',
   ]) {
     assert.ok(bundle.instructions.includes(`${cli} ${line} --paseo-home ${home}`), line);
   }
   // monitor takes no flag — the home goes inside the request payload.
   assert.ok(bundle.instructions.includes(`${cli} monitor <request.json>`) &&
     bundle.instructions.includes(`"paseoHome": "/home/daemon/.paseo"`));
-  // upgrade/uninstall resolve the home from the target's paseo-binding.json.
-  assert.ok(bundle.instructions.includes(`paseo-binding.json must record ${home}`));
+  // Peer entry omits standalone installation lifecycle helpers.
+  assert.ok(!bundle.instructions.includes(`${cli} install <dir>`));
+  assert.ok(!bundle.instructions.includes('upgrade/uninstall'));
   // init/materialize are repo-scoped and never touch a daemon home.
   assert.ok(bundle.instructions.includes('init/materialize/snapshot/prepare/prepare-handoff/verify are repo-scoped'));
   // Policy text must not embed this checkout's path or RPC calls.

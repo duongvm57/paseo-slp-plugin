@@ -182,7 +182,7 @@ export function decideDeskSettlement(ledger: Readonly<LedgerValue>, command: Rec
   if (leadError !== null) return leadError;
   const assignment = ledger.assignments.find(a => a.assignmentId === cmd.assignmentId);
   if (assignment === undefined) {
-    return reject("AUTHORITY_REQUIRED", "the assignment is not registered on this desk", "a settlement settles a durable assignment binding");
+    return reject("AUTHORITY_REQUIRED", "the assignment is not registered on this desk", "look up registered assignments with slp_status; tell the Lead to register the assignment under the current Human grant");
   }
   if (!effectiveOwnerMatches(ledger, assignment, actor)) {
     return reject(

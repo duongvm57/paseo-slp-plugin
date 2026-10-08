@@ -153,7 +153,7 @@ function requireOwnedOpenAssignment(
     missing: reject(
       "AUTHORITY_REQUIRED",
       "the assignment is not registered on this desk",
-      "check commands name a durable assignment binding of this repo desk",
+      "look up registered assignments with slp_status; tell the Lead to register the assignment under the current Human grant",
     ),
     ownerMismatch: reject(
       "ACTOR_MISMATCH",
@@ -647,13 +647,13 @@ export async function runCheckRun(
   // a rebound seat keeps its agentId but loses the pinned membership.
   const actor = liveMembership(ledger, ctx.row.agentId as string);
   if (actor === undefined || actor.membershipId !== ctx.row.membershipId) {
-    return reject("AUTHORITY_REQUIRED", "the actor has no live bound membership on this desk", "a run needs a host-bound, registered row");
+    return reject("AUTHORITY_REQUIRED", "the actor has no live bound membership on this desk", "look up current bindings with slp_status; tell the Lead — retrying cannot rebind a revoked seat");
   }
   const leadError = requireLead(actor);
   if (leadError !== null) return leadError;
   const assignment = ledger.assignments.find(a => a.assignmentId === input.assignmentId);
   if (assignment === undefined) {
-    return reject("AUTHORITY_REQUIRED", "the assignment is not registered on this desk", "check commands name a durable assignment binding of this repo desk");
+    return reject("AUTHORITY_REQUIRED", "the assignment is not registered on this desk", "look up registered assignments with slp_status; tell the Lead to register the assignment under the current Human grant");
   }
   if (!effectiveOwnerMatches(ledger, assignment, actor)) {
     return reject("ACTOR_MISMATCH", "only the assignment's current effective owner may administer its checks", "the effective owner's exact live membership tuple holds custody — a peer, another lead, or a supervisor cannot run or declare checks");

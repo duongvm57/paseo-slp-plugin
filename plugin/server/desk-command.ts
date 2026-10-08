@@ -30,7 +30,7 @@ export function requireActor(
     ok: false,
     code: "AUTHORITY_REQUIRED",
     message: "the actor has no live bound membership on this desk",
-    recovery,
+    recovery: `${recovery}; look up current bindings with slp_status; tell the Lead — retrying cannot rebind a revoked seat`,
   };
 }
 

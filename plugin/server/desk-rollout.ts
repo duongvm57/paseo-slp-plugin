@@ -125,7 +125,7 @@ function requireOwnedOpenAssignment(
     missing: reject(
       "AUTHORITY_REQUIRED",
       "the assignment is not registered on this desk",
-      "rollout commands name a durable assignment binding of this repo desk",
+      "look up registered assignments with slp_status; tell the Lead to register the assignment under the current Human grant",
     ),
     ownerMismatch: reject(
       "ACTOR_MISMATCH",

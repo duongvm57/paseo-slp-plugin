@@ -165,7 +165,7 @@ function requireOwnedOpenAssignment(
     missing: reject(
       "AUTHORITY_REQUIRED",
       "the assignment is not registered on this desk",
-      "scope commands name a durable assignment binding of this repo desk",
+      "look up registered assignments with slp_status; tell the Lead to register the assignment under the current Human grant",
     ),
     ownerMismatch: reject(
       "AUTHORITY_REQUIRED",
@@ -806,7 +806,7 @@ function decideScopeReview(
 ): DecideOutcome {
   const reviewAssignment = ledger.assignments.find(a => a.assignmentId === cmd.assignmentId);
   if (reviewAssignment === undefined) {
-    return reject("AUTHORITY_REQUIRED", "the assignment is not registered on this desk", "a review binds a durable assignment of this repo desk");
+    return reject("AUTHORITY_REQUIRED", "the assignment is not registered on this desk", "look up registered assignments with slp_status; tell the Lead to register the assignment under the current Human grant");
   }
   if (reviewAssignment.state !== "open") {
     return reject("SCOPE_CONFLICT", "the assignment is closed", "closed assignments take no new review observations");

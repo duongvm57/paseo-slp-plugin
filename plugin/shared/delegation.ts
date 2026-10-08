@@ -5,7 +5,7 @@ const id = z.string().min(1).max(WIRE_LIMITS.deskRequestId);
 const ref = z.string().min(1).max(WIRE_LIMITS.deskAuthorityRef);
 const text = z.string().min(1).max(WIRE_LIMITS.deskTaskText);
 const formation = {
-  requestId: id, grantRef: ref,
+  requestId: id, grantRef: ref.describe("Human grant pointer (assignment sentence/date); verbatim claim, never authenticated."),
   taskLabel: z.string().min(1).max(100).regex(/^[^\r\n]+$/),
   assignment: text,
   // Absent means "caller": the caller delivers through host send_agent_prompt so the host arms finish notification.

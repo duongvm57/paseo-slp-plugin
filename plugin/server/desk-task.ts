@@ -1958,14 +1958,14 @@ export function decideDeskTask(ledger: Readonly<LedgerValue>, command: Record<st
     actorRow !== undefined && actorRow.agentId === cmd.actorAgentId &&
     actorRow.state !== "revoked" && actorRow.registeredAt !== null && actorRow.openGeneration === cmd.actorOpenGeneration
       ? actorRow
-      : reject("AUTHORITY_REQUIRED", "the actor's exact membership tuple is not live on this desk", "a task mutation needs the exact live bound membership — a rebound row is a different caller");
+      : reject("AUTHORITY_REQUIRED", "the actor's exact membership tuple is not live on this desk", "look up current bindings with slp_status; tell the Lead — retrying cannot rebind a revoked seat; a rebound row is a different caller");
 
   // Registered + open assignment is the floor for every remaining command;
   // owner-vs-bound-member authority is enforced per op below.
   const openAssignment = (): AssignmentValue | DeskRejectionValue => {
     const row = ledger.assignments.find(candidate => candidate.assignmentId === cmd.assignmentId);
     if (row === undefined) {
-      return reject("AUTHORITY_REQUIRED", "the assignment is not registered on this desk", "mutations require the durable assignment binding");
+      return reject("AUTHORITY_REQUIRED", "the assignment is not registered on this desk", "look up registered assignments with slp_status; tell the Lead to register the assignment under the current Human grant");
     }
     if (row.state !== "open") {
       return reject("AUTHORITY_REQUIRED", "the assignment is closed", "closed assignments retain history and accept no new task mutations");

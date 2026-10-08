@@ -215,223 +215,205 @@ export const DESK_TOOL_CATALOG = [
     name: STATUS_TOOL,
     visible: true,
     mutation: false,
-    description: "Seat-facing desk status: this seat's own membership view plus desk availability.",
+    description: "Read this seat's membership, assignments and desk availability before choosing a desk action.",
   },
   {
     name: HANDBACK_SUBMIT_TOOL,
     visible: true,
     mutation: true,
-    description:
-      "Submit a structured handback record (v1, kind handback) against an assignment this seat is bound to. " +
-      "Input: {requestId, assignmentId, recordV1, candidateId|null}. " +
-      "Response: {ok, revision, receiptId, gaps, handbackId, observedCandidateId}.",
+    description: "Submit a v1 handback for this seat's bound assignment; creates an observed candidate row when capture succeeds.",
   },
   {
     name: ASSIGNMENT_REGISTER_TOOL,
     visible: true,
     mutation: true,
-    description:
-      "Lead-only: register a durable assignment binding on this desk. " +
-      "Input: {requestId, authorityRef, objective|null}. authorityRef is stored verbatim as a pointer to the grant — never dereferenced. " +
-      "Response: {ok, receiptId, assignmentId, state}.",
+    description: "Lead: register the assignment before attaching seats or submitting handbacks.",
   },
   {
     name: ASSIGNMENT_ATTACH_TOOL,
     visible: true,
     mutation: true,
-    description:
-      "Lead owner only: bind a live seat to an open assignment. " +
-      "Input: {requestId, assignmentId, agentId}. Idempotent on an already-bound seat. " +
-      "Response: {ok, receiptId, assignmentId, seat}.",
+    description: "Owner: attach an exact live seat to an open assignment; an existing binding is idempotent.",
   },
   {
     name: ASSIGNMENT_CLOSE_TOOL,
     visible: true,
     mutation: true,
-    description:
-      "Lead owner only: close an assignment; submissions against a closed assignment reject. " +
-      "Input: {requestId, assignmentId}. Response: {ok, receiptId, assignmentId, state}.",
+    description: "Owner: close an open assignment; further handbacks reject.",
   },
   {
     name: ASSIGNMENT_AMEND_TOOL,
     visible: true,
     mutation: true,
-    description: "Chủ assignment: thêm brief theo revision CAS. Input: {requestId, assignmentId, expectedBriefRevision, brief, changeReason, authorityRef, affectedOwners}. Pointer chỉ là claim.",
+    description: "Owner: append the operative brief against its current revision; identify affected owners.",
   },
   {
     name: DECISION_APPEND_TOOL,
     visible: true,
     mutation: true,
-    description: "Chủ assignment: ghi quyết định material bất biến theo brief CAS. Input: {requestId, assignmentId, expectedBriefRevision, authorityRef, decision}. Refs chỉ là claim.",
+    description: "Owner: append a material decision against the current brief revision, after slp_assignment_amend if the brief changed.",
   },
   {
     name: WORKFLOW_GET_TOOL,
     visible: true,
     mutation: false,
-    description: "Đọc workflow theo trang: chủ hoặc seat đang gắn với membership hiện hành. Input: {assignmentId, section, expectedLedgerRevision, expectedBriefRevision, cursor, limit}. Không mở refs.",
+    description: "Read a workflow page as a current participant; reuse returned ledger/brief pins for subsequent pages. References are claims.",
   },
   {
     name: SETTLEMENT_RECORD_TOOL,
     visible: true,
     mutation: true,
-    description:
-      "Receiving-owner only: record an immutable settlement mirror revision for a bound seat. " +
-      "Input: {requestId, assignmentId, seatAgentId, seatTitle, at, pointers, refs, resources, timeline}. " +
-      "Response: {ok, settlementId, revision, receiptId, status, gaps}.",
+    description: "Receiving owner: append a settlement mirror for a bound seat; delivery, rework closure and sink references are claims.",
   },
   {
     name: SETTLEMENT_EXPORT_TOOL,
     visible: true,
     mutation: false,
-    description:
-      "Owner or settled seat: re-derive the committed revision's v1 slp-record for manual sink placement. " +
-      "Input: {settlementId}. Read-only, no side effects.",
+    description: "Owner or settled seat: export a committed settlement revision as a v1 record for manual sink placement.",
   },
   {
     name: SCOPE_DECLARE_TOOL,
     visible: true,
     mutation: true,
-    description: "Chủ assignment: khai báo scope bất biến, ownership và review plan tùy chọn. Input có expectedBriefRevision; refs authority là claim.",
+    description: "Owner: declare scope after slp_assignment_amend when the brief changes; pin its current revision.",
   },
   {
     name: SCOPE_TRANSITION_TOOL,
     visible: true,
     mutation: true,
-    description: "Chủ assignment: chuyển state scope sau khi pin declaration và brief revision hiện hành; submit-for-review pin candidate.",
+    description: "Owner: move scope using its latest declaration and brief revisions; submit-for-review pins a candidate created by slp_handback_submit.",
   },
   {
     name: SCOPE_REVIEW_TOOL,
     visible: true,
     mutation: true,
-    description: "Reviewer seat độc lập: ghi axis legacy hoặc named lens theo scope, brief, mandate và candidate pin; refs chỉ là claim.",
+    description: "Independent reviewer: record one axis or lens against the active round's scope, brief and candidate pins.",
   },
   {
     name: CHECK_DECLARE_TOOL,
     visible: true,
     mutation: true,
-    description:
-      "Owner/lead only: declare an allowlisted check definition on an assignment scope (P5). " +
-      "Input: {requestId, assignmentId, scopeId, checkId, checkClass, label, definitionSha256, limits, requiredEvidence, refs}. " +
-      "Response: {ok, checkId, revision, receiptId}.",
+    description: "Owner: declare an allowlisted check for an assignment scope before running it.",
   },
   {
     name: CHECK_RUN_TOOL,
     visible: true,
     mutation: true,
-    description:
-      "Owner/lead only: run an allowlisted check on the rollout's pinned candidate (P5). " +
-      "Input: {requestId, assignmentId, rolloutId, checkId, definitionRevision, evidenceRef|null}. " +
-      "Response: {ok, runId, status, attempt, receiptId}.",
+    description: "Owner: run a declared check against the rollout candidate and current check definition revision.",
   },
   {
     name: ROLLOUT_DECLARE_TOOL,
     visible: true,
     mutation: true,
-    description:
-      "Owner/lead only: declare a rollout pinned to scope + candidate (P5). " +
-      "Input: {requestId, assignmentId, scopeId, rolloutId, label, declarationSha256, candidateSnapshot, candidateHead, requiredChecks, refs}. " +
-      "Response: {ok, rolloutId, revision, receiptId}.",
+    description: "Owner: declare rollout after scope declaration and candidate capture; pin required checks.",
   },
   {
     name: ROLLOUT_TRANSITION_TOOL,
     visible: true,
     mutation: true,
-    description:
-      "Owner/lead only: one explicit move along the shared rollout machine (P5). " +
-      "Input: {requestId, assignmentId, rolloutId, transition, rolloutRevision, targetSnapshot, evidenceRefs}. " +
-      "Response: {ok, transitionId, state, receiptId, dischargedChecks}.",
+    description: "Owner: move rollout against its current revision; pass the pinned target snapshot and required evidence.",
   },
   {
     name: ASSIGNMENT_OFFER_TOOL,
     visible: true,
     mutation: true,
-    description:
-      "Owner only: nominate an exact live lead for succession (no authority transfer). " +
-      "{requestId, assignmentId, expectedOwnershipRevision, targetAgentId, targetMembershipId, authorityRef, contextRef} " +
-      "→ {ok, offerId, ownershipRevision}.",
+    description: "Owner: nominate an exact live Lead against the current ownership revision; an offer does not transfer custody.",
   },
   {
     name: ASSIGNMENT_ACCEPT_TOOL,
     visible: true,
     mutation: true,
-    description:
-      "Exact nominee only: take custody; prior liveness is no mutex. " +
-      "{requestId, assignmentId, offerId, expectedOwnershipRevision, expectedLedgerRevision, expectedBriefRevision, acknowledgment, settlementRef, resources} " +
-      "→ {ok, acceptId, ownershipRevision, gaps}.",
+    description: "Exact nominee: accept custody against current ownership, ledger and brief revisions; retain settlement obligations.",
   },
   {
     name: TASK_DEFINE_TOOL,
     visible: true,
     mutation: true,
-    description: "Define or amend an outcome task with dependency, scope, proof and effect-grant pins. Current owner only; a declaration does not launch a worker.",
+    description: "Owner: declare or amend an outcome task against current revisions; definition does not launch a worker.",
   },
   {
     name: TASK_DISPATCH_TOOL,
     visible: true,
     mutation: true,
-    description: "Current owner: perform one supervised bootstrap, reuse, send or archive phase. Reservation and exact registered membership precede work; uncertain effects require reconciliation.",
+    description: "Owner: perform one bootstrap, reuse, send or archive phase using current task/attempt pins; reconcile uncertain effects.",
   },
   {
     name: TASK_RESULT_TOOL,
     visible: true,
     mutation: true,
-    description: "Record a bound attempt result and supplied evidence. Capture, check completion and a handback do not establish an accepted task result.",
+    description: "Owner or bound worker: record an attempt result with evidence and current task pins; submission does not establish acceptance.",
   },
   {
     name: TASK_RULE_TOOL,
     visible: true,
     mutation: true,
-    description: "Current owner: adjudicate the exact task/result revisions with reasons and evidence. A usable ruling remains qualified only while its dependency, review and proof pins stand.",
+    description: "Owner: rule on exact task/result revisions with reasons and evidence; stale proof or review pins invalidate usability.",
   },
   {
     name: TASK_HOLD_TOOL,
     visible: true,
     mutation: true,
-    description: "Raise a bounded task question or hold; current-owner rulings release or retain obligations. Brief changes never silently release a hold.",
+    description: "Raise a task question or hold; owner rulings retain or release it. Brief amendments do not release holds.",
   },
   {
     name: TASK_STOP_TOOL,
     visible: true,
     mutation: true,
-    description: "Current owner: durably stop further task effect issuance. In-flight work and resources remain obligations; this tool does not cancel a host turn.",
+    description: "Owner: stop further effect issuance using current pins; in-flight work and resources remain obligations.",
   },
   {
     name: TASK_ACKNOWLEDGE_TOOL,
     visible: true,
     mutation: true,
-    description: "Exact recipient: acknowledge a recorded delivery obligation. Host acceptance, responsibility acknowledgment, handling and resource settlement are distinct.",
+    description: "Exact recipient: acknowledge a delivery obligation; responsibility and handling are distinct from host acceptance.",
   },
   {
     name: TASK_RECONCILE_TOOL,
     visible: true,
     mutation: true,
-    description: "Current owner: observe known attempts, effects and resources without retrying an uncertain effect. Missing or negative evidence never proves absence.",
+    description: "Owner: observe known attempts, effects and resources; do not retry uncertain effects or infer absence from missing evidence.",
   },
   {
     name: TASK_INTEGRATE_TOOL,
     visible: true,
     mutation: true,
-    description: "Current owner: stage, check, land, reconcile or discharge a pinned result under its integration grant. Three-way checks preserve target work; cleanup requires separate admission.",
+    description: "Owner: stage, check, land, reconcile or discharge a pinned result under its integration grant; preserve target work.",
   },
   {
     name: TASK_RECAP_TOOL,
     visible: true,
     mutation: false,
-    description: "Read a bounded task recap from the same authorized, revision-pinned workflow projection. Omissions and unresolved obligations remain visible; a recap grants no authority.",
+    description: "Read a task recap against workflow revision pins; omissions and obligations remain visible.",
   },
-  { name: "slp_seat_create", visible: true, mutation: true,
-    description: "Form a Lead (saved profile) or Lean Peer (pool pins). Derives parent/workspace, creates without work, observes, then returns the exact prompt for the caller's send_agent_prompt notifyOnFinish=true (delivery=caller, default) or sends it (delivery=server)" },
-  { name: "slp_operation_get", visible: true, mutation: false,
-    description: "Read this caller's exact formation/delivery operation receipt and partial phases by original requestId. Read-only; missing evidence never authorizes resubmission." },
-  { name: "slp_task_deliver", visible: true, mutation: true,
-    description: "Current Lead owner: declare one new bounded task, bootstrap a fresh Peer and send using current derived pins. Partial outcomes remain retained; no scheduler, retry or result acceptance." },
-  { name: "slp_task_get", visible: true, mutation: false,
-    description: "Read one authorized task and optional exact attempt with current identity, CAS pins, readiness and compact effect/resource markers. No unrelated assignment history pages." },
+  {
+    name: "slp_seat_create",
+    visible: true,
+    mutation: true,
+    description: "Orchestrating seat: form a child from saved routing. Returns its exact prompt for send_agent_prompt with notifyOnFinish=true; delivery=server sends it instead.",
+  },
+  {
+    name: "slp_operation_get",
+    visible: true,
+    mutation: false,
+    description: "Read this caller's formation/delivery receipt by original requestId before considering resubmission.",
+  },
+  {
+    name: "slp_task_deliver",
+    visible: true,
+    mutation: true,
+    description: "Owner: declare a new bounded task, bootstrap a fresh Peer and send it under current revisions; reconcile partial outcomes.",
+  },
+  {
+    name: "slp_task_get",
+    visible: true,
+    mutation: false,
+    description: "Read an authorized task and optional exact attempt to obtain current identity, revision pins and readiness.",
+  },
   {
     name: HIDDEN_TOOL,
     visible: false,
     mutation: false,
-    description: "Internal mechanism entry — exists to prove hidden-catalog dispatch rejection.",
+    description: "Internal mechanism entry; direct seat calls always reject.",
   },
 ] as const;
 
@@ -800,7 +782,7 @@ export function createDeskBridge(deps: DeskBridgeDeps) {
         return {
           ok: false,
           code: "CAPABILITY_GAP",
-          reason: `desk-busy: bridge lock held by live pid ${holder.pid} (nonce ${holder.instanceNonce})`,
+          reason: `desk-busy: bridge lock held by live pid ${holder.pid} (nonce ${holder.instanceNonce}); do not respawn the bridge; tell the Human/tooling operator`,
         };
       }
       await sleep(LOCK_POLL_MS);
@@ -1114,7 +1096,7 @@ export function createDeskBridge(deps: DeskBridgeDeps) {
 
   interface ToolHandler {
     input: z.ZodType;
-    prepare(input: unknown): ((ctx: ToolContext) => Promise<unknown>) | null;
+    prepare(input: unknown): { run: (ctx: ToolContext) => Promise<unknown> } | { issues: z.ZodError["issues"] };
   }
 
   interface ToolDef extends ToolHandler {
@@ -1135,7 +1117,9 @@ export function createDeskBridge(deps: DeskBridgeDeps) {
       input,
       prepare(value) {
         const parsed = input.safeParse(value);
-        return parsed.success ? ctx => run({ ...ctx, input: parsed.data }) : null;
+        return parsed.success
+          ? { run: ctx => run({ ...ctx, input: parsed.data }) }
+          : { issues: parsed.error.issues };
       },
     };
   }
@@ -1667,12 +1651,12 @@ export function createDeskBridge(deps: DeskBridgeDeps) {
     if (identityError !== null) return fail(identityError);
     const capError = capabilityGate();
     if (capError !== null) return fail(capError);
-    const run = tool.prepare(call.data.arguments ?? {});
-    if (run === null) {
+    const prepared = tool.prepare(call.data.arguments ?? {});
+    if ("issues" in prepared) {
       return fail(rejection(
         "INVALID_RECORD",
-        `tool arguments fail the strict input schema for ${tool.name}`,
-        "dispatch carries only the fields the tool's schema declares",
+        `tool arguments fail the strict input schema for ${tool.name}: ${prepared.issues.slice(0, 3).map(issue => `${issue.path.join(".") || "$"}: ${issue.message}`).join("; ")}`.slice(0, WIRE_LIMITS.rejectionMessage),
+        "read the tool schema with tools/list and send only declared fields",
       ));
     }
     let availability: Availability;
@@ -1682,7 +1666,7 @@ export function createDeskBridge(deps: DeskBridgeDeps) {
         return fail(rejection(
           "RECOVERY_REQUIRED",
           "desk-unavailable: the bound desk is recovery-required",
-          "run the operator desk recovery before mutating desk state",
+          "reads still answer; tell the Lead — operator recovery is Human/tooling authority, not a seat action",
         ));
       }
     } else {
@@ -1698,13 +1682,13 @@ export function createDeskBridge(deps: DeskBridgeDeps) {
             : "degraded";
     }
     try {
-      const result = await run({ row, bound, availability, seatRead });
+      const result = await prepared.run({ row, bound, availability, seatRead });
       return { content: [{ type: "text", text: text(result) }] };
     } catch (error) {
       return fail(rejection(
         "EXECUTION_UNKNOWN",
         `tool ${tool.name} failed: ${(error as Error).message.slice(0, 200)}`,
-        "the dispatch result is unknown — do not assume it landed",
+        "the request may have committed; reconcile with slp_status or slp_operation_get before resubmitting",
       ));
     }
   }
@@ -1713,7 +1697,7 @@ export function createDeskBridge(deps: DeskBridgeDeps) {
   // connection handling — hello → bound seat → serialized JSON-RPC
   // ---------------------------------------------------------------------
 
-  function ackLine(ok: boolean, error?: { code: DeskErrorCode; message: string }): string {
+  function ackLine(ok: boolean, error?: { code: DeskErrorCode; message: string; recovery?: string }): string {
     const ack = ok
       ? { schemaVersion: 1 as const, protocol: DESK_BRIDGE_PROTOCOL, ok: true as const }
       : {
@@ -1726,8 +1710,19 @@ export function createDeskBridge(deps: DeskBridgeDeps) {
   }
 
   function rejectConn(conn: Socket, code: DeskErrorCode, message: string): void {
+    const recovery = code === "CANDIDATE_DRIFT"
+      ? "reconnecting cannot repair a candidate pin mismatch; tell the Human/tooling operator to inspect the installed bridge and binding"
+      : code === "STALE_EPOCH"
+        ? "reconnecting cannot restore a revoked or stale seat; tell the Lead and look up current bindings with slp_status"
+        : code === "ACTOR_MISMATCH"
+          ? "reconnecting cannot create or repair host-bound membership; tell the Lead to inspect the seat binding with slp_status"
+          : code === "REQUEST_TOO_LARGE"
+            ? "shrink or split the record; the cap is per frame; reconnecting cannot fix oversized hello data; tell the tooling operator"
+            : code === "INVALID_RECORD"
+              ? "reconnecting cannot fix the handshake cause; tell the Human/tooling operator to inspect the hello schema and handshake budget"
+              : undefined;
     try {
-      conn.write(ackLine(false, { code, message }), () => conn.destroy());
+      conn.write(ackLine(false, { code, message, recovery }), () => conn.destroy());
     } catch {
       conn.destroy();
     }
@@ -1791,7 +1786,10 @@ export function createDeskBridge(deps: DeskBridgeDeps) {
      *  alongside the numeric JSON-RPC code — the vocabulary is
      *  machine-readable, never just message text (D3/errata T5). */
     const writeError = (id: unknown, code: number, message: string, slpCode: DeskErrorCode) => {
-      const error = DeskBridgeFrameError.safeParse({ code, message, data: { slpCode } });
+      const detail = slpCode === "EXECUTION_UNKNOWN"
+        ? "; the request may have committed; reconcile with slp_status or slp_operation_get before resubmitting"
+        : slpCode === "REQUEST_TOO_LARGE" ? "; shrink or split the record; the cap is per frame" : "";
+      const error = DeskBridgeFrameError.safeParse({ code, message: message.slice(0, WIRE_LIMITS.rejectionMessage - detail.length) + detail, data: { slpCode } });
       write(JSON.stringify(error.success
         ? { jsonrpc: "2.0", id, error: error.data }
         : { jsonrpc: "2.0", id, error: { code: -32603, message: "slp-desk: error frame failed schema", data: { slpCode: "INVALID_RECORD" } } }));

@@ -125,11 +125,11 @@ test('spawnKit carries role-scoped approximate MCP tool signatures', t => {
     assert.match(plan.create.initialPrompt, /approximate; consult the specific live schema for unfamiliar parameters or a mismatch/);
   }
   const peer = launchPlan(installed, { ...request, repository: dir, role: 'peer', providers, route: catalogFixture(dir) });
-  assert.deepEqual(peer.spawnKit.tools.map(tool => tool.split('(')[0]), ['slp_task_get', 'send_agent_prompt', 'get_agent_status']);
+  assert.deepEqual(peer.spawnKit.tools.map(tool => tool.split('(')[0]), ['slp_status', 'slp_handback_submit', 'slp_task_hold', 'slp_task_get', 'send_agent_prompt', 'get_agent_status']);
   // The Peer route resolves a verified slp-*-peer wrapper, which injects the
   // carrier at session entry — the prompt omits it, the plan fields stay.
   assert.ok(!peer.create.initialPrompt.includes('Policy locators —'));
-  assert.equal(peer.spawnKit.tools.length, 3);
+  assert.equal(peer.spawnKit.tools.length, 6);
   assert.throws(() => spawnKit('human'), /Unknown role/);
 });
 

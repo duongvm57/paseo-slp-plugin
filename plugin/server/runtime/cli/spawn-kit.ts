@@ -30,6 +30,9 @@ const orchestratingTools = [
 
 // A Peer never spawns; it only reports to its owner and checks its own status.
 const peerTools = [
+  'slp_status()',
+  'slp_handback_submit(requestId, assignmentId, recordV1, candidateId: string | null)',
+  'slp_task_hold(requestId, assignmentId, taskId, attemptId: string | null, holdId: string | null, expectedLedgerRevision?, expectedBriefRevision?, expectedOwnershipRevision?, expectedTaskRevision?, hold: object | null, ruling: object | null)',
   'slp_task_get(assignmentId: string, taskId: string, attemptId?: string, expectedLedgerRevision?: integer)',
   'send_agent_prompt(agentId: string, prompt: string, sessionMode?: string, background?: boolean, notifyOnFinish?: boolean)',
   'get_agent_status(agentId: string)',
@@ -38,7 +41,9 @@ const peerTools = [
 export function spawnKit(role: string) {
   if (!roles.includes(role)) throw new Error('Unknown role');
   return {
-    note: 'approximate; consult the specific live schema for unfamiliar parameters or a mismatch',
+    note: orchestrates(role)
+      ? 'approximate; consult the specific live schema for unfamiliar parameters or a mismatch'
+      : 'approximate; see tools/list; agentId: full id, not list_agents shortId; without slp_desk tools, hand back with one native send_agent_prompt report',
     tools: orchestrates(role) ? [...orchestratingTools] : [...peerTools],
   };
 }

@@ -61,7 +61,7 @@ function assignmentForMutation(
   assignmentId: string,
 ): AssignmentValue | DeskRejectionValue {
   const assignment = ledger.assignments.find(row => row.assignmentId === assignmentId);
-  if (assignment === undefined) return reject("AUTHORITY_REQUIRED", "the assignment is not registered on this desk", "mutations require the durable assignment binding");
+  if (assignment === undefined) return reject("AUTHORITY_REQUIRED", "the assignment is not registered on this desk", "look up registered assignments with slp_status; tell the Lead to register the assignment under the current Human grant");
   const owner = effectiveOwner(ledger, assignment);
   if (owner.agentId !== actor.agentId || owner.membershipId !== actor.membershipId) {
     return reject("AUTHORITY_REQUIRED", "only the current effective owner may amend assignment records", "attached seats may read and report, but only the owner's exact live membership mutates this assignment");
@@ -316,7 +316,7 @@ export function projectDeskWorkflow(
   if (!parsedPage.success) return reject("INVALID_RECORD", "workflow page request is invalid", "use the strict section, revision pins and cursor shape");
   const input = parsedPage.data;
   const assignment = ledger.assignments.find(row => row.assignmentId === assignmentId);
-  if (assignment === undefined) return reject("AUTHORITY_REQUIRED", "the assignment is not registered on this desk", "read a registered assignment on this repo desk");
+  if (assignment === undefined) return reject("AUTHORITY_REQUIRED", "the assignment is not registered on this desk", "look up registered assignments with slp_status; tell the Lead to register the assignment under the current Human grant");
   if (input.expectedLedgerRevision !== null && input.expectedLedgerRevision !== ledger.revision) {
     return reject("REVISION_CONFLICT", "the requested ledger revision is no longer current", "reload the first page and continue from its returned pin");
   }

@@ -66,7 +66,7 @@ function communicationLanguage(env: Environment, explicitUnset = false) {
 // home inside its request JSON. install/upgrade/uninstall are standalone-
 // install operations — never this managed runtime's lifecycle — but they are
 // listed so an authorized use still names the home explicitly.
-function managedHelpers(cli: string, home: string) {
+function managedHelpers(cli: string, home: string, role: string) {
   const q = shq(home);
   return `Managed runtime helpers (SLP_MANAGED_RUNTIME=1) — always this verified Node, stable runtime CLI and explicit daemon home:\n` +
     `  ${cli} routes <repository> --paseo-home ${q}\n` +
@@ -74,8 +74,9 @@ function managedHelpers(cli: string, home: string) {
     `  ${cli} agents --paseo-home ${q}\n` +
     `  ${cli} notebook <repository> --paseo-home ${q}\n` +
     `  ${cli} monitor <request.json> — the request must carry "paseoHome": ${JSON.stringify(home)}\n` +
-    `  ${cli} install <dir> --paseo-home ${q} — standalone installs only; the plugin owns this runtime's lifecycle\n` +
-    `  upgrade/uninstall take no home flag — the target installation's paseo-binding.json must record ${q}; verify it before running them\n` +
+    (orchestrates(role) ?
+      `  ${cli} install <dir> --paseo-home ${q} — standalone installs only; the plugin owns this runtime's lifecycle\n` +
+      `  upgrade/uninstall take no home flag — the target installation's paseo-binding.json must record ${q}; verify it before running them\n` : '') +
     `  init/materialize/snapshot/prepare/prepare-handoff/verify are repo-scoped: they take explicit paths and never touch a daemon home.\n`;
 }
 
@@ -169,7 +170,7 @@ export function roleDelivery(root: string, role: string, env: Environment = proc
   const entryPrefix = core +
     (orchestrates(role) ? `For repo setup/update, use ${join(policyRoot, 'skills/paseo-slp-onboarding/SKILL.md')}.\n` : '') +
     recovery + `Snapshot command: ${cli} snapshot <repository>\n` +
-    (managed ? managedHelpers(cli, managed.daemonHome) : '');
+    (managed ? managedHelpers(cli, managed.daemonHome, role) : '');
   // Compute the measured carrier once, alongside the immutable core. launch.ts
   // opts out when it owns the carrier so the initial prompt never duplicates it.
   const carrier = options.carrier === false ? '' : carrierBlock(spawnKit(role), policyLocators(policyRoot, role, env), SESSION_LOCATOR_CAPTION, policyRoot);

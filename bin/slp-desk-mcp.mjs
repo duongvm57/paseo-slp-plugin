@@ -50,6 +50,7 @@ const LINE_CAP = 262144;
 const HANDLE_CAP = 512;
 const SOCK_CAP = 4096;
 const MAX_DIAGNOSTICS = 32;
+const RECOVERY_CAP = 1024; // WIRE_LIMITS.rejectionRecovery; code units, as in the schema.
 const MAX_IN_FLIGHT = 4096;
 const MAX_IN_FLIGHT_ID_BYTES = 1048576;
 const CONNECT_BACKOFF_MS = [100, 200, 400, 800, 1600];
@@ -58,9 +59,12 @@ const INITIAL_HOLD_MS = 11500;
 const RECONNECT_HOLD_MS = CONNECT_BACKOFF_MS.slice(0, 3).reduce((a, b) => a + b, 0); // 700 ms
 
 /** One bounded, typed stderr record. Diagnostics never carry frame bytes,
- *  handle material or filesystem secrets — code + message only. */
-export function diagnosticLine(code, message) {
-  return JSON.stringify({ slpDeskBridge: true, code, message });
+ *  handle material or filesystem secrets — code + message and optional recovery. */
+export function diagnosticLine(code, message, recovery) {
+  return JSON.stringify({ slpDeskBridge: true, code, message,
+    ...(typeof recovery === 'string'
+      ? { recovery: recovery.replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g, '').slice(0, RECOVERY_CAP) }
+      : {}) });
 }
 
 /** JSON-RPC error frame written to stdout when an inbound frame is
@@ -175,10 +179,10 @@ const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
  *  returns a connected net.Socket-like duplex; returns the exit code. */
 export async function run({ env, platform, stdin, stdout, stderr, connect, selfSha256 }) {
   let diagnostics = 0;
-  const diag = (code, message) => {
+  const diag = (code, message, recovery) => {
     if (diagnostics >= MAX_DIAGNOSTICS) return;
     diagnostics += 1;
-    stderr.write(diagnosticLine(code, message) + '\n');
+    stderr.write(diagnosticLine(code, message, recovery) + '\n');
   };
 
   if (platform === 'win32') {
@@ -348,7 +352,7 @@ export async function run({ env, platform, stdin, stdout, stderr, connect, selfS
       // Notifications have no response id and are never replayed.
     }, () => {
       diag('REQUEST_TOO_LARGE', `stdin frame over the ${LINE_CAP}-byte cap — dropped`);
-      return output(errorFrame(null, `REQUEST_TOO_LARGE: request frame exceeds ${LINE_CAP} bytes`, 'REQUEST_TOO_LARGE') + '\n');
+      return output(errorFrame(null, `REQUEST_TOO_LARGE: request frame exceeds ${LINE_CAP} bytes; shrink or split the record; the cap is per frame`, 'REQUEST_TOO_LARGE') + '\n');
     }, stdinState);
     stdinState = undefined;
     const resumeInput = () => {
@@ -579,7 +583,7 @@ export async function run({ env, platform, stdin, stdout, stderr, connect, selfS
         ? String(ack.error.message ?? 'desk rejected the handshake')
         : 'desk rejected the handshake';
       failInitial();
-      diag(code, message);
+      diag(code, message, ack?.error?.recovery);
       socket.destroy();
       attempt = Math.min(attempt + 1, CONNECT_BACKOFF_MS.length);
       startOffline();
@@ -627,7 +631,7 @@ export async function run({ env, platform, stdin, stdout, stderr, connect, selfS
     };
     const stdinOverflow = () => {
       diag('REQUEST_TOO_LARGE', `stdin frame over the ${LINE_CAP}-byte cap — dropped`);
-      if (toStdout(errorFrame(null, `REQUEST_TOO_LARGE: request frame exceeds ${LINE_CAP} bytes`, 'REQUEST_TOO_LARGE') + '\n', resumeStdin) === 'full') {
+      if (toStdout(errorFrame(null, `REQUEST_TOO_LARGE: request frame exceeds ${LINE_CAP} bytes; shrink or split the record; the cap is per frame`, 'REQUEST_TOO_LARGE') + '\n', resumeStdin) === 'full') {
         pauseStdin();
         return 'wait';
       }
@@ -850,7 +854,7 @@ export async function run({ env, platform, stdin, stdout, stderr, connect, selfS
       if (stdout.writableNeedDrain) await waitStdoutDrain();
       if (stdout.destroyed || stdout.closed) break;
       await new Promise(resolve => {
-        if (writeStdout(errorFrame(id, 'EXECUTION_UNKNOWN: desk connection dropped before its reply', 'EXECUTION_UNKNOWN') + '\n', () => resolve()) === 'flushed') resolve();
+        if (writeStdout(errorFrame(id, 'EXECUTION_UNKNOWN: the request may have committed; reconcile with slp_status or slp_operation_get before resubmitting', 'EXECUTION_UNKNOWN') + '\n', () => resolve()) === 'flushed') resolve();
       });
       if (stdout.destroyed || stdout.closed) break;
     }

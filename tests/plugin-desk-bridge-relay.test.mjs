@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { PassThrough, Readable, Writable } from 'node:stream';
 import { readFileSync } from 'node:fs';
 import { spawn } from 'node:child_process';
+import { WIRE_LIMITS } from '../plugin/shared/enforcement.ts';
 import { run } from '../bin/slp-desk-mcp.mjs';
 import { auditCapabilities, CAPABILITY_IDS } from '../plugin/server/capabilities.ts';
 import { sha256Hex } from '../plugin/server/config-view.ts';
@@ -33,11 +34,13 @@ function relay(t, socketPath, dial = connect, onDiagnostic = () => {}) {
   const stdout = new PassThrough();
   const reader = new LineReader(stdout);
   const diagnostics = [];
+  const diagnosticLines = [];
   let exited = false;
   const pending = run({
     env: { SLP_DESK_SOCK: socketPath, SLP_DESK_HANDLE: HANDLE },
     platform: 'linux', stdin, stdout,
     stderr: { write: line => {
+      diagnosticLines.push(line);
       const diagnostic = JSON.parse(line);
       diagnostics.push(diagnostic);
       onDiagnostic(diagnostic);
@@ -45,7 +48,7 @@ function relay(t, socketPath, dial = connect, onDiagnostic = () => {}) {
     connect: dial, selfSha256: PIN,
   }).then(code => { exited = true; return code; });
   t.after(() => stdin.push(null));
-  return { stdin, stdout, reader, pending, diagnostics, exited: () => exited };
+  return { stdin, stdout, reader, pending, diagnostics, diagnosticLines, exited: () => exited };
 }
 const request = (id, name = 'slp_status', args = {}) => ({
   jsonrpc: '2.0', id, method: 'tools/call', params: { name, arguments: args },
@@ -166,13 +169,14 @@ test('a dropped in-flight request gets EXECUTION_UNKNOWN once and is never repla
   const error = await reply(r);
   assert.equal(error.id, 'uncertain');
   assert.equal(error.error.data.slpCode, 'EXECUTION_UNKNOWN');
+  assert.match(error.error.message, /the request may have committed; reconcile with slp_status or slp_operation_get before resubmitting/);
   await pause(100);
   assert.equal(requests, 1);
   r.stdin.push(null);
   assert.equal(await r.pending, 0);
 });
 
-test('initial hello rejection releases held requests with typed errors', { timeout: 10000 }, async t => {
+for (const recovery of [undefined, 'tell the Lead; reconnecting cannot restore a revoked seat']) test(`initial hello rejection prints optional recovery (${recovery === undefined ? 'old ack' : 'new ack'})`, { timeout: 10000 }, async t => {
   const net = await import('node:net');
   const f = bridgeFixture(t, 'slp-stalled-hello-', PIN);
   let peer;
@@ -183,11 +187,46 @@ test('initial hello rejection releases held requests with typed errors', { timeo
   const r = relay(t, path);
   await until(() => peer !== undefined);
   r.stdin.push(JSON.stringify(request('hello-wait')) + '\n');
-  writeFrame(peer, { protocol: 'slp-desk-bridge/1', ok: false, error: { code: 'ACTOR_MISMATCH', message: 'rejected' } });
+  writeFrame(peer, { protocol: 'slp-desk-bridge/1', ok: false, error: { code: 'ACTOR_MISMATCH', message: 'rejected', ...(recovery === undefined ? {} : { recovery }) } });
   assert.equal((await reply(r)).error.data.slpCode, 'CAPABILITY_GAP');
-  assert.ok(r.diagnostics.some(d => d.code === 'ACTOR_MISMATCH'));
+  const diagnostic = r.diagnostics.find(d => d.code === 'ACTOR_MISMATCH');
+  assert.ok(diagnostic);
+  assert.equal(diagnostic.recovery, recovery);
   r.stdin.push(null);
   assert.equal(await r.pending, 0);
+});
+
+test('peer recovery diagnostics cap oversized text and remove multiline controls', async t => {
+  const cases = [
+    { recovery: 'x'.repeat(1500), expected: 'x'.repeat(1024) },
+    { recovery: 'tell\nLead\r\nnow\t\0\x1b\x7f\x85\u2028\u2029', expected: 'tellLeadnow' },
+  ];
+  for (const [index, { recovery, expected }] of cases.entries()) {
+    await t.test(`recovery case ${index}`, async t => {
+      const net = await import('node:net');
+      const f = bridgeFixture(t, 'slp-recovery-diagnostic-', PIN);
+      let peer;
+      const server = net.createServer(conn => { peer = conn; conn.resume(); });
+      t.after(() => { peer?.destroy(); server.close(); });
+      const path = `${f.home}/hello.sock`;
+      await new Promise(resolve => server.listen(path, resolve));
+      const r = relay(t, path);
+      await until(() => peer !== undefined);
+      r.stdin.push(JSON.stringify(request('hello-wait')) + '\n');
+      writeFrame(peer, { protocol: 'slp-desk-bridge/1', ok: false,
+        error: { code: 'ACTOR_MISMATCH', message: 'rejected', recovery } });
+      await reply(r);
+      const diagnostic = r.diagnostics.find(d => d.code === 'ACTOR_MISMATCH');
+      assert.equal(diagnostic.recovery, expected);
+      assert.ok(diagnostic.recovery.length <= WIRE_LIMITS.rejectionRecovery);
+      const line = r.diagnosticLines.find(line => JSON.parse(line).code === 'ACTOR_MISMATCH');
+      assert.equal(line.endsWith('\n'), true);
+      assert.doesNotMatch(line.slice(0, -1), /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/);
+      assert.deepEqual(JSON.parse(line), diagnostic);
+      r.stdin.push(null);
+      assert.equal(await r.pending, 0);
+    });
+  }
 });
 
 test('stdin close cancels a held initial dial and destroys its late socket', { timeout: 10000 }, async t => {
@@ -488,6 +527,7 @@ test('expired held requests remain typed errors when a late ACK arrives behind s
   const stdin = new Readable({ read() {} });
   const frames = [];
   const diagnostics = [];
+  const diagnosticLines = [];
   let blocking = false;
   const callbacks = [];
   const stdout = new Writable({ highWaterMark: 16, write(chunk, _enc, callback) {

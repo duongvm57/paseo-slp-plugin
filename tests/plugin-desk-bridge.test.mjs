@@ -41,11 +41,16 @@ import {
   repoKeyFor,
 } from '../plugin/server/desk-store.ts';
 import { auditCapabilities, CAPABILITY_IDS } from '../plugin/server/capabilities.ts';
+import { roleBundle } from '../plugin/server/runtime/cli/role-bundle.ts';
+import { spawnKit } from '../plugin/server/runtime/cli/spawn-kit.ts';
+import { SETTLEMENT_VIA } from '../plugin/server/runtime/cli/report-records.ts';
+import { decideDeskHandback } from '../plugin/server/desk-handback.ts';
 import { DESK_TOOL_CATALOG } from '../plugin/server/desk-bridge.ts';
 import { sha256Hex } from '../plugin/server/config-view.ts';
 import {
   DESK_BRIDGE_PROTOCOL,
   DeskBridgeToolEntry,
+  DeskBridgeAck,
   DeskSeatStatus,
   WIRE_LIMITS,
 } from '../plugin/shared/enforcement.ts';
@@ -244,6 +249,7 @@ test('a live foreign holder is never stolen — bounded wait ends desk-busy', as
   assert.equal(outcome, 'unavailable');
   assert.equal(f.bridge.state().code, 'CAPABILITY_GAP');
   assert.match(f.bridge.state().reason, /desk-busy/);
+  assert.match(f.bridge.state().reason, /do not respawn the bridge/);
   assert.ok(Date.now() - t0 < 10000, 'bounded wait respected');
   assert.equal(JSON.parse(readFileSync(f.paths.lockPath, 'utf8')).instanceNonce, 'foreign-live');
   assert.equal(existsSync(deskRepoPaths(f.stableRoot, f.paths.repoKey).auditPath), false);
@@ -283,6 +289,14 @@ test('F4: stop() tolerates an already-vanished lock — logged, never invented',
 // handshake — hello schema, binary pin, seat resolution
 // ---------------------------------------------------------------------------
 
+test('old-format rejection ack still parses under slp-desk-bridge/1', () => {
+  const old = { schemaVersion: 1, protocol: DESK_BRIDGE_PROTOCOL, ok: false,
+    error: { code: 'ACTOR_MISMATCH', message: 'rejected' } };
+  assert.deepEqual(DeskBridgeAck.parse(old), old);
+  const current = { ...old, error: { ...old.error, recovery: 'tell the Lead; reconnecting cannot repair this binding' } };
+  assert.deepEqual(DeskBridgeAck.parse(current), current);
+});
+
 test('hello roundtrip: valid handshake answers the protocol ack', async t => {
   const f = await started(t);
   const git = gitRepo(t);
@@ -316,6 +330,22 @@ test('a hello that fails the schema is INVALID_RECORD', async t => {
   t.after(() => conn.destroy());
   assert.equal(ack.ok, false);
   assert.equal(ack.error.code, 'INVALID_RECORD');
+  assert.match(ack.error.recovery, /reconnecting cannot/);
+  assert.match(ack.error.recovery, /Lead|Human|tooling/);
+});
+
+test('handshake budget rejection names tooling recovery', { timeout: 12000 }, async t => {
+  const f = await started(t);
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const conn = await connect(f.paths.socketPath);
+  t.after(() => conn.destroy());
+  const reader = new LineReader(conn);
+  await new Promise(resolve => setImmediate(resolve));
+  t.mock.timers.tick(10000);
+  const ack = JSON.parse((await reader.next()).toString());
+  assert.equal(ack.error.code, 'INVALID_RECORD');
+  assert.match(ack.error.recovery, /reconnecting cannot/);
+  assert.match(ack.error.recovery, /tooling/);
 });
 
 test('a wrong protocol literal never reaches dispatch', async t => {
@@ -327,6 +357,8 @@ test('a wrong protocol literal never reaches dispatch', async t => {
   t.after(() => conn.destroy());
   assert.equal(ack.ok, false);
   assert.equal(ack.error.code, 'INVALID_RECORD');
+  assert.match(ack.error.recovery, /reconnecting cannot/);
+  assert.match(ack.error.recovery, /Lead|Human|tooling/);
 });
 
 test('a bridge binary hash outside the launch-set pin is CANDIDATE_DRIFT', async t => {
@@ -338,6 +370,8 @@ test('a bridge binary hash outside the launch-set pin is CANDIDATE_DRIFT', async
   t.after(() => conn.destroy());
   assert.equal(ack.ok, false);
   assert.equal(ack.error.code, 'CANDIDATE_DRIFT');
+  assert.match(ack.error.recovery, /reconnecting cannot/);
+  assert.match(ack.error.recovery, /Lead|Human|tooling/);
 });
 
 test('a handle with no membership row is ACTOR_MISMATCH', async t => {
@@ -348,6 +382,8 @@ test('a handle with no membership row is ACTOR_MISMATCH', async t => {
   t.after(() => conn.destroy());
   assert.equal(ack.ok, false);
   assert.equal(ack.error.code, 'ACTOR_MISMATCH');
+  assert.match(ack.error.recovery, /reconnecting cannot/);
+  assert.match(ack.error.recovery, /Lead|Human|tooling/);
 });
 
 test('a revoked membership handle is STALE_EPOCH', async t => {
@@ -366,6 +402,8 @@ test('a revoked membership handle is STALE_EPOCH', async t => {
   t.after(() => conn.destroy());
   assert.equal(ack.ok, false);
   assert.equal(ack.error.code, 'STALE_EPOCH');
+  assert.match(ack.error.recovery, /reconnecting cannot/);
+  assert.match(ack.error.recovery, /Lead|Human|tooling/);
 });
 
 test('an unbound-open membership cannot bind through the bridge', async t => {
@@ -386,6 +424,8 @@ test('an unbound-open membership cannot bind through the bridge', async t => {
   t.after(() => conn.destroy());
   assert.equal(ack.ok, false);
   assert.equal(ack.error.code, 'ACTOR_MISMATCH');
+  assert.match(ack.error.recovery, /reconnecting cannot/);
+  assert.match(ack.error.recovery, /Lead|Human|tooling/);
 });
 
 // ---------------------------------------------------------------------------
@@ -617,6 +657,83 @@ test('an unknown tool name is INVALID_RECORD', async t => {
   assert.equal(rejection.code, 'INVALID_RECORD');
 });
 
+test('tool catalog uses concise English guidance and explains ambiguous field sources', async t => {
+  const { reader, conn } = await boundSeat(t);
+  const { result } = await rpc(reader, conn, { jsonrpc: '2.0', id: 1, method: 'tools/list' });
+  for (const tool of result.tools) {
+    assert.ok(tool.description.length <= 256, `${tool.name} keeps the description cap`);
+    assert.doesNotMatch(tool.description, /[\u00c0-\u1eff]/, `${tool.name} description is English`);
+    assert.doesNotMatch(tool.description, /Input:|Response:/, `${tool.name} avoids duplicating schema field lists`);
+    const inspect = schema => {
+      if (!schema || typeof schema !== 'object') return;
+      for (const [key, field] of Object.entries(schema.properties ?? {})) {
+        if (key === 'authorityRef' || key === 'grantRef') {
+          assert.match(field.description, /Human grant/);
+          assert.match(field.description, /assignment sentence\/date/);
+          assert.match(field.description, /verbatim claim, never authenticated/);
+        }
+        inspect(field);
+      }
+      for (const key of ['oneOf', 'anyOf', 'allOf']) for (const branch of schema[key] ?? []) inspect(branch);
+      inspect(schema.items);
+    };
+    inspect(tool.inputSchema);
+  }
+  const descriptionCharacters = schema => {
+    if (!schema || typeof schema !== 'object') return 0;
+    return Object.entries(schema).reduce((sum, [key, value]) => sum +
+      (key === 'description' && typeof value === 'string' ? value.length : descriptionCharacters(value)), 0);
+  };
+  const loadedDescriptionCharacters = result.tools.reduce((sum, tool) =>
+    sum + tool.description.length + descriptionCharacters(tool.inputSchema), 0);
+  assert.ok(loadedDescriptionCharacters <= 5987, 'description text does not exceed the HEAD catalog budget');
+  const byName = new Map(result.tools.map(tool => [tool.name, tool]));
+  assert.match(byName.get('slp_handback_submit').inputSchema.properties.recordV1.description, /Bare JSON record object, not the fenced block/);
+  assert.match(byName.get('slp_handback_submit').inputSchema.properties.recordV1.description, /slp.mjs records --schema/);
+  const via = byName.get('slp_settlement_record').inputSchema.properties.timeline.properties.via.description;
+  for (const value of SETTLEMENT_VIA) assert.ok(via.includes(value), value);
+  const transition = byName.get('slp_scope_transition');
+  assert.match(transition.inputSchema.properties.candidateSnapshot.description, /snapshotSha256.*candidate row.*slp_workflow_get/);
+  assert.match(transition.description, /slp_handback_submit/);
+  assert.match(byName.get('slp_scope_declare').inputSchema.properties.declarationSha256.description, /sha256.*declaration body/);
+  assert.match(byName.get('slp_scope_declare').description, /after slp_assignment_amend/);
+});
+
+test('Peer kit supplies desk health, handback and hold signatures with native fallback', async t => {
+  const { reader, conn } = await boundSeat(t);
+  const { result } = await rpc(reader, conn, { jsonrpc: '2.0', id: 1, method: 'tools/list' });
+  const kit = spawnKit('peer');
+  const byName = new Map(result.tools.map(tool => [tool.name, tool]));
+  for (const name of ['slp_status', 'slp_handback_submit', 'slp_task_hold']) {
+    const signature = kit.tools.find(tool => tool.startsWith(`${name}(`));
+    assert.ok(signature, `${name} is supplied to Peers`);
+    const argumentsText = signature.slice(name.length + 1, -1);
+    const params = argumentsText ? argumentsText.split(', ').map(value => value.split(': ')[0]) : [];
+    const schema = byName.get(name).inputSchema;
+    assert.deepEqual(params.map(value => value.replace(/\?$/, '')).sort(), Object.keys(schema.properties).sort());
+    assert.deepEqual(params.filter(value => !value.endsWith('?')).sort(), [...(schema.required ?? [])].sort());
+    for (const field of ['candidateId', 'attemptId', 'holdId', 'hold', 'ruling']) {
+      if (schema.properties[field]) assert.match(signature, new RegExp(`${field}: [^,]+ \\| null`));
+    }
+  }
+  assert.match(kit.note, /without slp_desk tools, hand back with one native send_agent_prompt report/);
+  assert.match(kit.note, /agentId.*full id.*list_agents.*shortId/);
+});
+
+test('managed Peer entry omits install lifecycle helpers; orchestrating entries retain them', t => {
+  const root = process.cwd();
+  const env = { SLP_MANAGED_RUNTIME: '1', SLP_NODE_BIN: process.execPath,
+    SLP_RUNTIME_ROOT: root, SLP_DAEMON_HOME: tmp(t, 'slp-carrier-home-') };
+  const peer = roleBundle(root, 'peer', env).instructions;
+  assert.doesNotMatch(peer, /install <dir>|upgrade\/uninstall/);
+  assert.match(peer, /slp_handback_submit/);
+  for (const role of ['supervisor', 'lead']) {
+    const entry = roleBundle(root, role, env).instructions;
+    assert.match(entry, /install <dir>/);
+    assert.match(entry, /upgrade\/uninstall/);
+  }
+});
+
 test('tool arguments beyond the strict schema are INVALID_RECORD', async t => {
   const { reader, conn } = await boundSeat(t);
   const reply = await rpc(reader, conn, {
@@ -627,6 +744,66 @@ test('tool arguments beyond the strict schema are INVALID_RECORD', async t => {
   });
   const rejection = JSON.parse(reply.result.content[0].text);
   assert.equal(rejection.code, 'INVALID_RECORD');
+});
+
+test('strict input reports at most three paths and messages within the rejection cap', async t => {
+  const { reader, conn } = await boundSeat(t);
+  const call = async (id, name, args) => JSON.parse((await rpc(reader, conn, {
+    jsonrpc: '2.0', id, method: 'tools/call', params: { name, arguments: args },
+  })).result.content[0].text);
+  const invalid = await call(1, 'slp_scope_declare', {
+    requestId: '', assignmentId: '', scopeId: '', label: '',
+    declarationSha256: 'a'.repeat(64), refs: [], seatAgentId: null,
+  });
+  assert.equal(invalid.code, 'INVALID_RECORD');
+  assert.match(invalid.message, /requestId: Too small: expected string to have >=1 characters/);
+  assert.match(invalid.message, /assignmentId: /);
+  assert.match(invalid.message, /scopeId: /);
+  assert.doesNotMatch(invalid.message, /label: /);
+  assert.match(invalid.recovery, /tools\/list/);
+  assert.match(invalid.recovery, /only declared fields/);
+  const refined = await call(2, 'slp_scope_declare', {
+    requestId: 'r', assignmentId: 'a', scopeId: 's', label: 'scope',
+    declarationSha256: 'a'.repeat(64), refs: [], seatAgentId: null,
+    reviewPlan: { kind: 'required', authorityRef: 'Human grant', ruleRef: 'rule',
+      reason: 'review', lenses: [], exemptionClass: null },
+  });
+  assert.match(refined.message, /reviewPlan.lenses: required plan has lenses and no exemption class/);
+  const huge = await call(3, 'slp_status', { ['x'.repeat(10000)]: true });
+  assert.equal(huge.code, 'INVALID_RECORD');
+  assert.ok(huge.message.length <= WIRE_LIMITS.rejectionMessage);
+});
+
+test('authority rejection directs assignment lookup and revoked-seat escalation', async t => {
+  const { reader, conn, f, repoKey, row } = await boundSeat(t, { row: { role: 'lead' } });
+  const reply = await rpc(reader, conn, { jsonrpc: '2.0', id: 1, method: 'tools/call',
+    params: { name: 'slp_assignment_close', arguments: { requestId: 'missing', assignmentId: 'unregistered' } } });
+  const rejection = JSON.parse(reply.result.content[0].text);
+  assert.equal(rejection.code, 'AUTHORITY_REQUIRED');
+  assert.match(rejection.message, /not registered/);
+  assert.match(rejection.recovery, /slp_status/);
+  assert.match(rejection.recovery, /Lead/);
+  const ledger = seedStore(f).read(repoKey).ledger;
+  const revoked = decideDeskHandback({ ...ledger, memberships: [{ ...row, state: 'revoked',
+    revokedAt: FIXED_AT, revokeReason: 'archived' }] }, {
+    kind: 'assignment.close', actorAgentId: row.agentId, requestId: 'revoked', assignmentId: 'unregistered',
+  });
+  assert.equal(revoked.code, 'AUTHORITY_REQUIRED');
+  assert.match(revoked.recovery, /slp_status/);
+  assert.match(revoked.recovery, /retrying cannot rebind a revoked seat/);
+});
+
+test('bridge dispatch fault requires reconciliation before resubmission', async t => {
+  let fault = false;
+  const { reader, conn } = await boundSeat(t, { audit: input => {
+    if (fault) throw new Error('fixture fault');
+    return auditCapabilities(input);
+  } });
+  fault = true;
+  const reply = await rpc(reader, conn, { jsonrpc: '2.0', id: 1, method: 'tools/call',
+    params: { name: 'slp_status', arguments: {} } });
+  assert.equal(reply.error.data.slpCode, 'EXECUTION_UNKNOWN');
+  assert.match(reply.error.message, /the request may have committed; reconcile with slp_status or slp_operation_get before resubmitting/);
 });
 
 test('native union branches reject discriminator and unknown-field violations before effects', async t => {
@@ -772,6 +949,14 @@ test('read-only status still answers under recovery-required with the limitation
     'desk lock orphaned or unreadable — operator recovery required before desk mutations',
     'assignments view withheld — the desk ledger cannot be read',
   ]);
+  const mutation = await rpc(reader, conn, { jsonrpc: '2.0', id: 2, method: 'tools/call',
+    params: { name: 'slp_assignment_register', arguments: { requestId: 'blocked', authorityRef: 'Human', objective: null } } });
+  const rejection = JSON.parse(mutation.result.content[0].text);
+  assert.equal(rejection.code, 'RECOVERY_REQUIRED');
+  assert.match(rejection.recovery, /reads still answer/);
+  assert.match(rejection.recovery, /Human\/tooling authority/);
+  assert.match(rejection.recovery, /tell the Lead/);
+
 });
 
 test('read-only status still answers when the ledger itself is unreadable (degraded)', async t => {
@@ -904,6 +1089,7 @@ test('a frame over the request cap carries the typed REQUEST_TOO_LARGE code', as
   // embedded in free-form message text.
   assert.equal(error.error.data.slpCode, 'REQUEST_TOO_LARGE');
   assert.match(error.error.message, /REQUEST_TOO_LARGE/);
+  assert.match(error.error.message, /shrink or split the record; the cap is per frame/);
   const reply = await rpc(reader, conn, { jsonrpc: '2.0', id: 2, method: 'ping' });
   assert.deepEqual(reply.result, {});
 });

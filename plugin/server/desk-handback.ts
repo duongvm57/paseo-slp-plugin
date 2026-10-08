@@ -246,7 +246,7 @@ export function decideDeskHandback(ledger: Readonly<LedgerValue>, command: Recor
     if (leadError !== null) return leadError;
     const assignment = ledger.assignments.find(a => a.assignmentId === cmd.assignmentId);
     if (assignment === undefined) {
-      return reject("AUTHORITY_REQUIRED", "the assignment is not registered on this desk", "assignment bindings are created by a lead register, never by peers");
+      return reject("AUTHORITY_REQUIRED", "the assignment is not registered on this desk", "look up registered assignments with slp_status; tell the Lead to register the assignment under the current Human grant");
     }
     if (!effectiveOwnerTupleMatches(ledger, assignment, actor)) {
       return reject("AUTHORITY_REQUIRED", "only the current assignment owner may attach seats", "the effective owner's exact live membership tuple is bound into custody");
@@ -281,7 +281,7 @@ export function decideDeskHandback(ledger: Readonly<LedgerValue>, command: Recor
     if (leadError !== null) return leadError;
     const assignment = ledger.assignments.find(a => a.assignmentId === cmd.assignmentId);
     if (assignment === undefined) {
-      return reject("AUTHORITY_REQUIRED", "the assignment is not registered on this desk", "close targets a registered assignment");
+      return reject("AUTHORITY_REQUIRED", "the assignment is not registered on this desk", "look up registered assignments with slp_status; tell the Lead to register the assignment under the current Human grant");
     }
     if (!effectiveOwnerTupleMatches(ledger, assignment, actor)) {
       return reject("AUTHORITY_REQUIRED", "only the current assignment owner may close it", "the effective owner's exact live membership tuple is bound into custody");
@@ -300,7 +300,7 @@ export function decideDeskHandback(ledger: Readonly<LedgerValue>, command: Recor
     if ("ok" in actor) return actor;
     const assignment = ledger.assignments.find(a => a.assignmentId === cmd.assignmentId);
     if (assignment === undefined) {
-      return reject("AUTHORITY_REQUIRED", "the assignment is not registered on this desk", "a seat submits only against a durable assignment binding");
+      return reject("AUTHORITY_REQUIRED", "the assignment is not registered on this desk", "look up registered assignments with slp_status; tell the Lead to register the assignment under the current Human grant");
     }
     if (assignment.state !== "open") {
       return reject("AUTHORITY_REQUIRED", "the assignment is closed", "closed assignments take no new handback revisions");
