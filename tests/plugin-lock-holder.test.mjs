@@ -3,7 +3,7 @@ import test from 'node:test';
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { createDeskStore, deskRepoPaths, repoKeyFor } from '../plugin/server/desk-store.ts';
 import { recoverDeskLock } from '../plugin/server/desk-recovery.ts';
-import { classifyLockHolderProcess, parseLockHolder } from '../plugin/server/runtime/lock-holder.ts';
+import { classifyLockHolderProcess, parseLockHolder, readProcessIdentity } from '../plugin/server/runtime/lock-holder.ts';
 import { bridgeFixture, startBridge } from './helpers/desk-bridge-fixture.mjs';
 
 // Fixed wire-contract boundaries: production limits must not move these oracles.
@@ -134,4 +134,47 @@ test('lock holder adapters: the literal 64-character nonce is a live foreign hol
 
 test('lock holder adapters: EPERM preserves each adapter\'s liveness policy', async t => {
   await characterizeAdapters(t, record({ instanceNonce: NONCE_64 }), { valid: true, eperm: true });
+});
+
+const BOOT_ID = '01234567-89ab-cdef-0123-456789abcdef';
+// Field 22 is a literal oracle; comm contains spaces and ')' to exercise the
+// kernel stat grammar rather than indexing a whitespace-split whole line.
+const PROC_STAT = '424242 (worker ) with spaces) R 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 8675309 23 24\n';
+
+test('readProcessIdentity parses field 22 after the final comm parenthesis', () => {
+  const reads = [];
+  const identity = readProcessIdentity(424242, {
+    platform: 'linux',
+    readFile: path => {
+      reads.push(path);
+      return path === '/proc/424242/stat' ? PROC_STAT : BOOT_ID + '\n';
+    },
+  });
+  assert.equal(identity, BOOT_ID + ':8675309');
+  assert.deepEqual(reads, ['/proc/sys/kernel/random/boot_id', '/proc/424242/stat', '/proc/sys/kernel/random/boot_id']);
+});
+
+test('readProcessIdentity refuses malformed boot IDs and missing start ticks', () => {
+  for (const boot of ['', 'not-a-boot-id', '-'.repeat(36), 'a'.repeat(36)]) {
+    assert.equal(readProcessIdentity(424242, {
+      platform: 'linux', readFile: path => path.endsWith('/stat') ? PROC_STAT : boot,
+    }), null, boot);
+  }
+  for (const stat of ['424242 (worker) R 4 5\n', PROC_STAT.replace('8675309', 'unknown')]) {
+    assert.equal(readProcessIdentity(424242, {
+      platform: 'linux', readFile: path => path.endsWith('/stat') ? stat : BOOT_ID,
+    }), null);
+  }
+});
+
+test('readProcessIdentity returns identity doubt for a missing proc entry', () => {
+  const reads = [];
+  assert.equal(readProcessIdentity(424242, {
+    platform: 'linux', readFile: path => {
+      reads.push(path);
+      if (path.endsWith('/stat')) throw Object.assign(new Error('missing'), { code: 'ENOENT' });
+      return BOOT_ID;
+    },
+  }), null);
+  assert.deepEqual(reads, ['/proc/sys/kernel/random/boot_id', '/proc/424242/stat']);
 });

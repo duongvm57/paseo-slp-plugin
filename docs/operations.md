@@ -577,6 +577,72 @@ Human re-enables it — an upgrade never widens transmission or turns on
 delivery. Live end-to-end validation and model evaluation have not run; see
 [docs/spec/supervision-integration.md](spec/supervision-integration.md).
 
+### Desk bridge availability
+
+The `slp_desk` stdio MCP stays alive across plugin reloads and socket outages
+while its stdin remains open. It reconnects over the Unix socket with backoff
+capped at 1600 ms and repeats its pinned hello on every connection. A valid
+persisted membership handle can reconnect after plugin restart; all five
+dispatch guards still run. Windows remains a `CAPABILITY_GAP`; there is no TCP
+fallback.
+
+At startup stdin stays paused until the first positive hello ACK, so an
+immediate MCP `initialize` waits in the pipe and receives the real reply.
+Startup holds for up to 11500 ms even when the socket is absent or refusing
+connections. Dials and transient hello failures retry throughout that budget
+with 100/200/400/800/1600 ms backoff; the last delay repeats. Each hello is
+bounded by 10000 ms and the remaining startup budget. Only budget expiry or a
+permanent hello rejection (invalid record, pin mismatch or authority refusal)
+releases held requests as typed errors; reconnecting continues while stdin is
+open.
+
+After a socket drop the relay holds unsent requests for 700 ms, the first
+three backoff delays (100+200+400 ms). This window starts at the drop and is
+never renewed by another dial. An ACK within the window forwards held
+requests in order. After expiry, held and arriving requests receive JSON-RPC
+errors with `error.data.slpCode: CAPABILITY_GAP` until connected. Expired input
+keeps that error disposition if a late ACK arrives behind stdout pressure. Holding
+pauses the source and preserves the splitter remainder under existing buffer
+bounds. A request accepted by the old socket but left unanswered receives
+`EXECUTION_UNKNOWN` once: it may have executed and is never replayed
+automatically. Inspect the durable desk result before deciding whether another
+request is warranted. EOF ends the relay after held input and stdout flush.
+During a hold, stdin destroy/close is terminal: the relay exits without
+answering held bytes because the stdin reader is gone; previously accepted
+stdout writes still flush. A vanished stdout is terminal. Raw lines remain
+capped at 262144 bytes in
+both directions, flow control persists, and stderr diagnostics stop after 32
+records. Outstanding request IDs are bounded to 4096 entries/1 MiB; excess
+requests receive a typed capacity error rather than growing memory.
+
+The stable root must be owned by one PID namespace. Sharing it across PID
+namespaces, including separate WSL distros or containers, is unsupported:
+ESRCH is namespace-relative and cannot establish another namespace's holder
+liveness. This is an explicit deployment assumption, not a detectable guard.
+
+After an unclean daemon exit, plugin startup automatically recovers only its
+reserved bridge lock when ESRCH or a recorded Linux/WSL boot/start identity
+mismatch proves the old holder dead. Recovery uses the same serialized,
+fsynced pre-unlink audit as operator recovery, with actor `plugin:desk-bridge`,
+then competes for the lifecycle lock with `O_EXCL` before binding `desk.sock`.
+A live holder, unreadable lock or uncertain identity stays untouched. Hosts
+without a process-start probe use ESRCH only; a live PID in an old-format lock
+cannot prove PID reuse from its nonce or wall-clock timestamp alone.
+
+If the plugin dies after creating `recover.lock` but before cleaning it up,
+a later start can report `recover-lock-orphan` and `RECOVERY_REQUIRED`. This
+also applies to the automatic recovery path: it never removes an orphaned
+`recover.lock` itself.
+
+The operator recovery route is `node bin/slp.mjs desk-recover --bridge` under
+maintenance authority and the selected isolated/served `PASEO_HOME`. If it
+reports `recover-lock-orphan`, inspect that reserved namespace's `recover.lock`
+and remove it manually only after confirming no recoverer is running, then
+rerun the command. Operator recovery remains ESRCH-only and may also refuse
+holder uncertainty. Repository transaction locks retain operator-only
+recovery. Local restart fixtures do not establish live daemon or provider
+acceptance.
+
 ### External work state
 
 Use [the repository desk](work-coordination.md) for registered assignments,

@@ -264,6 +264,29 @@ test('C4: a kill error that is neither ESRCH nor EPERM is undetermined', async t
 
 // --- Group D — ESRCH path: re-read, audit, unlink -----------------------------
 
+test('identity changed before recovery audit: second holder proof refuses despite ESRCH', async t => {
+  const fx = repoFixture(t, repoKeyFor(DESK_BRIDGE_REPO));
+  const bytes = JSON.stringify({ pid: 424242, instanceNonce: 'orphan', processIdentity: 'original-instance' });
+  writeFileSync(fx.paths.lockPath, bytes);
+  let observedIdentity = 'original-instance';
+  const kill = () => { throw Object.assign(new Error('gone'), { code: 'ESRCH' }); };
+  const out = await run(fx, {
+    kill,
+    holderProcess: holder => {
+      assert.throws(() => kill(holder.pid), { code: 'ESRCH' }, 'pid liveness remains ESRCH at both proofs');
+      return observedIdentity === holder.processIdentity ? 'esrch' : 'undetermined';
+    },
+    hooks: { beforeLockRecheck: () => { observedIdentity = 'replacement-instance'; } },
+  }, { actorKey: 'plugin:desk-bridge' });
+  assert.equal(out.ok, false);
+  assert.equal(out.code, 'RECOVERY_REQUIRED');
+  assert.equal(out.receipt.result, 'undetermined');
+  assert.match(out.message, /holder identity changed before recovery audit/);
+  assert.equal(readFileSync(fx.paths.lockPath, 'utf8'), bytes);
+  assert.equal(auditLines(fx.paths).length, 0);
+  assert.equal(existsSync(fx.paths.recoverLockPath), false);
+});
+
 test('D1: lock bytes changed between reads → changed, no audit, no unlink', async t => {
   const fx = repoFixture(t);
   const pid = await deadPid();

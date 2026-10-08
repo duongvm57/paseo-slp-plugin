@@ -6,7 +6,7 @@ import { closeSync, fsyncSync, openSync, readFileSync, unlinkSync, writeSync } f
 import { DESK_RECOVERY_LIMITS, type DeskRecoveryResultValue } from "../../shared/runtime/desk-contract.ts";
 import { deskRepoPaths } from "./desk-paths.ts";
 import { fsyncDirectory, lstatOrNull, PRIVATE_FILE_MODE } from "./filesystem.ts";
-import { classifyLockHolderProcess, parseLockHolder, type LockHolder } from "./lock-holder.ts";
+import { classifyLockHolderProcess, parseLockHolder, type LockHolder, type LockHolderProcess } from "./lock-holder.ts";
 
 export interface DeskRecoveryReceipt {
   schemaVersion: 1;
@@ -62,6 +62,8 @@ export interface DeskRecoveryDeps {
   now?: () => Date;
   pid?: number;
   kill?: (pid: number) => void;
+  /** Bridge-only identity probe. CLI/RPC omit it and remain ESRCH-only. */
+  holderProcess?: (holder: LockHolder) => LockHolderProcess;
   io?: Partial<DeskRecoveryIo>;
   hooks?: DeskRecoveryHooks;
 }
@@ -236,7 +238,7 @@ export function* recoverLockSteps(
         }
 
         // Step 4 — classify the holder.
-        const alive = classifyLockHolderProcess(holder.pid, kill);
+        const alive = deps.holderProcess?.(holder) ?? classifyLockHolderProcess(holder.pid, kill);
         if (alive === "alive" || alive === "eperm") {
           return reject("held", "CAPABILITY_GAP",
             `held: lock holder pid ${holder.pid} is alive (instance ${holder.instanceNonce})`,
@@ -248,6 +250,12 @@ export function* recoverLockSteps(
             lockPtr, holder.pid, holder.instanceNonce, false);
         }
         yield "beforeLockRecheck";
+
+        if (deps.holderProcess !== undefined && deps.holderProcess(holder) !== "esrch") {
+          return reject("undetermined", "RECOVERY_REQUIRED",
+            "undetermined: holder identity changed before recovery audit", lockPtr,
+            holder.pid, holder.instanceNonce, false);
+        }
 
         // Step 5 — ESRCH only: re-read and compare bytes byte-for-byte.
         let recheck: Buffer;

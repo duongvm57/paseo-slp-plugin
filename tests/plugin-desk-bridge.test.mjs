@@ -157,25 +157,65 @@ test('a binding whose runtimePath diverges from the verified launch root is CAND
 // lifecycle lock — reserved repo namespace, fail-closed classes
 // ---------------------------------------------------------------------------
 
-test('a dead foreign lock holder is RECOVERY_REQUIRED — never unlinked', async t => {
-  const f = bridgeFixture(t, { kill: () => { throw new Error('ESRCH'); } });
+test('a dead foreign lock holder is reclaimed with the recovery seam audit before binding', async t => {
+  const f = bridgeFixture(t, { kill: () => { throw Object.assign(new Error('gone'), { code: 'ESRCH' }); } });
   mkdirSync(f.paths.repoDir, { recursive: true });
-  writeFileSync(
-    f.paths.lockPath,
-    JSON.stringify({ pid: 424242, instanceNonce: 'foreign', startedAt: FIXED_AT }) + '\n',
-  );
-  void f.bridge.start();
-  const outcome = await f.bridge.whenReady();
-  t.after(() => f.bridge.stop());
-  assert.equal(outcome, 'unavailable');
+  const bytes = JSON.stringify({ pid: 424242, instanceNonce: 'foreign', startedAt: FIXED_AT }) + '\n';
+  writeFileSync(f.paths.lockPath, bytes);
+  assert.equal((await startBridge(t, f)).outcome, 'listening');
+  const paths = deskRepoPaths(f.stableRoot, f.paths.repoKey);
+  const audit = JSON.parse(readFileSync(paths.auditPath, 'utf8').trim());
+  assert.equal(audit.phase, 'pre-unlink');
+  assert.equal(audit.actorKey, 'plugin:desk-bridge');
+  assert.equal(audit.pid, 424242);
+  assert.equal(audit.instanceNonce, 'foreign');
+  assert.equal(audit.lockSha256, sha256Hex(bytes));
+  assert.equal(audit.repoKey, f.paths.repoKey);
+  assert.equal(JSON.parse(readFileSync(f.paths.lockPath, 'utf8')).pid, process.pid);
+  assert.equal(existsSync(paths.recoverLockPath), false);
+});
+
+test('a proven process-start mismatch reclaims the stale bridge instance, with audit', async t => {
+  const f = bridgeFixture(t, { kill: () => {}, processIdentity: () => 'boot:200' });
+  mkdirSync(f.paths.repoDir, { recursive: true });
+  writeFileSync(f.paths.lockPath, JSON.stringify({ pid: 424242, instanceNonce: 'old', processIdentity: 'boot:100' }));
+  assert.equal((await startBridge(t, f)).outcome, 'listening');
+  assert.equal(JSON.parse(readFileSync(deskRepoPaths(f.stableRoot, f.paths.repoKey).auditPath, 'utf8')).instanceNonce, 'old');
+});
+
+test('a reused live pid without recorded process identity is untouched', async t => {
+  const f = bridgeFixture(t, { kill: () => {}, processIdentity: () => 'boot:200' });
+  mkdirSync(f.paths.repoDir, { recursive: true });
+  const bytes = JSON.stringify({ pid: 424242, instanceNonce: 'old', startedAt: FIXED_AT });
+  writeFileSync(f.paths.lockPath, bytes);
+  assert.equal((await startBridge(t, f)).outcome, 'unavailable');
+  assert.equal(readFileSync(f.paths.lockPath, 'utf8'), bytes);
+  assert.equal(existsSync(deskRepoPaths(f.stableRoot, f.paths.repoKey).auditPath), false);
+});
+
+test('a replacement live holder during recovery is untouched and unaudited', async t => {
+  let probes = 0;
+  let f;
+  const replacement = JSON.stringify({ pid: 434343, instanceNonce: 'new-live', processIdentity: 'boot:200' });
+  f = bridgeFixture(t, { kill: () => {
+    if (++probes === 2) writeFileSync(f.paths.lockPath, replacement);
+    throw Object.assign(new Error('gone'), { code: 'ESRCH' });
+  } });
+  mkdirSync(f.paths.repoDir, { recursive: true });
+  writeFileSync(f.paths.lockPath, JSON.stringify({ pid: 424242, instanceNonce: 'dead' }));
+  assert.equal((await startBridge(t, f)).outcome, 'unavailable');
+  assert.equal(readFileSync(f.paths.lockPath, 'utf8'), replacement);
+  assert.equal(existsSync(deskRepoPaths(f.stableRoot, f.paths.repoKey).auditPath), false);
+});
+
+test('an unreadable process-start identity cannot authorize reclaim', async t => {
+  const f = bridgeFixture(t, { kill: () => {}, processIdentity: () => null });
+  mkdirSync(f.paths.repoDir, { recursive: true });
+  const bytes = JSON.stringify({ pid: 424242, instanceNonce: 'old', processIdentity: 'boot:100' });
+  writeFileSync(f.paths.lockPath, bytes);
+  assert.equal((await startBridge(t, f)).outcome, 'unavailable');
   assert.equal(f.bridge.state().code, 'RECOVERY_REQUIRED');
-  // The orphaned holder is left for the operator recovery seam verbatim.
-  assert.deepEqual(JSON.parse(readFileSync(f.paths.lockPath, 'utf8')), {
-    pid: 424242,
-    instanceNonce: 'foreign',
-    startedAt: FIXED_AT,
-  });
-  assert.equal(existsSync(f.paths.socketPath), false);
+  assert.equal(readFileSync(f.paths.lockPath, 'utf8'), bytes);
 });
 
 test('a malformed lock holder is RECOVERY_REQUIRED', async t => {
@@ -205,6 +245,8 @@ test('a live foreign holder is never stolen — bounded wait ends desk-busy', as
   assert.equal(f.bridge.state().code, 'CAPABILITY_GAP');
   assert.match(f.bridge.state().reason, /desk-busy/);
   assert.ok(Date.now() - t0 < 10000, 'bounded wait respected');
+  assert.equal(JSON.parse(readFileSync(f.paths.lockPath, 'utf8')).instanceNonce, 'foreign-live');
+  assert.equal(existsSync(deskRepoPaths(f.stableRoot, f.paths.repoKey).auditPath), false);
   assert.equal(existsSync(f.paths.socketPath), false);
 });
 
@@ -1307,4 +1349,38 @@ test('seat fields at the durable maxima stay inside the status wire schema — n
   assert.equal(view.seat.workspaceId, workspaceId);
   assert.equal(view.seat.createCwd, createCwd);
   assert.equal(view.seat.membershipId, row.membershipId);
+});
+
+test('a live lock replacing the orphan during the final identity probe stays untouched', async t => {
+  let probes = 0;
+  let f;
+  const replacement = JSON.stringify({ pid: 434343, instanceNonce: 'live-replacement' });
+  f = bridgeFixture(t, { kill: () => {
+    if (++probes === 3) writeFileSync(f.paths.lockPath, replacement);
+    throw Object.assign(new Error('gone'), { code: 'ESRCH' });
+  } });
+  mkdirSync(f.paths.repoDir, { recursive: true });
+  writeFileSync(f.paths.lockPath, JSON.stringify({ pid: 424242, instanceNonce: 'orphan' }));
+  assert.equal((await startBridge(t, f)).outcome, 'unavailable');
+  assert.equal(readFileSync(f.paths.lockPath, 'utf8'), replacement);
+  assert.equal(existsSync(deskRepoPaths(f.stableRoot, f.paths.repoKey).auditPath), false);
+});
+
+test('the real kernel identity of a live bridge cannot authorize another instance to reclaim it', async t => {
+  const f = await started(t);
+  const bytes = readFileSync(f.paths.lockPath, 'utf8');
+  if (process.platform === 'linux') {
+    assert.match(JSON.parse(bytes).processIdentity, /^[0-9a-f-]{36}:\d+$/);
+  }
+  const other = f.makeBridge();
+  t.after(() => other.stop());
+  await other.start();
+  assert.equal(await other.whenReady(), 'unavailable');
+  assert.equal(other.state().code, 'CAPABILITY_GAP');
+  assert.equal(readFileSync(f.paths.lockPath, 'utf8'), bytes);
+  assert.equal(existsSync(deskRepoPaths(f.stableRoot, f.paths.repoKey).auditPath), false);
+  other.stop();
+  assert.equal(existsSync(f.paths.socketPath), true, 'a refused instance never removes the live holder socket');
+  const socket = await connect(f.paths.socketPath);
+  socket.destroy();
 });

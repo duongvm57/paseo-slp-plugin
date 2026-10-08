@@ -109,7 +109,7 @@ async function drive(t, { stdinChunks, stdin, stdout, onFrame, onConnection, onC
   const { run } = await import(relayUrl().href);
   const sink = stdout ?? (() => { const s = new HeldWritable({ highWaterMark: 65536 }); s.release(); return s; })();
   const adapter = await adapterServer(t, { onFrame, onConnection });
-  const source = stdin ?? Readable.from(stdinChunks ?? []);
+  const source = stdin ?? new Readable({ read() {} });
   const bridgeSockets = [];
   const stderrLines = [];
   const pending = run({
@@ -129,6 +129,12 @@ async function drive(t, { stdinChunks, stdin, stdout, onFrame, onConnection, onC
     }),
     selfSha256: 'f'.repeat(64),
   });
+  await until(() => bridgeSockets.length === 1, 'the initial connection');
+  await new Promise(resolve => setTimeout(resolve, 20));
+  if (!stdin) {
+    for (const chunk of stdinChunks ?? []) source.push(chunk);
+    source.push(null);
+  }
   return { pending, stdin: source, stdout: sink, adapter, bridgeSockets, stderrLines };
 }
 
@@ -239,8 +245,7 @@ test('a sink that dies before drain does not hang the relay', { timeout: 10000 }
     stdout,
     onConnection: () => {
       generation += 1;
-      // Fresh frames on the reconnected socket keep echoes flowing into the
-      // dead sink, so the second close spends the reconnect budget.
+      // If a reconnect races the destroyed sink, keep the adapter responsive.
       if (generation === 2) for (let i = 50; i < 53; i += 1) manualStdin.push(frame(i));
     },
     onFrame: (socket, line) => socket.write(`${line}\n`),
@@ -248,9 +253,8 @@ test('a sink that dies before drain does not hang the relay', { timeout: 10000 }
   for (let i = 0; i < 50; i += 1) manualStdin.push(frame(i));
   await until(() => stdout.frames.length > 0, 'frames to reach the held stdout');
   stdout.destroy();
-  // stdin never ends and the adapter keeps echoing, so the relay must give
-  // up the session typed instead of waiting on a drain that never comes —
-  // the reconnect budget is spent by the second dead-sink close.
+  // A dead stdout is terminal even with open stdin; no reconnect can
+  // restore the client's vanished output channel.
   assert.equal(await pending, 1, 'the relay exits typed instead of waiting for a drain that never comes');
 });
 
@@ -286,7 +290,7 @@ test('mid-session drop reconnects once, keeps ordering, then ends cleanly', { ti
 });
 
 for (const input of ['open', 'EOF', 'partial frame']) {
-  test(`reconnect preserves the unsent chunk remainder with stdin ${input}`, { timeout: 15000 }, async t => {
+  test(`reconnect forwards the held chunk remainder without replay, stdin ${input}`, { timeout: 15000 }, async t => {
     const count = 2000;
     const tail = frame(count);
     const cut = Math.floor(tail.length / 2);
@@ -294,13 +298,17 @@ for (const input of ['open', 'EOF', 'partial frame']) {
       ...Array.from({ length: count }, (_, i) => frame(i, 'y'.repeat(1000))),
       ...(input === 'partial frame' ? [tail.subarray(0, cut)] : []),
     ]);
-    const source = input === 'EOF' ? Readable.from([chunk]) : new Readable({ read() {} });
+    let releaseInput;
+    const inputReady = new Promise(resolve => { releaseInput = resolve; });
+    const source = input === 'EOF' ? Readable.from((async function* () {
+      await inputReady; yield chunk;
+    })()) : new Readable({ read() {} });
     const written = [];
     const receivedAfterReconnect = [];
     let generation = 0;
     let ended = false;
     source.once('end', () => { ended = true; });
-    const { pending, stdin, bridgeSockets, adapter } = await drive(t, {
+    const { pending, stdin, stdout, bridgeSockets, adapter } = await drive(t, {
       stdin: source,
       onConnect: (socket, cycle) => {
         // Observe every real write before input starts. Keep the original
@@ -324,48 +332,24 @@ for (const input of ['open', 'EOF', 'partial frame']) {
         if (socket === adapter.connections[1]) receivedAfterReconnect.push(idOf(line));
       },
     });
-    if (input !== 'EOF') source.push(chunk);
+    if (input === 'EOF') releaseInput();
+    else source.push(chunk);
     await until(() => stdin.isPaused() && bridgeSockets[0]?.writableLength > 0, 'a full socket with a buffered stdin remainder');
     const sentBeforeDrop = written.length;
     assert.ok(sentBeforeDrop > 0 && sentBeforeDrop < count, 'complete requests remain unsent in the splitter');
-    if (input === 'EOF') assert.equal(ended, true, 'EOF arrived while the splitter was paused');
     bridgeSockets[0].destroy();
     assert.equal(await pending, 0);
-    assert.equal(generation, 2, 'the buffered remainder requires a reconnect even after EOF');
+    if (input === 'EOF') assert.equal(ended, true, 'EOF is consumed after the paused remainder is answered');
+    assert.equal(generation, 2);
     const expected = Array.from({ length: count + (input === 'EOF' ? 0 : 1) }, (_, i) => i);
-    assert.deepEqual(written.map(row => row.id), expected, 'every request is written exactly once; uncertain old writes are never replayed');
-    assert.deepEqual(receivedAfterReconnect, expected.slice(sentBeforeDrop), 'every previously unsent request reaches the new adapter in order');
+    assert.deepEqual(written.map(row => row.id), expected, 'accepted writes are not replayed; the unsent remainder is forwarded after ACK');
+    assert.deepEqual(receivedAfterReconnect, expected.slice(sentBeforeDrop));
+    assert.equal(new Set(stdout.ids).size, expected.length);
+    assert.equal(stdout.ids.length, expected.length, 'every unanswered request gets uncertainty once');
+    const errors = stdout.text.trim().split('\n').map(JSON.parse);
+    assert.ok(errors.every(r => r.error.data.slpCode === 'EXECUTION_UNKNOWN'));
   });
 }
-
-test('unsent EOF requests fail when the reconnect budget is exhausted', { timeout: 15000 }, async t => {
-  const count = 2000;
-  const chunk = Buffer.concat(Array.from({ length: count }, (_, i) => frame(i, 'y'.repeat(1000))));
-  const source = Readable.from([chunk]);
-  let ended = false;
-  let written = 0;
-  source.once('end', () => { ended = true; });
-  const { pending, stdin, bridgeSockets, stderrLines } = await drive(t, {
-    stdin: source,
-    onConnect: socket => {
-      const write = socket.write;
-      socket.write = function (bytes, ...args) {
-        if ('id' in JSON.parse(bytes.toString('utf8'))) written += 1;
-        return write.call(this, bytes, ...args);
-      };
-    },
-    onConnection: socket => socket.pause(),
-  });
-  for (const cycle of [0, 1]) {
-    await until(() => stdin.isPaused() && bridgeSockets[cycle]?.writableLength > 0, `socket ${cycle + 1} to fill with unsent EOF requests`);
-    assert.equal(ended, true, 'EOF occurred before the socket drop');
-    assert.ok(written > 0 && written < count, 'complete requests remain unwritten before the socket drop');
-    bridgeSockets[cycle].destroy();
-  }
-  assert.equal(await pending, 1, 'unforwarded requests must never become a successful EOF exit');
-  assert.equal(bridgeSockets.length, 2, 'only one reconnect is allowed');
-  assert.ok(stderrLines.some(line => JSON.parse(line).code === 'CAPABILITY_GAP' && line.includes('reconnect budget is spent')));
-});
 
 test('reconnect preserves overflow swallowing across a paused stdin frame', { timeout: 10000 }, async t => {
   const source = new Readable({ read() {} });
@@ -393,7 +377,7 @@ test('reconnect preserves overflow swallowing across a paused stdin frame', { ti
   stdout.release();
   assert.equal(await pending, 0);
   assert.deepEqual(received, [1], 'the rejected frame tail is swallowed on the new connection');
-  assert.equal(stdout.ids.length, 1, 'overflow is rejected exactly once across reconnect');
+  assert.deepEqual(stdout.ids, [null, 1], 'overflow and the unanswered request each get one error');
 });
 
 test('the terminal boundary preserves pending stdout bytes before run() returns', { timeout: 10000 }, async t => {
@@ -424,4 +408,99 @@ test('cleanup removes the relay listeners and restores the paused source', { tim
   assert.equal(bridgeSockets[0].listenerCount('data'), 0, 'no socket data listener survives the session');
   assert.equal(stdout.listenerCount('drain'), 0, 'no drain listener survives the session');
   assert.equal(bridgeSockets[0].destroyed, true, 'the bridge socket is torn down');
+});
+
+test('disconnected requests obey stdout backpressure, raw caps, diagnostic cap and EOF flush', { timeout: 10000 }, async t => {
+  const { run } = await import(relayUrl().href);
+  t.mock.timers.enable({ apis: ['Date', 'setTimeout'], now: 0 });
+  const stdout = new HeldWritable({ highWaterMark: 16 });
+  const source = new Readable({ read() {} });
+  const diagnostics = [];
+  const pending = run({
+    env: { SLP_DESK_SOCK: '/tmp/slp-offline-flow.sock', SLP_DESK_HANDLE: HANDLE },
+    platform: 'linux', stdin: source, stdout,
+    stderr: { write: line => diagnostics.push(line) },
+    connect: async () => { throw new Error('offline'); }, selfSha256: 'f'.repeat(64),
+  });
+  const count = 3500;
+  source.push(Buffer.concat(Array.from({ length: count }, (_, i) => frame(i))));
+  await new Promise(resolve => setImmediate(resolve));
+  for (let elapsed = 0; elapsed < 11500; elapsed += 100) {
+    t.mock.timers.tick(100);
+    await new Promise(resolve => setImmediate(resolve));
+  }
+  assert.ok(source.isPaused() && stdout.frames.length === 1, 'disconnected stdin pauses behind stdout after the startup hold expires');
+  assert.ok(stdout.maxQueued <= 16 + 512);
+  stdout.release();
+  for (let i = 0; i < 40; i++) source.push(Buffer.concat([Buffer.alloc(262145, 0x78), Buffer.from('\n')]));
+  source.push(null);
+  assert.equal(await pending, 0);
+  assert.deepEqual(stdout.ids.slice(0, count), Array.from({ length: count }, (_, i) => i));
+  assert.equal(stdout.ids.length, count + 40);
+  assert.ok(stdout.frames.every(f => f.length <= 262145));
+  assert.ok(diagnostics.length <= 32);
+  assert.equal(stdout.queued, 0);
+  assert.equal(source.listenerCount('data'), 0);
+  assert.equal(source.listenerCount('end'), 0);
+  assert.equal(source.listenerCount('close'), 0);
+});
+
+test('a held stdout stays bounded across repeated socket drops', { timeout: 10000 }, async t => {
+  const source = new Readable({ read() {} });
+  const stdout = new HeldWritable({ highWaterMark: 16 });
+  const { pending, bridgeSockets } = await drive(t, { stdin: source, stdout });
+  source.push(Buffer.from('{bad\n'.repeat(100)));
+  await until(() => source.isPaused() && stdout.frames.length === 1, 'the first error to hold stdout');
+  const limit = stdout.writableHighWaterMark + stdout.frames[0].length;
+  try {
+    for (let cycle = 0; cycle < 3; cycle++) {
+      bridgeSockets[cycle].destroy();
+      await until(() => bridgeSockets.length === cycle + 2, 'a new socket while stdout is held');
+      await new Promise(resolve => setTimeout(resolve, 20));
+      assert.ok(stdout.queued <= limit, `socket cycling must not add frames above the stdout bound: ${stdout.queued} > ${limit}`);
+    }
+  } finally {
+    stdout.release();
+    source.push(null);
+    await pending;
+  }
+  assert.equal(stdout.ids.length, 100, 'all buffered malformed requests eventually get exactly one reply');
+});
+
+test('stdin close during drop cleanup is observed when offline listeners re-attach', { timeout: 10000 }, async t => {
+  const source = new Readable({ read() {} });
+  const stdout = new HeldWritable({ highWaterMark: 16 });
+  let received = false;
+  const { pending, bridgeSockets } = await drive(t, {
+    stdin: source, stdout, onFrame: () => { received = true; },
+  });
+  source.push(frame('in-flight'));
+  await until(() => received, 'a request accepted by the socket');
+  bridgeSockets[0].destroy();
+  await until(() => stdout.frames.length === 1 && source.listenerCount('close') === 0,
+    'drop cleanup to hold its uncertainty reply with stdin listeners detached');
+  const closed = new Promise(resolve => source.once('close', resolve));
+  source.destroy();
+  await closed;
+  assert.equal(source.closed, true);
+  stdout.release();
+  let timer;
+  try {
+    const code = await Promise.race([
+      pending,
+      new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('relay kept reconnecting after lost stdin close')), 1000); }),
+    ]);
+    assert.equal(code, 0);
+    assert.equal(bridgeSockets.length, 1, 'closed stdin must not launch another connection');
+    assert.equal(stdout.ids.length, 1);
+    assert.equal(JSON.parse(stdout.text).error.data.slpCode, 'EXECUTION_UNKNOWN');
+    assert.equal(source.listenerCount('end'), 0);
+    assert.equal(source.listenerCount('close'), 0);
+  } finally {
+    clearTimeout(timer);
+    // Failure-only resource release for the pre-fix relay: it missed the
+    // real close above, so notify its newly attached listener before cleanup.
+    source.emit('close');
+    await pending;
+  }
 });

@@ -17,9 +17,10 @@
 // Lifecycle: contribute() calls start(); cleanup calls stop(). The lock is
 // O_EXCL under repos/<reserved>/lock carrying {pid, instanceNonce,
 // startedAt}; a live foreign holder is never stolen from — bounded wait,
-// then a typed desk-busy gap. A dead/undetermined holder is
-// RECOVERY_REQUIRED (operator recovery via the same seam as repo locks),
-// never auto-unlinked. stop() closes connections, closes the server,
+// then a typed desk-busy gap. A proven-dead bridge instance is reclaimed
+// through the serialized, audited recovery seam; identity doubt remains
+// RECOVERY_REQUIRED. Repository locks retain operator-only recovery.
+// stop() closes connections, closes the server,
 // unlinks the socket and releases the lock — in that order.
 
 import { z } from "zod";
@@ -53,7 +54,8 @@ import {
   type MembershipValue,
 } from "./desk-store.ts";
 import { assertRealComponents, ensurePrivateDirectory } from "./kept-files.ts";
-import { classifyLockHolderProcess, parseLockHolder, type LockHolder } from "./runtime/lock-holder.ts";
+import { classifyLockHolderProcess, parseLockHolder, readProcessIdentity, type LockHolder, type LockHolderProcess } from "./runtime/lock-holder.ts";
+import { recoverDeskLockAsync } from "./runtime/desk-recovery.ts";
 import { detectDaemonHome } from "./daemon-home.ts";
 import { sha256Hex } from "./config-view.ts";
 import type { Journal } from "./journal.ts";
@@ -476,6 +478,8 @@ export interface DeskBridgeDeps {
   now?: () => Date;
   uuid?: () => string;
   kill?: (pid: number, signal?: number) => void;
+  /** Kernel boot/start identity; null means this host cannot prove reuse. */
+  processIdentity?: (pid: number) => string | null;
   warn?: (line: string) => void;
   /** P3-a observed capture — tests substitute a deterministic double; the
    *  default spawns the bound runtime's snapshot under 60s/32MiB. */
@@ -641,6 +645,7 @@ export function createDeskBridge(deps: DeskBridgeDeps) {
   let store: DeskStore | null = null;
   let server: Server | null = null;
   let lockHeld = false;
+  let socketOwned = false;
   let stopped = false;
   const connections = new Set<Socket>();
 
@@ -658,9 +663,16 @@ export function createDeskBridge(deps: DeskBridgeDeps) {
     }
   };
 
-  // Bridge readiness requires a successful probe; EPERM keeps it closed.
-  // Store/recovery instead preserve an EPERM holder as potentially live.
   const pidAlive = (pid: number): boolean => classifyLockHolderProcess(pid, kill) === "alive";
+  const processIdentity = deps.processIdentity ?? readProcessIdentity;
+  const holderProcess = (holder: LockHolder): LockHolderProcess => {
+    const status = classifyLockHolderProcess(holder.pid, kill);
+    if (status !== "alive" || holder.processIdentity === undefined) return status;
+    let identity: string | null;
+    try { identity = processIdentity(holder.pid); } catch { return "undetermined"; }
+    if (identity === null) return "undetermined";
+    return identity === holder.processIdentity ? "alive" : "esrch";
+  };
 
   // ---------------------------------------------------------------------
   // stable-root provenance (D7) — receipt → verified launch set → the
@@ -728,10 +740,12 @@ export function createDeskBridge(deps: DeskBridgeDeps) {
     for (;;) {
       let fd: number | null = null;
       try {
+        const selfIdentity = processIdentity(process.pid);
         fd = openSync(lockPath, "wx", 0o600);
         writeSync(
           fd,
-          JSON.stringify({ pid: process.pid, instanceNonce, startedAt: now().toISOString() }) + "\n",
+          JSON.stringify({ pid: process.pid, instanceNonce, startedAt: now().toISOString(),
+            ...(selfIdentity !== null ? { processIdentity: selfIdentity } : {}) }) + "\n",
         );
         fsyncSync(fd);
         lockHeld = true;
@@ -768,13 +782,18 @@ export function createDeskBridge(deps: DeskBridgeDeps) {
           reason: "bridge lock holder record is malformed — operator recovery required",
         };
       }
-      if (!pidAlive(holder.pid)) {
+      const processState = holderProcess(holder);
+      if (processState === "esrch" && stableRoot !== null && paths !== null) {
+        const recovery = await recoverDeskLockAsync({
+          stableRoot, repoKey: paths.repoKey, kill, now, holderProcess,
+        }, { actorKey: "plugin:desk-bridge" });
+        if (recovery.ok) continue; // O_EXCL still decides who binds next.
+        return { ok: false, code: recovery.code, reason: recovery.message };
+      }
+      if (processState !== "alive") {
         return {
-          ok: false,
-          code: "RECOVERY_REQUIRED",
-          reason:
-            `bridge lock held by dead pid ${holder.pid} — operator recovery ` +
-            "required via the desk recovery seam; the bridge never steals a lock",
+          ok: false, code: "RECOVERY_REQUIRED",
+          reason: `bridge lock held by dead pid or uncertain identity ${holder.pid} — operator recovery required`,
         };
       }
       if (Date.now() >= deadline) {
@@ -2063,8 +2082,9 @@ export function createDeskBridge(deps: DeskBridgeDeps) {
         await new Promise<void>(resolve => server!.close(() => resolve()));
         server = null;
       }
-      if (paths !== null) {
+      if (paths !== null && socketOwned) {
         try { unlinkSync(paths.socketPath); } catch { /* never created */ }
+        socketOwned = false;
       }
       releaseLock();
       state = { kind: "unavailable", code: "CAPABILITY_GAP", reason: "desk bridge stopped" };
@@ -2112,6 +2132,7 @@ export function createDeskBridge(deps: DeskBridgeDeps) {
         server!.once("error", reject);
         server!.listen(paths!.socketPath, () => {
           server!.removeListener("error", reject);
+          socketOwned = true;
           resolve();
         });
       });
@@ -2121,6 +2142,8 @@ export function createDeskBridge(deps: DeskBridgeDeps) {
       } catch (error) {
         await new Promise<void>(resolve => server!.close(() => resolve()));
         server = null;
+        try { unlinkSync(paths.socketPath); } catch { /* already gone */ }
+        socketOwned = false;
         releaseLock();
         state = {
           kind: "unavailable",
@@ -2153,8 +2176,9 @@ export function createDeskBridge(deps: DeskBridgeDeps) {
     const srv = server;
     server = null;
     const finish = () => {
-      if (paths !== null) {
+      if (paths !== null && socketOwned) {
         try { unlinkSync(paths.socketPath); } catch { /* already gone */ }
+        socketOwned = false;
       }
       releaseLock();
       if (state.kind === "listening" || state.kind === "starting") {

@@ -64,7 +64,7 @@ export function bridgeFixture(t, homePrefix, pin, over = {}) {
     }),
   };
   const payload = over.payload ?? { files: [{ path: 'bin/slp-desk-mcp.mjs', sha256: pin }] };
-  const bridge = createDeskBridge({
+  const deps = {
     journal,
     launchers,
     payload,
@@ -80,14 +80,16 @@ export function bridgeFixture(t, homePrefix, pin, over = {}) {
     checkProbe: over.checkProbe,
     checkEnvironment: over.checkEnvironment,
     kill: over.kill,
+    processIdentity: over.processIdentity,
     platform: over.platform,
     now: over.now,
     uuid: over.uuid,
     warn: line => warnings.push(line),
-  });
+  };
+  const bridge = createDeskBridge(deps);
   return {
     home, stableRoot, launchSetSha, candidateSha, runtimePath,
-    bridge, warnings, paseoRef, paths: deskBridgePaths(stableRoot),
+    bridge, makeBridge: () => createDeskBridge(deps), warnings, paseoRef, paths: deskBridgePaths(stableRoot),
   };
 }
 

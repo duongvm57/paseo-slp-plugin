@@ -24,8 +24,11 @@
 //  - Windows has no usable transport — startup emits a typed
 //    CAPABILITY_GAP diagnostic and exits non-zero (no fake named-pipe
 //    adapter);
-//  - connect failures and mid-session drops retry on a bounded backoff
-//    budget; exhaustion exits non-zero with a typed diagnostic;
+//  - connect failures and mid-session drops reconnect with capped backoff
+//    while stdin stays open; every connection re-sends the pinned hello;
+//    startup holds stdin through its bounded dial/hello budget; drops hold
+//    it for 700 ms before CAPABILITY_GAP errors, while accepted unanswered
+//    requests get EXECUTION_UNKNOWN, never automatic replay;
 //  - stderr diagnostics are single-line JSON records, count-capped so a
 //    broken peer can never flood the host log.
 //
@@ -47,9 +50,12 @@ const LINE_CAP = 262144;
 const HANDLE_CAP = 512;
 const SOCK_CAP = 4096;
 const MAX_DIAGNOSTICS = 32;
-const CONNECT_ATTEMPTS = 5;
+const MAX_IN_FLIGHT = 4096;
+const MAX_IN_FLIGHT_ID_BYTES = 1048576;
 const CONNECT_BACKOFF_MS = [100, 200, 400, 800, 1600];
 const HELLO_ACK_TIMEOUT_MS = 10000;
+const INITIAL_HOLD_MS = 11500;
+const RECONNECT_HOLD_MS = CONNECT_BACKOFF_MS.slice(0, 3).reduce((a, b) => a + b, 0); // 700 ms
 
 /** One bounded, typed stderr record. Diagnostics never carry frame bytes,
  *  handle material or filesystem secrets — code + message only. */
@@ -100,6 +106,10 @@ function idOf(line) {
 function lineSplitter(onLine, onOverflow, state) {
   let pending = state?.pending ?? Buffer.alloc(0);
   let dropping = state?.dropping ?? false;
+  // A prefix that expired offline keeps its error disposition across ACK,
+  // including a partial frame completed by later input. This is a byte
+  // boundary, not another queue of request bodies.
+  let rejectBytes = state?.rejectBytes ?? 0;
   const step = () => {
     let start = 0;
     for (;;) {
@@ -107,15 +117,18 @@ function lineSplitter(onLine, onOverflow, state) {
       if (nl === -1) {
         if (dropping) {
           pending = Buffer.alloc(0);
+          rejectBytes = 0;
           return true;
         }
         if (pending.length - start > LINE_CAP) {
           const wait = onOverflow(pending.length - start) === 'wait';
           dropping = true;
           pending = Buffer.alloc(0);
+          rejectBytes = 0;
           return !wait;
         }
         pending = pending.subarray(start);
+        rejectBytes = Math.max(0, rejectBytes - start);
         return true;
       }
       if (dropping) {
@@ -129,10 +142,12 @@ function lineSplitter(onLine, onOverflow, state) {
       if (line.length > LINE_CAP) {
         if (onOverflow(line.length) === 'wait') {
           pending = pending.subarray(nl + 1);
+          rejectBytes = Math.max(0, rejectBytes - nl - 1);
           return false;
         }
-      } else if (onLine(line) === 'wait') {
+      } else if (onLine(line, rejectBytes > start) === 'wait') {
         pending = pending.subarray(nl + 1);
+        rejectBytes = Math.max(0, rejectBytes - nl - 1);
         return false;
       }
       start = nl + 1;
@@ -145,9 +160,10 @@ function lineSplitter(onLine, onOverflow, state) {
     },
     resume: step,
     takeState() {
-      const state = { pending, dropping };
+      const state = { pending, dropping, rejectBytes };
       pending = Buffer.alloc(0);
       dropping = false;
+      rejectBytes = 0;
       return state;
     },
   };
@@ -249,6 +265,12 @@ export async function run({ env, platform, stdin, stdout, stderr, connect, selfS
   let stdoutPendingFlushes = 0;
   let stdoutIdleCallback = null;
   const writeStdout = (bytes, resume) => {
+    // A maximal request ID can make even a generated rejection exceed the
+    // response cap. Replace it exactly as an oversized adapter response.
+    if (Buffer.byteLength(bytes) > LINE_CAP + 1) {
+      diag('RESPONSE_TOO_LARGE', 'generated reply exceeds the raw response cap');
+      bytes = errorFrame(null, `RESPONSE_TOO_LARGE: response frame exceeds ${LINE_CAP} bytes`, 'RESPONSE_TOO_LARGE') + '\n';
+    }
     stdoutPendingFlushes += 1;
     return boundedWrite(stdout, bytes, resume, () => {
       stdoutPendingFlushes = Math.max(0, stdoutPendingFlushes - 1);
@@ -272,29 +294,212 @@ export async function run({ env, platform, stdin, stdout, stderr, connect, selfS
     return code;
   };
 
-  // Only bytes not yet handed to socket.write survive a reconnect. A write
-  // accepted by the old socket may already have executed at the desk and
-  // must never be replayed. EOF belongs to stdin, not the socket session.
+  // Accepted socket writes are never replayed. Keep only bounded request IDs
+  // so a drop can answer uncertainty without retaining request bodies.
+  const inFlight = new Map();
+  let idBytes = 0;
   let stdinState;
   let stdinEnded = false;
-  for (let cycle = 0; ; cycle += 1) {
-    // ---- connect + handshake -----------------------------------------
-    let socket = null;
-    for (let attempt = 0; attempt < CONNECT_ATTEMPTS; attempt += 1) {
-      if (attempt > 0) await sleep(CONNECT_BACKOFF_MS[Math.min(attempt - 1, CONNECT_BACKOFF_MS.length - 1)]);
-      try {
-        socket = await connect(sockPath);
-        break;
-      } catch (error) {
-        diag('CAPABILITY_GAP', `desk socket connect failed (${attempt + 1}/${CONNECT_ATTEMPTS}): ${error.message}`);
+  let offline = null;
+  let attempt = 0;
+  let initialConnecting = true;
+  let holdUntil = Date.now() + INITIAL_HOLD_MS;
+  const failInitial = reason => {
+    if (!initialConnecting) return;
+    initialConnecting = false;
+    holdUntil = 0;
+    if (reason) diag('CAPABILITY_GAP', reason);
+    offline?.releaseHold();
+  };
+
+  const startOffline = () => {
+    if (offline !== null) return;
+    let detached = false;
+    let paused = false;
+    let holding = Date.now() < holdUntil;
+    let holdTimer;
+    let inputAttached = false;
+    stdin.pause();
+    let terminalReason = null;
+    const waiters = new Set();
+    const done = reason => {
+      if (terminalReason !== null) return;
+      terminalReason = reason;
+      for (const waiter of waiters) waiter(reason);
+      waiters.clear();
+    };
+    const pauseInput = () => { paused = true; stdin.pause(); };
+    const output = bytes => {
+      if (writeStdout(bytes, reason => {
+        if (detached) return;
+        if (reason === 'error') { done('stdout-dead'); return; }
+        resumeInput();
+      }) === 'full') { pauseInput(); return 'wait'; }
+    };
+    const heldRemainder = (stdinState?.pending.length ?? 0) > 0;
+    const splitter = lineSplitter(line => {
+      const text = decodeFrame(line);
+      let value;
+      try { if (text === null) throw new Error(); value = JSON.parse(text); }
+      catch { return output(errorFrame(null, 'slp-desk: malformed NDJSON frame') + '\n'); }
+      if (value && typeof value === 'object' && 'id' in value && typeof value.method === 'string') {
+        return output(errorFrame(value.id, 'CAPABILITY_GAP: desk transport is disconnected', 'CAPABILITY_GAP') + '\n');
       }
+      // Notifications have no response id and are never replayed.
+    }, () => {
+      diag('REQUEST_TOO_LARGE', `stdin frame over the ${LINE_CAP}-byte cap — dropped`);
+      return output(errorFrame(null, `REQUEST_TOO_LARGE: request frame exceeds ${LINE_CAP} bytes`, 'REQUEST_TOO_LARGE') + '\n');
+    }, stdinState);
+    stdinState = undefined;
+    const resumeInput = () => {
+      if (detached) return;
+      if (holding) {
+        pauseInput();
+        // Destroy/close is terminal even if a Readable retains unread bytes.
+        // Plain EOF with held bytes waits for ACK or expiry to preserve them.
+        if (stdin.destroyed || stdin.closed || (stdinEnded && !heldRemainder &&
+            (stdin.readableLength ?? 0) === 0)) done('eof');
+        return;
+      }
+      if (!inputAttached) { inputAttached = true; stdin.on('data', data); }
+      if (stdout.writableNeedDrain) { pauseInput(); return; }
+      paused = false;
+      if (splitter.resume() === false) { paused = true; return; }
+      if (stdinEnded) done('eof');
+      else stdin.resume();
+    };
+    const data = chunk => { if (splitter.feed(chunk) === false) pauseInput(); };
+    const end = () => { stdinEnded = true; if (holding || !paused) resumeInput(); };
+    stdin.once('end', end);
+    stdin.once('close', end);
+    // Drop cleanup awaits stdout with no stdin listeners. A close/end in
+    // that window is durable stream state, even though its event is gone.
+    stdinEnded ||= stdin.readableEnded || stdin.destroyed || stdin.closed;
+    const outputDead = () => done('stdout-dead');
+    stdout.on('drain', resumeInput);
+    stdout.once('error', outputDead);
+    stdout.once('close', outputDead);
+    const releaseHold = () => {
+      if (detached || !holding) return;
+      holding = false;
+      clearTimeout(holdTimer);
+      resumeInput();
+    };
+    offline = {
+      releaseHold,
+      subscribeEnd(waiter) {
+        if (terminalReason !== null) waiter(terminalReason);
+        else waiters.add(waiter);
+        return () => waiters.delete(waiter);
+      },
+      detach(connected = false) {
+        detached = true;
+        clearTimeout(holdTimer);
+        stdin.pause();
+        stdin.removeListener('data', data);
+        stdin.removeListener('end', end);
+        stdin.removeListener('close', end);
+        stdout.removeListener('drain', resumeInput);
+        stdout.removeListener('error', outputDead);
+        stdout.removeListener('close', outputDead);
+        stdinState = splitter.takeState();
+        if (connected && !holding) {
+          // Expired errors may still be behind a full stdout. Capture only
+          // the already-buffered native prefix while stdin remains paused;
+          // a late ACK cannot change those frames into socket writes.
+          const buffered = stdin.readableLength ?? 0;
+          const chunks = [stdinState.pending];
+          if (stdin.readableObjectMode) {
+            for (let n = 0; n < buffered; n++) {
+              const chunk = stdin.read();
+              if (chunk === null) break;
+              chunks.push(chunk);
+            }
+          } else if (buffered > 0) {
+            const chunk = stdin.read(buffered);
+            if (chunk !== null) chunks.push(chunk);
+          }
+          if (chunks.length > 1) stdinState.pending = Buffer.concat(chunks);
+          stdinState.rejectBytes = stdinState.pending.length;
+        }
+        offline = null;
+      },
+    };
+    if (holding) holdTimer = setTimeout(() => {
+      // Startup expiry is terminal for buffering, not for the relay process.
+      if (initialConnecting) failInitial(`initial desk connection hold budget spent after ${INITIAL_HOLD_MS}ms`);
+      else releaseHold();
+    }, Math.max(0, holdUntil - Date.now()));
+    resumeInput();
+  };
+  // Remove each EOF subscription after a dial/backoff/hello settles. Racing
+  // repeatedly against one unresolved EOF promise would retain callbacks for
+  // the entire outage, growing memory even when no frames arrive.
+  const waitOffline = (promise, budgetMs) => new Promise((resolve, reject) => {
+    let settled = false;
+    let timer;
+    let unsubscribe = () => {};
+    const finish = (value, failed = false) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      unsubscribe();
+      if (failed) reject(value); else resolve(value);
+    };
+    unsubscribe = offline.subscribeEnd(reason => finish({ reason }));
+    promise.then(value => finish({ value }), error => finish(error, true));
+    if (!settled && budgetMs !== undefined) timer = setTimeout(() => finish({ timedOut: true }), budgetMs);
+  });
+  const waitStdoutDrain = () => new Promise(resolve => {
+    const finish = () => {
+      stdout.removeListener('drain', finish);
+      stdout.removeListener('error', finish);
+      stdout.removeListener('close', finish);
+      resolve();
+    };
+    stdout.once('drain', finish);
+    stdout.once('error', finish);
+    stdout.once('close', finish);
+    if (!stdout.writableNeedDrain || stdout.destroyed || stdout.closed) finish();
+  });
+  startOffline();
+  for (;;) {
+    if (stdout.destroyed || stdout.closed) { offline?.detach(); return finish(1); }
+    // Hold stdin during startup and the fixed reconnect grace period. The
+    // source pipe/native buffer and carried splitter remainder bound memory;
+    // expiry resumes the same ordered stream through typed error handling.
+    if (attempt > 0) {
+      startOffline();
+      const waited = await waitOffline(sleep(CONNECT_BACKOFF_MS[Math.min(attempt - 1, CONNECT_BACKOFF_MS.length - 1)]));
+      if (waited.reason) { offline.detach(); return finish(waited.reason === 'eof' ? 0 : 1); }
     }
-    if (socket === null) {
-      diag('CAPABILITY_GAP', 'desk socket unreachable after the bounded retry budget — desk-busy or adapter down');
-      return 1;
+    let socket;
+    try {
+      if (offline) {
+        // If stdin closes while a dial is outstanding, tear down its eventual
+        // socket too; that late completion must never outlive the relay.
+        let abandoned = false;
+        let dialSocket;
+        const dial = connect(sockPath).then(s => { dialSocket = s; if (abandoned) s.destroy(); return s; });
+        const dialBudget = initialConnecting
+          ? Math.max(1, Math.min(HELLO_ACK_TIMEOUT_MS, holdUntil - Date.now()))
+          : HELLO_ACK_TIMEOUT_MS;
+        const result = await waitOffline(dial, dialBudget);
+        if (result.timedOut) {
+          abandoned = true; dialSocket?.destroy();
+          throw new Error('desk socket dial budget spent');
+        }
+        if (result.reason) { abandoned = true; dialSocket?.destroy(); offline.detach(); return finish(result.reason === 'eof' ? 0 : 1); }
+        socket = result.value;
+      } else socket = await connect(sockPath);
+    } catch (error) {
+      diag('CAPABILITY_GAP', `desk socket connect failed: ${error.message}`);
+      attempt = Math.min(attempt + 1, CONNECT_BACKOFF_MS.length);
+      startOffline();
+      continue;
     }
 
-    const helloResult = await new Promise(resolve => {
+    const helloPending = new Promise(resolve => {
       const pending = [];
       let done = false;
       const timer = setTimeout(() => finish({ ok: false, code: 'CAPABILITY_GAP', reason: 'hello ack timeout' }), HELLO_ACK_TIMEOUT_MS);
@@ -315,6 +520,7 @@ export async function run({ env, platform, stdin, stdout, stderr, connect, selfS
           if (joined.length > LINE_CAP) finish({ ok: false, code: 'RESPONSE_TOO_LARGE', reason: 'hello ack over the line cap' });
           return;
         }
+        if (nl > LINE_CAP) return finish({ ok: false, code: 'RESPONSE_TOO_LARGE', reason: 'hello ack over the line cap' });
         const rest = joined.subarray(nl + 1);
         let ack;
         const ackText = decodeFrame(joined.subarray(0, nl));
@@ -338,10 +544,28 @@ export async function run({ env, platform, stdin, stdout, stderr, connect, selfS
       });
     });
 
+    let helloResult;
+    if (offline) {
+      const result = await waitOffline(helloPending, initialConnecting ? Math.max(1, holdUntil - Date.now()) : undefined);
+      if (result.timedOut) {
+        socket.destroy();
+        helloResult = { ok: false, code: 'CAPABILITY_GAP', reason: 'initial dial/hello budget spent' };
+      } else if (result.reason) {
+        socket.destroy(); offline.detach();
+        return finish(result.reason === 'eof' ? 0 : 1);
+      }
+      else helloResult = result.value;
+    } else helloResult = await helloPending;
+
     if (!helloResult.ok) {
+      // A closed/failed/timed-out transport can recover during startup.
+      // Malformed or over-cap hello replies are permanent handshake failures.
+      if (helloResult.code !== 'CAPABILITY_GAP') failInitial();
       diag(helloResult.code ?? 'CAPABILITY_GAP', `desk handshake failed: ${helloResult.reason}`);
       socket.destroy();
-      return finish(1);
+      attempt = Math.min(attempt + 1, CONNECT_BACKOFF_MS.length);
+      startOffline();
+      continue;
     }
     const ack = helloResult.ack;
     if (
@@ -354,10 +578,17 @@ export async function run({ env, platform, stdin, stdout, stderr, connect, selfS
       const message = ack && typeof ack === 'object' && ack.error && typeof ack.error === 'object'
         ? String(ack.error.message ?? 'desk rejected the handshake')
         : 'desk rejected the handshake';
+      failInitial();
       diag(code, message);
       socket.destroy();
-      return finish(1);
+      attempt = Math.min(attempt + 1, CONNECT_BACKOFF_MS.length);
+      startOffline();
+      continue;
     }
+    offline?.detach(true);
+    initialConnecting = false;
+    holdUntil = 0;
+    attempt = 0;
 
     // ---- relay --------------------------------------------------------
     // Both directions are flow-controlled: the producer (stdin or socket)
@@ -386,10 +617,14 @@ export async function run({ env, platform, stdin, stdout, stderr, connect, selfS
         if (!socket.destroyed) socket.pause();
       }
     };
-    const toStdout = (bytes, resume) => writeStdout(bytes, reason => {
-      if (reason === 'error') socket.destroy();
-      else resume();
-    });
+    const toStdout = (bytes, resume) => {
+      const state = writeStdout(bytes, reason => {
+        if (reason === 'error') socket.destroy();
+        else resume();
+      });
+      if (state === 'full') pauseStdin();
+      return state;
+    };
     const stdinOverflow = () => {
       diag('REQUEST_TOO_LARGE', `stdin frame over the ${LINE_CAP}-byte cap — dropped`);
       if (toStdout(errorFrame(null, `REQUEST_TOO_LARGE: request frame exceeds ${LINE_CAP} bytes`, 'REQUEST_TOO_LARGE') + '\n', resumeStdin) === 'full') {
@@ -397,7 +632,7 @@ export async function run({ env, platform, stdin, stdout, stderr, connect, selfS
         return 'wait';
       }
     };
-    const onStdinLine = line => {
+    const onStdinLine = (line, expired) => {
       if (dead) return;
       const text = decodeFrame(line);
       if (text === null) {
@@ -408,8 +643,9 @@ export async function run({ env, platform, stdin, stdout, stderr, connect, selfS
         }
         return;
       }
+      let parsed;
       try {
-        JSON.parse(text);
+        parsed = JSON.parse(text);
       } catch {
         diag('INVALID_RECORD', 'stdin frame is not valid JSON — dropped');
         if (toStdout(errorFrame(idOf(text), 'slp-desk: malformed NDJSON frame') + '\n', resumeStdin) === 'full') {
@@ -418,7 +654,27 @@ export async function run({ env, platform, stdin, stdout, stderr, connect, selfS
         }
         return;
       }
+      if (expired) {
+        if (parsed && typeof parsed === 'object' && typeof parsed.method === 'string' && 'id' in parsed) {
+          if (toStdout(errorFrame(parsed.id, 'CAPABILITY_GAP: desk transport is disconnected', 'CAPABILITY_GAP') + '\n', resumeStdin) === 'full') {
+            pauseStdin(); return 'wait';
+          }
+        }
+        return;
+      }
       if (line.length > 0) {
+        if (parsed && typeof parsed === 'object' && typeof parsed.method === 'string' && 'id' in parsed) {
+          const key = JSON.stringify(parsed.id);
+          const size = Buffer.byteLength(key);
+          if (inFlight.has(key) || inFlight.size >= MAX_IN_FLIGHT || idBytes + size > MAX_IN_FLIGHT_ID_BYTES) {
+            if (toStdout(errorFrame(parsed.id, 'CAPABILITY_GAP: outstanding request capacity reached', 'CAPABILITY_GAP') + '\n', resumeStdin) === 'full') {
+              pauseStdin(); return 'wait';
+            }
+            return;
+          }
+          inFlight.set(key, { id: parsed.id, size });
+          idBytes += size;
+        }
         const state = boundedWrite(socket, Buffer.concat([line, Buffer.from('\n')]), reason => {
           if (reason === 'error') socket.destroy();
           else resumeStdin();
@@ -429,10 +685,10 @@ export async function run({ env, platform, stdin, stdout, stderr, connect, selfS
         }
       }
     };
-    const splitStdin = lineSplitter(line => onStdinLine(line), stdinOverflow, stdinState);
+    const splitStdin = lineSplitter((line, expired) => onStdinLine(line, expired), stdinOverflow, stdinState);
     stdinState = undefined;
     const resumeStdin = () => {
-      if (dead || inputDetached || !stdinPausedByUs) return;
+      if (dead || inputDetached || !stdinPausedByUs || stdout.writableNeedDrain) return;
       stdinPausedByUs = false;
       if (splitStdin.resume() === false) {
         stdinPausedByUs = true;
@@ -449,6 +705,7 @@ export async function run({ env, platform, stdin, stdout, stderr, connect, selfS
       if (splitStdin.feed(chunk) === false) pauseStdin();
     };
     stdin.on('data', onStdinData);
+    stdout.on('drain', resumeStdin);
 
     // A paused producer can still emit 'end': every buffered chunk was
     // already handed to the splitter, so the raw stream reaches EOF while a
@@ -464,6 +721,7 @@ export async function run({ env, platform, stdin, stdout, stderr, connect, selfS
       if (!socket.destroyed) socket.end();
     };
     stdin.once('end', onStdinEnd);
+    stdin.once('close', onStdinEnd);
     // socket → stdout: cap enforced here too — the adapter is trusted to
     // stay under it, but a violation must not reach the MCP client raw.
     const socketOverflow = () => {
@@ -485,7 +743,12 @@ export async function run({ env, platform, stdin, stdout, stderr, connect, selfS
         return;
       }
       try {
-        JSON.parse(text);
+        const response = JSON.parse(text);
+        if (response && typeof response === 'object' && 'id' in response) {
+          const key = JSON.stringify(response.id);
+          const pending = inFlight.get(key);
+          if (pending) { idBytes -= pending.size; inFlight.delete(key); }
+        }
       } catch {
         diag('INVALID_RECORD', 'socket frame is not valid JSON — replaced with a typed error');
         if (toStdout(errorFrame(null, 'slp-desk: malformed frame from desk adapter') + '\n', resumeSocket) === 'full') {
@@ -531,6 +794,7 @@ export async function run({ env, platform, stdin, stdout, stderr, connect, selfS
       const endSession = reason => {
         // Old stdout drains must not consume input into a dead socket while
         // its response splitter is still flushing during teardown.
+        if (!inputDetached) holdUntil = Date.now() + RECONNECT_HOLD_MS;
         inputDetached = true;
         resolve(reason);
       };
@@ -554,7 +818,9 @@ export async function run({ env, platform, stdin, stdout, stderr, connect, selfS
       stdin.pause();
     }
     stdin.removeListener('data', onStdinData);
+    stdout.removeListener('drain', resumeStdin);
     stdin.removeListener('end', onStdinEnd);
+    stdin.removeListener('close', onStdinEnd);
     socket.removeListener('data', onSocketData);
     // `socketPausedByUs` is the drain signal: a 'wait' inside the splitter
     // always goes through pauseSocket(), so unpaused means fully consumed.
@@ -578,19 +844,23 @@ export async function run({ env, platform, stdin, stdout, stderr, connect, selfS
     socket.destroy();
     stdinState = splitStdin.takeState();
 
-    if (stdinEnded && stdinState.pending.length === 0) {
-      stdinPausedByUs = false;
-      return finish(0);
+    // Drain typed uncertainty errors one at a time under stdout backpressure.
+    // A request may already have executed; reconnect never resends it.
+    for (const { id } of inFlight.values()) {
+      if (stdout.writableNeedDrain) await waitStdoutDrain();
+      if (stdout.destroyed || stdout.closed) break;
+      await new Promise(resolve => {
+        if (writeStdout(errorFrame(id, 'EXECUTION_UNKNOWN: desk connection dropped before its reply', 'EXECUTION_UNKNOWN') + '\n', () => resolve()) === 'flushed') resolve();
+      });
+      if (stdout.destroyed || stdout.closed) break;
     }
-    // Mid-session drop: reconnect on the same bounded budget, then give
-    // up typed rather than hanging forever.
-    if (cycle >= 1) {
-      stdinPausedByUs = false;
-      stdin.resume();
-      diag('CAPABILITY_GAP', `desk socket lost (${sessionEnd}) and the reconnect budget is spent`);
-      return finish(1);
-    }
-    diag('CAPABILITY_GAP', `desk socket lost (${sessionEnd}) — reconnecting once`);
+    inFlight.clear();
+    idBytes = 0;
+    if (stdout.destroyed || stdout.closed) return finish(1);
+    if (stdinEnded && stdinState.pending.length === 0) return finish(0);
+    diag('CAPABILITY_GAP', `desk socket lost (${sessionEnd}) — reconnecting`);
+    attempt = 1;
+    startOffline();
   }
 }
 

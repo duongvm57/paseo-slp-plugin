@@ -1,6 +1,6 @@
 # Desk lock recovery is operator-only and automatic-mode only
 
-- Status: Proposed
+- Status: Superseded
 - Date: 2026-09-29
 - Decided by: Supervisor on behalf of Human
 - Source: Supervisor notebook (local, gitignored), entry 2026-09-29 "P2-e: design note + quyết định S1/S2/S3"
