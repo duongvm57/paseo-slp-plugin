@@ -1,6 +1,6 @@
 # Governance and recovery
 
-Supervisor uses this for supervision setup, coordination recovery, authorized
+Supervisor uses this for causal recording, coordination recovery, authorized
 cross-project relay and policy evolution. Human owns the final boundary;
 Lead retains technical acceptance.
 

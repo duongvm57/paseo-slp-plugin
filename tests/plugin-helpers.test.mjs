@@ -317,6 +317,7 @@ test('managed bundles disclose guarded and ordinary paths while preserving role 
     assert.match(bundle, /parent\/report recipient must match your paseo\.parent-agent-id\s+label/);
     assert.match(bundle, /recipient distinct from your\s+parent/);
     assert.match(bundle, /A Lead writer\s+never stands in for required independent review/);
+    assert.match(bundle, /policy delivered in your bundle needs no re-read or hash check unless lost to compaction/);
     if (role === 'peer') {
       assert.match(bundle, /Reviewer\/Auditor stays independent of writer and accepting owner/);
       assert.ok(!bundle.includes(readFileSync(join(installed, 'src/delegation.md'), 'utf8')));
@@ -330,6 +331,10 @@ test('managed bundles disclose guarded and ordinary paths while preserving role 
     }
     assert.match(bundle, /ordinary\/Lean creation or observation/);
     assert.match(bundle, /consume admission receipts for reservations, seat pins and effects/);
+    assert.match(bundle, /Check desk binding first \(slp_status if available\); use bound slp_seat_create\s+for Supervisor's Lead/);
+    assert.match(bundle, /prepare plus Paseo\s+create_agent remains for unbound hosts or declared isolated placement/);
+    assert.match(bundle, /slp_seat_create creates a Paseo agent through the desk that the Human can\s+inspect and chat with/);
+    assert.match(bundle, /repository rules, protocol clauses or Human instructions\s+forbidding desk creation or requiring another formation path exclusively override this default/);
   }
   assert.match(roleBundle(installed, 'lead', env).instructions, /When the assignment or protocol\s+requires independent review/);
   assert.ok(!/When the assignment or protocol\s+requires independent review/.test(roleBundle(installed, 'supervisor', env).instructions));
@@ -524,8 +529,8 @@ test('ACP delivery keeps verified core while refreshing language and restoring c
     assert.match(next, /Review selection never waives\s+a Human, assignment or protocol obligation/);
     assert.equal(/Lead's explicit review selection precedes the candidate round/.test(next), role !== 'peer');
     assert.equal(/Unavailable\s+required reviewers or adverse findings never relax the gate/.test(next), role !== 'peer');
-    assert.equal(/record selection\/reason before the candidate round/.test(next), role === 'lead');
-    assert.equal(/Before each review\s+selection or revision, including not-required, read references\/review-gates\.md/.test(next), role === 'lead');
+    assert.equal(/record\s+selection\/reason before the candidate round/.test(next), role === 'lead');
+    assert.equal(/Before each review\s+selection or revision, including not-required, reviewer choice, re-review or\s+acceptance, read applicable gate rules/.test(next), role === 'lead');
     assert.equal(/Reviewer\/Auditor stays independent of writer and accepting owner/.test(next), role === 'peer');
     assert.doesNotMatch(next, /does not license merging\s+the axes into one seat|parallel seats on split axes/);
     assert.match(send('b')[0].text, /Spawn kit —/, 'new session gets its own carrier');
@@ -567,7 +572,7 @@ test('tiny policy keeps protocol-owned ceremony separate from required gates and
   assert.match(lead, /Supervisor\/Lead use saved profiles/);
   assert.match(lead, /Tiny classification reduces ceremony, never authority, ownership, parentage or required review/);
   assert.match(lead, /Tiny labels and missing\/stale protocols grant no exception/);
-  assert.match(lead, /Reuse full relevant policy\/protocol text in context only when its source is known unchanged/);
+  assert.match(lead, /Reuse full relevant references\/ or protocol text only when known unchanged/);
   assert.match(lead, /Runtime checks still need fresh catalog hash, eligibility, provider availability and Jev receipts/);
   assert.match(lead, /first required full workspace-protocol read remains mandatory/);
   assert.match(protocol, /Lean: short inline brief\/formation/);

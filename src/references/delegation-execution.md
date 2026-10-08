@@ -1,8 +1,6 @@
 # Ordinary delegation and observation
 
-Use for Supervisor/Lead formation outside desk-managed task dispatch.
-For managed tasks, task-execution.md owns the operating path; avoid repeating
-its reservation, runtime verification or effect bookkeeping manually.
+For desk-managed task dispatch, use task-execution.md without duplicating its bookkeeping.
 
 ## Classify and brief
 
@@ -14,7 +12,7 @@ Classify from the actual assignment, not available sessions:
 | Reliable continuation/correction/re-review or phase of the same outcome | send_agent_prompt to the verified child with the added grant. |
 | Observe existing work | Pin owner ID, observation scope and explicit report recipient; retain real parentage and write owner. |
 
-A direct Human-assigned Lead is valid without a Supervisor. When Human asks
+When Human asks
 to form a standby Lead for a future task, record that formation exception:
 read-only orientation and ownership/handback acknowledgment complete its
 first phase, not the future project. Its acknowledgment covers current scope,
@@ -32,8 +30,7 @@ For parallel work use orchestration.md's actual paths/shared-resource preflight.
 
 ## Form and deliver
 
-slp_status shows which desk tools are bound; when slp_seat_create is bound,
-use it by default with requestId, role, taskLabel, assignment and grantRef.
+Use bound slp_seat_create by default with requestId, role, taskLabel, assignment and grantRef.
 grantRef is a declared pointer to the Human grant (e.g. assignment sentence
 and date), a claim, never authenticated; verify authority, one writer and review sufficiency.
 Lead formation resolves the fresh saved slp-lead
@@ -46,7 +43,6 @@ the exact native tuple and only then hands off the assignment. By default
 with delivery.prompt; send exactly that prompt through send_agent_prompt with
 notifyOnFinish=true so the host arms the finish callback. delivery "server"
 sends in the server without a callback; use it only when none is needed.
-The assignment names outcome, constraints, granted effects and proof/handback.
 The created assignment names the verified parent agent ID and requires exactly
 one native report to that parent at handback. A standby Lead reports readiness
 separately from technical verdicts; create no back-and-forth acknowledgment loop.
@@ -61,9 +57,7 @@ Retained early-format addresses are located without copying or resealing;
 ambiguous, corrupt or over-budget legacy evidence blocks a new invocation.
 Retain any returned agentId and scope, reconcile original host evidence and
 use a separately authorized explicit follow-up only when safe. Receipts retain
-resources and do not establish acceptance or cleanup. Use monitoring.md for
-remaining observation. A finish notification only signals the event; that native
-report establishes the handback route; neither establishes acceptance.
+resources and do not establish acceptance or cleanup. The native report establishes the handback route, not acceptance.
 
 For unbound/older hosts or declared isolated placement, use provider-routing.md, prepare --emit create
 and agent-scoped Paseo create_agent with its emitted record and notifyOnFinish=true;

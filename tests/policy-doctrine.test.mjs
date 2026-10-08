@@ -39,7 +39,9 @@ test('all seats receive communication, stop and recovery responsibilities', () =
     /known unchanged.*sha256sum.*delivered Policy locators.*summary is insufficient.*fresh catalog hash/,
     /Measure a file with wc -c before reading it; read large files in bounded ranges/,
     /Resume only on a new Human instruction/,
-    /First full reads of applicable policy files are required; delivered full text counts/,
+    /First full reads of applicable policy files are required; policy delivered in your bundle needs no re-read or hash check unless lost to compaction/,
+    /Reuse full relevant references\/ or protocol text only when known unchanged/,
+    /Re-read on mismatch, lost context or uncertainty; a summary is insufficient/,
     /once per session.*get_agent_status on your PASEO_AGENT_ID.*snapshot.labels\["paseo.parent-agent-id"\].*complete managed attempt evidence.*re-verify only after context loss or a new binding/);
 });
 
@@ -61,16 +63,64 @@ test('formation distinguishes managed admissions from ordinary host verification
   pins('src/delegation.md', /dispatching desk tasks, not forming seats.*task-execution.md.*consume admission receipts for reservations, seat pins and effects/,
     /ordinary\/Lean creation or observation.*delegation-execution.md for native receipts or compatibility verification/);
   pins(direct, /Its parent forms Lead\/Peer under Form and deliver/,
-    /slp_status shows which desk tools are bound; when slp_seat_create is bound, use it by default/,
+    /For desk-managed task dispatch, use task-execution.md without duplicating its bookkeeping/,
+    /Use bound slp_seat_create by default with requestId, role, taskLabel, assignment and grantRef/,
     /delivery.prompt; send exactly that prompt through send_agent_prompt with notifyOnFinish=true/,
     /grantRef is a declared pointer to the Human grant.*assignment sentence and date.*claim, never authenticated/,
     /For unbound\/older hosts or declared isolated placement.*prepare --emit create.*agent-scoped Paseo create_agent/,
     /different checkout\/lane needs declared paths\/reason/,
     /Verify the returned ID against actual host parent\/workspace\/cwd and bundle/,
     /Confirm the brief's report route when its first report arrives/,
+    /The native report establishes the handback route, not acceptance/,
     /Empty inventory alone proves no absence/,
     /original cannot still create and any old owner is settled/);
   pins(desk, /Ordinary role creation can remain unbound if desk mint\/registration fails/);
+});
+
+test('new tasks discover desk formation in always-loaded delegation policy', () => {
+  pins('src/delegation.md',
+    /Check desk binding first \(slp_status if available\); use bound slp_seat_create for Supervisor's Lead \(read references\/delegation-execution.md\); prepare plus Paseo create_agent remains for unbound hosts or declared isolated placement/);
+});
+
+test('generic inspectable Paseo delegation rules admit desk creation under the authority ceiling', () => {
+  pins('src/delegation.md',
+    /slp_seat_create creates a Paseo agent through the desk that the Human can inspect and chat with, satisfying generic Paseo create_agent or inspectability rules; repository rules, protocol clauses or Human instructions forbidding desk creation or requiring another formation path exclusively override this default/);
+});
+
+for (const scenario of [
+  {
+    name: 'Human instruction can require prepare/create for a reviewable record',
+    instruction: 'form the Peer via prepare --emit create + create_agent so I can review the record',
+    authority: /Human instructions forbidding desk creation or requiring another formation path exclusively override this default/,
+  },
+  {
+    name: 'protocol clause can require prepare/create for all seats',
+    instruction: 'all seats are created via prepare + create_agent',
+    authority: /protocol clauses or Human instructions forbidding desk creation or requiring another formation path exclusively override this default/,
+  },
+  {
+    name: 'repository rule can require plain create_agent only',
+    instruction: 'plain create_agent only',
+    authority: /repository rules, protocol clauses or Human instructions forbidding desk creation or requiring another formation path exclusively override this default/,
+  },
+]) {
+  test(scenario.name, () => {
+    const policy = read('src/delegation.md');
+    assert.match(policy, scenario.authority, `Exclusive formation instruction: ${scenario.instruction}`);
+    assert.doesNotMatch(policy, /only a repository rule naming the desk can forbid that path/);
+    pins('src/common.md', /Human authority is the ceiling/);
+  });
+}
+
+test('Supervisor reference reads follow the activity instead of team formation', () => {
+  pins('src/roles/supervisor.md',
+    /Read references\/governance.md before causal recording, coordination recovery, policy evolution, audit, investigation of drift, repeated failures, difficult decisions or lost momentum/,
+    /references\/monitoring.md before observation and at settlement/);
+  assert.doesNotMatch(read('src/roles/supervisor.md'), /when establishing supervision/);
+  pins(governance, /Supervisor uses this for causal recording, coordination recovery, authorized cross-project relay and policy evolution/);
+  pins('src/delegation.md', /before Peer reuse, read references\/orchestration.md for reliable same-assignment continuation and Human exceptions/,
+    /Before selecting reviewers, read references\/review-gates.md/,
+    /Before runtime choice\/settings\/fallback, read references\/provider-routing.md/);
 });
 
 test('session boundary is semantic, not a task ID or runtime capability', () => {
@@ -289,7 +339,7 @@ test('routing delegates actual bundle checks to runtime without granting fallbac
 
 test('role gate-policy reads stay conditional even with desk-enforced pins', () => {
   pins('src/roles/lead.md', /When the assignment or protocol requires independent review/,
-    /Before choosing reviewer seats, re-review or acceptance, use applicable gate rules in references\/orchestration.md and references\/review-gates.md under common policy's hash-anchored reuse.*Re-read only on mismatch, lost context \(including compaction\) or uncertainty/,
+    /Before each review selection or revision, including not-required, reviewer choice, re-review or acceptance, read applicable gate rules in references\/orchestration.md and references\/review-gates.md under common policy's hash-anchored reuse; record selection\/reason before the candidate round/,
     /After mandatory reads, the next action is formation or dispatch; orientation is not a stopping point/,
     /Unavailable, stale or unclear applicable gate rules make that branch BLOCKED/);
 });

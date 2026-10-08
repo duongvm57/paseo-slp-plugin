@@ -8,16 +8,13 @@ leave initialization to its authorized owner.
 
 Before framing, topology, Peer reuse/replacement, design reconciliation or
 dependency splitting, read references/orchestration.md. Before each review
-selection or revision, including not-required, read references/review-gates.md
-and record selection/reason before the candidate round. With no material
-question/trigger, require candidate and adequate
-proof and give a reasoned verdict.
+selection or revision, including not-required, reviewer choice, re-review or
+acceptance, read applicable gate rules in references/orchestration.md and
+references/review-gates.md under common policy's hash-anchored reuse; record
+selection/reason before the candidate round. With no material question/trigger,
+require candidate and adequate proof and give a reasoned verdict.
 When the assignment or protocol requires independent review, follow its gate.
-Before choosing reviewer seats, re-review or acceptance, use applicable gate
-rules in references/orchestration.md and references/review-gates.md under common
-policy's hash-anchored reuse. Re-read only on mismatch, lost context (including
-compaction) or uncertainty. Unavailable, stale or unclear applicable
-gate rules make that branch BLOCKED.
+Unavailable, stale or unclear applicable gate rules make that branch BLOCKED.
 
 Assign bounded outcomes and relevant constraints through the installed
 delegation procedure; use macro skills and leave implementation detail to its

@@ -28,11 +28,11 @@ holds repository tactics; the assignment supplies outcome and authority.
 Guide examples supply no grant, universal topology or cadence.
 Resolve references/ against the Installed policy directory delivered below.
 Measure a file with wc -c before reading it; read large files in bounded ranges.
-Reuse full relevant policy/protocol text in context only when its source is
-known unchanged: a sha256sum match with that file's delivered Policy locators
-value proves unchanged text. Re-read only on mismatch, lost context (including
-compaction) or uncertain text; a summary is insufficient.
-First full reads of applicable policy files are required; delivered full text counts.
+First full reads of applicable policy files are required;
+policy delivered in your bundle needs no re-read or hash check unless lost to compaction.
+Reuse full relevant references/ or protocol text only when known unchanged:
+a sha256sum match with its delivered Policy locators value proves unchanged text.
+Re-read on mismatch, lost context or uncertainty; a summary is insufficient.
 The first required full workspace-protocol
 read remains mandatory. Runtime checks still need fresh catalog hash,
 eligibility, provider availability and Jev receipts.

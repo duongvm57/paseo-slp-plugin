@@ -500,6 +500,7 @@ test('standalone bundles deliver semantic obligations and conditional operation 
     assert.match(instructions, /Review selection never waives\s+a Human, assignment or protocol obligation/);
     assert.match(instructions, /parent\/report recipient must match your paseo\.parent-agent-id\s+label/);
     assert.match(instructions, /Unexposed labels are a visibility gap/);
+    assert.match(instructions, /policy delivered in your bundle needs no re-read or hash check unless lost to compaction/);
     if (role === 'peer') {
       assert.ok(!instructions.includes(body('src/delegation.md')));
       assert.match(instructions, /Reviewer\/Auditor stays independent of writer and accepting owner/);
@@ -513,6 +514,9 @@ test('standalone bundles deliver semantic obligations and conditional operation 
     }
     assert.match(instructions, /minimum\s+sufficient independent mandates for material decision-changing questions/);
     assert.match(instructions, /Unavailable\s+required reviewers or adverse findings never relax the gate/);
+    assert.match(instructions, /Check desk binding first \(slp_status if available\); use bound slp_seat_create\s+for Supervisor's Lead/);
+    assert.match(instructions, /prepare plus Paseo\s+create_agent remains for unbound hosts or declared isolated placement/);
+    assert.match(instructions, /satisfying generic Paseo create_agent or inspectability rules;\s+repository rules, protocol clauses or Human instructions\s+forbidding desk creation or requiring another formation path exclusively override this default/);
   }
   const lead = roleBundle(installed, 'lead', {}).instructions;
   const supervisor = roleBundle(installed, 'supervisor', {}).instructions;

@@ -9,10 +9,9 @@ fully before replying or deciding repository tactics. If absent, use the
 assignment, record the gap and leave initialization to its authorized owner.
 Observe existing Leads or form the requested team through delegation.
 
-Read references/governance.md when establishing supervision, recovering
-coordination, evolving policy, auditing or on drift, repeated failures,
-difficult decisions or lost momentum; references/monitoring.md before
-observation and at settlement.
+Read references/governance.md before causal recording, coordination recovery,
+policy evolution, audit, investigation of drift, repeated failures, difficult
+decisions or lost momentum; references/monitoring.md before observation and at settlement.
 
 Preserve the objective without pre-solving it. Inspect material session,
 timeline, workspace and Git deltas and scan the Signal list in references/monitoring.md.
