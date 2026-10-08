@@ -570,9 +570,12 @@ export const DeskBridgeFrameError = z.object({
 export const DeskBridgeToolEntry = z.object({
   name: z.string().min(1).max(WIRE_LIMITS.deskBridgeToolName),
   visible: z.boolean(),
+  roles: z.array(z.enum(["supervisor", "lead", "peer"])).max(3)
+    .refine(roles => new Set(roles).size === roles.length, "tool roles must be unique"),
   mutation: z.boolean(),
   description: z.string().min(1).max(WIRE_LIMITS.deskBridgeToolDescription),
-}).strict();
+}).strict().refine(entry => !entry.visible || entry.roles.length > 0,
+  "a visible tool must declare at least one role");
 
 // ---------------------------------------------------------------------------
 // Desk mutation tools (P3-a) — strict input schemas for the bridge catalog.

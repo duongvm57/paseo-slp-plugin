@@ -15,6 +15,12 @@ import { DESK_BRIDGE_PROTOCOL } from '../../plugin/shared/enforcement.ts';
 
 export const BIN_SOURCE = fileURLToPath(new URL('../../bin/slp-desk-mcp.mjs', import.meta.url));
 
+// Opt-in observer for the role-authority replay suite. Ordinary fixtures keep
+// their original store and wire behavior.
+let observer = null;
+export function observeDeskBridgeFixtures(value) { observer = value; }
+export function observeDeskStore(root, store) { return observer?.store?.(root, store) ?? store; }
+
 export function tmp(t, prefix) {
   const dir = mkdtempSync(join(tmpdir(), prefix));
   t.after(() => rmSync(dir, { recursive: true, force: true, maxRetries: 3 }));
@@ -73,7 +79,10 @@ export function bridgeFixture(t, homePrefix, pin, over = {}) {
     audit: over.audit,
     detectDaemonHome: () => ({ daemonHome: home, source: 'env' }),
     realpath: realpathSync,
-    createStore: over.createStore ?? (root => createDeskStore({ stableRoot: root })),
+    createStore: root => {
+      const store = (over.createStore ?? (root => createDeskStore({ stableRoot: root })))(root);
+      return observeDeskStore(root, store);
+    },
     capture: over.capture,
     verifyExport: over.verifyExport,
     checkExec: over.checkExec,
@@ -139,7 +148,7 @@ export async function seedMemberships(store, repo, rows) {
   return repoKey;
 }
 
-export const seedStore = f => createDeskStore({ stableRoot: f.stableRoot });
+export const seedStore = f => observeDeskStore(f.stableRoot, createDeskStore({ stableRoot: f.stableRoot }));
 
 /** Buffer raw bytes until a newline; split UTF-8 and multiple queued frames
  * remain intact. Exposed for malformed/oversize-frame tests at the same seam. */
@@ -202,14 +211,19 @@ export async function handshake(socketPath, helloFrame) {
   const reader = new LineReader(conn);
   writeFrame(conn, helloFrame);
   const ack = JSON.parse((await reader.next()).toString('utf8'));
+  conn.deskFixtureIdentity = { socketPath, handle: helloFrame.handle };
   return { conn, reader, ack };
 }
 
 /** Error frames and results both match the caller's unchanged request id. */
 export async function rpc(reader, conn, frame) {
+  const before = await observer?.beforeCall?.(conn.deskFixtureIdentity, frame, reader, conn);
   writeFrame(conn, frame);
   for (;;) {
     const line = JSON.parse((await reader.next()).toString('utf8'));
-    if ('id' in line && line.id === frame.id) return line;
+    if ('id' in line && line.id === frame.id) {
+      await observer?.afterCall?.(before, line);
+      return line;
+    }
   }
 }

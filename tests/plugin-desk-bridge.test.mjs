@@ -451,7 +451,7 @@ async function boundSeat(t, over = {}) {
 }
 
 test('tools/list exposes the visible catalog — hidden and excluded tools absent', async t => {
-  const { reader, conn } = await boundSeat(t);
+  const { reader, conn } = await boundSeat(t, { row: { role: 'lead' } });
   const reply = await rpc(reader, conn, { jsonrpc: '2.0', id: 1, method: 'tools/list' });
   const names = reply.result.tools.map(tool => tool.name);
   assert.deepEqual(names, [
@@ -658,7 +658,7 @@ test('an unknown tool name is INVALID_RECORD', async t => {
 });
 
 test('tool catalog uses concise English guidance and explains ambiguous field sources', async t => {
-  const { reader, conn } = await boundSeat(t);
+  const { reader, conn } = await boundSeat(t, { row: { role: 'lead' } });
   const { result } = await rpc(reader, conn, { jsonrpc: '2.0', id: 1, method: 'tools/list' });
   for (const tool of result.tools) {
     assert.ok(tool.description.length <= 256, `${tool.name} keeps the description cap`);

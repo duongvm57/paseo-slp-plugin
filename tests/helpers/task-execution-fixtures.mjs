@@ -33,6 +33,7 @@ import {
 import {
   latestTask, latestTaskEntity, runTaskCommand, runTaskEffect,
 } from '../../plugin/server/desk-task.ts';
+import { observeDeskStore } from './desk-bridge-fixture.mjs';
 import { createDeskStore, repoKeyFor } from '../../plugin/server/desk-store.ts';
 import { createDeskSeat, DESK_TASK_CREATE_TICKET_KEY } from '../../plugin/server/desk-seat.ts';
 import { createRoleInjection } from '../../plugin/server/role-injection.ts';
@@ -510,7 +511,7 @@ export async function realDesk(t, options = {}) {
   const repo = REAL_REPO(w);
   const repoKey = repoKeyFor(repo);
   const stableRoot = join(w.scratch, 'desk-store');
-  const store = createDeskStore({ stableRoot });
+  const store = observeDeskStore(stableRoot, createDeskStore({ stableRoot }));
   const seatWarnings=[];
   const seatHooks = createDeskSeat({stableRoot,store,now:()=>new Date(NOW),warn:message=>seatWarnings.push(message)});
   let owner = realMember('agent-owner', realpathSync(w.repo), 'lead', { provider: 'slp-codex-lead' });

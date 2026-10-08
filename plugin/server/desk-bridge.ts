@@ -100,6 +100,7 @@ import {
   DeskTaskRecapInput,
   DeskTaskRecapResult,
   WIRE_LIMITS,
+  type DeskBridgeToolEntryValue,
   type DeskRejectionValue,
   type DeskSeatStatusValue,
   type DeskTaskCommandInputValue,
@@ -213,209 +214,245 @@ const BRIDGE_LIMITATIONS = {
 export const DESK_TOOL_CATALOG = [
   {
     name: STATUS_TOOL,
+    roles: ["supervisor", "lead", "peer"],
     visible: true,
     mutation: false,
     description: "Read this seat's membership, assignments and desk availability before choosing a desk action.",
   },
   {
     name: HANDBACK_SUBMIT_TOOL,
+    roles: ["supervisor", "lead", "peer"],
     visible: true,
     mutation: true,
     description: "Submit a v1 handback for this seat's bound assignment; creates an observed candidate row when capture succeeds.",
   },
   {
     name: ASSIGNMENT_REGISTER_TOOL,
+    roles: ["lead"],
     visible: true,
     mutation: true,
     description: "Lead: register the assignment before attaching seats or submitting handbacks.",
   },
   {
     name: ASSIGNMENT_ATTACH_TOOL,
+    roles: ["lead"],
     visible: true,
     mutation: true,
     description: "Owner: attach an exact live seat to an open assignment; an existing binding is idempotent.",
   },
   {
     name: ASSIGNMENT_CLOSE_TOOL,
+    roles: ["lead"],
     visible: true,
     mutation: true,
     description: "Owner: close an open assignment; further handbacks reject.",
   },
   {
     name: ASSIGNMENT_AMEND_TOOL,
+    roles: ["lead"],
     visible: true,
     mutation: true,
     description: "Owner: append the operative brief against its current revision; identify affected owners.",
   },
   {
     name: DECISION_APPEND_TOOL,
+    roles: ["lead"],
     visible: true,
     mutation: true,
     description: "Owner: append a material decision against the current brief revision, after slp_assignment_amend if the brief changed.",
   },
   {
     name: WORKFLOW_GET_TOOL,
+    roles: ["supervisor", "lead", "peer"],
     visible: true,
     mutation: false,
     description: "Read a workflow page as a current participant; reuse returned ledger/brief pins for subsequent pages. References are claims.",
   },
   {
     name: SETTLEMENT_RECORD_TOOL,
+    roles: ["lead"],
     visible: true,
     mutation: true,
     description: "Receiving owner: append a settlement mirror for a bound seat; delivery, rework closure and sink references are claims.",
   },
   {
     name: SETTLEMENT_EXPORT_TOOL,
+    roles: ["supervisor", "lead", "peer"],
     visible: true,
     mutation: false,
     description: "Owner or settled seat: export a committed settlement revision as a v1 record for manual sink placement.",
   },
   {
     name: SCOPE_DECLARE_TOOL,
+    roles: ["lead"],
     visible: true,
     mutation: true,
     description: "Owner: declare scope after slp_assignment_amend when the brief changes; pin its current revision.",
   },
   {
     name: SCOPE_TRANSITION_TOOL,
+    roles: ["lead"],
     visible: true,
     mutation: true,
     description: "Owner: move scope using its latest declaration and brief revisions; submit-for-review pins a candidate created by slp_handback_submit.",
   },
   {
     name: SCOPE_REVIEW_TOOL,
+    roles: ["supervisor", "lead", "peer"],
     visible: true,
     mutation: true,
     description: "Independent reviewer: record one axis or lens against the active round's scope, brief and candidate pins.",
   },
   {
     name: CHECK_DECLARE_TOOL,
+    roles: ["lead"],
     visible: true,
     mutation: true,
     description: "Owner: declare an allowlisted check for an assignment scope before running it.",
   },
   {
     name: CHECK_RUN_TOOL,
+    roles: ["lead"],
     visible: true,
     mutation: true,
     description: "Owner: run a declared check against the rollout candidate and current check definition revision.",
   },
   {
     name: ROLLOUT_DECLARE_TOOL,
+    roles: ["lead"],
     visible: true,
     mutation: true,
     description: "Owner: declare rollout after scope declaration and candidate capture; pin required checks.",
   },
   {
     name: ROLLOUT_TRANSITION_TOOL,
+    roles: ["lead"],
     visible: true,
     mutation: true,
     description: "Owner: move rollout against its current revision; pass the pinned target snapshot and required evidence.",
   },
   {
     name: ASSIGNMENT_OFFER_TOOL,
+    roles: ["lead"],
     visible: true,
     mutation: true,
     description: "Owner: nominate an exact live Lead against the current ownership revision; an offer does not transfer custody.",
   },
   {
     name: ASSIGNMENT_ACCEPT_TOOL,
+    roles: ["lead"],
     visible: true,
     mutation: true,
     description: "Exact nominee: accept custody against current ownership, ledger and brief revisions; retain settlement obligations.",
   },
   {
     name: TASK_DEFINE_TOOL,
+    roles: ["lead"],
     visible: true,
     mutation: true,
     description: "Owner: declare or amend an outcome task against current revisions; definition does not launch a worker.",
   },
   {
     name: TASK_DISPATCH_TOOL,
+    roles: ["lead"],
     visible: true,
     mutation: true,
     description: "Owner: perform one bootstrap, reuse, send or archive phase using current task/attempt pins; reconcile uncertain effects.",
   },
   {
     name: TASK_RESULT_TOOL,
+    roles: ["supervisor", "lead", "peer"],
     visible: true,
     mutation: true,
     description: "Owner or bound worker: record an attempt result with evidence and current task pins; submission does not establish acceptance.",
   },
   {
     name: TASK_RULE_TOOL,
+    roles: ["lead"],
     visible: true,
     mutation: true,
     description: "Owner: rule on exact task/result revisions with reasons and evidence; stale proof or review pins invalidate usability.",
   },
   {
     name: TASK_HOLD_TOOL,
+    roles: ["supervisor", "lead", "peer"],
     visible: true,
     mutation: true,
     description: "Raise a task question or hold; owner rulings retain or release it. Brief amendments do not release holds.",
   },
   {
     name: TASK_STOP_TOOL,
+    roles: ["lead"],
     visible: true,
     mutation: true,
     description: "Owner: stop further effect issuance using current pins; in-flight work and resources remain obligations.",
   },
   {
     name: TASK_ACKNOWLEDGE_TOOL,
+    roles: ["supervisor", "lead", "peer"],
     visible: true,
     mutation: true,
     description: "Exact recipient: acknowledge a delivery obligation; responsibility and handling are distinct from host acceptance.",
   },
   {
     name: TASK_RECONCILE_TOOL,
+    roles: ["lead"],
     visible: true,
     mutation: true,
     description: "Owner: observe known attempts, effects and resources; do not retry uncertain effects or infer absence from missing evidence.",
   },
   {
     name: TASK_INTEGRATE_TOOL,
+    roles: ["lead"],
     visible: true,
     mutation: true,
     description: "Owner: stage, check, land, reconcile or discharge a pinned result under its integration grant; preserve target work.",
   },
   {
     name: TASK_RECAP_TOOL,
+    roles: ["supervisor", "lead", "peer"],
     visible: true,
     mutation: false,
     description: "Read a task recap against workflow revision pins; omissions and obligations remain visible.",
   },
   {
     name: "slp_seat_create",
+    roles: ["supervisor", "lead"],
     visible: true,
     mutation: true,
     description: "Orchestrating seat: form a child from saved routing. Returns its exact prompt for send_agent_prompt with notifyOnFinish=true; delivery=server sends it instead.",
   },
   {
     name: "slp_operation_get",
+    roles: ["supervisor", "lead", "peer"],
     visible: true,
     mutation: false,
     description: "Read this caller's formation/delivery receipt by original requestId before considering resubmission.",
   },
   {
     name: "slp_task_deliver",
+    roles: ["lead"],
     visible: true,
     mutation: true,
     description: "Owner: declare a new bounded task, bootstrap a fresh Peer and send it under current revisions; reconcile partial outcomes.",
   },
   {
     name: "slp_task_get",
+    roles: ["supervisor", "lead", "peer"],
     visible: true,
     mutation: false,
     description: "Read an authorized task and optional exact attempt to obtain current identity, revision pins and readiness.",
   },
   {
     name: HIDDEN_TOOL,
+    roles: [],
     visible: false,
     mutation: false,
     description: "Internal mechanism entry; direct seat calls always reject.",
   },
-] as const;
+] as const satisfies readonly (Omit<DeskBridgeToolEntryValue, "roles"> & {
+  roles: readonly DeskBridgeToolEntryValue["roles"][number][];
+})[];
 
 /** The SDK surface the dispatch guards need — a structural subset of
  *  PaseoApi (same narrowing convention as supervision/state.ts): tests
@@ -1102,6 +1139,7 @@ export function createDeskBridge(deps: DeskBridgeDeps) {
   interface ToolDef extends ToolHandler {
     name: string;
     visible: boolean;
+    roles: readonly DeskBridgeToolEntryValue["roles"][number][];
     mutation: boolean;
     description: string;
   }
@@ -1584,8 +1622,12 @@ export function createDeskBridge(deps: DeskBridgeDeps) {
     return { ...meta, ...impl };
   });
 
-  function mcpToolsList() {
-    return TOOLS.filter(t => t.visible).map(t => {
+  function mcpToolsList(role: unknown) {
+    // Hello pins the server-resolved membership role for this connection.
+    // Unknown/missing roles preserve the full visible list: discovery must
+    // never invent a narrower authority boundary or become an empty list.
+    const knownRole = role === "supervisor" || role === "lead" || role === "peer" ? role : null;
+    return TOOLS.filter(t => t.visible && (knownRole === null || t.roles.includes(knownRole))).map(t => {
       const schema = z.toJSONSchema(t.input);
       return {
         name: t.name,
@@ -1728,7 +1770,7 @@ export function createDeskBridge(deps: DeskBridgeDeps) {
     }
   }
 
-  function dispatchMessage(msg: Record<string, unknown>): Record<string, unknown> | null {
+  function dispatchMessage(msg: Record<string, unknown>, bound: BoundSeat): Record<string, unknown> | null {
     const hasId = "id" in msg && msg.id !== undefined;
     if (!hasId) return null; // notifications never answer
     const id = msg.id;
@@ -1747,7 +1789,7 @@ export function createDeskBridge(deps: DeskBridgeDeps) {
       case "ping":
         return answer({});
       case "tools/list":
-        return answer({ tools: mcpToolsList() });
+        return answer({ tools: mcpToolsList(bound.row.role) });
       default:
         return {
           jsonrpc: "2.0",
@@ -1898,7 +1940,7 @@ export function createDeskBridge(deps: DeskBridgeDeps) {
         }
         return;
       }
-      const reply = dispatchMessage(msg);
+      const reply = dispatchMessage(msg, bound);
       if (reply !== null) {
         if ("error" in reply) {
           const error = reply.error as { code: number; message: string };
