@@ -365,6 +365,7 @@ const MESSAGE_ADAPTERS: Partial<Record<FamilyId, MessageAdapter>> = {
 // family, independent of how the opening user_message was wrapped.
 const HANDBACK_SHAPES: Record<FamilyId, string> = {
   codex: "codex-message-v1", claude: "claude-message-v1", devin: "devin-acp-message-v1", pi: "pi-message-v1",
+  opencode: "opencode-unverified",
 };
 
 const unverifiedMessage = (reason: string): Evidence<CapturedMessage> => ({ state: "unverified", reason });
@@ -574,6 +575,8 @@ const SEND_ADAPTERS: Record<FamilyId, SendAdapter> = {
   claude: claudeSends,
   devin: devinSends,
   pi: piSends,
+  // Registry membership/role delivery does not verify timeline shapes.
+  opencode: { coverage: { state: "unverified", reason: VISIBILITY.sendCoverageUnverified }, parse: () => null },
 };
 
 /** Send coverage for a provider named by a verified host record; null or a

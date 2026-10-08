@@ -34,7 +34,9 @@ import {
   OWNED_PROFILE_IDS,
   OWNED_PROVIDER_IDS,
   canonicalSha256,
+  canonicalEqual,
   providerExtendsForId,
+  projectionProviderIds,
 } from "./config-view.ts";
 import {
   assertRealDirectory,
@@ -125,7 +127,7 @@ function assertReceiptRefinements(receipt: ReceiptValue): void {
     if (!projection) continue;
     assertProjectionShape(projection);
   }
-  // A live binding must own the complete projection — the exact twelve-id
+  // A live binding must own the complete projection — the exact registry-owned
   // provider key set (assertProjectionShape already proved it) plus both
   // profile slots. Settings-driven generation (Phase 1) legitimately records
   // non-chosen combos as present:false inside that key set; what remains
@@ -229,10 +231,7 @@ function assertReceiptPaths(receipt: ReceiptValue): void {
 }
 
 export function assertProjectionShape(projection: ProjectionValue): void {
-  const keys = Object.keys(projection.providers).sort();
-  if (keys.length !== OWNED_PROVIDER_IDS.length || keys.some((key, i) => key !== OWNED_PROVIDER_IDS[i])) {
-    throw new Error("projection must carry exactly the twelve owned provider ids");
-  }
+  projectionProviderIds(projection);
   const seenProfileIds = new Set<string>();
   const seenIndexes = new Set<number>();
   for (const slot of projection.profiles) {
@@ -248,10 +247,55 @@ export function assertProjectionShape(projection: ProjectionValue): void {
   for (const [id, presence] of Object.entries(projection.providers)) {
     if (!presence.present) continue;
     const expected = providerExtendsForId(id);
-    if (expected === null || presence.value.extends !== expected) {
+    if (expected === null || (presence.value.extends !== expected && !(id.startsWith("slp-opencode-") && presence.value.extends === "opencode"))) {
       throw new Error(`provider ${id} extends ${presence.value.extends}, expected ${expected}`);
     }
   }
+}
+
+// Reading never widens or rehashes history. A write may carry old objects
+// only verbatim from this receipt's history (including recovery references).
+// New plans/bindings/snapshots/projections must use the current vocabulary.
+function assertHistoricalWrite(previous: ReceiptValue | null, next: ReceiptValue): void {
+  type HistoricalKind = "projection" | "snapshot" | "binding" | "plan";
+  const known = new Map<HistoricalKind, Set<string>>();
+  const visit = (receipt: ReceiptValue, consume: (kind: HistoricalKind, value: unknown, projection: ProjectionValue) => void) => {
+    const projection = (value: ProjectionValue) => consume("projection", value, value);
+    const snapshot = (value: SnapshotValue) => { consume("snapshot", value, value.owned); projection(value.owned); };
+    const binding = (value: BindingValue | null) => {
+      if (value === null) return;
+      consume("binding", value, value.owned); projection(value.owned); snapshot(value.beforeActivation);
+    };
+    binding(receipt.binding);
+    for (const op of receipt.operations) {
+      const plan = op.plan;
+      if (plan === null) continue;
+      consume("plan", plan, plan.afterOwned); snapshot(plan.before); projection(plan.afterOwned);
+      binding(plan.previousBinding); binding(plan.nextBinding);
+    }
+  };
+  if (previous !== null) visit(previous, (kind, value, projection) => {
+    if (projectionProviderIds(projection).length === OWNED_PROVIDER_IDS.length) return;
+    const artifacts = known.get(kind) ?? new Set<string>(); artifacts.add(JSON.stringify(value)); known.set(kind, artifacts);
+  });
+  // Native OpenCode is historical observation data, never a newly authored
+  // binding. An existing exact binding may be carried/restored verbatim.
+  const knownBindings = new Set<string>();
+  if (previous !== null) visit(previous, (kind, value) => {
+    if (kind === "binding") knownBindings.add(JSON.stringify(value));
+  });
+  visit(next, (kind, value, projection) => {
+    if (kind !== "binding" || knownBindings.has(JSON.stringify(value))) return;
+    for (const [id, presence] of Object.entries(projection.providers)) {
+      if (presence.present && presence.value.extends !== providerExtendsForId(id)) {
+        throw new Error(`new binding provider ${id} must extend ${providerExtendsForId(id)}; historical observations are not current ownership`);
+      }
+    }
+  });
+  visit(next, (kind, value, projection) => {
+    if (projectionProviderIds(projection).length === OWNED_PROVIDER_IDS.length) return;
+    if (!known.get(kind)?.has(JSON.stringify(value))) throw new Error(`new or modified historical ${kind} refused; current writes require current15, historical evidence remains verbatim`);
+  });
 }
 
 function summarizeIssues(error: { issues: ReadonlyArray<{ path: PropertyKey[]; message: string }> }): string {
@@ -307,7 +351,8 @@ export function createJournal(deps: JournalDeps = {}): Journal {
       );
     }
     try {
-      assertReceiptRefinements(parsed.data);
+      if (!canonicalEqual(json, parsed.data)) throw new Error("receipt schema normalization refused");
+      assertReceiptRefinements(json as ReceiptValue);
     } catch (error) {
       throw new OperationConflict(
         "RECOVERY_REQUIRED",
@@ -315,7 +360,7 @@ export function createJournal(deps: JournalDeps = {}): Journal {
         { path },
       );
     }
-    return parsed.data;
+    return json as ReceiptValue;
   }
 
   function write(stableRoot: string, receipt: ReceiptValue): void {
@@ -327,7 +372,9 @@ export function createJournal(deps: JournalDeps = {}): Journal {
       );
     }
     const parsed = Receipt.parse(receipt);
-    assertReceiptRefinements(parsed);
+    if (!canonicalEqual(receipt, parsed)) throw new Error("receipt schema normalization refused");
+    assertReceiptRefinements(receipt);
+    assertHistoricalWrite(previous, receipt);
     const stateDir = join(stableRoot, "state");
     ensurePrivateDirectory(stableRoot, platform);
     ensurePrivateDirectory(stateDir, platform);
@@ -340,7 +387,7 @@ export function createJournal(deps: JournalDeps = {}): Journal {
     let fd: number | null = null;
     try {
       fd = openSync(temp, "wx", RECEIPT_MODE);
-      writeSync(fd, JSON.stringify(parsed, null, 2) + "\n");
+      writeSync(fd, JSON.stringify(receipt, null, 2) + "\n");
       fsyncSync(fd);
       closeSync(fd);
       fd = null;

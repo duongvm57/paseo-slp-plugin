@@ -49,6 +49,7 @@ import {
   canonicalSha256,
   effectiveView,
   extractProjection,
+  projectionProviderIds,
   profilesArray,
   readRawConfig,
   sha256Hex,
@@ -946,6 +947,7 @@ export function createManager(deps: ManagerDeps): Manager {
         FAMILIES.every(family => {
           const next = resolution.binaries[family];
           const prev = binding.binaries[family];
+          if (prev === undefined) return false; // historical vocabulary needs a fresh current launch set
           if (next.available !== prev.available) return false;
           if (!next.available) return true;
           return next.path === (prev as { path: string }).path && next.version === (prev as { version: string }).version;
@@ -1011,7 +1013,7 @@ export function createManager(deps: ManagerDeps): Manager {
         daemonHome: ctx.canonicalHome,
         // Settings-driven provider generation (Phase 1): read once at plan
         // time inside the serialized operation; a null/legacy routing keeps
-        // the v1 all-twelve generation.
+        // the v1 all-family generation.
         roleRouting: readRoleRouting(ctx.stableRoot),
         now: now(),
       });
@@ -1574,7 +1576,7 @@ export function createManager(deps: ManagerDeps): Manager {
               { path: "daemon.mcp.enabled" },
             );
           }
-          const observed = extractProjection(raw.json, "OWNERSHIP_DRIFT");
+          const observed = extractProjection(raw.json, "OWNERSHIP_DRIFT", projectionProviderIds(binding.owned));
           const profiles = profilesArray(raw.json).value;
           for (const slot of binding.owned.profiles) {
             const current = profiles.find(
@@ -1616,7 +1618,7 @@ export function createManager(deps: ManagerDeps): Manager {
           }
           // Provider entries must match the receipt exactly.
           const rawProviders = providersRecord(raw.json);
-          for (const id of OWNED_PROVIDER_IDS) {
+          for (const id of projectionProviderIds(binding.owned)) {
             const expected = binding.owned.providers[id];
             const present = Object.hasOwn(rawProviders, id);
             if (expected.present !== present) {
@@ -1706,6 +1708,9 @@ export function createManager(deps: ManagerDeps): Manager {
           return;
         }
         if (pendingSlots !== null && conflicts.length === 0) {
+          if (projectionProviderIds(binding.owned).length !== OWNED_PROVIDER_IDS.length) {
+            throw new OperationConflict("OWNERSHIP_DRIFT", "historical binding preferences require activation into the current family domain; reconcile does not rewrite historical hashes");
+          }
           // Every invariant passed: publish the deferred refresh atomically.
           // Slot indexes come from the fresh raw read; the binding hash is
           // recomputed over the refreshed projection.
@@ -1859,7 +1864,7 @@ export function createManager(deps: ManagerDeps): Manager {
             }
           }
           if (raw !== undefined) {
-            const observed = extractProjection(raw.json, "OWNERSHIP_DRIFT");
+            const observed = extractProjection(raw.json, "OWNERSHIP_DRIFT", projectionProviderIds(binding.owned));
             if (!canonicalEqual(observed, binding.owned)) {
               throw new OperationConflict(
                 "OWNERSHIP_DRIFT",
@@ -2140,14 +2145,18 @@ export function createManager(deps: ManagerDeps): Manager {
         transition(ctx, r => {
           const recovery = findOperation(r, opId);
           if (rootKind === "activate") {
+            const intended = plan.nextBinding!;
             const postSha = canonicalSha256(
-              extractProjection(readRawConfig(ctx.configPath).json, "OWNERSHIP_DRIFT"),
+              extractProjection(readRawConfig(ctx.configPath).json, "OWNERSHIP_DRIFT", projectionProviderIds(intended.owned)),
             );
-            r.binding = {
-              ...plan.nextBinding!,
-              verifiedAt: now(),
-              postPatchPersistedShapeSha256: postSha,
-            };
+            // Recovery reinstates an already-pinned legacy artifact, rather
+            // than rewriting its evidence as a newly verified current one.
+            if (projectionProviderIds(intended.owned).length !== OWNED_PROVIDER_IDS.length) {
+              if (postSha !== intended.postPatchPersistedShapeSha256) throw new OperationConflict("OWNERSHIP_DRIFT", "historical recovery endpoint does not match its recorded projection digest");
+              r.binding = intended;
+            } else {
+              r.binding = { ...intended, verifiedAt: now(), postPatchPersistedShapeSha256: postSha };
+            }
             r.state = "ACTIVE";
           } else {
             r.binding = null;
@@ -2291,7 +2300,7 @@ export function createManager(deps: ManagerDeps): Manager {
         // whose before endpoint has no owned providers — removes the full
         // set, and there live-only references would be silently emptied by
         // the removal patch.
-        const removedByInverse = OWNED_PROVIDER_IDS.filter(
+        const removedByInverse = projectionProviderIds(plan.before.owned).filter(
           id => plan.before.owned.providers[id]?.present !== true,
         );
         if (removedByInverse.length > 0) {

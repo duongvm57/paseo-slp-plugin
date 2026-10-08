@@ -65,7 +65,7 @@ export function readLanguage(stableRoot: string): string | null {
 // desiredProviderEntries/desiredProfiles generate from. Backward
 // compatibility decision (settings-driven-providers.md §5 Phase 1): an
 // absent file, unparseable bytes, or a schema/legacy-version mismatch all
-// mean "no routing" — activation then keeps the v1 all-twelve provider
+// mean "no routing" — activation then keeps the v1 all-family provider
 // generation exactly as before. The file is plugin-owned and rewritten
 // atomically by set-role-routing, so foreign or truncated content degrades
 // to the legacy path rather than blocking activation on a recoverable file.

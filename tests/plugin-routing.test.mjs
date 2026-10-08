@@ -3,7 +3,7 @@
 // role-routing file at slp-runtime/state/role-routing.json, the
 // get/set-role-routing RPCs, routing-driven provider/profile generation,
 // rebind removal of non-chosen combos, the dependent-reference guard, and
-// the absent/legacy → all-twelve backward-compatibility decision.
+// the absent/legacy → all-fifteen backward-compatibility decision.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -50,7 +50,7 @@ const getRouting = (store, home) =>
 // The six generated ids under a routing: chosen supervisor + chosen lead
 // combos plus all four pool-driven peers — nothing else.
 const generatedIds = (supFamily, leadFamily) =>
-  [`slp-${supFamily}-supervisor`, `slp-${leadFamily}-lead`, 'slp-codex-peer', 'slp-pi-peer', 'slp-devin-peer', 'slp-claude-peer'].sort();
+  [`slp-${supFamily}-supervisor`, `slp-${leadFamily}-lead`, 'slp-codex-peer', 'slp-pi-peer', 'slp-devin-peer', 'slp-claude-peer', 'slp-opencode-peer'].sort();
 const absentIds = (supFamily, leadFamily) =>
   OWNED_IDS.filter(id => !generatedIds(supFamily, leadFamily).includes(id));
 
@@ -64,7 +64,7 @@ test('role-routing file round-trips through get/set before any activation', asyn
   const store = createStateStore();
   const file = routingPath(home);
 
-  // Unset → null (the legacy all-twelve generation applies).
+  // Unset → null (the legacy all-fifteen generation applies).
   assert.equal(existsSync(file), false);
   assert.deepEqual(await getRouting(store, home), { schemaVersion: 1, routing: null });
 
@@ -121,10 +121,10 @@ test('set-role-routing rejects malformed input and unknown keys', async t => {
 });
 
 // ---------------------------------------------------------------------------
-// Backward compatibility: absent/legacy routing → v1 all-twelve generation
+// Backward compatibility: absent/legacy routing → v1 all-fifteen generation
 // ---------------------------------------------------------------------------
 
-test('malformed or legacy-version routing file degrades to all-twelve generation', async t => {
+test('malformed or legacy-version routing file degrades to all-fifteen generation', async t => {
   const home = makeHome(t);
   const binaries = makeBinaries(t);
   const daemon = await makeDaemon(t, home);
@@ -140,7 +140,7 @@ test('malformed or legacy-version routing file degrades to all-twelve generation
   const act = await manager.activate(activateInput(home, deps.payload, randomUUID()), daemon);
   const done = await waitTerminal(manager, home, act.operation.operationId, daemon);
   assert.equal(done.state, 'ACTIVE');
-  assert.equal(Object.keys(slpProvidersOf(readConfigJson(home))).length, 12, 'legacy routing keeps v1 generation');
+  assert.equal(Object.keys(slpProvidersOf(readConfigJson(home))).length, 15, 'legacy routing keeps v1 generation');
 });
 
 // ---------------------------------------------------------------------------
@@ -181,7 +181,7 @@ test('routing generates the two chosen combos plus all four peers', async t => {
   assert.equal(lead.thinkingOptionId, 'high');
   assert.deepEqual(lead.featureValues, { auto_accept: true });
 
-  // The recorded projection still spans all twelve owned ids — the
+  // The recorded projection still spans all fifteen owned ids — the
   // non-chosen six are present:false, which is what drives removal.
   const binding = readReceipt(home).binding;
   assert.deepEqual(Object.keys(binding.owned.providers).sort(), OWNED_IDS);
@@ -296,10 +296,10 @@ test('routing change on an existing binding removes non-chosen providers and rep
   const manager = createManager(deps);
   const store = createStateStore();
 
-  // Legacy all-twelve binding first.
+  // Legacy all-fifteen binding first.
   const first = await manager.activate(activateInput(home, deps.payload, randomUUID()), daemon);
   await waitTerminal(manager, home, first.operation.operationId, daemon);
-  assert.equal(Object.keys(slpProvidersOf(readConfigJson(home))).length, 12);
+  assert.equal(Object.keys(slpProvidersOf(readConfigJson(home))).length, 15);
 
   // Route supervisor → devin, lead → pi; re-activate the same candidate.
   await setRouting(store, home, { family: 'devin', model: 'swe-2-high' }, { family: 'pi' });
@@ -383,7 +383,7 @@ test('deactivation under a settings-driven binding still removes every owned id'
   await setRouting(store, home, { family: 'pi' }, { family: 'devin' });
   const act = await manager.activate(activateInput(home, deps.payload, randomUUID()), daemon);
   const doneAct = await waitTerminal(manager, home, act.operation.operationId, daemon);
-  assert.equal(Object.keys(slpProvidersOf(readConfigJson(home))).length, 6);
+  assert.equal(Object.keys(slpProvidersOf(readConfigJson(home))).length, 7);
 
   const deact = await manager.deactivate(
     deactivateInput(home, randomUUID(), doneAct.binding.bindingSha256),

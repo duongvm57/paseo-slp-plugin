@@ -231,7 +231,7 @@ test('installer registers both role transports and preserves user provider switc
   installPaseo(root, installed, home, true);
   const path = join(home, 'config.json');
   const config = readJson(path);
-  assert.equal(Object.keys(config.agents.providers).length, 12);
+  assert.equal(Object.keys(config.agents.providers).length, 15);
   assert.equal(config.daemon.agentProfiles.length, 2);
   assert.equal(config.agents.providers['slp-pi-peer'].extends, 'pi');
   assert.equal(config.agents.providers['slp-pi-lead'].command[1], join(installed, 'bin/pi-role.mjs'));

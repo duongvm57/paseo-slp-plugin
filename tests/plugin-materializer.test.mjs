@@ -364,7 +364,7 @@ test('publication: materializer claims the operation directory; launchers re-ent
       operationId: op,
       candidate: { sha256: candidate.candidateSha256, runtimePath: candidate.runtimePath },
       node: { path: process.execPath, version: process.versions.node },
-      binaries: Object.fromEntries(['codex', 'pi', 'devin', 'claude'].map(family => [
+      binaries: Object.fromEntries(['codex', 'pi', 'devin', 'claude', 'opencode'].map(family => [
         family, { available: false, path: null, version: null },
       ])),
     });
@@ -376,7 +376,7 @@ test('publication: materializer claims the operation directory; launchers re-ent
   assert.equal(existsSync(join(staging, 'launch-set')), false);
   assert.equal(existsSync(join(set.directory, 'leftover')), false);
   assert.equal(mode(join(set.directory, 'launch.json')), 0o644);
-  assert.equal(set.files.length, 12);
+  assert.equal(set.files.length, 15);
   for (const file of set.files) assert.equal(mode(file.path), 0o755);
   assert.equal((await builder.verify(set.directory)).launchSetSha256, set.launchSetSha256);
   await publisher.verifyPublished(candidate.runtimePath, candidate.candidateSha256, candidate.payloadSha256);
@@ -425,7 +425,7 @@ test('publication: private-directory creation failures retain domain wording and
     operationId: 'op-mkdir',
     candidate: { sha256: payload.candidate.sha256, runtimePath: join(nested, payload.candidate.sha256) },
     node: { path: process.execPath, version: process.versions.node },
-    binaries: Object.fromEntries(['codex', 'pi', 'devin', 'claude'].map(family => [
+    binaries: Object.fromEntries(['codex', 'pi', 'devin', 'claude', 'opencode'].map(family => [
       family, { available: false, path: null, version: null },
     ])),
   }), 'IO_FAILURE');

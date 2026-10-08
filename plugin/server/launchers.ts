@@ -10,7 +10,7 @@
 // absent — so a single shared candidate-level gate script cannot work (no
 // node path, no family binary); per-entry generated files are the only
 // shape that carries the frozen resolution into the probe. The manifest
-// keeps the full four-family resolution record because the shipped devin
+// keeps the full five-family resolution record because the shipped devin
 // shim validates the complete family/role sets before entering the wrapper
 // (verifyLaunchManifest stays generic — that is the documented choice).
 // `launchSetSha256` is the sha256 of the canonical launch.json bytes; the
@@ -48,7 +48,7 @@ import type {
   LaunchSet,
   LaunchSetRequest,
 } from "../shared/contracts.ts";
-import { FAMILY_IDS, HOOK_FAMILY_IDS, ROLES, type RoleName } from "../shared/runtime/families.ts";
+import { FAMILY_IDS, HOOK_FAMILY_IDS, ROLES, persistedFamilyIds, type RoleName } from "../shared/runtime/families.ts";
 import {
   PRIVATE_DIR_MODE,
   PrivateDirectoryCreationError,
@@ -132,6 +132,9 @@ function buildManifest(request: LaunchSetRequest): LaunchManifest {
       ? { available: true, path: entry.path, version: entry.version }
       : { available: false, path: null, version: null };
   }
+  if (persistedFamilyIds(Object.keys(request.binaries)) !== FAMILY_IDS) {
+    throw new OperationConflict("INVALID_REQUEST", "new launch sets require the exact current5 binary domain");
+  }
   const manifest: LaunchManifest = {
     schemaVersion: 1,
     daemonHome: request.daemonHome,
@@ -192,11 +195,15 @@ function gateLauncherScript(
   node: { path: string },
   gatePath: string,
   binaryPath: string,
+  family: FamilyName,
 ): string {
   return (
     "#!/bin/sh\n" +
     "unset NODE_OPTIONS\n" +
     `export SLP_FAMILY_BIN=${quote(binaryPath)}\n` +
+    // Recorded native manifests retain their exact historical script bytes.
+    // Current publication never puts OpenCode in gateFamilies.
+    (family === "opencode" ? "export SLP_OPENCODE_V2_ONLY=1\n" : "") +
     `exec ${quote(node.path)} ${quote(gatePath)} "$@"\n`
   );
 }
@@ -228,6 +235,7 @@ function planFiles(manifest: LaunchManifest, directory: string): PlannedFile[] {
             manifest.node,
             gatePath,
             manifest.binaries[family]?.path ?? "",
+            family,
           )
         : launcherScript(manifestPath, digest, manifest.node, shimPath, family, role);
       files.push({
@@ -253,6 +261,8 @@ function parseManifest(bytes: Buffer): LaunchManifest {
   }
   if (m === null || typeof m !== "object" || Array.isArray(m)) fail("is not an object");
   if (m.schemaVersion !== 1) fail("schemaVersion is not 1");
+  const manifestKeys = ['schemaVersion', 'daemonHome', 'candidate', 'node', 'binaries', 'families', 'roles', 'launcherFamilies', 'gateFamilies', 'bridgeSha256', 'bridgeProtocolVersion'];
+  if (Object.keys(m).some(key => !manifestKeys.includes(key))) fail("contains unknown fields");
   if (typeof m.daemonHome !== "string" || !isAbsolute(m.daemonHome)) fail("daemonHome is not absolute");
   const candidate = m.candidate;
   if (
@@ -270,7 +280,12 @@ function parseManifest(bytes: Buffer): LaunchManifest {
   }
   const binaries = m.binaries;
   if (!binaries || typeof binaries !== "object") fail("binaries is missing");
-  for (const family of FAMILIES) {
+  const historicalFamilies = Array.isArray(m.families) ? persistedFamilyIds(m.families) : null;
+  const binaryFamilies = persistedFamilyIds(Object.keys(binaries));
+  if (historicalFamilies === null || binaryFamilies === null || historicalFamilies.length !== binaryFamilies.length) {
+    fail("families/binaries must share exact legacy4 or current5 domain");
+  }
+  for (const family of historicalFamilies) {
     const b = (binaries as Record<string, unknown>)[family] as BinaryResolution | undefined;
     if (
       !b ||
@@ -284,8 +299,6 @@ function parseManifest(bytes: Buffer): LaunchManifest {
   }
   if (
     !Array.isArray(m.families) ||
-    m.families.length !== FAMILIES.length ||
-    !FAMILIES.every(f => (m.families as string[]).includes(f)) ||
     !Array.isArray(m.roles) ||
     m.roles.length !== ROLES.length ||
     !ROLES.every(r => (m.roles as string[]).includes(r))
@@ -295,14 +308,16 @@ function parseManifest(bytes: Buffer): LaunchManifest {
   if (
     m.launcherFamilies !== undefined &&
     (!Array.isArray(m.launcherFamilies) ||
-      !m.launcherFamilies.every(f => (FAMILIES as readonly string[]).includes(f)))
+      new Set(m.launcherFamilies).size !== m.launcherFamilies.length ||
+      !m.launcherFamilies.every(f => historicalFamilies.includes(f)))
   ) {
     fail("launcherFamilies is malformed");
   }
   if (m.gateFamilies !== undefined) {
-    const launchers = m.launcherFamilies ?? FAMILIES;
+    const launchers = m.launcherFamilies ?? historicalFamilies;
     if (
       !Array.isArray(m.gateFamilies) ||
+      new Set(m.gateFamilies).size !== m.gateFamilies.length ||
       !m.gateFamilies.every(f => launchers.includes(f as FamilyName))
     ) {
       fail("gateFamilies is malformed or outside launcherFamilies");

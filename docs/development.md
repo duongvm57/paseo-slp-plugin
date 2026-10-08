@@ -180,7 +180,7 @@ Git-source install, management surface, activate/deactivate/reconcile RPCs,
 provider/profile patching, collision and drift refusals, and recovery
 classification — see `.local-checks/` for the evidence ledger. Roles are
 behavioral instructions, not a filesystem/MCP sandbox. The transport supports
-Codex, Pi, Devin and Claude; routing, adapter and handoff have local checks.
+Codex, Pi, Devin, Claude and OpenCode; routing, adapter and handoff have local checks.
 Live provider switching, heartbeat, council and the full E2E manifest are
 not yet E2E-accepted. The [candidate contract](contract.md) records capability
 and policy-load ownership; the [E2E review checklist](review-checklist.md)

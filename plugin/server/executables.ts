@@ -28,6 +28,7 @@ import type {
 } from "../shared/contracts.ts";
 
 import { FAMILY_IDS } from "../shared/runtime/families.ts";
+import { supportsOpenCodeVersion, OPENCODE_VERSION_REQUIREMENT } from "../shared/runtime/opencode-version.mjs";
 
 // The family set derives from the shared registry (families.ts) — the export
 // keeps its historical name so existing imports keep working.
@@ -329,16 +330,21 @@ async function checkBinary(
   node: ResolvedNode,
   ctx: Ctx,
   followVendorCurrent = true,
+  family?: FamilyName,
 ): Promise<BinaryResolution> {
   if (!isAbsolute(path)) throw new Error("path is not absolute");
   const real = await executableRealpath(path);
   if (real === null) throw new Error("not an existing executable file");
   const rejected = rejectBinary(real, node, ctx);
   if (rejected) throw new Error(rejected);
-  // Preserve a validated stable alias. All four providers may update the
+  // Preserve a validated stable alias. All registered providers may update the
   // target of their PATH symlink; realpath would freeze an old release.
   const tracked = path === real && followVendorCurrent ? (await vendorCurrentHandle(real)) ?? real : path;
-  return probeBinary(tracked, ctx);
+  const result = await probeBinary(tracked, ctx);
+  if (family === "opencode" && result.available && !supportsOpenCodeVersion(result.version)) {
+    throw new Error(`requires ${OPENCODE_VERSION_REQUIREMENT}; observed ${result.version}`);
+  }
+  return result;
 }
 
 const UNAVAILABLE: BinaryResolution = { available: false, path: null, version: null };
@@ -352,7 +358,7 @@ async function resolveBinary(
   const explicit = request.binaries?.[family];
   if (explicit !== undefined) {
     try {
-      return await checkBinary(explicit, node, ctx, false);
+      return await checkBinary(explicit, node, ctx, false, family);
     } catch (error) {
       throw new OperationConflict(
         "EXECUTABLE_UNAVAILABLE",
@@ -370,7 +376,7 @@ async function resolveBinary(
     const real = await executableRealpath(candidate);
     if (real === null || rejectBinary(real, node, ctx)) continue;
     try {
-      return await checkBinary(candidate, node, ctx);
+      return await checkBinary(candidate, node, ctx, true, family);
     } catch {
       continue;
     }
@@ -378,7 +384,7 @@ async function resolveBinary(
   const prior = request.prior?.binaries?.[family];
   if (prior?.available === true) {
     try {
-      return await checkBinary(prior.path, node, ctx);
+      return await checkBinary(prior.path, node, ctx, true, family);
     } catch {
       // The last verified path is unavailable too.
     }

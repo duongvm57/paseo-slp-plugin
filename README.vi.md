@@ -64,7 +64,7 @@ Lý do thiết kế nằm ở [docs/architecture.md](docs/architecture.md).
 
 | Plugin làm                                                                                   | Plugin từ chối                                                                     | Plugin không bao giờ                                             |
 | -------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
-| Đăng ký tối đa 12 provider `slp-<family>-<role>` và hai profile **SLP Supervisor** / **SLP Lead** | Ghi đè provider hay profile không thuộc về nó (`COLLISION`)                    | Tạo agent khi cài đặt hoặc kích hoạt                             |
+| Đăng ký tối đa 15 provider `slp-<family>-<role>` và hai profile **SLP Supervisor** / **SLP Lead** | Ghi đè provider hay profile không thuộc về nó (`COLLISION`)                    | Tạo agent khi cài đặt hoặc kích hoạt                             |
 | Nạp hướng dẫn role cho từng seat lúc session bắt đầu, tách riêng với prompt công việc         | Đoán mò khi config bị đổi ngoài journal của nó (`RECOVERY_REQUIRED`)               | Chạy scheduler hay database agent riêng; Paseo vẫn là control plane |
 | Giữ Peer pool để Lead chọn runtime cho từng Peer                                             | Binding Peer ngoài pool khi chạy `prepare`                                         | Ghi routing catalog của repository                               |
 | Kiểm tra tham số khởi chạy offline (`prepare`), báo lỗi theo từng bước có tên                | Provider inventory chưa được xác minh hoặc không tương thích được đưa vào `prepare` | Chạy daemon giám sát; `monitor` là một lượt quét do bạn gọi       |
@@ -73,7 +73,7 @@ Lý do thiết kế nằm ở [docs/architecture.md](docs/architecture.md).
 | Hỗ trợ handoff owner có chuẩn bị và panel chỉ đọc trong workspace                            | Acknowledgment không khớp offer còn dùng được và revision pin hiện hành             | Chuyển quyền qua tin nhắn chat hay resource account               |
 | Cung cấp Jev routing và communication supervision tùy chọn                                   | Receipt routing Jev không qua được kiểm tra offline (hash, model, catalog)          | Bật dịch vụ ngoài khi bạn chưa cấu hình                            |
 
-Lựa chọn role đã lưu giới hạn provider Supervisor/Lead; cả bốn provider Peer vẫn được chọn qua
+Lựa chọn role đã lưu giới hạn provider Supervisor/Lead; cả năm provider Peer vẫn được chọn qua
 pool. Provider của CLI chưa có sẵn bị vô hiệu hóa. Kiểm tra pool áp dụng cho `prepare` và native task dispatch.
 Quy tắc role hướng dẫn cách agent làm việc; kiểm tra managed launch và desk áp dụng tại các
 interface tương ứng. Quyền truy cập repository và shell vẫn do Paseo cùng provider quyết định.
@@ -87,8 +87,9 @@ interface tương ứng. Quyền truy cập repository và shell vẫn do Paseo 
 | **Lead**       | Định khung, routing, dependency, tích hợp, verdict dự án                               | Giải trước phần khó rồi giao Peer việc đánh máy         | Profile **SLP Lead**                    |
 | **Peer**       | Một outcome có giới hạn, trong vai Engineer, Architect, Reviewer hoặc Scout            | Tạo agent khác                                          | Một option trong Peer pool, theo task   |
 
-Seat chạy trên **Codex, Pi, Devin hoặc Claude Code**, trộn tùy ý: hai Peer trong cùng một team có thể
-dùng provider, model và mức effort khác nhau.
+Seat chạy trên **Codex, Pi, Devin, Claude Code hoặc OpenCode**, trộn tùy ý: hai Peer trong cùng một team có thể
+dùng provider, model và mức effort khác nhau. [OpenCode](docs/opencode.md) dùng ACP
+stdio cho managed và standalone; transport native OpenCode và V1 chưa được hỗ trợ.
 
 Peer Engineer là writer mặc định cho phần triển khai. Human assignment hoặc workspace protocol
 có hiệu lực có thể cấp rõ một phạm vi Lead được viết cho việc rõ ràng, dễ đảo ngược. Quy tắc một
@@ -98,10 +99,10 @@ writer, proof của candidate và review độc lập khi bắt buộc vẫn áp
 
 Bạn cần:
 
-- Paseo `>=0.8.0`, với `pluginsEnabled: true` và `mcp.enabled` hiệu lực là `true`
+- Paseo `>=0.10.3`, với `pluginsEnabled: true` và `mcp.enabled` hiệu lực là `true`
 - Máy chạy daemon dùng POSIX (Linux/macOS), với Node.js 22.x từ 22.18, hoặc Node.js 23.6+
   (native TypeScript stripping)
-- CLI của từng provider family bạn dùng (Codex, Pi, Devin, Claude), đã đăng nhập trên máy daemon;
+- CLI của từng provider family bạn dùng (Codex, Pi, Devin, Claude, OpenCode), đã đăng nhập trên máy daemon;
   Pi cần hỗ trợ truyền `--append-system-prompt` nhiều lần
 
 Bật provider family đã cài mà bạn muốn dùng trong phần cấu hình agent của Paseo trước lần kích hoạt đầu.

@@ -211,7 +211,7 @@ test('mergeToolPolicyPreapprovals fails closed at the 1024 bound — never an in
 
 const silentHost = { rpcDispatched: false, providersSnapshot: null, agentsList: null };
 
-test('auditCapabilities emits per-family rows for all four families plus host-wide rows', () => {
+test('auditCapabilities emits per-family rows for all five families plus host-wide rows', () => {
   const { records, gaps } = auditCapabilities({ now: NOW, observed: silentHost });
   for (const family of FAMILY_IDS) {
     const familyRows = records.filter(r => r.family === family);
@@ -328,8 +328,8 @@ test('every one of the 54 observation tuples yields the exact pinned inventory',
   for (const observed of tuples) {
     const label = JSON.stringify(observed);
     const { records, gaps } = auditCapabilities({ now: NOW, observed });
-    assert.equal(records.length, 39, `records ${label}`);
-    assert.equal(gaps.length, 18, `gaps ${label}`);
+    assert.equal(records.length, 45, `records ${label}`);
+    assert.equal(gaps.length, 22, `gaps ${label}`);
     // Exact id/family inventory — a new row or family without a pin raise
     // must fail here, never be shed by the wire cap.
     assert.deepEqual(
@@ -766,9 +766,9 @@ test('the production view emits the full pinned inventory with zero omissions', 
   const enforcement = createEnforcement({ journal: stubJournal(null), now: () => new Date(NOW) });
   const view = await enforcement.readView({ schemaVersion: 1, target: target(home) }, { agents: { list: agentsListOk() } });
   // Pins equal the audit inventory: everything produced is emitted verbatim.
-  assert.equal(view.capabilities.length, 39);
+  assert.equal(view.capabilities.length, 45);
   assert.equal(view.capabilities.length, WIRE_LIMITS.capabilities);
-  assert.equal(view.gaps.length, 18);
+  assert.equal(view.gaps.length, 22);
   assert.equal(view.gaps.length, WIRE_LIMITS.gaps);
   // No omission in the production domain — completeness is the empty report.
   assert.deepEqual(view.completeness, []);

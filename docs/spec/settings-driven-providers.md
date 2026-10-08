@@ -190,15 +190,15 @@ As built on `feat/slp-paseo-plugin`:
   create). The bare `--version` probe answers through the real binary in
   every grant state (host availability probes run outside any session
   open).
-- Launch sets publish all twelve launchers: the nine hook-family gate
-  launchers plus the three devin shim dispatchers. The launch manifest
-  still records all four family resolutions for shim validation, and new
-  manifests carry `launcherFamilies` (all four families) plus
+- Launch sets publish all fifteen launchers: the nine hook-family gate
+  launchers plus six ACP shim dispatchers for Devin and OpenCode. The launch manifest
+  still records all five family resolutions for shim validation, and new
+  manifests carry `launcherFamilies` (all five families) plus
   `gateFamilies` (codex/pi/claude) so verify replays the right script per
   file (pre-Phase-2 manifests without the fields replay the legacy
   all-shim 12-launcher plan).
 - Byte-parity test between hook-rendered and wrapper-rendered bundles
-  across all twelve owned ids (tests/plugin-role-injection.test.mjs).
+  across all fifteen owned ids (tests/plugin-role-injection.test.mjs).
 - Devin wrapper path untouched.
 - Live-daemon smoke ran 2026-09-19 (candidate `97a179eb`, commit `390820b`):
   it immediately caught the capability-probe refusal described above —
@@ -274,7 +274,16 @@ Registry entry shape (chosen over the brief's minimal
 
 ### Adding a family
 
-After this refactor the remaining steps are exactly three:
+OpenCode uses `transport: wrapper`, `extends: acp` for both managed and
+standalone installation. Its managed shim additionally requires the enabled
+session-open hook grant before launching the per-client ACP child, so a
+plugin-disabled create cannot bypass the boundary. Native OpenCode V2 is
+unsupported after actual lifecycle proof exposed its shared-runtime gate
+bypass. See [OpenCode support](../opencode.md) for version and proof limits.
+
+The three runtime mechanics follow below. Persisted-family expansion also
+requires explicit historical-domain, hash, ownership and CAS compatibility
+review; registry derivation does not authorize normalization of old records.
 
 1. **Registry entry** — append one entry to `FAMILIES` in
    `plugin/shared/runtime/families.ts`. Every downstream list, regex, schema

@@ -24,14 +24,17 @@ export interface FamilySpec {
    *              roleBundle() via config.systemPrompt and `agent.session_open`
    *              overlays the grant (codex/pi/claude).
    *  "wrapper" — shim + role wrapper; the ACP adapter drops systemPrompt, so
-   *              the role bytes travel through the shim's session/new rewrite
-   *              (devin). */
+   *              the role bytes travel through the wrapper's session/prompt rewrite
+   *              (devin/opencode). */
   transport: "hook" | "wrapper";
   /** Provider-env variable that carries the frozen binary resolution —
    *  `SLP_<ID>_BIN`; the shim's per-family source and the provider env block. */
   binEnv: string;
   /** Base provider a generated `slp-*` entry extends. */
   extends: string;
+  /** A managed session needs a live session-open hook grant before the
+   *  wrapper/native child starts; capability/catalog probes stay available. */
+  sessionGrant?: boolean;
   /** Position in pickers that offer a family choice — lower sorts first.
    *  Canonical order (FAMILY_IDS) stays the declaration order; the UI's
    *  PROFILE_FAMILY_ORDER derives from this rank. */
@@ -43,6 +46,7 @@ export const FAMILIES = [
   { id: "pi", label: "Pi", transport: "hook", binEnv: "SLP_PI_BIN", extends: "pi", pickerRank: 2 },
   { id: "devin", label: "Devin", transport: "wrapper", binEnv: "SLP_DEVIN_BIN", extends: "acp", pickerRank: 3 },
   { id: "claude", label: "Claude Code", transport: "hook", binEnv: "SLP_CLAUDE_BIN", extends: "claude", pickerRank: 0 },
+  { id: "opencode", label: "OpenCode", transport: "wrapper", binEnv: "SLP_OPENCODE_BIN", extends: "acp", sessionGrant: true, pickerRank: 4 },
 ] as const satisfies readonly FamilySpec[];
 
 export type FamilyId = (typeof FAMILIES)[number]["id"];
@@ -69,14 +73,18 @@ export const HOOK_FAMILY_IDS: readonly FamilyId[] =
 export const WRAPPER_FAMILY_IDS: readonly FamilyId[] =
   FAMILIES.filter(f => f.transport === "wrapper").map(f => f.id);
 
+export const GRANT_FAMILY_IDS: readonly FamilyId[] =
+  FAMILIES.filter(f => f.transport === "hook" || ("sessionGrant" in f && f.sessionGrant)).map(f => f.id);
+
 const perFamily = <V>(pick: (f: (typeof FAMILIES)[number]) => V): Record<FamilyId, V> =>
   Object.fromEntries(FAMILIES.map(f => [f.id, pick(f)])) as Record<FamilyId, V>;
 
 export const FAMILY_LABEL: Readonly<Record<FamilyId, string>> = perFamily(f => f.label);
 export const PROVIDER_EXTENDS: Readonly<Record<FamilyId, ProviderExtends>> = perFamily(f => f.extends);
+export const STANDALONE_PROVIDER_EXTENDS = PROVIDER_EXTENDS;
 export const FAMILY_BIN_ENV: Readonly<Record<FamilyId, string>> = perFamily(f => f.binEnv);
 /** Deduped `extends` values, registry order — the OwnedProvider.extends enum
- *  domain (devin contributes "acp", the rest extend their own id). */
+ *  domain (Devin/OpenCode contribute "acp"; hook families extend their own id). */
 export const PROVIDER_EXTENDS_IDS: readonly ProviderExtends[] = [
   ...new Set(FAMILIES.map(f => f.extends)),
 ];
@@ -97,6 +105,27 @@ export const OWNED_PROVIDER_IDS: string[] = FAMILY_IDS.flatMap(family =>
   ROLES.map(role => ownedProviderId(family, role)),
 ).sort();
 
+// Persisted history has exactly two admitted vocabularies. This frozen
+// historical domain is intentionally independent of the current registry;
+// adding a future family does not authorize another history format.
+export const LEGACY_FAMILY_IDS = ['codex', 'pi', 'devin', 'claude'] as const;
+export const LEGACY_OWNED_PROVIDER_IDS = LEGACY_FAMILY_IDS.flatMap(family =>
+  ROLES.map(role => ownedProviderId(family, role)),
+).sort();
+const exactSet = (keys: readonly string[], expected: readonly string[]) =>
+  keys.length === expected.length && new Set(keys).size === expected.length
+    && expected.every(key => keys.includes(key));
+export function persistedFamilyIds(keys: readonly string[]): readonly FamilyId[] | null {
+  if (exactSet(keys, FAMILY_IDS)) return FAMILY_IDS;
+  if (exactSet(keys, LEGACY_FAMILY_IDS)) return LEGACY_FAMILY_IDS;
+  return null;
+}
+export function persistedProviderIds(keys: readonly string[]): readonly string[] | null {
+  if (exactSet(keys, OWNED_PROVIDER_IDS)) return OWNED_PROVIDER_IDS;
+  if (exactSet(keys, LEGACY_OWNED_PROVIDER_IDS)) return LEGACY_OWNED_PROVIDER_IDS;
+  return null;
+}
+
 const familyPattern = (ids: readonly FamilyId[]): string => ids.join("|");
 const ROLE_PATTERN = ROLES.join("|");
 
@@ -108,6 +137,9 @@ export const OWNED_PROVIDER_ID_RE = new RegExp(
 /** Owned ids on the hook transport (thin alias + gate launcher). */
 export const HOOK_PROVIDER_ID_RE = new RegExp(
   `^slp-(${familyPattern(HOOK_FAMILY_IDS)})-(${ROLE_PATTERN})$`,
+);
+export const GRANT_PROVIDER_ID_RE = new RegExp(
+  `^slp-(${familyPattern(GRANT_FAMILY_IDS)})-(${ROLE_PATTERN})$`,
 );
 /** Owned ids on the wrapper transport (shim). */
 export const WRAPPER_PROVIDER_ID_RE = new RegExp(

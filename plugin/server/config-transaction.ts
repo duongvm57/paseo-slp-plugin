@@ -58,6 +58,7 @@ import {
   canonicalSha256,
   effectiveView,
   extractProjection,
+  projectionProviderIds,
   getKey,
   getPath,
   isRecord,
@@ -497,7 +498,7 @@ function launcherPathFor(launchSet: LaunchSet, providerId: string): string {
  *  pool-driven per Lead delegation, so they are always generated. Ids absent
  *  from the returned map record `present:false` in the plan endpoint, which
  *  the patch turns into a removal on rebind. A null routing keeps the v1
- *  all-twelve generation — the documented backward-compatibility decision
+ *  all-family generation — the documented backward-compatibility decision
  *  for an absent or legacy routing file. */
 export function desiredProviderEntries(
   launchSet: LaunchSet,
@@ -752,13 +753,13 @@ function diskMatchesEndpoint(
   const problems: string[] = [];
   let observed: ProjectionValue;
   try {
-    observed = extractProjection(rawJson, "OWNERSHIP_DRIFT");
+    observed = extractProjection(rawJson, "OWNERSHIP_DRIFT", projectionProviderIds(owned));
   } catch (error) {
     problems.push((error as Error).message);
     return { match: false, problems };
   }
   const rawProviders = providersRecord(rawJson);
-  for (const id of OWNED_PROVIDER_IDS) {
+  for (const id of projectionProviderIds(owned)) {
     const expected = owned.providers[id];
     const present = Object.hasOwn(rawProviders, id);
     if (expected.present !== present) {
@@ -807,7 +808,7 @@ function diskMatchesEndpoint(
   if (!wholeProfilesMatch) {
     problems.push("daemon.agentProfiles (whole array)");
   }
-  if (canonicalSha256(unrelatedPersistedView(rawJson)) !== unrelatedPersistedSha256) {
+  if (canonicalSha256(unrelatedPersistedView(rawJson, projectionProviderIds(owned))) !== unrelatedPersistedSha256) {
     problems.push("unrelated persisted config changed");
   }
   return { match: problems.length === 0, problems };
@@ -828,7 +829,7 @@ function liveMatchesEndpoint(
   if (effective.enabled !== expectedEnabled) {
     problems.push("live mcp.enabled");
   }
-  for (const id of OWNED_PROVIDER_IDS) {
+  for (const id of projectionProviderIds(owned)) {
     const expected = owned.providers[id];
     const livePresent = Object.hasOwn(effective.providers, id);
     if (expected.present !== livePresent) {
@@ -923,7 +924,7 @@ export function patchForDirection(
   const desiredArray = applyOwnedSlots(baseArray, owned.profiles);
   const providers: Record<string, unknown> = {};
   const removeProviders: string[] = [];
-  for (const id of OWNED_PROVIDER_IDS) {
+  for (const id of projectionProviderIds(owned)) {
     const presence = owned.providers[id];
     if (presence.present) providers[id] = presence.value;
     else removeProviders.push(id);
@@ -1009,7 +1010,7 @@ export interface ActivationPlanArgs {
   launchSet: LaunchSet;
   /** Settings-driven role routing read from slp-runtime/state/role-routing.json
    *  (Phase 1): drives which supervisor/lead provider combos are generated and
-   *  what the owned profiles bind to. null → legacy all-twelve generation. */
+   *  what the owned profiles bind to. null → legacy all-family generation. */
   roleRouting: RoleRoutingValue | null;
   /** Candidate identity: freshly materialized result or reused binding assets. */
   candidateSha256: string;
@@ -1144,6 +1145,14 @@ export function planActivation(args: ActivationPlanArgs): PlanResult {
     for (const id of OWNED_PROVIDER_IDS) {
       const expected = previousBinding.owned.providers[id];
       const present = Object.hasOwn(rawProviders, id);
+      // A legacy vocabulary never owned this new slot. Absence is a
+      // prerequisite to acquiring it, not a decoded present:false value.
+      if (expected === undefined) {
+        if (present && (!input.adoptIdentical || !canonicalEqual(rawProviders[id], desiredProviders[id]))) {
+          throw new OperationConflict("COLLISION", `new provider ${id} is outside the historical binding; explicit exact adoption required`, { path: `agents.providers.${id}` });
+        }
+        continue;
+      }
       if (expected.present !== present) {
         throw new OperationConflict(
           "OWNERSHIP_DRIFT",
@@ -1292,7 +1301,7 @@ export function planActivation(args: ActivationPlanArgs): PlanResult {
   const slots = computeSlots(rawProfiles.value, desiredProfiles_);
   const desiredArray = applyOwnedSlots(rawProfiles.value, slots);
   const afterOwned: ProjectionValue = {
-    // The projection still covers the full twelve-id ownership set; under a
+    // The projection still covers the full registry-owned ownership set; under a
     // routing the non-chosen combos record present:false, which the patch
     // turns into a removal and the endpoint matchers treat as absent.
     providers: Object.fromEntries(
@@ -1413,7 +1422,8 @@ export function planDeactivation(args: DeactivationPlanArgs): PlanResult {
 
   // Exact receipt equality for every owned entry.
   const rawProviders = providersRecord(raw.json);
-  for (const id of OWNED_PROVIDER_IDS) {
+  const previouslyOwnedIds = projectionProviderIds(binding.owned);
+  for (const id of previouslyOwnedIds) {
     const expected = binding.owned.providers[id];
     const present = Object.hasOwn(rawProviders, id);
     if (expected.present !== present) {
@@ -1464,13 +1474,13 @@ export function planDeactivation(args: DeactivationPlanArgs): PlanResult {
       { path: "daemon.mcp.injectIntoAgents" },
     );
   }
-  assertNoDependentReferences(raw.json);
+  assertNoDependentReferences(raw.json, previouslyOwnedIds);
 
   const desiredArray = rawProfilesFiltered(raw.json);
   const restoreTo = binding.mcpBefore.injectIntoAgents.effective;
   const afterOwned: ProjectionValue = {
     providers: Object.fromEntries(
-      OWNED_PROVIDER_IDS.map(id => [id, { present: false as const }]),
+      OWNED_PROVIDER_IDS.map(id => [id, previouslyOwnedIds.includes(id) ? { present: false as const } : before.owned.providers[id]]),
     ),
     // Raw key presence: the inverse patch writes agentProfiles explicitly, so
     // the key is present after the endpoint even when the remaining array is
@@ -1488,7 +1498,7 @@ export function planDeactivation(args: DeactivationPlanArgs): PlanResult {
   const patch = alreadyThere
     ? null
     : {
-        removeProviders: [...OWNED_PROVIDER_IDS],
+        removeProviders: [...previouslyOwnedIds],
         agentProfiles: desiredArray,
         mcp: { injectIntoAgents: restoreTo },
       };

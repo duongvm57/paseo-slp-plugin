@@ -264,8 +264,8 @@ The plugin is a **manager**, not an agent feature. It exposes a small set
 of administrative operations (`status`, `activate`, `reconcile`,
 `deactivate`, `local-target`, `catalog`) that a human drives from the SLP
 sidebar. Agents never see these. Activation writes the provider entries
-(up to twelve — all twelve without routing; the chosen supervisor/lead
-combos plus all four peers when `role-routing.json` is set) and 2 profiles
+(up to fifteen — all fifteen without routing; the chosen supervisor/lead
+combos plus all five peers when `role-routing.json` is set) and 2 profiles
 into `config.json` atomically through `config.patch`,
 materializes the SLP payload into an immutable `slp-runtime/<sha>` tree,
 and records a receipt. Nothing changes on the daemon until a human
@@ -313,12 +313,12 @@ provider session begins with SLP instructions already in its
 durable context
 
 
-devin — shim + role wrapper (unchanged)
+devin / opencode — shim + ACP role wrapper
 
 human or agent calls create_agent(profile/provider, prompt)
         │
         ▼
-Paseo resolves the slp-devin-* provider entry
+Paseo resolves the slp-{devin,opencode}-* provider entry
         │
         ▼
 launcher process starts  ── env: SLP_MANAGED_RUNTIME, SLP_NODE_BIN,
@@ -327,16 +327,15 @@ launcher process starts  ── env: SLP_MANAGED_RUNTIME, SLP_NODE_BIN,
 slp-shim verifies the runtime payload (manifest digest + identity)
         │
         ▼
-role wrapper renders the role bundle and rewrites the session/new
-request — this is the injection — then starts the real provider
-transport (ACP)
+OpenCode shim requires the live session-open grant before child spawn;
+role wrapper starts the real ACP child and prepends role instructions
+to every session/prompt (entry carrier on first/re-armed prompts)
         │
         ▼
-provider session (devin) begins with SLP
-instructions already in its durable context
+provider receives SLP instructions before the user content on each prompt
 ```
 
-Devin keeps the wrapper transport because its ACP adapter drops
+Devin and OpenCode use the wrapper transport because generic ACP drops
 `systemPrompt` outright — the hook path cannot reach it (Phase 0 probe,
 2026-09-19). For hook families the plugin is in the loop at session entry
 via the two before-hooks, but never afterwards — no proxy, no monitoring

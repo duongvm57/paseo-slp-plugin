@@ -49,6 +49,7 @@ and dependency locks are supporting artifacts, not additional runtime owners.
 | bin/pi-role.mjs, plugin/server/runtime/cli/role-transport.ts | Pi native append-system-prompt adapter; preserve RPC bytes, host extensions and session/model/thinking arguments. |
 | bin/devin-role.mjs, plugin/server/runtime/cli/role-transport.ts | Generic ACP adapter; prepend role core, recovery pointer and current managed communication-language state on every session prompt. First prompts and prompts re-armed by load/resume/fork also carry session-entry helpers and the full measured carrier; no compaction event is required. |
 | bin/claude-role.mjs, plugin/server/runtime/cli/role-transport.ts | Claude Agent SDK stream-json adapter; append installed role instructions to the initialize control request's system-prompt append field; all other frames pass through. |
+| bin/opencode-role.mjs, plugin/shared/runtime/opencode-version.mjs | Managed/standalone OpenCode V2 ACP adapter: preserve non-prompt frame bytes; prepend role core on every session prompt and entry helpers/carrier on first/re-armed prompts. Refuse native serve and unsupported versions. Managed opens additionally require a live session-open grant before child spawn. |
 | src/common.md, src/roles/*.md | Authority, role behavior, conditional policy-text reuse and context-recovery rules; no repository tactics or model IDs. |
 | src/delegation.md | Always-loaded Supervisor/Lead delegation core: required review-gate, parentage/placement and ambiguous-create invariants, with distinct managed-desk and ordinary/direct operating pointers. |
 | src/references/delegation-execution.md | Ordinary/Lean formation, preparation, manual host verification and uncertain-create recovery; managed task dispatch uses its own guarded path. |
@@ -151,16 +152,22 @@ transaction and stable executable shims.
 ## Installation and restoration
 
 Managed family binaries use validated daemon PATH aliases when available, so
-Codex, Pi, Devin and Claude updates can reach future launches. Existing
+Codex, Pi, Devin, Claude and OpenCode updates can reach future launches. Existing
 version-pinned bindings migrate on the next authorized activation; the SLP
 picker refreshes the host catalog before presenting models.
 
 Three roles remain Supervisor, Lead and Peer. Only two saved profiles are managed:
-slp-supervisor and slp-lead. Up to twelve providers use slp-codex-{role},
-slp-pi-{role}, slp-devin-{role} and slp-claude-{role}. Plugin activation with
+slp-supervisor and slp-lead. Up to fifteen providers use slp-codex-{role},
+slp-pi-{role}, slp-devin-{role}, slp-claude-{role} and slp-opencode-{role}. Plugin activation with
 saved role routing generates the chosen Supervisor/Lead providers and all
-four Peer providers; absent routing keeps all twelve. Peer chooses runtime from
-the project pool, not a saved profile. Devin bindings accept swe-2 models only.
+five Peer providers; absent routing keeps all fifteen. Peer chooses runtime from
+the project pool, not a saved profile. Devin bindings accept swe-2 models only. OpenCode uses generic ACP (`extends: acp`) with the role wrapper for both
+managed and standalone installation; native OpenCode is unsupported.
+The plugin requires Paseo >=0.10.3. OpenCode detection and launch re-probes
+accept V2 >=2.0.10, reject V1/unknown majors and preserve validated PATH aliases.
+Measured compatibility is Paseo 0.10.3/OpenCode 2.0.24; the range is an API
+compatibility boundary, not evidence that every later release was tested.
+[OpenCode support](opencode.md) records the transport and proof limits.
 Peer disposition belongs to the assignment, independent of pool option choice.
 Standalone installation refuses collisions with owned provider and Supervisor/Lead
 profile IDs. Plugin activation may adopt existing entries only by explicit
@@ -205,6 +212,19 @@ already be enabled. Human profile preferences are preserved during rebind and
 may be acknowledged by reconcile; conflicting managed entries stop
 deactivation.
 
+Persisted provider history admits exactly legacy4/legacy12 and current5/current15
+vocabularies in the plugin journal/launch manifests. The standalone installer
+also retains its separate exact Codex3 + three-profile historical format; it
+never widens the plugin journal domain. Historical bindings, plans, snapshots and standalone receipts
+retain their original fields and digests. Persisted observations can retain
+native `extends: opencode` verbatim; current authored OpenCode entries and
+bindings require ACP, and native launch is refused. Readers neither fill absent OpenCode
+slots nor rewrite old evidence. New activation writes current plans/bindings,
+retaining the original baseline. Recovery may reinstate an original pinned
+legacy binding verbatim. Missing historical IDs carry no ownership: new rebind
+checks collision/adoption explicitly, and legacy restore/removal uses only
+recorded IDs. See [OpenCode compatibility](opencode.md).
+
 ## Configuration transactions
 
 SLP management operations are administrator-only and require an exclusive
@@ -218,8 +238,9 @@ automatic mutation and requires reconciliation.
 
 ## Runtime lifetime and policy delivery
 
-Plugin disable/remove is not SLP deactivation. Raw removal leaves verified
-stable transports operational and correctly roled, with ownership recoverable
+Plugin disable/remove is not SLP deactivation. Existing sessions remain
+operational; new managed OpenCode opens require the enabled hook grant.
+Stable runtime bytes remain verified and roled, with ownership recoverable
 by reinstalling the same plugin ID and reconciling its retained receipt.
 Deactivate before removing the manager when detachment is intended. Neither
 lifecycle cleanup nor deactivate deletes stable runtime or launcher
@@ -228,7 +249,14 @@ available to existing sessions; deletion requires separate maintenance
 authority after dependencies have ended. Provider commands and policy/helper
 paths must never reference managed plugin checkouts.
 
-Policy is injected independently of the ordinary task prompt. Provider labels
+Native hook policy is injected independently of the ordinary task prompt.
+Managed OpenCode and standalone ACP transports carry role bytes as a prepended text block on every
+`session/prompt`; first/re-armed prompts also include the measured carrier.
+Managed OpenCode requires the live session-open grant before its ACP child
+starts, including after plugin disable or during a reload gap. Standalone
+OpenCode ACP works without that grant. Native OpenCode is unsupported: its
+healthy V2 shared-runtime path can bypass the native sentinel when hooks are
+disabled. No V2 `instructions` file/glob/URL configuration is used. Provider labels
 and agent self-reports are not proof of loading: E2E evidence must correlate the
 provider command, installed bytes, actual session instructions and host parentage.
 Permissions and role boundaries remain distinct: policy is not tool isolation.
@@ -297,7 +325,7 @@ owns load paths; [review checklist](review-checklist.md) bounds local proof.
 
 ## Runtime selection
 
-Codex, Pi, Devin and Claude share role bytes through their respective adapters. Human configures
+Codex, Pi, Devin, Claude and OpenCode share role bytes through their respective adapters. Human configures
 slp-supervisor/slp-lead with matching role providers and chosen models/settings.
 Supervisor/Lead launches refresh these saved profiles and copy their complete
 provider/model/mode/thinking/features bundles. A pinned binding/bundle modeId
@@ -442,7 +470,8 @@ each send's input and outcome, and opens only shapes backed by a real
 normalized fixture — codex, claude and pi brief/handback/sends, devin
 brief/handback (an SLP-wrapped Devin message must be exactly one wrapper for
 the captured actor's role; a message with no transport trace is read
-verbatim) with send outcomes unknown because the provider emits no result. Lead-role live runs for
+verbatim) with send outcomes unknown because the provider emits no result. OpenCode timeline/send shapes remain unverified; role delivery does not
+authorize a fabricated supervision mapping. Lead-role live runs for
 claude, codex and pi are not done (no such Lead provider on the test
 daemon). An accepted
 send needs the semantic success of that exact call; a related rejected or

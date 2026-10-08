@@ -122,7 +122,7 @@ test('happy activate: INACTIVE → ACTIVE, providers/profiles/injection written,
   assert.equal(config.daemon.mcp.enabled, true);
   assert.equal(config.daemon.mcp.injectIntoAgents, true);
   const providers = slpProvidersOf(config);
-  assert.equal(Object.keys(providers).length, 12);
+  assert.equal(Object.keys(providers).length, 15);
   for (const id of OWNED_IDS) {
     const family = id.split('-')[1];
     const role = id.split('-')[2];
@@ -146,8 +146,9 @@ test('happy activate: INACTIVE → ACTIVE, providers/profiles/injection written,
     // One label template for every transport: `SLP <Family> <Role>` with
     // FAMILY_LABEL as the single display-name source.
     assert.equal(entry.label, `SLP ${FAMILY_LABEL[family]} ${roleLabel}`);
-    if (family === 'devin') {
-      assert.equal(entry.env.SLP_DEVIN_BIN, binaries.devin);
+    if (['devin', 'opencode'].includes(family)) {
+      assert.equal(entry.extends, 'acp');
+      assert.equal(entry.env[`SLP_${family.toUpperCase()}_BIN`], binaries[family]);
       continue;
     }
     // Hook families are sentinel-gated thin aliases: same launcher shape,
@@ -525,7 +526,7 @@ test('deactivate blocked by DEPENDENT_REFERENCE from an unrelated profile', asyn
   const done = await waitTerminal(manager, home, deact.operation.operationId, daemon2);
   assert.equal(done.operation.outcome, 'failed');
   assert.ok(opConflicts(home, opId).includes('DEPENDENT_REFERENCE'));
-  assert.equal(Object.keys(slpProvidersOf(readConfigJson(home))).length, 12);
+  assert.equal(Object.keys(slpProvidersOf(readConfigJson(home))).length, 15);
 });
 
 test('deactivate blocked by DEPENDENT_REFERENCE from metadataGeneration.providers', async t => {
@@ -545,7 +546,7 @@ test('deactivate blocked by DEPENDENT_REFERENCE from metadataGeneration.provider
   assert.equal(done.operation.outcome, 'failed');
   assert.ok(opConflicts(home, opId).includes('DEPENDENT_REFERENCE'));
   assert.equal(daemon2.patchCalls.length, 0);
-  assert.equal(Object.keys(slpProvidersOf(readConfigJson(home))).length, 12);
+  assert.equal(Object.keys(slpProvidersOf(readConfigJson(home))).length, 15);
 });
 
 test('deactivate with a modified owned profile → OWNERSHIP_DRIFT, no patch', async t => {
@@ -788,7 +789,7 @@ test('status reports state and never mutates; unknown operationId → NOT_FOUND'
   const s0 = await manager.status(statusInput(home), daemon);
   assert.equal(s0.state, 'INACTIVE');
   assert.equal(s0.binding, null);
-  assert.equal(s0.families.length, 4);
+  assert.equal(s0.families.length, 5);
   assert.equal(s0.liveAcceptance, 'not-established-by-this-rpc');
   const unknown = await manager.status(statusInput(home, randomUUID()), daemon);
   assert.equal(unknown.operation, null);
@@ -1026,7 +1027,7 @@ test('pure planner: patchForDirection rebuilds forward and inverse patches', asy
   const beforeConfig = { version: 1, daemon: { mcp: { enabled: true } } };
   const forward = patchForDirection(plan, 'activate', 'forward', beforeConfig);
   assert.equal(forward.mcp.injectIntoAgents, true);
-  assert.equal(Object.keys(forward.providers).length, 12);
+  assert.equal(Object.keys(forward.providers).length, 15);
   assert.equal(forward.removeProviders, undefined);
   assert.equal(forward.agentProfiles.length, 2);
   const inverse = patchForDirection(plan, 'activate', 'inverse', readConfigJson(home));
