@@ -309,3 +309,40 @@ test('slp_seat_create retains the observed child and withholds assignment when b
   assert.equal(create.creates.length, 1, 'the same request never repeats a native effect');
   assert.equal(create.sends.length, 0);
 });
+
+function peerPool(f, count=2) {
+ const path=join(f.repo.dir,'.paseo-slp');mkdirSync(path,{recursive:true});
+ const options=Array.from({length:count},(_,i)=>({id:i===0?'first':'second',provider:'codex',model:'gpt-6-luna',
+  roles:['peer'],enabled:true,availability:'ready',modeId:'full-access',thinkingOptionId:'high',
+  features:{fast_mode:true},suitableFor:['coding'],avoidFor:[],notes:'fixture'}));
+ writeFileSync(join(path,'slp-routing.json'),JSON.stringify({version:1,policy:'Fixture',quotaFallback:{enabled:false,optionId:null},options}));
+}
+const peerEntries=[{provider:'slp-codex-peer',enabled:true,status:'ready',modes:[{id:'full-access'}]}];
+test('wire optional Peer runtime discovers choices without intent then pins one existing-pool selection',async t=>{
+ const f=await boundFormationSeat(t,{providerEntries:peerEntries});peerPool(f);
+ const request={...seatCreate('peer-choices'),role:'peer'};
+ const choice=await callTool(f,101,'slp_seat_create',request);
+ assert.equal(choice.state,'selection-required');assert.equal(choice.operationAdmitted,false);assert.equal(f.effects.creates.length,0);
+ const noIntent=await callTool(f,102,'slp_operation_get',{requestId:request.requestId,kind:'seat-create'});
+ assert.equal(noIntent.code,'EVIDENCE_INCOMPLETE');
+ const out=await callTool(f,103,'slp_seat_create',{...request,selection:{optionId:'second'}});
+ assert.equal(out.result.state,'awaiting-caller-delivery');assert.equal(out.phases.length,6);
+ assert.equal(out.phases[0].name,'route-selected');assert.equal(out.phases[0].value.route.optionId,'second');
+ assert.equal(f.effects.creates.length,1);assert.equal(f.effects.sends.length,0);
+ const replay=await callTool(f,104,'slp_seat_create',{...request,selection:{optionId:'second'}});
+ assert.equal(replay.receiptSha256,out.receiptSha256);assert.equal(f.effects.creates.length,1);
+});
+test('wire armed Peer decision error never falls back and exact replay performs no network',async t=>{
+ const f=await boundFormationSeat(t,{providerEntries:peerEntries});peerPool(f,1);
+ writeFileSync(join(f.stableRoot,'state/jev.json'),JSON.stringify({schemaVersion:1,enabled:true,capabilities:{routing:true},
+  provider:{kind:'openrouter',model:'typesafe/jev-1.13'}}));
+ writeFileSync(join(f.stableRoot,'state/jev-openrouter.key'),'fixture-key\n',{mode:0o600});
+ const original=globalThis.fetch;let fetched=0;globalThis.fetch=async()=>{fetched++;throw new TypeError('fixture network failure');};
+ t.after(()=>{globalThis.fetch=original;});
+ const request={...seatCreate('armed-error'),role:'peer'};
+ const out=await callTool(f,201,'slp_seat_create',request);
+ assert.equal(out.state,'recorded');assert.equal(out.result.ok,false);
+ assert.equal(out.phases[0].name,'route-issued');assert.equal(f.effects.creates.length,0);assert.ok(fetched>=1);
+ const count=fetched;const replay=await callTool(f,202,'slp_seat_create',request);
+ assert.equal(replay.receiptSha256,out.receiptSha256);assert.equal(fetched,count);
+});

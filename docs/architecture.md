@@ -544,8 +544,16 @@ longer qualify under the new owner. See [assignment continuity](work-continuity.
   rollout decisions. Authority resolves from host-bound memberships and
   durable owner bindings; these tools record evidence and state. They do
   not create agents, choose delegation or deploy a rollout.
+- Ordinary Peer runtime selection is composed into durable formation, not the
+  CLI planner. Replay inspection precedes local choice preflight; choices admit
+  no intent. The exclusive executor imports the bound candidate selector, pins
+  one choice/full receipt, then replans offline before create and delivery.
+  Mode/source/catalog drift blocks dependent effects; old full-runtime requests
+  preserve their five phases. New paths use six phases without Jev and seven
+  with it (of 16). Decline retains evidence without allocating a seat. No default
+  pool, task enrollment or retry/resume scheduler is introduced.
 - Jev is an explicit helper primitive, not an agent feature: the
-  `route-decide` CLI is the only CLI call path (no loops, schedules or
+  `route-decide` CLI and admitted ordinary formation invoke routing decisions (no loops, schedules or
   prepare-time calls), its key lives in per-daemon state, and routing
   stays deterministic — prepare verifies the receipt offline and fails
   closed on any config/transport/validation error. The plugin-side

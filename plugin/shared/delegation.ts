@@ -15,9 +15,14 @@ const formation = {
  * Profiles and complete settings are server-resolved, with no overrides. */
 export const DeskSeatCreateInput = z.discriminatedUnion("role", [
   z.object({ ...formation, role: z.literal("lead") }).strict(),
-  z.object({ ...formation, role: z.literal("peer"), runtime: DeskTaskRuntimePin,
+  z.object({ ...formation, role: z.literal("peer"), runtime: DeskTaskRuntimePin.optional(),
+    selection: z.object({ optionId: DeskTaskRuntimePin.shape.optionId }).strict().optional(),
     disposition: z.string().min(1).max(64).regex(/^[A-Za-z][A-Za-z0-9_-]*$/).optional() }).strict(),
-]);
+]).superRefine((body, ctx) => {
+  if (body.role === "peer" && body.runtime !== undefined && body.selection !== undefined) {
+    ctx.addIssue({ code: "custom", path: ["selection"], message: "runtime and selection are mutually exclusive" });
+  }
+});
 export type DeskSeatCreateInputValue = z.infer<typeof DeskSeatCreateInput>;
 
 export const DeskOperationGetInput = z.object({

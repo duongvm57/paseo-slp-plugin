@@ -9,9 +9,10 @@ import { verifySeat } from "./desk-task-execution.ts";
 import { createTaskBoundedHost } from "./desk-task-host.ts";
 import type { TaskHostApi } from "./desk-task-execution-host.ts";
 import type { TaskRuntimeApi } from "./desk-task-runtime.ts";
-import type { DeskRejectionValue } from "../shared/enforcement.ts";
+import { WIRE_LIMITS, type DeskRejectionValue } from "../shared/enforcement.ts";
 import type { DeskSeatCreateInputValue } from "../shared/delegation.ts";
 import type { MembershipValue } from "./desk-store.ts";
+import type { PeerSelectionRequest, SelectedPeer } from "./runtime/cli/seat-selection.ts";
 
 type ModeSupport = { provider: string; modes: string[] };
 type Plan = {
@@ -25,7 +26,26 @@ type FormationRequest = {
   paseoHome: string; providers: { id: string; enabled: boolean; status: string }[];
   profiles?: unknown[]; route?: unknown;
 };
-type FormationModule = { launchPlan(root: string, request: FormationRequest): Omit<Plan, "modeSupport"> };
+type FormationModule = {
+  launchPlan(root: string, request: FormationRequest): Omit<Plan, "modeSupport">;
+  preflightPeerChoice?: typeof import("./runtime/cli/seat-selection.ts").preflightPeerChoice;
+  selectPeerSeat?: typeof import("./runtime/cli/seat-selection.ts").selectPeerSeat;
+  revalidatePeerSelection?: typeof import("./runtime/cli/seat-selection.ts").revalidatePeerSelection;
+  verifyFormationCandidate?: (root: string) => unknown;
+};
+type SelectionContext = { selected: SelectedPeer };
+type PhaseWriter = (name: string, value: unknown) => void;
+const formationEvidenceTooLarge = (value: unknown) =>
+  Buffer.byteLength(JSON.stringify(value)) * 3 > WIRE_LIMITS.deskBridgeRequestBytes - 32768;
+function selectionFailure(error: unknown): DeskRejectionValue {
+  const e = error as { name?: unknown; code?: unknown } | null;
+  if (e?.name === "SeatSelectionError" && ["INVALID_RECORD", "ROUTE_DRIFT", "REQUEST_TOO_LARGE"].includes(e.code as string)) {
+    return reject(e.code as DeskRejectionValue["code"], "Peer selection failed; inspect pool eligibility, independent choice and Jev receipt/configuration");
+  }
+  if (error instanceof FormationPlanningError) return reject(error.code, error.message);
+  const reason = typeof e?.code === "string" && /^jev-[a-z-]+$/.test(e.code) ? ` (${e.code})` : "";
+  return reject("INVALID_RECORD", `Peer selection failed${reason}; resolve the pool/Jev configuration or decision failure without provider fallback`);
+}
 const reject = (code: DeskRejectionValue["code"], message: string): DeskRejectionValue => ({
   ok: false, code, message,
   recovery: "inspect retained formation evidence; resolve the missing capability or drift without repeating an uncertain create/send",
@@ -39,22 +59,45 @@ export function createFormationPlanner(deps: {
   runtimePath: string; daemonHome: string; host: () => (TaskHostApi & TaskRuntimeApi) | null;
   importModule?: (specifier: string) => Promise<unknown>;
 }) {
-  return async (row: MembershipValue, input: DeskSeatCreateInputValue): Promise<Plan> => {
+  const loadLaunch = async (): Promise<FormationModule> => {
+    const load = deps.importModule ?? (specifier => import(specifier));
+    try { return await load(pathToFileURL(candidateModulePath(deps.runtimePath, "launch")).href) as FormationModule; }
+    catch { throw new FormationPlanningError("RUNTIME_INTEGRITY", "the bound candidate launch module is unavailable"); }
+  };
+  const peerRequest = (row: MembershipValue, input: DeskSeatCreateInputValue): PeerSelectionRequest => ({
+    repository: row.createCwd, assignment: input.assignment, paseoHome: deps.daemonHome,
+    ...(input.role === "peer" && input.selection ? { selection: input.selection } : {}),
+  });
+  const observeProviders = async (row: MembershipValue) => {
+    const host = deps.host();
+    if (host === null) throw new FormationPlanningError("CAPABILITY_GAP", "connected host unavailable");
+    try {
+      const observed = await createTaskBoundedHost(host).providers.snapshot({ cwd: row.createCwd });
+      if (observed.error) throw new Error("provider snapshot failed");
+      return observed;
+    } catch { throw new FormationPlanningError("CAPABILITY_GAP", "connected provider snapshot failed"); }
+  };
+  const providerInventory = (observed: Awaited<ReturnType<typeof observeProviders>>) => observed.entries.map(entry => ({
+    id: entry.provider, enabled: entry.enabled === true, status: entry.status === "ready" && !entry.error ? "available" : "unavailable",
+  }));
+  const requireSelection = (launch: FormationModule) => {
+    if (typeof launch.preflightPeerChoice !== "function" || typeof launch.selectPeerSeat !== "function"
+      || typeof launch.revalidatePeerSelection !== "function" || typeof launch.verifyFormationCandidate !== "function") {
+      throw new FormationPlanningError("CAPABILITY_GAP", "bound candidate lacks automatic Peer selection; use supported full runtime pins");
+    }
+    try { launch.verifyFormationCandidate(deps.runtimePath); }
+    catch { throw new FormationPlanningError("RUNTIME_INTEGRITY", "bound candidate bytes changed before Peer selection"); }
+  };
+  const planner = async (row: MembershipValue, input: DeskSeatCreateInputValue, context?: SelectionContext): Promise<Plan> => {
     if (row.workspaceId === null) throw new FormationPlanningError("CAPABILITY_GAP", "formation requires the caller's exact workspace");
     const host = deps.host();
     if (host === null) throw new FormationPlanningError("CAPABILITY_GAP", "connected host unavailable");
-    const load = deps.importModule ?? (specifier => import(specifier));
-    let launch: FormationModule;
-    try { launch = await load(pathToFileURL(candidateModulePath(deps.runtimePath, "launch")).href) as FormationModule; }
-    catch { throw new FormationPlanningError("RUNTIME_INTEGRITY", "the bound candidate launch module is unavailable"); }
+    const launch = await loadLaunch();
     const saved = () => profilesArray(readRawConfig(join(deps.daemonHome, "config.json")).json).value;
     let profiles: unknown[] | undefined;
     try { profiles = input.role === "lead" ? saved() : undefined; }
     catch { throw new FormationPlanningError("INVALID_RECORD", "saved profile configuration is unreadable or invalid"); }
-    let observed: Awaited<ReturnType<TaskRuntimeApi["providers"]["snapshot"]>>;
-    try { observed = await createTaskBoundedHost(host).providers.snapshot({ cwd: row.createCwd }); }
-    catch { throw new FormationPlanningError("CAPABILITY_GAP", "connected provider snapshot failed"); }
-    if (observed.error) throw new FormationPlanningError("CAPABILITY_GAP", "connected provider snapshot failed");
+    const observed = await observeProviders(row);
     // Profile reads straddle the awaited provider observation. Full bundles
     // are compared, and then re-planned before every native effect.
     if (profiles !== undefined) {
@@ -62,15 +105,19 @@ export function createFormationPlanner(deps: {
       try { after = saved(); } catch { throw new FormationPlanningError("INVALID_RECORD", "saved profile configuration is unreadable or invalid"); }
       if (canonicalSha256(profiles) !== canonicalSha256(after)) throw new FormationPlanningError("ROUTE_DRIFT", "saved profiles changed during formation");
     }
+    if (context !== undefined) {
+      requireSelection(launch);
+      try { launch.revalidatePeerSelection!(peerRequest(row, input), context.selected, providerInventory(observed)); }
+      catch { throw new FormationPlanningError("ROUTE_DRIFT", "fixed Peer selection or provider evidence changed before the next effect"); }
+    }
     let planned: Omit<Plan, "modeSupport">;
     try { planned = launch.launchPlan(deps.runtimePath, {
       repository: row.createCwd, workspaceId: row.workspaceId, role: input.role,
       assignment: `${input.assignment}\nHandback route: the verified parent agent ID is ${row.agentId}.\nAt handback, send exactly one native report to the verified parent above.\nA finish notification only signals the event; it does not replace the report or establish acceptance.\nA standby Lead reports readiness separately; readiness is not a technical verdict.\nAuthority reference (claim): ${input.grantRef}`,
       taskLabel: input.taskLabel, paseoHome: deps.daemonHome,
-      providers: observed.entries.map(entry => ({ id: entry.provider, enabled: entry.enabled === true,
-        status: entry.status === "ready" && !entry.error ? "available" : "unavailable" })),
+      providers: providerInventory(observed),
       ...(profiles !== undefined ? { profiles } : {}),
-      ...(input.role === "peer" ? { route: { ...input.runtime, disposition: input.disposition } } : {}),
+      ...(input.role === "peer" ? { route: { ...(context?.selected.route ?? input.runtime), disposition: input.disposition } } : {}),
     }); } catch { throw new FormationPlanningError("INVALID_RECORD", "fresh saved profile/pool/provider validation failed; refresh the preparation evidence"); }
     const separator = planned.create.provider.indexOf("/");
     if (separator <= 0) throw new FormationPlanningError("INVALID_RECORD", "fresh formation plan has no exact provider identity");
@@ -107,6 +154,22 @@ export function createFormationPlanner(deps: {
     }
     return { ...planned, modeSupport: { provider, modes: modeIds } };
   };
+  return Object.assign(planner, {
+    preflightPeer: async (row: MembershipValue, input: DeskSeatCreateInputValue) => {
+      if (row.workspaceId === null) throw new FormationPlanningError("CAPABILITY_GAP", "formation requires the caller's exact workspace");
+      const launch = await loadLaunch(); requireSelection(launch);
+      return launch.preflightPeerChoice!(peerRequest(row, input));
+    },
+    selectPeer: async (row: MembershipValue, input: DeskSeatCreateInputValue, phase: PhaseWriter, guard: () => Promise<DeskRejectionValue | null>) => {
+      if (row.workspaceId === null) throw new FormationPlanningError("CAPABILITY_GAP", "formation requires the caller's exact workspace");
+      const launch = await loadLaunch(); requireSelection(launch);
+      const observed = await observeProviders(row);
+      const refused = await guard();
+      if (refused !== null) throw new FormationPlanningError(refused.code, refused.message);
+      requireSelection(launch);
+      return launch.selectPeerSeat!(peerRequest(row, input), { providers: providerInventory(observed), phase });
+    },
+  });
 }
 
 function modeSupportError(plan: Plan): DeskRejectionValue | null {
@@ -130,7 +193,9 @@ function modeSupportError(plan: Plan): DeskRejectionValue | null {
 export async function runSeatCreate(row: MembershipValue, input: DeskSeatCreateInputValue, deps: {
   stableRoot: string; repoKey: string;
   host: () => (TaskHostApi & TaskRuntimeApi) | null;
-  plan: (row: MembershipValue, input: DeskSeatCreateInputValue) => Promise<Plan>;
+  plan: (row: MembershipValue, input: DeskSeatCreateInputValue, context?: SelectionContext) => Promise<Plan>;
+  preflightPeer?: (row: MembershipValue, input: DeskSeatCreateInputValue) => Promise<unknown | null>;
+  selectPeer?: (row: MembershipValue, input: DeskSeatCreateInputValue, phase: PhaseWriter, guard: () => Promise<DeskRejectionValue | null>) => Promise<SelectedPeer>;
   guard: () => Promise<DeskRejectionValue | null>;
 }) {
   if (row.agentId === null || !["lead", "supervisor"].includes(row.role)) return reject("AUTHORITY_REQUIRED", "only an orchestrating bound seat can form a child");
@@ -140,14 +205,31 @@ export async function runSeatCreate(row: MembershipValue, input: DeskSeatCreateI
   // earlier receipt replays unchanged). The "caller" default applies only here
   // at execution; absent vs explicit "caller" are different bodies.
   const delivery = input.delivery ?? "caller";
+  const automaticPeer = input.role === "peer" && input.runtime === undefined;
+  const preflight = automaticPeer ? async () => {
+    const guard = await deps.guard(); if (guard !== null) return guard;
+    // Reject oversized input before admission or a paid decision; retained
+    // invocations still replay first. Full runtime pins keep their old path.
+    if (formationEvidenceTooLarge(input)) return reject("REQUEST_TOO_LARGE", "automatic formation input exceeds the wire allowance; shorten it before retrying this requestId");
+    if (!deps.preflightPeer || !deps.selectPeer) return reject("CAPABILITY_GAP", "automatic Peer selection is unavailable");
+    try { return await deps.preflightPeer(row, input); }
+    catch (error) { return selectionFailure(error); }
+  } : undefined;
   return createDeskOperations(deps.stableRoot).run(identity, input, async phase => {
     const hostApi = deps.host();
     if (hostApi === null) return reject("CAPABILITY_GAP", "the connected SDK is unavailable");
     const host = createTaskBoundedHost(hostApi);
     const initialGuard = await deps.guard(); if (initialGuard !== null) return initialGuard;
+    let selected: SelectedPeer | undefined;
+    if (automaticPeer) {
+      try { selected = await deps.selectPeer!(row, input, phase, deps.guard); }
+      catch (error) { return selectionFailure(error); }
+      // This durable pin precedes every create/observe/delivery replan.
+      phase("route-selected", selected);
+    }
     const prepare = async (): Promise<Plan | DeskRejectionValue> => {
       try {
-        const plan = await deps.plan(row, input);
+        const plan = await deps.plan(row, input, selected ? { selected } : undefined);
         return modeSupportError(plan) ?? plan;
       }
       catch (error) {
@@ -157,6 +239,12 @@ export async function runSeatCreate(row: MembershipValue, input: DeskSeatCreateI
     };
     const plan = await prepare(); if ("ok" in plan) return plan;
     const { create } = plan;
+    if (selected && formationEvidenceTooLarge({ selected, plan })) {
+      // Reserve room for phase/result copies, JSON-RPC string escaping and
+      // bounded native tuple evidence before allocating a child. Legacy
+      // full-pin invocations keep their original validation/receipt path.
+      return reject("REQUEST_TOO_LARGE", "automatic formation evidence/prompt exceeds the wire allowance");
+    }
     const pin = canonicalSha256({ create, modeSupport: plan.modeSupport });
     const { initialPrompt, ...createMetadata } = create;
     phase("prepared", { pin, create: createMetadata, promptSha256: canonicalSha256(initialPrompt),
@@ -208,5 +296,5 @@ export async function runSeatCreate(row: MembershipValue, input: DeskSeatCreateI
     return { ok: true, state: "host-accepted", agentId, workspaceId: verification.workspaceId, parent: verification.parent,
       sent: true, verification, runtime: { provider: create.provider, ...create.settings, modeSupport: plan.modeSupport }, resourceDisposition: "retained",
       notification: "native-finish-callback-not-established; child reports to observed parent" };
-  });
+  }, preflight);
 }

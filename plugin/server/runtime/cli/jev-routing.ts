@@ -2,7 +2,8 @@ import type { CatalogOption } from './routing.ts';
 import type { JevQuestion, JevOptions } from './jev.ts';
 // plugin/server/runtime/cli/jev-routing.ts — first Jev consumer: seat-selection routing decisions.
 //
-// Jev runs ONLY through the explicit `route-decide` helper command — never in
+// Jev runs through explicit routeDecide invocation: the `route-decide` command
+// or an admitted slp_seat_create executor — never in
 // a background loop, a schedule, or inside prepare (prepare stays offline and
 // merely verifies the receipt this module's output carries).
 //
@@ -167,7 +168,7 @@ export async function routeDecide(request: { repository: string; role?: string; 
 // descriptive only — emitted so callers author request files without guessing.
 export function routeDecideSchema() {
   return {
-    description: 'Request contract for slp.mjs route-decide — the explicit Jev network call (the only path that calls Jev; never inside prepare)',
+    description: 'Request contract for slp.mjs route-decide — the explicit CLI Jev network call (also used by admitted slp_seat_create; never inside prepare)',
     request: {
       repository: 'required — absolute path to the work repository; its .paseo-slp/slp-routing.json (or the user-scope pool) supplies the candidate set',
       brief: 'required — a nonempty STRING of raw task/assignment text: task description, risk/effort signals, constraints, dependencies. Structured forms (object/array, e.g. a signals field) are refused — inline the facts as prose so suitability classification stays Jev’s, not the caller’s. Verbatim axis:value tokens inside the text ship as unverified mentions and are flagged in warnings.',

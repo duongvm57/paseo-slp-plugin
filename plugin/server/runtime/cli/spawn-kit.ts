@@ -10,7 +10,7 @@ import { roles, orchestrates } from './profiles.ts';
 
 const orchestratingTools = [
   'slp_seat_create(requestId: string, role: "lead", taskLabel: string, assignment: string, grantRef: string, delivery?: "caller" | "server")',
-  'slp_seat_create(requestId: string, role: "peer", taskLabel: string, assignment: string, grantRef: string, runtime: { optionId: string, catalogSha256: string, decision?: object }, disposition?: string, delivery?: "caller" | "server")',
+  'slp_seat_create(requestId: string, role: "peer", taskLabel: string, assignment: string, grantRef: string, runtime?: { optionId: string, catalogSha256: string, decision?: object }, selection?: { optionId: string }, disposition?: string, delivery?: "caller" | "server")',
   'slp_task_deliver(requestId: string, assignmentId: string, expectedLedgerRevision: integer, expectedBriefRevision: integer, expectedOwnershipRevision: integer, task: object, runtime: object, text: string, placement?: object)',
   'slp_task_get(assignmentId: string, taskId: string, attemptId?: string, expectedLedgerRevision?: integer)',
   'slp_operation_get(requestId: string, kind: "seat-create" | "task-deliver")',

@@ -113,12 +113,21 @@ export function createDeskOperations(stableRoot: string) {
       try { return inspect(identity); } catch { return reject("STATE_UNREADABLE", "retained operation evidence is unreadable or invalid"); }
     },
     async run(identity: OperationIdentity, request: unknown,
-      execute: (phase: (name: string, value: unknown) => void) => Promise<unknown>) {
+      execute: (phase: (name: string, value: unknown) => void) => Promise<unknown>,
+      preflight?: () => Promise<unknown | null>) {
       let path: string;
       let previous: string;
       try {
-        const located = locate(identity);
+        let located = locate(identity);
         if (located.existing) return inspect(identity, request, true, located.path);
+        if (preflight !== undefined) {
+          const choice = await preflight();
+          // A caller may have admitted this native identity while we awaited
+          // choice discovery. Retained evidence wins, including conflicts.
+          located = locate(identity);
+          if (located.existing) return inspect(identity, request, true, located.path);
+          if (choice !== null) return choice;
+        }
         path = located.path;
         assertRealComponents(stableRoot, path, "operation receipt");
         ensurePrivateDirectory(path, process.platform);

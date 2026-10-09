@@ -86,3 +86,22 @@ test('foreign native caller cannot retrieve another actor receipt; a distinct na
  let calls=0; const other=await f.ops.run({...f.identity,requestId:'different'},f.input,async()=>{calls++;return {state:'new'};});
  assert.equal(calls,1); assert.notEqual(other.intentSha256,original.intentSha256);
 });
+
+
+test('choice preflight publishes no intent and recorded operations bypass it', async t => {
+ const f=fixture(t);let calls=0;
+ const choice={ok:true,state:'selection-required',operationAdmitted:false,choices:['a','b']};
+ const reply=await f.ops.run(f.identity,f.input,async()=>assert.fail('unselected effect'),async()=>{calls++;return choice;});
+ assert.deepEqual(reply,choice);assert.equal(calls,1);
+ assert.equal(f.ops.get(f.identity).code,'EVIDENCE_INCOMPLETE');
+ const recorded=await f.ops.run(f.identity,{work:'chosen'},async()=>({done:true}),async()=>null);
+ const replay=await f.ops.run(f.identity,{work:'chosen'},async()=>assert.fail('replay effect'),async()=>assert.fail('replay preflight'));
+ assert.equal(replay.receiptSha256,recorded.receiptSha256);
+});
+
+test('concurrent admission while choice preflight awaits wins over stale choices', async t => {
+ const f=fixture(t);let release;const blocked=new Promise(resolve=>{release=resolve;});
+ const first=f.ops.run(f.identity,f.input,async()=>assert.fail('loser effect'),async()=>{await blocked;return {state:'selection-required'};});
+ const admitted=await f.ops.run(f.identity,f.input,async()=>({winner:true}));release();
+ const loser=await first;assert.equal(loser.receiptSha256,admitted.receiptSha256);assert.equal(loser.replayed,true);
+});

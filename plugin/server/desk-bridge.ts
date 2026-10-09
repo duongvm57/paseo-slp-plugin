@@ -421,7 +421,7 @@ export const DESK_TOOL_CATALOG = [
     roles: ["supervisor", "lead"],
     visible: true,
     mutation: true,
-    description: "Orchestrating seat: form a child from saved routing. Returns its exact prompt for send_agent_prompt with notifyOnFinish=true; delivery=server sends it instead.",
+    description: "Form Lead/Peer; Peer runtime optional, selection independent. Armed fails closed; choices unadmitted. Prompt for caller notifyOnFinish; delivery=server sends.",
   },
   {
     name: "slp_operation_get",
@@ -1312,6 +1312,7 @@ export function createDeskBridge(deps: DeskBridgeDeps) {
       const host = deps.taskHost ?? (() => null);
       const plan = createFormationPlanner({ runtimePath: pinnedBinding.runtimePath, daemonHome: dirname(pinnedRoot), host });
       return runSeatCreate(ctx.row, ctx.input, { stableRoot: pinnedRoot, repoKey: ctx.bound.repoKey, host, plan,
+        preflightPeer: plan.preflightPeer, selectPeer: plan.selectPeer,
         guard: async () => {
           if (stopped) return rejection("CAPABILITY_GAP", "bridge stopped during formation", "retain the original operation");
           const capability = capabilityGate(); if (capability !== null) return capability;

@@ -30,6 +30,8 @@ import { spawnKit } from './spawn-kit.ts';
 import { assignmentFileSelection, assignmentCarrier } from './assignment-file.ts';
 import { SLP_ROLE_PREFIX, LAUNCH_BINDING_PREFIX, ASSIGNMENT_HEADER, PLAN_LOCATOR_CAPTION } from '../../../shared/runtime/session-delivery.ts';
 import { buildHandoffRecap } from '../handoff-recap.ts';
+export { preflightPeerChoice, selectPeerSeat, revalidatePeerSelection } from './seat-selection.ts';
+export const verifyFormationCandidate = (root: string) => verifyInstall(root);
 
 // Every Binding source normalises to { binding, routing? } right here, so nothing
 // downstream unwraps a source-specific shape. Order is precedence, highest first.

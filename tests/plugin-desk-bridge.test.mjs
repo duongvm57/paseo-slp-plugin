@@ -841,7 +841,7 @@ test('native union branches reject discriminator and unknown-field violations be
     ['slp_task_dispatch', { ...dispatch, callerAgentId: 'forged' }],
     ['slp_task_integrate', { ...integrate, phase: 'land' }],
     ['slp_task_integrate', { ...integrate, internalReceipt: true }],
-    ['slp_seat_create', { ...seatCreate, role: 'peer' }],
+    ['slp_seat_create', { ...seatCreate, role: 'peer', runtime: dispatch.runtime, selection: { optionId: 'pool-fixture' } }],
     ['slp_seat_create', { ...seatCreate, modeId: 'caller-selected' }],
   ];
   let id = 10;

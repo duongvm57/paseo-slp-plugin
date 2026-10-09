@@ -420,12 +420,56 @@ read-only on the form — see `docs/spec/routing-criteria.md`); custom seats
 are free-form, and provider/`model` stay blank until picked from live
 discovery on the host.
 
-The Lead reads the current pool, records its choice rationale and validates
-option/hash via `prepare` before launching (when Jev routing is armed, the
+The bound Lead uses `slp_seat_create` for ordinary Peer formation (see below).
+For explicit CLI compatibility, the Lead reads the pool and validates option/hash
+via `prepare` before launching (when Jev routing is armed, the
 rationale trail is the receipt's recorded distribution instead — see
 [Jev-assisted routing](#jev-assisted-routing-optional)). With no valid pool/option at
 either scope, finish onboarding first; there is no fallback to `slp-peer`, to
 the Lead's own settings, or to another repo's catalog.
+
+### Ordinary Peer formation through the desk
+
+Call `slp_seat_create` with requestId, role=peer, taskLabel, assignment and
+its grantRef. `runtime` is optional; `selection: {optionId}` is an independent
+Lead choice and cannot accompany runtime. No provider/settings override is
+accepted. The assignment's raw prose is the Jev routing brief.
+
+| Jev mode | No runtime/selection | selection | Existing full runtime |
+|---|---|---|---|
+| unconfigured/off | Sole eligible option pins automatically; several return choices | Pin that eligible option | Existing offline pool/receipt validation |
+| shadow | Return choices even if sole | Retain independent choice plus server-obtained advisory receipt | Existing supplied-receipt semantics, no new call |
+| armed | Server obtains binding decision | Decision must match the choice | Existing required receipt validates offline, no new call |
+| unreadable/error | Refuse | Refuse | Refuse unreadable config as before |
+
+`selection-required` has operationAdmitted=false: no intent, decision or child
+was admitted. It lists up to 32 bounded choices and omittedCount; use the same
+requestId with selection after choosing. Once intent is published, changing any
+input is IDEMPOTENCY_CONFLICT. Eligibility does not prove suitability, live quota
+or provider readiness; fresh connected provider validation still gates creation.
+There is no take-first or settings/provider fallback. Shadow errors block too.
+
+New selection records route-issued before a Jev request, then route-selected
+with complete receipt, option/hash/source and configuration fingerprint. Armed
+decline retains route-declined and refuses creation. Replans read the fixed pin
+and fail on drift; they never decide again. Exact replay reads old recorded or
+partial evidence before choice discovery, performs no decision/create/send and
+never resumes a crashed operation. Keep returned IDs and uncertainties. Old
+full-runtime requests retain their original five-phase path and receipt bytes.
+New automatic formation uses at most seven phases of the existing 16-phase cap
+(six with no network). Oversized automatic input refuses in preflight before
+intent or Jev, using the same three-copy allowance and 32KiB reserve as the
+final evidence check; shorten it and reuse the unconsumed requestId.
+Selection/plan evidence only known after decision is also checked before native
+allocation. Existing full-runtime validation and retained replay stay unchanged.
+
+The child is created without work, its native tuple is observed, then the default
+caller delivery returns an exact prompt for send_agent_prompt with
+notifyOnFinish=true. Server delivery has no native finish callback; a finish
+event is neither the report nor acceptance. This group uses caller workspace;
+new placement/worktree support remains a separate change. CLI prepare stays
+explicit/offline; a bound older candidate lacking selection exports reports a
+capability gap for the new path while explicit full pins remain compatible.
 
 ### Peer quota fallback
 
@@ -456,8 +500,8 @@ API at `https://api.typesafe.ai/v1/systemone` with the pinned model
 an origin+path prefix). It is
 **not** an ACP provider and never becomes an agent seat; it answers one typed
 choice question over a caller-supplied state and returns a calibrated answer.
-It runs only through the explicit `route-decide` helper — never in a
-background loop, a schedule, or inside `prepare`.
+It runs through explicit `route-decide` or one admitted `slp_seat_create`
+executor — never in a background loop, a schedule, or inside `prepare`.
 
 Configuration is per daemon, via the SLP Manager's **Jev** card
 (`<daemonHome>/slp-runtime/state/jev.json` + a write-only `jev-<kind>.key`,
@@ -472,13 +516,14 @@ never mutates running seats, and disabling keeps the stored key. Two modes:
 - **Armed** (`enabled` and `capabilities.routing` both on): the receipt is
   required and binding — `route.optionId` must equal its choice.
 
-Shadow evaluation precedes arming: run route-decide on each delegation,
+Shadow evaluation precedes arming: independently select through slp_seat_create
+or run route-decide on each CLI-compatible delegation,
 prepare with the Lead's pick plus the receipt, and let the paired records
 accumulate; the Human pre-registers exit criteria — agreement rate and the
 asymmetric error class — and arms the capability only once the pairs satisfy
 them. The toggle stays off until that data exists.
 
-The flow in either mode: the Lead authors a routing `brief` (never raw
+The CLI compatibility flow in either mode: the Lead authors a routing `brief` (never raw
 `assignmentFile` bytes) and runs `route-decide <request.json>`; the helper
 computes the eligible candidate set deterministically — the same exclusion
 tokens `prepare` enforces — plus an explicit `no-suitable-option` sentinel,

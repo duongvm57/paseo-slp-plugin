@@ -172,11 +172,21 @@ topology (which seats, which pool options) fits the assignment — under armed
 Jev routing that reason trail is the decision receipt's distribution, not
 prose.
 
+## Bound seat formation
+
+`slp_seat_create` is a desk MCP tool, not a CLI command. Peer runtime may be
+omitted; server-side selection is described in [operations](operations.md#ordinary-peer-formation-through-the-desk).
+Use `selection: {optionId}` for an independent pick or an existing full runtime
+pin, never both. The spawn kit exposes both optional arguments. A choice response
+is unadmitted, not a successful create. After admission exact replay never calls
+Jev or resumes effects. `prepare`/`--check`/handoff preparation remain offline
+and still require explicit Peer pool pins; the new selector is not run by them.
+
 ## `route-decide`
 
 `route-decide <request.json> [--schema] [--out <path>] [--paseo-home <absolute-home>]`
-is the only path
-that calls Jev — see [Jev-assisted routing](operations.md#jev-assisted-routing-optional)
+is the CLI path
+that calls routing Jev (the admitted slp_seat_create executor also invokes it) — see [Jev-assisted routing](operations.md#jev-assisted-routing-optional)
 for what it is and when it applies. The request carries `repository`, an
 optional `role` (default `peer`) and a Lead-authored `brief` — a nonempty
 string of raw task/assignment text and the only task context Jev sees;
