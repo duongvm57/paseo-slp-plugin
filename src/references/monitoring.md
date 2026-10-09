@@ -1,9 +1,8 @@
 # Observe, wait and settle
 
-Supervisor/Lead use this before observation/delegated waits and at settlement.
-The package is no background lifecycle runner. If supported, opt-in
-`slp.mjs monitor` is an on-demand delta scan producing signal candidates,
-not verdicts or live turns.
+Supervisor/Lead use this before observation/delegated waits and settlement.
+No background lifecycle runner: supported opt-in `slp.mjs monitor` scans deltas
+for signal candidates, not verdicts or live turns.
 
 ## Observation route
 
@@ -22,7 +21,10 @@ worktrees run different paths and refs/heads/<lane> receives lane commits
 before shared-branch integration. Keep IDs/creation
 receipts; verify a missing listing by ID before diagnosing absence or
 replacement. Empty inventory proves no settlement.
-Use notifyOnFinish=true on create/follow-up. Peers report material decisions,
+Use notifyOnFinish=true on create/follow-up except Supervisor relays of rulings/decisions
+to Lead: send_agent_prompt with notifyOnFinish=false avoids acknowledgment wakes;
+Lead-level pushes (BLOCKED, handback, milestones), bounded heartbeat and Human wakes remain.
+Peers report material decisions,
 new assumptions, ambiguity, reopen/dependency requests, repeated failures,
 stalls and stable candidates/findings to Lead, bounded with evidence and
 attention needed; Lead reports to Supervisor under its role. Peer→Lead and
@@ -66,19 +68,18 @@ heartbeat stays a safety net.
 
 ## Signal and intervention
 
-Read indicated status/activity and relevant timeline/Git/workspace delta.
-Retrieve actual report/candidate; curated activity is tail-oriented and can
-truncate into overflow files. Widen the limit/read the overflow rather than
-infer completeness; unavailable report access is an evidence gap.
+Read indicated status/activity, relevant timeline/Git/workspace delta and actual report/candidate.
+Tail-oriented activity may overflow: widen limit/read overflow, never infer completeness;
+unavailable report access is an evidence gap.
 At every material event scan for repeated scope/file corrections,
 out-of-scope writes, status/tests promoted to acceptance, implementation-
 mirroring tests and mocks hiding failure paths. A hit uses governance.md
 as a hypothesis, not a diagnosis. Distinguish waits, permissions,
 prerequisites and lost momentum; use observation/evidence/open question to Lead.
 
-Before correction prompts, compare current activity with the checkpoint.
-Prior tool errors do not establish a stall; corrected requests and checks
-are progress. Prompt running work only when intervention warrants interrupting
+Before correction prompts, compare activity with the checkpoint.
+Tool errors prove no stall; corrected requests/checks are progress.
+Prompt running work only when intervention warrants interrupting
 its mutation. Continue an evidenced idle owner only with actionable work and
 no pending wait, or explicit recovery authority. Log every prompt's timestamp
 and pre-send state; later success proves no necessity. Preserve interrupted

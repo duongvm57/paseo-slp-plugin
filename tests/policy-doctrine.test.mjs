@@ -247,6 +247,15 @@ test('monitoring stays event-first with bounded owned wakes and no guessed clean
   pins('src/common.md', /When only armed events remain and no local action is useful, end the turn with text/);
 });
 
+test('Supervisor decision relays suppress acknowledgment finish wakes and preserve material wakes', () => {
+  pins(monitoring,
+    /Use notifyOnFinish=true on create\/follow-up except Supervisor relays of rulings\/decisions to Lead: send_agent_prompt with notifyOnFinish=false avoids acknowledgment wakes;/,
+    /Lead-level pushes \(BLOCKED, handback, milestones\), bounded heartbeat and Human wakes remain\./);
+  assert.doesNotMatch(read(monitoring), /Use notifyOnFinish=true on create\/follow-up\./);
+  // The relay exception must fit the file's preceding whitespace-word budget.
+  assert.ok(raw(monitoring).trim().split(/\s+/u).length <= 910);
+});
+
 test('Lead pushes Lead-level state; Supervisor checks objective continuity on every wake', () => {
   // Triggers live in role bytes (system prompt) so they survive compaction.
   pins('src/roles/lead.md', /Report to that Supervisor only Lead-level state: BLOCKED, cross-scope dependencies/,
