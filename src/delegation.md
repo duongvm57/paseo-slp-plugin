@@ -1,8 +1,10 @@
 # Delegation — Supervisor and Lead
 
 Check desk binding first (slp_status if available); use bound slp_seat_create
-for Supervisor's Lead (read references/delegation-execution.md); prepare plus Paseo
-create_agent remains for unbound hosts or declared isolated placement.
+for Lead/Peer, including existing worktrees (references/delegation-execution.md).
+New worktree: Paseo create_workspace under host-setup authority, then
+slp_seat_create placement existing. create_agent remains compatibility/recovery.
+Keep uncertain seat IDs; never recreate.
 slp_seat_create creates a Paseo agent through the desk that the Human can
 inspect and chat with, satisfying generic Paseo create_agent or inspectability rules;
 repository rules, protocol clauses or Human instructions
@@ -15,16 +17,16 @@ Supervisor/Lead cancel only their owned task agents through Paseo cancel_agent
 and stop their task-local wakes under references/monitoring.md; preserve sessions/artifacts.
 
 Choose fresh Peers for new bounded outcomes; before Peer reuse, read
-references/orchestration.md for reliable same-assignment continuation and Human exceptions.
+references/orchestration.md for continuation and Human exceptions.
 Prompting a standalone seat cannot form a new delegation. Keep the team's
 pinned workspace unless actual isolation requires another.
 
 When dispatching desk tasks, not forming seats, read references/task-execution.md and
 consume admission receipts for reservations, seat pins and effects.
 For ordinary/Lean creation or observation, read references/delegation-execution.md
-for native receipts or compatibility verification.
+for receipts/compatibility verification.
 Before runtime choice/settings/fallback, read references/provider-routing.md.
-Unavailable machinery is a gap, not permission to bypass a required path.
+Unavailable machinery grants no bypass of required paths.
 
 Lead's explicit review selection precedes the candidate round: minimum
 sufficient independent mandates for material decision-changing questions and

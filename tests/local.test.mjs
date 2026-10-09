@@ -159,6 +159,8 @@ test('launcher loads installed role bytes, excludes private review material, pre
   const peer = prompt(installed, 'peer', 'bounded outcome', binding);
   assert.deepEqual(roleBundle(installed, 'peer').parts, ['common.md', 'roles/peer.md']);
   assert.ok(peer.includes(readFileSync(join(installed, 'src/roles/peer.md'), 'utf8')));
+  assert.match(peer, /reading consumes about 1\/3[\s\S]*labelled estimate[\s\S]*No timeout\/quota/);
+  assert.match(peer, /TestcaseAuthor[\s\S]*TestEngineer/);
   for (const role of ['supervisor', 'lead']) {
     const child = launchPlan(installed, { ...request, role });
     assert.ok(child.create.initialPrompt.includes(readFileSync(join(installed, `src/roles/${role}.md`), 'utf8')));
@@ -514,21 +516,23 @@ test('standalone bundles deliver semantic obligations and conditional operation 
     }
     assert.match(instructions, /minimum\s+sufficient independent mandates for material decision-changing questions/);
     assert.match(instructions, /Unavailable\s+required reviewers or adverse findings never relax the gate/);
-    assert.match(instructions, /Check desk binding first \(slp_status if available\); use bound slp_seat_create\s+for Supervisor's Lead/);
-    assert.match(instructions, /prepare plus Paseo\s+create_agent remains for unbound hosts or declared isolated placement/);
+    assert.match(instructions, /Check desk binding first \(slp_status if available\); use bound slp_seat_create\s+for Lead\/Peer, including existing worktrees/);
+    assert.match(instructions, /New worktree: Paseo create_workspace under host-setup authority, then\s+slp_seat_create placement existing/);
+    assert.match(instructions, /create_agent remains compatibility\/recovery/);
+    assert.match(instructions, /create_agent remains compatibility\/recovery/);
     assert.match(instructions, /satisfying generic Paseo create_agent or inspectability rules;\s+repository rules, protocol clauses or Human instructions\s+forbidding desk creation or requiring another formation path exclusively override this default/);
   }
   const lead = roleBundle(installed, 'lead', {}).instructions;
   const supervisor = roleBundle(installed, 'supervisor', {}).instructions;
   assert.match(lead, /When the assignment or protocol requires independent review/);
   assert.match(lead, /before a\s+reply or decision depending on repository tactics/);
-  assert.match(supervisor, /before replying or deciding repository tactics/);
+  assert.match(supervisor, /read .paseo-slp\/workspace-protocol.md fully before replies\/tactics/);
   const direct = body('src/references/delegation-execution.md').replace(/\s+/gu, ' ');
   assert.match(direct, /agent-scoped Paseo create_agent/);
   assert.match(direct, /actual host parent\/workspace\/cwd and bundle/);
-  assert.match(direct, /Default placement is the pinned parent workspace, including read-only review/);
+  assert.match(direct, /Default placement is the parent workspace, including read-only review/);
   assert.match(direct, /formation in that brief\/receipt: parent, seat, workspace\/cwd/);
-  assert.match(direct, /review taskLabel uses `<task> \/ <lens>`/);
+  assert.match(direct, /preserve taskLabel\/disposition and the actual parent/);
   assert.match(direct, /Empty inventory alone proves no absence/);
   const monitoring = body('src/references/monitoring.md').replace(/\s+/gu, ' ');
   assert.match(monitoring, /not cwd/);

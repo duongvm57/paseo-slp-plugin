@@ -12,13 +12,11 @@ Classify from the actual assignment, not available sessions:
 | Reliable continuation/correction/re-review or phase of the same outcome | send_agent_prompt to the verified child with the added grant. |
 | Observe existing work | Pin owner ID, observation scope and explicit report recipient; retain real parentage and write owner. |
 
-When Human asks
-to form a standby Lead for a future task, record that formation exception:
-read-only orientation and ownership/handback acknowledgment complete its
-first phase, not the future project. Its acknowledgment covers current scope,
-report route and readiness; broader document audits belong to the concrete
-task. The concrete task/grant continues this Lead; it relaxes no Peer outcome
-boundary.
+Human may explicitly form a standby Lead: read-only orientation and
+ownership/handback acknowledgment complete its first phase, not the future
+project. Record that exception and current scope/report route/readiness.
+Broader audits await the concrete task; its grant continues this Lead
+without relaxing any Peer outcome boundary.
 
 Supply outcome/acceptance, real constraints, provisional choices/unknowns,
 owned/excluded scope, current phase/grants, dependencies, relevant skills,
@@ -33,41 +31,46 @@ For parallel work use orchestration.md's actual paths/shared-resource preflight.
 Use bound slp_seat_create by default with requestId, role, taskLabel, assignment and grantRef.
 grantRef is a declared pointer to the Human grant (e.g. assignment sentence
 and date), a claim, never authenticated; verify authority, one writer and review sufficiency.
-Lead formation resolves the fresh saved slp-lead
-profile; Peer formation additionally needs explicit runtime option/hash and
-any required Jev decision under provider-routing.md. The bound caller supplies
-native parent/workspace/cwd. No caller request file, copied create arguments
-or task queue enrollment is required. The server creates without work, observes
-the exact native tuple and only then hands off the assignment. By default
+Lead formation resolves the saved slp-lead profile; Peer runtime is optional.
+The server selects once under provider-routing.md, retaining full-pin compatibility.
+Use selection for independent choice; no settings overrides.
+Placement defaults to caller; existing worktrees need declared paths/reason.
+It qualifies same-Git workspace/cwd and pins routing/protocol separately.
+Placement/automatic runtime/selection waits briefly for exact registration;
+legacy omitted full-pin Peer/Lead keeps its delivery path. Pending directs
+slp_operation_get with the same requestId: immutable evidence, no resume/recreate.
+SDK open may revive archived workspaces; prefer active IDs. Source configuration
+drift blocks delivery; same-Git identity alone grants no authority.
+Need a worktree? Lead uses Paseo create_workspace, owns its host setup within
+the grant, then calls slp_seat_create with placement existing and that workspace
+ID. Do not return to create_agent. V1 kind=worktree reports a gap before effects.
+The server creates without work, observes the exact tuple, then hands off. By default
 (delivery "caller") it does not send: the result is awaiting-caller-delivery
 with delivery.prompt; send exactly that prompt through send_agent_prompt with
 notifyOnFinish=true so the host arms the finish callback. delivery "server"
-sends in the server without a callback; use it only when none is needed.
+sends without a callback; use only when none is needed.
 The created assignment names the verified parent agent ID and requires exactly
 one native report to that parent at handback. A standby Lead reports readiness
 separately from technical verdicts; create no back-and-forth acknowledgment loop.
 
-Read the operation's result and phases, not just its outer ok. Replaying the
-same input reads the immutable receipt; slp_operation_get reads it by original
-kind/requestId. Partial or uncertain create/send never continues on replay. Identity stays
-stable across caller membership epochs; the receipt keeps the original epoch.
-A fresh bound native caller can read its own historical receipt with
-callerEpochMatches=false, but invoking it under another epoch is denied.
-Retained early-format addresses are located without copying or resealing;
-ambiguous, corrupt or over-budget legacy evidence blocks a new invocation.
-Retain any returned agentId and scope, reconcile original host evidence and
-use a separately authorized explicit follow-up only when safe. Receipts retain
-resources and do not establish acceptance or cleanup. The native report establishes the handback route, not acceptance.
+Read result/phases, not outer ok. Same-input replay and slp_operation_get
+read immutable evidence by original kind/requestId; partial/uncertain effects
+never continue. Native identity survives membership epochs; original epoch
+stays pinned. Fresh callers may read historical evidence with
+callerEpochMatches=false; mutation under another epoch is denied.
+Legacy addresses remain untouched; ambiguous/corrupt/over-budget evidence
+blocks admission. Retain returned IDs/scope and reconcile host evidence;
+follow-up needs separate authority and safety. Receipts establish no acceptance
+or cleanup; the native report establishes the route, not acceptance.
 
-For unbound/older hosts or declared isolated placement, use provider-routing.md, prepare --emit create
-and agent-scoped Paseo create_agent with its emitted record and notifyOnFinish=true;
-pass taskLabel/disposition (review taskLabel uses `<task> / <lens>`).
-assignmentFile or validated opt-in snapshot supplies the brief. Use an available
-final-report callback to retrieve the actual report; inspect its evidence before a verdict.
-Default placement is the pinned parent workspace, including read-only review;
-a different checkout/lane needs declared paths/reason; if protocol/references
-are missing, use authorized `slp.mjs materialize <target> --from <source>` with
-explicit --include inputs before preparation, without installation/host authority.
+For unbound/older hosts or required compatibility, use provider-routing.md,
+prepare --emit create and agent-scoped Paseo create_agent with emitted settings and
+notifyOnFinish=true; preserve taskLabel/disposition and the actual parent.
+Default placement is the parent workspace, including read-only review;
+a different checkout/lane needs declared paths/reason. Existing worktrees use slp_seat_create.
+Never install dependencies or materialize to hide a gap; Lead owns the setup
+triggered by its authorized Paseo workspace creation.
+Retrieve the actual report through the callback before a verdict.
 
 Verify the returned ID against actual host parent/workspace/cwd and bundle.
 Confirm the brief's report route when its first report arrives. Titles,

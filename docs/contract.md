@@ -264,7 +264,20 @@ locators are integrity evidence, not
 policy content. This source contract stays outside installed bytes.
 
 Lead owns framing, shared state, dependencies, integration and acceptance;
-Peers keep bounded independent judgment. A required gate follows the rule the
+Peers keep bounded independent judgment. Bounded means finishable within one
+Peer's context, including implementation, proof and anticipated review/correction
+rounds. Lead records estimates of rounds/comments, flows/screens, files and the
+provider context window; oversized work splits into dependency-ordered slices,
+one Peer and explicit scope/acceptance per slice. Supervisor assignments state
+outcome and authority, leaving execution topology to Lead. A Peer that consumes
+about 1/3 context reading without recorded artifact/proof returns a scope question
+with telemetry or a labelled estimate, remaining obligations and proposed slices.
+This is a scope checkpoint, not timeout, quota or a monitor feature; writing just
+to evade it is forbidden. Reviewer verdicts use the shared record vocabulary
+APPROVE/FINDINGS; BLOCKED/REOPEN_REQUEST/DEPENDENCY_REQUEST name their respective
+missing prerequisites/premises/dependencies. TestcaseAuthor supplies linked cases
+and expected coverage; TestEngineer supplies granted test artifacts and pinned
+execution evidence. Neither owns product acceptance. A required gate follows the rule the
 effective workspace protocol declares. Material questions select minimum
 sufficient independent mandates without fixed counts/axes/families; explicit
 required shapes remain binding. Unavailable required proof blocks that gate.
@@ -277,6 +290,18 @@ standby Lead formation binds orientation and the future task without relaxing
 Peer continuity. Degraded context uses authorized handoff without a numeric
 threshold; acceptance, Delivery, closed rework and resource reconciliation
 precede authorized archive, which proves no quiescence.
+
+Supervisor relays Human instructions verbatim, marking inferences separately and
+never attributing added constraints to Human. On Human STOP it preserves already
+available evidence/receipts and cancels the verified Lead immediately, without
+waiting for a report or prompting that owner again. Parent cancellation does not
+cancel Peer turns: list_agents is scanned for paseo.parent-agent-id matching the
+Lead ID, and identified task children are cancelled directly under STOP authority.
+IDs, control replies including failures, and timestamped activeTurn/permission
+observations are retained; incomplete listings, unknown children or missing
+receipts remain unknown settlement. No new cleanup agent or owner revival is
+introduced; resource cleanup still needs its applicable grant/control. This is
+behavioral policy, not an atomic tree-cancel or proof of process quiescence.
 
 The existing guarded desk owns exact membership/revision checks, declared
 scope overlap/review pins, effect reservations and observed task/resource

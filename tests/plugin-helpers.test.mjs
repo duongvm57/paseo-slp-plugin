@@ -333,8 +333,8 @@ test('managed bundles disclose guarded and ordinary paths while preserving role 
     }
     assert.match(bundle, /ordinary\/Lean creation or observation/);
     assert.match(bundle, /consume admission receipts for reservations, seat pins and effects/);
-    assert.match(bundle, /Check desk binding first \(slp_status if available\); use bound slp_seat_create\s+for Supervisor's Lead/);
-    assert.match(bundle, /prepare plus Paseo\s+create_agent remains for unbound hosts or declared isolated placement/);
+    assert.match(bundle, /Check desk binding first \(slp_status if available\); use bound slp_seat_create\s+for Lead\/Peer, including existing worktrees/);
+    assert.match(bundle, /create_agent remains compatibility\/recovery/);
     assert.match(bundle, /slp_seat_create creates a Paseo agent through the desk that the Human can\s+inspect and chat with/);
     assert.match(bundle, /repository rules, protocol clauses or Human instructions\s+forbidding desk creation or requiring another formation path exclusively override this default/);
   }
@@ -584,7 +584,7 @@ test('tiny policy keeps protocol-owned ceremony separate from required gates and
   assert.match(protocol, /paused stable candidate, actual proof and in-session handback/);
   assert.match(protocol, /Lead inspection\/Gate\/verdict/);
   assert.match(protocol, /Direct Lead write grant.*None by default; Human may specify clear reversible scope, proof\/review bounds/);
-  assert.match(orchestration, /One Peer Engineer; tiny ceremony comes from the effective protocol\. Direct Lead writes follow delegation policy's explicit grant/);
+  assert.match(orchestration, /One Peer Engineer per dependency slice; direct Lead writes require delegation's explicit grant/);
 });
 
 test('live preparation inventories only the verified home and preserves the saved bundle', () => {

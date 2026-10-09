@@ -6,31 +6,35 @@ thresholds/methods; the assignment controls scope and authority.
 
 ## Frame and maintain state
 
-Read relevant repository evidence before delegation. Establish outcome,
-acceptance, real constraints, provisional design/assumptions, unknowns,
-ownership/exclusions, dependencies and proof. Keep moving writer ownership
-separate from module/state ownership. In an unfamiliar domain, expose missing
-framing and owner boundaries before fixing a representation; Human may use an
-advisory session. Gather only context the decision needs. File/API plans stay
-provisional as slices reveal lifecycle or dependency facts.
+Read relevant repository evidence before delegation. Establish outcome, acceptance,
+constraints, assumptions/unknowns, ownership/exclusions, dependencies and proof.
+Keep moving writer ownership separate from module/state ownership. Expose missing
+framing before representation changes; file/API plans stay provisional.
 
-A single bounded task may use one inline brief. For desk-managed work, read
-the current slp_workflow_get projection and amend brief/decisions through its
-tools instead of copying a second owner/revision ledger into notes. Resolve
-omissions and stale pins before decisions; preserve real constraints and
-provisional choices. Notify affected owners when steering or a material
-judgment changes. With no desk path, keep the bounded current brief and
-actual evidence in the authorized timeline/checkpoint. Give Peers only
-relevant context; Lead retains integration context. Messages are claims,
-not acceptance, and policy recovery restores no missing task state.
+Bounded means finishable within one Peer's context. Estimate update rounds/comments,
+flows/screens, touched files and the provider's context window against required
+implementation/proof; record estimates in the brief, with dependency/readiness
+and acceptance obligations per slice. Include anticipated correction/review rounds,
+not just coding, and label unmeasured context estimates. If it will not fit, split
+dependency-ordered slices with
+one Peer and explicit scope each; do not size by issue count alone.
+
+A bounded task may use an inline brief. For desk work, read slp_workflow_get;
+amend brief/decisions through its tools instead of copying a second owner/revision
+ledger into notes. Resolve omissions/stale pins before decisions. Keep constraints
+and provisional choices; notify affected owners of steering/material judgments.
+Without desk, use the authorized timeline/checkpoint. Give Peers relevant context;
+Lead retains integration context. Messages are claims, not acceptance; policy
+recovery restores no task state.
 
 ## Select topology
 
+Supervisor briefs state outcome and authority; Lead chooses execution topology.
 Start with the smallest topology that supplies the required judgment:
 
 | Need | Starting shape |
 |---|---|
-| Clear bounded implementation | One Peer Engineer; tiny ceremony comes from the effective protocol. Direct Lead writes follow delegation policy's explicit grant. |
+| Implementation fitting one Peer context | One Peer Engineer per dependency slice; direct Lead writes require delegation's explicit grant. |
 | Open ownership/lifecycle/contract | Read-only Architect reconstructs boundaries; Lead decides the contract needed by the slice before implementation. |
 | Plausible alternative foundations or costly lock-in | Independent design lenses or sealed council. |
 | Large disruptive dependency | Bounded Peer/lane or dependency Lead, with separate contract, proof and handback. |
@@ -51,12 +55,10 @@ added scope/grants alone do not make a different outcome continuation.
 Explicit Human-directed formation exceptions and authorized handoffs still
 stand.
 
-The desk's assignment/task IDs and host dispatch.reuse capability do not
-decide a Peer session's outcome boundary or grant a reuse exception. Classify
-from the actual brief/outcome and authority; a grantRef string is a claim,
-not authenticated Human authority. A task ID may represent a phase of the
-same bounded outcome; a different outcome follows fresh-by-default formation
-unless an explicit Human exception applies.
+Desk task IDs and host dispatch.reuse capability do not decide a Peer session's
+outcome boundary or grant a reuse exception. Classify from brief/outcome and
+authority; grantRef is a claim, not authenticated Human authority. Different
+outcomes are fresh-by-default unless an explicit Human exception applies.
 
 Send authorized corrections to the same write owner. Continue the same
 independent Reviewer for its new stable candidate, changes and prior findings;

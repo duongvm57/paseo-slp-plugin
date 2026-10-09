@@ -792,3 +792,33 @@ API`. When omitted, taskLabel falls back to the repo directory name and the
 disposition shows `General`. Resume keeps the name; a handed-off session adds
 `Handoff`. The agent ID remains the identifier used for ownership and
 reporting.
+
+
+## Bounded delegation and Human STOP
+
+Use slp_seat_create for both Lead and Peer, including existing same-Git worktree
+workspaces. A new worktree uses separately authorized Paseo create_workspace,
+then slp_seat_create placement existing; the Lead owns host setup within that
+grant. create_agent remains compatibility/recovery. Server selection/receipts
+replace caller routes/prepare/route-decide choreography on the ordinary path;
+CLI/task compatibility retains its explicit pins. Consume returned source/target
+and native evidence; do not repeat its formation checks without drift or a gap.
+
+Lead estimates whether implementation/proof plus review/correction rounds fit
+one Peer context: rounds/comments, flows/screens, files and provider window.
+Record estimates and dependencies; split oversize work into dependency-ordered
+slices with one Peer, scope and acceptance each. Supervisor assignments state
+outcome and authority; Lead chooses topology. About 1/3 context spent reading
+without a recorded artifact/proof is a scope-question checkpoint for Peer,
+using telemetry or a labelled estimate and remaining obligations/proposed slices.
+It is not a timeout/quota, automated monitor or permission to write beyond scope.
+
+Relay Human words verbatim; label added reasoning as inference. On STOP, retain
+existing IDs/evidence/receipts and cancel the verified Lead immediately, without
+waiting for new handback or prompting it again. Scan list_agents for exact
+paseo.parent-agent-id=Lead-ID and cancel identified task children directly;
+Lead cancellation does not cancel them. Retain each control reply including
+failure and timestamped activeTurn/permission observations. Unknown children,
+incomplete inventory or missing receipts stay unknown settlement. Preserve
+sessions/files/worktrees; no cleanup agent or owner revival. Other resource
+cleanup uses authorized host controls, never inferred quiescence from idle.

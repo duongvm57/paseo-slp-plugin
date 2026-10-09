@@ -125,7 +125,7 @@ test('workspace init creates only protocol and notebook once and preserves Human
     'init stages the effective default template verbatim, without resolving repository settings');
   for (const role of ['supervisor', 'lead']) {
     assert.match(readFileSync(join(destination, `src/roles/${role}.md`), 'utf8'),
-      /read .*workspace-protocol\.md[\s\S]*before (?:replying|a\s+reply)/i);
+      /read .*workspace-protocol\.md[\s\S]*before (?:replying|a\s+reply|replies\/tactics)/i);
   }
   // A repository routing catalog is a deliberate opt-in — default init never
   // writes one, so the repo resolves the user-scope pool.

@@ -6,6 +6,7 @@ import { join, dirname, resolve } from 'node:path';
 import { createHash } from 'node:crypto';
 import { installUnitPaths } from '../plugin/server/runtime/cli/package.ts';
 import { scenarios } from '../e2e/scenarios.mjs';
+import { HANDBACK_VERDICTS } from '../plugin/server/runtime/report-records.ts';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const raw = path => readFileSync(join(root, path), 'utf8');
@@ -61,17 +62,17 @@ test('bounded direct Lead writes need actual grants and required independent rev
 
 test('formation distinguishes managed admissions from ordinary host verification', () => {
   pins('src/delegation.md', /dispatching desk tasks, not forming seats.*task-execution.md.*consume admission receipts for reservations, seat pins and effects/,
-    /ordinary\/Lean creation or observation.*delegation-execution.md for native receipts or compatibility verification/);
+    /ordinary\/Lean creation or observation.*delegation-execution.md for receipts\/compatibility verification/);
   pins(direct, /Its parent forms Lead\/Peer under Form and deliver/,
     /For desk-managed task dispatch, use task-execution.md without duplicating its bookkeeping/,
     /Use bound slp_seat_create by default with requestId, role, taskLabel, assignment and grantRef/,
     /delivery.prompt; send exactly that prompt through send_agent_prompt with notifyOnFinish=true/,
     /grantRef is a declared pointer to the Human grant.*assignment sentence and date.*claim, never authenticated/,
-    /For unbound\/older hosts or declared isolated placement.*prepare --emit create.*agent-scoped Paseo create_agent/,
+    /For unbound\/older hosts or required compatibility.*prepare --emit create.*agent-scoped Paseo create_agent/,
     /different checkout\/lane needs declared paths\/reason/,
     /Verify the returned ID against actual host parent\/workspace\/cwd and bundle/,
     /Confirm the brief's report route when its first report arrives/,
-    /The native report establishes the handback route, not acceptance/,
+    /the native report establishes the route, not acceptance/,
     /Empty inventory alone proves no absence/,
     /original cannot still create and any old owner is settled/);
   pins(desk, /Ordinary role creation can remain unbound if desk mint\/registration fails/);
@@ -79,7 +80,10 @@ test('formation distinguishes managed admissions from ordinary host verification
 
 test('new tasks discover desk formation in always-loaded delegation policy', () => {
   pins('src/delegation.md',
-    /Check desk binding first \(slp_status if available\); use bound slp_seat_create for Supervisor's Lead \(read references\/delegation-execution.md\); prepare plus Paseo create_agent remains for unbound hosts or declared isolated placement/);
+    /Check desk binding first \(slp_status if available\); use bound slp_seat_create for Lead\/Peer, including existing worktrees/,
+    /New worktree: Paseo create_workspace under host-setup authority, then slp_seat_create placement existing/,
+    /create_agent remains compatibility\/recovery/);
+  assert.doesNotMatch(read('src/delegation.md'), /create_agent remains for .*declared isolated placement/);
 });
 
 test('generic inspectable Paseo delegation rules admit desk creation under the authority ceiling', () => {
@@ -114,11 +118,11 @@ for (const scenario of [
 
 test('Supervisor reference reads follow the activity instead of team formation', () => {
   pins('src/roles/supervisor.md',
-    /Read references\/governance.md before causal recording, coordination recovery, policy evolution, audit, investigation of drift, repeated failures, difficult decisions or lost momentum/,
-    /references\/monitoring.md before observation and at settlement/);
+    /Read references\/governance.md before causal recording, recovery, policy evolution, audit, drift\/failure investigation or lost momentum/,
+    /references\/monitoring.md before observation and settlement/);
   assert.doesNotMatch(read('src/roles/supervisor.md'), /when establishing supervision/);
   pins(governance, /Supervisor uses this for causal recording, coordination recovery, authorized cross-project relay and policy evolution/);
-  pins('src/delegation.md', /before Peer reuse, read references\/orchestration.md for reliable same-assignment continuation and Human exceptions/,
+  pins('src/delegation.md', /before Peer reuse, read references\/orchestration.md for continuation and Human exceptions/,
     /Before selecting reviewers, read references\/review-gates.md/,
     /Before runtime choice\/settings\/fallback, read references\/provider-routing.md/);
 });
@@ -127,11 +131,11 @@ test('session boundary is semantic, not a task ID or runtime capability', () => 
   pins(orchestration, /fresh Peer for a new assignment by default/,
     /assignment's continuation, authorized phases, correction or re-review/,
     /task IDs and host dispatch.reuse capability do not decide.*outcome boundary or grant a reuse exception/,
-    /grantRef string is a claim, not authenticated Human authority/,
+    /grantRef is a claim, not authenticated Human authority/,
     /unless an explicit Human exception applies/,
     /Reliable compaction may continue; no numeric compaction threshold/);
-  pins(direct, /Human asks to form a standby Lead for a future task.*formation exception/,
-    /first phase, not the future project.*relaxes no Peer outcome boundary/);
+  pins(direct, /Human may explicitly form a standby Lead.*Record that exception/,
+    /first phase, not the future project.*without relaxing any Peer outcome boundary/);
 });
 
 test('parallel scope and shared-resource preflight precede the isolation choice', () => {
@@ -260,10 +264,10 @@ test('Lead pushes Lead-level state; Supervisor checks objective continuity on ev
   // Triggers live in role bytes (system prompt) so they survive compaction.
   pins('src/roles/lead.md', /Report to that Supervisor only Lead-level state: BLOCKED, cross-scope dependencies/,
     /project milestones\/completion, your degraded context\/lifecycle and owner decisions; never internal progress or acknowledgments of relayed decisions/);
-  pins('src/roles/supervisor.md', /scan the Signal list in references\/monitoring.md/,
-    /inspect Lead, not each Peer, when a report, finish, Human question or wake calls for it/,
-    /On every wake, before answering or relaying, confirm each wait blocking the Human objective has a live owner and wake path from Lead-level activity, not reported status/,
-    /Take a stalled objective or a wait within your own authority to Human with options; restating a report is no supervision/,
+  pins('src/roles/supervisor.md', /scan monitoring's signals/,
+    /inspect Lead, not each Peer/,
+    /Each wake, before answering\/relaying, confirm each wait blocking the Human objective has a live owner\/wake path from Lead-level activity, not reported status/,
+    /Take stalls\/waits within your authority to Human with options/,
     /arm a bounded Lead-level heartbeat under monitoring.md/);
   pins(monitoring, /no material delta and a live objective need no intervention/,
     /Peers report material decisions.*to Lead, bounded with evidence and attention needed; Lead reports to Supervisor under its role/);
@@ -271,9 +275,9 @@ test('Lead pushes Lead-level state; Supervisor checks objective continuity on ev
 });
 
 test('governance owns evidence-led investigation, bounded contact and authorized cross-project relay', () => {
-  pins('src/roles/supervisor.md', /Lead owns project technical decisions and acceptance/,
-    /unless Human grants recovery contact with a named Peer.*Keep that contact bounded/,
-    /reconcile evidence and proposed changes into Lead's shared state before direction changes/);
+  pins('src/roles/supervisor.md', /Lead owns technical decisions and acceptance within its mandate/,
+    /unless Human grants recovery contact with a named Peer.*Keep contact bounded/,
+    /reconcile evidence\/proposed changes into Lead's shared state before direction changes/);
   pins(governance, /Resolve.*notebook.*Expose.*supervisor_notebook/,
     /Read the tail only when the assignment or a decision needs it/,
     /Human may grant recovery contact with a named Peer for a bounded purpose/,
@@ -335,8 +339,8 @@ test('onboarding adapts actual decision/tool paths without mandatory queue setup
 test('routing delegates actual bundle checks to runtime without granting fallback authority', () => {
   pins('src/references/provider-routing.md', /common policy's once-per-session route verification.*PASEO_AGENT_ID is unavailable.*slp_status\(\{\}\).*one bounded host lookup.*missing parent\/report metadata as a gap/,
     /optionId\/catalogSha256.*runtime resolves the complete bundle against fresh host providers/,
-    /jevRouting.routing` as `shadow`, `armed` or `error`.*read references\/jev-routing.md; skip unconfigured\/off.*Error blocks the branch/,
-    /ordinary\/Lean launch.*live list_providers/,
+    /error blocks the branch.*Read references\/jev-routing.md for shadow\/armed\/error, skipping unconfigured\/off/,
+    /CLI compatibility uses.*live list_providers/,
     /refresh routes.*quotaFallbackFrom/,
     /Quota alone creates no switch\/cost authority/,
     /mode needs Human/);
@@ -412,4 +416,82 @@ test('review method tools stay conditional and keep Lead obligations', () => {
   pins('docs/development.md', /the claim decides which receipt qualifies.*full-suite claim needs `selection: default-suite`.*narrow claim may use a `partial` receipt but only for exactly its argv and file list, never as full-suite evidence/,
     /Either way the receipt's snapshot sha256, argv\/file list and node\/platform must all match/,
     /pass `SLP_TEST_ISOLATED_ROOT` explicitly on every command/);
+});
+
+
+test('ordinary formation requires no caller routing choreography and preserves truthful pending recovery', () => {
+  pins(direct, /Peer runtime is optional.*server selects once.*full-pin compatibility/,
+    /Use selection for independent choice; no settings overrides/,
+    /same-Git workspace\/cwd and pins routing\/protocol separately/,
+    /Placement\/automatic runtime\/selection waits briefly for exact registration; legacy omitted full-pin Peer\/Lead keeps its delivery path/,
+    /Pending directs slp_operation_get with the same requestId: immutable evidence, no resume\/recreate/,
+    /Lead uses Paseo create_workspace, owns its host setup within the grant, then calls slp_seat_create with placement existing/,
+    /V1 kind=worktree reports a gap before effects/,
+    /SDK open may revive archived workspaces; prefer active IDs/,
+    /Never install dependencies or materialize to hide a gap/);
+  pins('src/references/provider-routing.md', /no routes\/prepare\/route-decide choreography is required/,
+    /linked caller without local routing\/protocol inherits its configured same-Git main checkout/,
+    /no trustworthy source means gap, not silent user fallback/,
+    /Shadow requires independent Lead selection even for one option; errors block/,
+    /Off\/unconfigured selects a sole eligible option; several options return choices for selection.optionId/,
+    /armed decline\/config\/key\/network failure blocks without default substitution/);
+  pins('src/references/jev-routing.md', /route-decide or slp_seat_create invokes it; admitted formation pins once, replay never re-decides/,
+    /prepare and --check verify receipts offline/);
+});
+
+test('bounded scope counts context and dependencies, not an issue count or timeout', () => {
+  pins(orchestration, /Bounded means finishable within one Peer's context/,
+    /Estimate update rounds\/comments, flows\/screens, touched files and the provider's context window/,
+    /required implementation\/proof.*anticipated correction\/review rounds.*label unmeasured context estimates/,
+    /split dependency-ordered slices with one Peer and explicit scope each; do not size by issue count alone/,
+    /Supervisor briefs state outcome and authority; Lead chooses execution topology/);
+  pins('src/roles/peer.md', /reading consumes about 1\/3 of your context without recorded artifact\/proof, return a scope question/,
+    /telemetry or a labelled estimate, remaining obligations and proposed slices/,
+    /Never write to evade this checkpoint; Lead decides scope. No timeout\/quota/);
+});
+
+test('Peer verdict vocabulary matches the shared schema and testcase dispositions keep proof separate', () => {
+  const peer = read('src/roles/peer.md');
+  pins('src/roles/peer.md', /Reviewer verdict is APPROVE or FINDINGS, never Lead's acceptance verdict/,
+    /REOPEN_REQUEST for failed premises, DEPENDENCY_REQUEST for missing owner\/results, or BLOCKED for missing authority\/capability/,
+    /TestcaseAuthor.*Requirement-linked cases, prerequisites, inputs, expected results and coverage\/unknowns; no product acceptance/,
+    /TestEngineer.*Granted test artifacts and executed checks on the pinned candidate; commands\/results, coverage and gaps; no product verdict/);
+  const vocabulary = [...new Set(peer.match(/\b(?:APPROVE|FINDINGS|BLOCKED|REOPEN_REQUEST|DEPENDENCY_REQUEST|ACCEPT|CHANGES_REQUESTED|PASS|FAIL)\b/gu))].sort();
+  assert.deepEqual(vocabulary, [...HANDBACK_VERDICTS].sort());
+});
+
+test('Supervisor relays Human words faithfully and STOP never waits for or revives the owner', () => {
+  pins('src/roles/supervisor.md', /Supervisor assignments state outcome and authority, not topology/,
+    /Relay Human instructions verbatim; label inferences separately; never attribute added constraints to Human/,
+    /On Human STOP, retain existing evidence\/receipts and cancel the verified Lead immediately; never wait for a report or prompt its owner again/,
+    /Lead cancellation does not cancel Peers.*list_agents for paseo.parent-agent-id matching the Lead ID and cancel identified children directly/,
+    /control replies \(including failures\).*activeTurn\/permission observations with timestamps/,
+    /Missing receipts, unidentified children or incomplete inventory remain unknown settlement/,
+    /No cleanup agents or owner revival; resume only on a new Human instruction/);
+});
+
+test('seat formation policy stays within frozen per-file and total word budgets', () => {
+  const caps = {
+  "src/common.md": 562,
+  "src/delegation.md": 266,
+  "src/roles/supervisor.md": 324,
+  "src/roles/lead.md": 419,
+  "src/roles/peer.md": 541,
+  "src/templates/workspace-protocol.md": 997,
+  "src/references/provider-routing.md": 619,
+  "src/references/report-records.md": 529,
+  "src/references/task-execution.md": 949,
+  "src/references/review-gates.md": 896,
+  "src/references/orchestration.md": 1148,
+  "src/references/delegation-execution.md": 745,
+  "src/references/anti-patterns.md": 612,
+  "src/references/governance.md": 635,
+  "src/references/monitoring.md": 910,
+  "src/references/jev-routing.md": 233
+};
+  const words = text => text.trim().split(/\s+/u).length;
+  for (const [path, cap] of Object.entries(caps)) assert.ok(words(raw(path)) <= cap, `${path} exceeds ${cap} words`);
+  const all = installUnitPaths(root).filter(path => path.startsWith('src/') && path.endsWith('.md'));
+  assert.deepEqual([...all].sort(), Object.keys(caps).sort(), 'account for every installed policy file');
+  assert.equal(all.reduce((total, path) => total + words(raw(path)), 0), 10385, 'net-zero total policy words');
 });

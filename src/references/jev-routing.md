@@ -1,19 +1,20 @@
 # Jev routing
 
-Read for routes' shadow/armed/error branch. Unreadable error blocks dependent
+Read for routing's shadow/armed/error branch. Unreadable error blocks dependent
 routing; unconfigured/off needs no Jev path. Jev is a typed decision primitive,
-not an ACP provider or agent. Invoke route-decide explicitly; prepare and
-its --check verify receipts offline and run no Jev background/network loop.
+not an ACP provider or agent. route-decide or slp_seat_create invokes it; admitted
+formation pins once, replay never re-decides; prepare and --check verify receipts
+offline without background/network loops.
 Configuration/keys belong to the Manager under separate Human authority.
 
-Shadow evaluation is the gate before arming: Lead runs route-decide with
-raw prose task/risk/constraints/dependencies, then prepares its own option
-plus the receipt. Human pre-registers agreement/asymmetric-error criteria and
-arms only after recorded Lead/Jev pairs meet them. Shadow choice is advisory;
-armed routing requires the receipt's option, with decline failing closed.
-Confidence/distribution is evidence, never a retry/rejection threshold.
+Shadow evaluation is the gate before arming: Lead supplies its independent option;
+slp_seat_create obtains and retains the decision, or CLI route-decide
+supplies it. Human pre-registers agreement/asymmetric-error criteria and arms only
+after recorded pairs qualify. Shadow choice is advisory; armed routing requires
+the receipt's option, with decline failing closed.
+Confidence/distribution proves no retry/rejection threshold.
 
-Use the advertised route-decide schema and returned decision/catalog pins,
+Use advertised route-decide schema and decision/catalog pins,
 not duplicated candidate lists or hand-built validation. The runtime computes
 eligibility, reports token/pool conflicts, withholds catalog notes and verifies
 provider model/vocabulary/question/role/hash/membership. Structured signals
