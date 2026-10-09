@@ -110,6 +110,7 @@ import { canReadDeskWorkflow, projectDeskWorkflow, runAssignmentAmend, runDecisi
 import { runAssignmentAccept, runAssignmentOffer } from "./desk-ownership.ts";
 import { runTaskCommand } from "./desk-task.ts";
 import { createTaskServices } from "./desk-task-services.ts";
+import { TaskRepositoryMismatchError } from "./desk-task-access.ts";
 import { createTaskHostEventObserver, createTaskObserver, runTaskDispatch, runTaskIntegration, runTaskReconciliation } from "./desk-task-execution.ts";
 import type { TaskExecutionDeps, TaskTurnEndedEvent } from "./desk-task-execution.ts";
 import type { TaskHostApi } from "./desk-task-execution-host.ts";
@@ -1212,7 +1213,9 @@ export function createDeskBridge(deps: DeskBridgeDeps) {
         host: deps.taskHost ?? (() => null), checkoutRoots: [...roots], now,
       });
     } catch (error) {
-      return rejection("CAPABILITY_GAP", `task repository services are unavailable: ${(error as Error).message.slice(0, 240)}`, "use checkout roots in the bound repository and preserve outstanding effects for reconciliation");
+      return rejection("CAPABILITY_GAP", `task repository services are unavailable: ${(error as Error).message.slice(0, 240)}`,
+        error instanceof TaskRepositoryMismatchError ? error.recovery
+          : "use checkout roots in the bound repository and preserve outstanding effects for reconciliation");
     }
   }
 

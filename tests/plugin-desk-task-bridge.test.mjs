@@ -1,9 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import {
   BIN_SOURCE, bridgeFixture, startBridge, gitRepo, repoOf, memberRow,
   seedStore, seedMemberships, hello, handshake, rpc,
@@ -344,6 +344,52 @@ function delivery(f, over = {}) {
     expectedLedgerRevision: f.store.read(f.repoKey).ledger.revision, expectedBriefRevision: 0, expectedOwnershipRevision: 0,
     task: declared.task, runtime: { optionId: 'wire-worker', catalogSha256: readCatalog(f.git.dir, f.home).sha256 },
     text: 'Read only changed.txt and return evidence.', ...over };
+}
+
+for (const kind of ['foreign', 'nested']) {
+  for (const tool of ['slp_task_dispatch', 'slp_task_deliver']) {
+    test(`${tool} reports ${kind} Git repository identities and topology without admitting effects`, async t => {
+      const f = await fixture(t, { execution: true });
+      let checkout;
+      if (kind === 'foreign') checkout = gitRepo(t, 'slp-task-foreign-repo-').dir;
+      else {
+        checkout = join(f.git.dir, 'nested');
+        mkdirSync(checkout);
+        execFileSync('git', ['init', '-q', checkout]);
+      }
+      writeFileSync(join(checkout, 'sentinel'), 'prior\n');
+      let request = delivery(f, { placement: { kind: 'isolated', cwd: checkout } });
+      if (tool === 'slp_task_dispatch') {
+        const input = declaration(f);
+        input.task = request.task;
+        const defined = await f.call(f.owner, 'slp_task_define', input);
+        assert.equal(defined.ok, true, JSON.stringify(defined));
+        request = { requestId: 'foreign-bootstrap', assignmentId: f.assignmentId, taskId: defined.taskId,
+          phase: 'bootstrap', attemptId: null, expectedAttemptRevision: 0,
+          expectedLedgerRevision: f.store.read(f.repoKey).ledger.revision,
+          expectedBriefRevision: 0, expectedOwnershipRevision: 0, expectedTaskRevision: 1,
+          grantRef: 'grant:create', placement: request.placement, runtime: request.runtime };
+      }
+      const before = f.store.read(f.repoKey).ledger;
+      const privateRoot = join(f.stableRoot, 'task-exec', f.repoKey);
+      const hadPrivateRoot = existsSync(privateRoot);
+      const out = await f.call(f.owner, tool, request);
+      assert.equal(out.ok, false);
+      assert.equal(out.code, 'CAPABILITY_GAP', JSON.stringify(out));
+      assert.match(out.message, /different Git repository/);
+      assert.ok(out.message.includes(`expected repo ${JSON.stringify(basename(f.git.dir).slice(0, 24))} (${sha256Hex(f.git.gitCommonDir).slice(0, 12)})`));
+      assert.ok(out.message.includes(`actual repo ${JSON.stringify(basename(checkout).slice(0, 24))} (${sha256Hex(realpathSync(join(checkout, '.git'))).slice(0, 12)})`));
+      assert.equal(out.message.includes(checkout), false);
+      assert.ok(out.message.length <= WIRE_LIMITS.rejectionMessage);
+      assert.match(out.recovery, /bind the Lead to the task's Git repository/);
+      assert.match(out.recovery, /seat in that repository's workspace/);
+      assert.match(out.recovery, /preserve outstanding effects/);
+      assert.deepEqual(f.effects, []);
+      assert.deepEqual(f.store.read(f.repoKey).ledger, before);
+      assert.equal(existsSync(privateRoot), hadPrivateRoot);
+      assert.equal(readFileSync(join(checkout, 'sentinel'), 'utf8'), 'prior\n');
+    });
+  }
 }
 
 test('one semantic delivery crosses real Core create/bind/send and returns targeted current pins without history paging', async t => {

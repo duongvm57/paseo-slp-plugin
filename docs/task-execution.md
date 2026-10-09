@@ -75,6 +75,31 @@ creation or delivery. Git tree modes express executable class; they are not
 proof of every filesystem permission bit. A materialization mismatch holds the
 attempt and keeps the worktree accounted for.
 
+### Repository binding
+
+Task checkout access compares canonical Git common-directory identities, not
+whether the checkout path sits below the Lead's directory. Worktrees of the
+bound repository can live outside that directory. A nested Git repository and
+its worktrees have a different identity and are rejected, even when their
+source checkout is inside the Lead's directory.
+
+Dispatch or delivery reports `CAPABILITY_GAP` with **different Git repository**
+when those identities differ. It names the `expected` bound repository and
+`actual` probed repository, for example `expected repo "hbl" (a1b2c3d4e5f6),
+actual repo "fe" (b2c3d4e5f6a1)`. Each fingerprint is the first 12 hexadecimal
+characters of SHA-256 over the canonical common-directory path (UTF-8, without
+a trailing newline). The display name is the source checkout's last directory
+component for a conventional `.git`; bare/nonstandard Git directories use their
+metadata name. Names are hints, not authority: only the full canonical identities
+decide access, even when names or short fingerprints collide.
+
+Names have controls and line separators removed, known credential-shaped names
+redacted before truncation, and a 24-code-point bound; full paths are not echoed.
+Both names and fingerprints survive the bridge's bounded diagnostic. Bind the
+Lead to the task's Git repository or form its seat in that repository's workspace
+under the assignment. Preserve outstanding effects for reconciliation. Moving
+the checkout or bypassing task tools does not widen repository authority.
+
 ## Integrate a result
 
 Integration has explicit **stage → check → land** phases, followed by
