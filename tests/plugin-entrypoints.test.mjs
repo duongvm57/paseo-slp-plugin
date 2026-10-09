@@ -50,23 +50,37 @@ test('paseo-plugin.json parses through the host readPluginManifest', async t => 
   });
 });
 
-test('host manifest validator rejects invented/extra keys', async t => {
+test('host manifest rejects invalid fields and never preserves unknown top-level keys', async t => {
   const host = await loadHostPluginModules();
   if (!host || typeof host.readPluginManifest !== 'function') {
     t.skip('HOST MANIFEST VALIDATOR UNAVAILABLE — rejection coverage skipped (set PASEO_CLI_MODULES; see warning above)');
     return;
   }
   const cases = [
-    { name: 'extra top-level key', doc: { id: 'x', extraField: true } },
+    { name: 'extra top-level key', doc: { id: 'x', extraField: true }, unknownKey: 'extraField' },
     { name: 'invented requirements key', doc: { id: 'x', requirements: { bogus: '1' } } },
     { name: 'missing id', doc: { requirements: { paseo: '>=0.8.0' } } },
     { name: 'non-string id', doc: { id: 42 } },
   ];
-  for (const { name, doc } of cases) {
+  for (const { name, doc, unknownKey } of cases) {
     const dir = mkdtempSync(join(tmpdir(), 'slp-manifest-'));
     t.after(() => rmSync(dir, { recursive: true, force: true }));
     writeFileSync(join(dir, 'paseo-plugin.json'), JSON.stringify(doc));
-    await assert.rejects(() => host.readPluginManifest(dir), undefined, name);
+    if (unknownKey) {
+      // 0.10.x rejects; 0.11.x strips. Neither may retain the unknown key.
+      // Keep assertions outside the rejection handler so a failed assertion
+      // cannot be mistaken for the host rejecting the manifest.
+      const outcome = await host.readPluginManifest(dir).then(
+        manifest => ({ accepted: true, manifest }),
+        () => ({ accepted: false }),
+      );
+      if (outcome.accepted) {
+        assert.equal(Object.hasOwn(outcome.manifest, unknownKey), false, name);
+        assert.equal(outcome.manifest.id, doc.id, 'accepted manifest retains its valid identity');
+      }
+    } else {
+      await assert.rejects(() => host.readPluginManifest(dir), undefined, name);
+    }
   }
 });
 
