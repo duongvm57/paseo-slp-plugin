@@ -42,8 +42,8 @@ export interface ProviderCatalogApi {
       provider: string; cwd: string; modeId?: string;
     }): Promise<{
       features?: (
-        | { type: "toggle"; id: string; label: string; description?: string; tooltip?: string; icon?: string; value: boolean }
-        | { type: "select"; id: string; label: string; description?: string; tooltip?: string; icon?: string; value: string | null; options: { id: string; label: string; description?: string; isDefault?: boolean; metadata?: Record<string, unknown> }[] }
+        | { type: "toggle"; id: string; label: string; description?: string; tooltip?: string; icon?: string; desktopTrigger?: string; value: boolean }
+        | { type: "select"; id: string; label: string; description?: string; tooltip?: string; icon?: string; desktopTrigger?: string; value: string | null; options: { id: string; label: string; description?: string; isDefault?: boolean; metadata?: Record<string, unknown> }[] }
       )[];
       error?: string | null;
     }>;

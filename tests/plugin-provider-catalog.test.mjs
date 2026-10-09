@@ -6,6 +6,9 @@ import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
+import ts from 'typescript';
+import { CatalogFeature, CatalogInput, CatalogOutput } from '../plugin/shared/contracts.ts';
+import * as hostDescriptors from './helpers/provider-descriptors.mts';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const MODULE = join(root, 'plugin/server/provider-catalog.ts');
@@ -303,3 +306,99 @@ test('preview budget: an exhausted warm-up budget never starts loading-entry lis
   assert.deepEqual(out.models, []);
   assert.deepEqual(out.modes, []);
 });
+
+const knownThinking = { id: 'high', label: 'High', description: 'More reasoning',
+  isDefault: true, metadata: { tier: 2 } };
+const knownToggle = { type: 'toggle', id: 'fast', label: 'Fast', description: 'Faster replies',
+  tooltip: 'Host tooltip', icon: 'zap', value: true, desktopTrigger: 'icon' };
+const knownSelect = { type: 'select', id: 'thinking', label: 'Thinking', value: null,
+  options: [knownThinking], desktopTrigger: 'label' };
+
+test('host descriptor fixture typechecks against the installed protocol', () => {
+  const fixture = join(root, 'tests/helpers/provider-descriptors.mts');
+  const program = ts.createProgram([fixture], {
+    noEmit: true, strict: true, skipLibCheck: true,
+    target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.NodeNext,
+    moduleResolution: ts.ModuleResolutionKind.NodeNext, types: ['node'],
+  });
+  const diagnostics = ts.getPreEmitDiagnostics(program);
+  assert.equal(diagnostics.length, 0, ts.formatDiagnosticsWithColorAndContext(diagnostics, {
+    getCurrentDirectory: () => root, getCanonicalFileName: file => file, getNewLine: () => '\n',
+  }));
+});
+
+test('toggle desktop trigger survives while future host feature keys are stripped', () => {
+  assert.deepEqual(CatalogFeature.parse(hostDescriptors.toggle), knownToggle);
+});
+
+test('select desktop trigger and option metadata survive while future host keys are stripped', () => {
+  assert.deepEqual(CatalogFeature.parse(hostDescriptors.select), knownSelect);
+});
+
+test('future desktop trigger strings survive catalog parsing without damaging descriptors', () => {
+  const parsed = CatalogOutput.parse({ schemaVersion: 1, models: [], modes: [],
+    features: hostDescriptors.futureFeatures, error: null });
+  assert.deepEqual(parsed.features, [
+    { ...knownToggle, desktopTrigger: 'both' },
+    { ...knownSelect, desktopTrigger: 'both' },
+  ]);
+  assert.equal(parsed.error, null);
+});
+
+test('model mode and thinking descriptors accept future host keys at the wire boundary', () => {
+  const parsed = CatalogOutput.parse({
+    schemaVersion: 1, models: [hostDescriptors.model], modes: [hostDescriptors.mode],
+    features: [], error: null,
+  });
+  assert.deepEqual(parsed.models, [{ id: 'host-model', label: 'Host model',
+    thinkingOptions: [knownThinking], defaultThinkingOptionId: 'high' }]);
+  assert.deepEqual(parsed.modes, [{ id: 'full-access', label: 'Full access' }]);
+});
+
+test('legacy feature descriptors still parse without an invented desktop trigger', () => {
+  for (const { desktopTrigger, futureHostKey, ...legacy } of hostDescriptors.features) {
+    const raw = legacy.type === 'select' ? { ...legacy, options: [knownThinking] } : legacy;
+    const parsed = CatalogFeature.parse(raw);
+    assert.deepEqual(parsed, raw);
+    assert.equal(Object.hasOwn(parsed, 'desktopTrigger'), false);
+  }
+});
+
+test('host descriptor evolution keeps known fields and plugin envelopes validated', () => {
+  for (const raw of [
+    { ...hostDescriptors.toggle, desktopTrigger: 1 },
+    { ...hostDescriptors.toggle, value: 'true' },
+    { ...hostDescriptors.select, desktopTrigger: null },
+    { ...hostDescriptors.select, value: {} },
+    { ...hostDescriptors.select, options: [{ id: '', label: 'Empty' }] },
+  ]) assert.throws(() => CatalogFeature.parse(raw));
+  assert.throws(() => CatalogOutput.parse({ schemaVersion: 1, models: [], modes: [],
+    features: [], error: null, futurePluginKey: true }));
+  assert.throws(() => CatalogInput.parse({ schemaVersion: 1, family: 'codex', futurePluginKey: true }));
+});
+
+for (const path of ['snapshot', 'legacy']) {
+  test(path + ' host catalog preserves desktop triggers through loader and RPC parser', async () => {
+    const loadCatalog = await freshCatalog();
+    const overrides = {
+      listModels: async () => ({ models: [hostDescriptors.model] }),
+      listModes: async () => ({ modes: [hostDescriptors.mode] }),
+      listFeatures: async () => ({ features: hostDescriptors.features }),
+      ...(path === 'snapshot' ? { snapshot: snapshotEntries([{
+        provider: 'slp-codex-peer', status: 'ready',
+        models: [hostDescriptors.model], modes: [hostDescriptors.mode],
+      }]) } : {}),
+    };
+    const { paseo } = fakePaseo(overrides);
+    const raw = await loadCatalog({ schemaVersion: 1, family: 'codex', role: 'peer',
+      model: 'host-model', cwd: '/catalog-workspace' }, paseo);
+    assert.equal(raw.features[0].futureHostKey, true,
+      'raw host payload reaches the plugin parser; it was not stripped by an older protocol first');
+    const parsed = CatalogOutput.parse(raw);
+    assert.deepEqual(parsed.features, [knownToggle, knownSelect]);
+    assert.equal(parsed.error, null);
+    assert.equal(parsed.models[0].defaultThinkingOptionId, 'high');
+    assert.deepEqual(parsed.models[0].thinkingOptions, [knownThinking]);
+    assert.deepEqual(parsed.modes, [{ id: 'full-access', label: 'Full access' }]);
+  });
+}

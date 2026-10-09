@@ -446,7 +446,7 @@ test('the catalog RPC passes per-model thinking options through to CatalogOutput
   assert.deepEqual(CatalogOutput.parse(result), result);
 });
 
-test('CatalogModel round-trips thinking options and stays strict', () => {
+test('CatalogModel round-trips thinking options and strips future host keys', () => {
   const model = {
     id: 'gpt-5.6',
     label: 'GPT 5.6',
@@ -456,7 +456,9 @@ test('CatalogModel round-trips thinking options and stays strict', () => {
     defaultThinkingOptionId: 'medium',
   };
   assert.deepEqual(CatalogModel.parse(model), model);
-  assert.throws(() => CatalogModel.parse({ ...model, bogus: 1 }));
+  assert.deepEqual(CatalogModel.parse({ ...model, futureHostKey: true,
+    thinkingOptions: model.thinkingOptions.map(option => ({ ...option, futureHostKey: true })),
+  }), model);
 });
 
 // ---------------------------------------------------------------------------

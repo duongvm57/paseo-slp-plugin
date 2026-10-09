@@ -486,10 +486,12 @@ export const CatalogInput = z.object({
   model: z.string().min(1).optional(),
   modeId: z.string().min(1).optional(),
 }).strict();
+// Host-owned descriptors may gain fields independently of this plugin.
+// Strip unknown descriptor keys; the plugin-owned RPC envelopes stay strict.
 export const CatalogOption = z.object({
   id: z.string().min(1),
   label: z.string(),
-}).strict();
+});
 /** One selectable option inside a provider feature or model descriptor —
  *  id + display label plus optional description, default marker and
  *  free-form metadata. Shared by CatalogFeature's select options and a
@@ -502,14 +504,14 @@ export const CatalogSelectOption = z.object({
   description: z.string().optional(),
   isDefault: z.boolean().optional(),
   metadata: z.record(z.string(), z.unknown()).optional(),
-}).strict();
+});
 /** One catalog model: the picker identity plus the thinking options the
  *  model declares and its declared default option id. Providers that bake
  *  thinking into model ids declare an empty/absent list. */
 export const CatalogModel = CatalogOption.extend({
   thinkingOptions: z.array(CatalogSelectOption).optional(),
   defaultThinkingOptionId: z.string().min(1).optional(),
-}).strict();
+});
 /** Provider feature definition — the same descriptor the host's profile
  *  editor renders as a toggle or select. `value` is the provider default;
  *  profile-level overrides live in `featureValues`. */
@@ -521,8 +523,9 @@ export const CatalogFeature = z.discriminatedUnion("type", [
     description: z.string().optional(),
     tooltip: z.string().optional(),
     icon: z.string().optional(),
+    desktopTrigger: z.string().optional(),
     value: z.boolean(),
-  }).strict(),
+  }),
   z.object({
     type: z.literal("select"),
     id: z.string().min(1),
@@ -530,9 +533,10 @@ export const CatalogFeature = z.discriminatedUnion("type", [
     description: z.string().optional(),
     tooltip: z.string().optional(),
     icon: z.string().optional(),
+    desktopTrigger: z.string().optional(),
     value: z.string().nullable(),
     options: z.array(CatalogSelectOption),
-  }).strict(),
+  }),
 ]);
 export const CatalogOutput = z.object({
   schemaVersion: z.literal(1),
