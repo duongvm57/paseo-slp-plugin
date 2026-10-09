@@ -182,6 +182,16 @@ is unadmitted, not a successful create. After admission exact replay never calls
 Jev or resumes effects. `prepare`/`--check`/handoff preparation remain offline
 and still require explicit Peer pool pins; the new selector is not run by them.
 
+Placement is a desk argument, not a CLI repository/catalog override. Both
+roles accept caller or existing (workspaceId and/or absolute cwd, reason).
+Existing worktrees share the bound Git-common-dir; foreign/nested repos refuse.
+Source routing/protocol and target execution cwd are pinned separately inside
+the server; CLI prepare still uses its own repository and cannot supply that
+trusted context or route.catalogFile. New worktree: use Paseo create_workspace
+under its host-setup grant, then slp_seat_create placement existing; the desk's
+kind=worktree branch returns a gap before effects. Pending keeps the child ID
+and evidence without runnable delivery; replay never repairs or recreates it.
+
 ## `route-decide`
 
 `route-decide <request.json> [--schema] [--out <path>] [--paseo-home <absolute-home>]`
@@ -609,3 +619,13 @@ Text output includes result, PID, nonce, actor/repository keys and recovery
 details. `--json` emits the strict recovery output object on one line. Exit
 0 means `recovered` or `no-lock`, exit 1 means a rejected/failed outcome, and
 exit 2 means a usage error (including a non-repository target).
+
+
+For ordinary SDK formation, a linked Lead with no local routing/protocol uses
+its configured same-Git main checkout as a pinned source, including its own
+Peer delegations. The execution cwd remains the qualified target. A missing
+trustworthy source refuses formation; the CLI itself does not discover host
+placement or accept trusted-context/catalogFile overrides. New-semantic
+seat-pending results name slp_operation_get with the same requestId; receipt
+reads do not resume or create a replacement. Legacy omitted full-pin Peer/Lead
+requests retain their old delivery path.

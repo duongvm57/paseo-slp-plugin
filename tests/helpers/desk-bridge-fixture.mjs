@@ -76,6 +76,7 @@ export function bridgeFixture(t, homePrefix, pin, over = {}) {
     payload,
     paseoRef,
     taskHost: over.taskHost,
+    formationWorkspace: over.formationWorkspace,
     audit: over.audit,
     detectDaemonHome: () => ({ daemonHome: home, source: 'env' }),
     realpath: realpathSync,

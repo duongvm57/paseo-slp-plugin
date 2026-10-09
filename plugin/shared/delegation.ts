@@ -1,13 +1,24 @@
 import { z } from "zod";
 import { DeskTaskCommandBody, DeskTaskPlacement, DeskTaskRuntimePin, WIRE_LIMITS } from "./enforcement.ts";
+import { AbsolutePath } from "./contracts.ts";
 
 const id = z.string().min(1).max(WIRE_LIMITS.deskRequestId);
 const ref = z.string().min(1).max(WIRE_LIMITS.deskAuthorityRef);
 const text = z.string().min(1).max(WIRE_LIMITS.deskTaskText);
+export const DeskSeatPlacement = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("caller") }).strict(),
+  z.object({ kind: z.literal("existing"), workspaceId: id.optional(), cwd: AbsolutePath.optional(), reason: text }).strict(),
+  z.object({ kind: z.literal("worktree"), reason: text, baseRef: text.optional(), branchName: text.optional() }).strict(),
+]).superRefine((value, ctx) => {
+  if (value.kind === "existing" && value.workspaceId === undefined && value.cwd === undefined) {
+    ctx.addIssue({ code: "custom", message: "existing placement requires workspaceId or cwd" });
+  }
+});
 const formation = {
   requestId: id, grantRef: ref.describe("Human grant pointer (assignment sentence/date); verbatim claim, never authenticated."),
   taskLabel: z.string().min(1).max(100).regex(/^[^\r\n]+$/),
   assignment: text,
+  placement: DeskSeatPlacement.optional(),
   // Absent means "caller": the caller delivers through host send_agent_prompt so the host arms finish notification.
   delivery: z.enum(["caller", "server"]).optional(),
 };

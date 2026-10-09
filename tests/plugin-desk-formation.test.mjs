@@ -8,6 +8,8 @@ import { createDeskOperations } from '../plugin/server/desk-operation.ts';
 import { createFormationPlanner, runSeatCreate, FormationPlanningError } from '../plugin/server/desk-formation.ts';
 import { DeskSeatCreateInput, DeskTaskDeliverInput } from '../plugin/shared/delegation.ts';
 import { WIRE_LIMITS } from '../plugin/shared/enforcement.ts';
+import { createFormationPlacement } from '../plugin/server/desk-placement.ts';
+import { execFileSync } from 'node:child_process';
 import { memberRow } from './helpers/desk-bridge-fixture.mjs';
 import { launchPlan } from '../plugin/server/runtime/cli/launch.ts';
 import { install } from '../plugin/server/runtime/cli/package.ts';
@@ -24,6 +26,7 @@ function fixture(t) {
     modeSupport: { provider: 'slp-codex-lead', modes: ['full-access', 'auto'] } };
   const effects = [];
   let snapshot;
+  let currentRole = input.role;
   const ref = () => ({ refresh: async () => ({ agent: snapshot, project: null }),
     send: async (text, options) => effects.push({ kind: 'send', text, options }),
     timeline: { refetch: async () => ({ entries: [] }) } });
@@ -34,11 +37,16 @@ function fixture(t) {
       thinkingOptionId: 'high', features: [{ id: 'fast_mode', value: true }], archivedAt: null };
     return { id: 'child' };
   };
-  const host = { agents: { ref, create, list: async () => ({ entries: [] }) }, workspaces: { ref: () => ({ agents: { create } }) },
+  const host = { agents: { ref, create, list: async () => ({ entries: [] }) }, workspaces: { ref: id => ({ id,
+    refresh:async()=>({id,workspaceDirectory:root,status:'done',archivingAt:null}),agents: { create } }) },
     providers: { snapshot: async () => ({ entries: [] }) } };
-  const deps = { stableRoot, repoKey: 'repo', host: () => host, plan: async () => structuredClone(plan), guard: async () => null };
+  const deps = { stableRoot, repoKey: 'repo', host: () => host, plan: async () => structuredClone(plan), guard: async () => null,
+    placement:createFormationPlacement({repo:{gitCommonDir:join(root,'.git')},host:()=>host,
+      git:{commonDir:async()=>join(root,'.git'),top:async()=>root,revParse:async()=>null}}),
+    readMemberships: () => snapshot ? [memberRow('child-member', {provider:snapshot.provider,at:'2026-01-01T00:00:00.000Z'},
+      {agentId:'child',role:currentRole,createCwd:snapshot.cwd,workspaceId:snapshot.workspaceId})] : [] };
   return { root, stableRoot, row, input, plan, effects, host, deps,
-    snapshot: () => snapshot, setSnapshot: value => { snapshot = value; }, run: (data = input) => runSeatCreate(row, data, deps) };
+    snapshot: () => snapshot, setSnapshot: value => { snapshot = value; }, run: (data = input) => { currentRole=data.role;return runSeatCreate(row, data, deps); } };
 }
 
 test('delivery server: ordinary formation derives native parent/placement, observes exact runtime and sends once without a caller file', async t => {
@@ -60,7 +68,7 @@ test('delivery server: ordinary formation derives native parent/placement, obser
 for (const field of ['workspaceId', 'model', 'currentModeId', 'thinkingOptionId', 'features', 'labels']) {
   test(`formation with ${field} mismatch retains the created seat and withholds assignment`, async t => {
     const f = fixture(t), original = f.host.workspaces.ref;
-    f.host.workspaces.ref = id => ({ agents: { create: async options => {
+    f.host.workspaces.ref = id => ({ ...original(id), agents: { create: async options => {
       const child = await original(id).agents.create(options);
       const snapshot = f.snapshot(); delete snapshot[field]; return child;
     } } });
@@ -73,7 +81,10 @@ for (const field of ['workspaceId', 'model', 'currentModeId', 'thinkingOptionId'
 for (const effect of ['create', 'send']) {
   test(`lost ${effect} acknowledgment cannot trigger resubmission`, async t => {
     const f = fixture(t);
-    if (effect === 'create') f.host.workspaces.ref = () => ({ agents: { create: async () => { f.effects.push({ kind: 'create' }); throw new Error('lost'); } } });
+    if (effect === 'create') {
+      const original=f.host.workspaces.ref;
+      f.host.workspaces.ref = id => ({ ...original(id), agents: { create: async () => { f.effects.push({ kind: 'create' }); throw new Error('lost'); } } });
+    }
     else f.host.agents.ref = () => ({ refresh: async () => ({ agent: f.snapshot(), project: null }), send: async () => { f.effects.push({ kind: 'send' }); throw new Error('lost'); } });
     const input = { ...f.input, delivery: 'server' };
     const out = await f.run(input); assert.equal(out.result.state, `${effect}-uncertain`);
@@ -254,6 +265,7 @@ import { routeDecide } from '../plugin/server/runtime/cli/jev-routing.ts';
 
 async function realPeerFixture(t, mode, count = 2) {
  const f=selectionFixture(t,{mode,count});
+ execFileSync('git',['init','-q',f.repository]);
  const candidate=join(f.dir,'candidate');install(fileURLToPath(new URL('..',import.meta.url)),candidate);
  const row=memberRow('peer-parent',{}, {agentId:'parent',role:'lead',createCwd:f.repository,workspaceId:'workspace'});
  const effects=[];let snapshot,decisions=0;
@@ -267,7 +279,8 @@ async function realPeerFixture(t, mode, count = 2) {
   return {id:'child'};
  };
  const host={providers:{snapshot:async()=>({entries:[{provider:'slp-codex-peer',enabled:true,status:'ready',modes:[{id:'full-access'}]}]})},
-  agents:{ref:()=>({refresh:async()=>({agent:snapshot,project:null}),send:async()=>{effects.push({kind:'send'});},timeline:{refetch:async()=>({entries:[]})}})},workspaces:{ref:()=>({agents:{create}})}};
+  agents:{ref:()=>({refresh:async()=>({agent:snapshot,project:null}),send:async()=>{effects.push({kind:'send'});},timeline:{refetch:async()=>({entries:[]})}})},workspaces:{ref:id=>({id,
+   refresh:async()=>({id,workspaceDirectory:f.repository,status:'done',archivingAt:null}),agents:{create}})}};
  const loaded=[];
  const planner=createFormationPlanner({runtimePath:candidate,daemonHome:f.home,host:()=>host,
   importModule:async spec=>{
@@ -278,7 +291,10 @@ async function realPeerFixture(t, mode, count = 2) {
    }})};
   }});
  const deps={stableRoot:join(f.home,'slp-runtime'),repoKey:'repo',host:()=>host,plan:planner,
-  preflightPeer:planner.preflightPeer,selectPeer:planner.selectPeer,guard:async()=>null};
+  preflightPeer:planner.preflightPeer,selectPeer:planner.selectPeer,guard:async()=>null,
+  placement:createFormationPlacement({repo:{gitCommonDir:join(f.repository,'.git')},host:()=>host}),
+  readMemberships:()=>snapshot?[memberRow('peer-child',{provider:snapshot.provider,at:'2026-01-01T00:00:00.000Z'},
+    {agentId:'child',role:'peer',createCwd:snapshot.cwd,workspaceId:snapshot.workspaceId})]:[]};
  const input={requestId:'matrix',role:'peer',taskLabel:'bounded',assignment:f.request.assignment,grantRef:'human:fixture'};
  return {...f,row,candidate,host,effects,loaded,planner,formationDeps:deps,input,decisions:()=>decisions,
   run:request=>runSeatCreate(row,request??input,deps)};

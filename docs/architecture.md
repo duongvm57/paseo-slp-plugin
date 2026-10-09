@@ -271,9 +271,9 @@ materializes the SLP payload into an immutable `slp-runtime/<sha>` tree,
 and records a receipt. Nothing changes on the daemon until a human
 explicitly activates.
 
-Two saved profiles are the only doors in: **SLP Supervisor** and **SLP
-Lead**. Peers never get saved profiles — the Lead chooses a peer provider
-per task from the routing pool: a repository's `.paseo-slp/slp-routing.json`
+Two saved profiles anchor **SLP Supervisor** and **SLP Lead** runtimes.
+Peers use complete pool bundles, selected server-side or independently by the
+Lead per task from the routing pool: a repository's `.paseo-slp/slp-routing.json`
 when pinned, else the user-scope `state/peer-pool.json` above. Either scope
 is what lets one project mix e.g. a Codex Lead with Devin peers.
 
@@ -543,15 +543,37 @@ longer qualify under the new owner. See [assignment continuity](work-continuity.
   tools for durable assignments, handbacks, settlements, scopes, checks and
   rollout decisions. Authority resolves from host-bound memberships and
   durable owner bindings; these tools record evidence and state. They do
-  not create agents, choose delegation or deploy a rollout.
+  not choose delegation or deploy a rollout. Ordinary formation and supervised
+  bootstrap invoke the host SDK only under their separate admissions.
 - Ordinary Peer runtime selection is composed into durable formation, not the
   CLI planner. Replay inspection precedes local choice preflight; choices admit
   no intent. The exclusive executor imports the bound candidate selector, pins
   one choice/full receipt, then replans offline before create and delivery.
   Mode/source/catalog drift blocks dependent effects; old full-runtime requests
-  preserve their five phases. New paths use six phases without Jev and seven
-  with it (of 16). Decline retains evidence without allocating a seat. No default
+  preserve their five phases. Omitted-placement automatic paths use six phases
+  without Jev and seven with it; explicit placement uses at most twelve (of 16). Decline retains evidence without allocating a seat. No default
   pool, task enrollment or retry/resume scheduler is introduced.
+- Formation placement owns live SDK/Git qualification. Caller/existing source
+  and execution roots are separate: local configured top or same-Git main checkout pins pool/protocol; a linked
+  checkout without a trustworthy configured source fails closed. This persists
+  across Lead→Peer hops with omitted placement. Target pins
+  canonical workspace/cwd/HEAD. Foreign/nested common-dir, configuration conflicts
+  or later drift block effects. New worktree creation is a gap; Lead uses Paseo
+  create_workspace under its setup authority, then seat-create existing. The
+  plugin never invokes setup/worktree-create/install. SDK open can register or
+  revive a directory workspace; a timeout retains uncertainty, not cancellation.
+  Cached qualified SDK handles avoid an unverified implicit directory lookup;
+  no cross-host/Git atomic fence is claimed.
+- New formation semantics (placement or automatic Peer runtime/selection) use
+  the task adapter's exact live membership predicate plus role. A read-only
+  registration wait is bounded to 1500ms, then fresh guards run before delivery;
+  polling adds no phases. Missing/revoked/wrong tuple returns seat-pending with
+  its child ID, evidence and slp_operation_get action for the same requestId.
+  Receipt reads do not resume; no replacement or automatic repair is introduced.
+  Historical omitted full-pin Peer/Lead requests bypass the membership gate,
+  retaining delivery/bytes and five phases. Retained receipts replay before
+  qualification. Explicit placement alone records membership-observed;
+  ordinary formation still does not bind a task scope.
 - Jev is an explicit helper primitive, not an agent feature: the
   `route-decide` CLI and admitted ordinary formation invoke routing decisions (no loops, schedules or
   prepare-time calls), its key lives in per-daemon state, and routing

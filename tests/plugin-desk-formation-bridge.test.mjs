@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
@@ -8,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { install } from '../plugin/server/runtime/cli/package.ts';
 import { createDeskBridge } from '../plugin/server/desk-bridge.ts';
 import { canonicalSha256 } from '../plugin/server/config-view.ts';
-import { createDeskStore } from '../plugin/server/desk-store.ts';
+import { createDeskStore, repoKeyFor } from '../plugin/server/desk-store.ts';
 import { auditCapabilities } from '../plugin/server/capabilities.ts';
 import { DESK_BRIDGE_PROTOCOL } from '../plugin/shared/enforcement.ts';
 import { gitRepo, hello, handshake, memberRow, repoOf, rpc, seedMemberships } from './helpers/desk-bridge-fixture.mjs';
@@ -19,7 +20,7 @@ const at = '2026-01-01T00:00:00.000Z';
 const codexProfile = { id: 'slp-lead', provider: 'slp-codex-lead', model: 'gpt-6-luna', modeId: 'full-access', thinkingOptionId: 'high', featureValues: { fast_mode: true } };
 
 function managedBridge(t, options = {}) {
-  const { afterCreate, profile = codexProfile, reportedModeId, omitCurrentModeId, providerEntries } = options;
+  const { afterCreate, profile = codexProfile, reportedModeId, omitCurrentModeId, providerEntries, registration = 'ready' } = options;
   const providerModes = Object.hasOwn(options, 'providerModes') ? options.providerModes : [{ id: 'full-access' }];
   const includeProviderModes = options.includeProviderModes !== false;
   const dir = mkdtempSync(join(tmpdir(), 'slp-managed-formation-'));
@@ -69,6 +70,7 @@ function managedBridge(t, options = {}) {
 
   const effects = { creates: [], sends: [] };
   let childSnapshot = null;
+  const workspaceSnapshots = new Map([['workspace',{id:'workspace',workspaceDirectory:repo.dir,status:'done',archivingAt:null}]]);
   const childHandle = id => ({
     id,
     refresh: async () => ({ agent: id === 'child' ? childSnapshot : null, project: null }),
@@ -85,7 +87,7 @@ function managedBridge(t, options = {}) {
       id: 'child',
       provider: combined.slice(0, slash),
       model: combined.slice(slash + 1),
-      cwd: repo.dir,
+      cwd: workspaceSnapshots.get(workspaceId)?.workspaceDirectory ?? repo.dir,
       workspaceId,
       archivedAt: null,
       labels: { ...options.labels, 'paseo.parent-agent-id': options.parent },
@@ -93,6 +95,15 @@ function managedBridge(t, options = {}) {
       thinkingOptionId: options.config.thinkingOptionId,
       features: Object.entries(options.config.featureValues ?? {}).map(([id, value]) => ({ id, value })),
     };
+    if (registration !== 'missing') {
+      const store=createDeskStore({stableRoot}),repoValue=repoOf(repo),read=store.read(repoKeyFor(repoValue));
+      assert.equal(read.state,'ok');
+      const child=memberRow('registered-child',{provider:childSnapshot.provider,at},{agentId:'child',
+        role:childSnapshot.provider.endsWith('-peer')?'peer':'lead',createCwd:childSnapshot.cwd,workspaceId,
+        ...(registration==='revoked'?{state:'revoked',revokedAt:at,revokeReason:'registration-mismatch'}:{}),
+        ...(registration==='wrong-role'?{role:'supervisor'}:{})});
+      await seedMemberships(store,repoValue,[...read.ledger.memberships,child]);
+    }
     afterCreate?.(() => { currentBinding = bindingFor(candidates[1]); });
     return childHandle('child');
   };
@@ -109,6 +120,10 @@ function managedBridge(t, options = {}) {
     },
     workspaces: { ref: id => ({ agents: { create: options => createChild(id, options) } }) },
   };
+  const formationWorkspace={workspaces:{
+    ref:id=>({id,refresh:async()=>workspaceSnapshots.get(id)??null,agents:{create:opts=>createChild(id,opts)}}),
+    open:async()=>assert.fail('ID placement must not open a workspace'),
+  }};
   writeFileSync(join(home, 'config.json'), JSON.stringify({ daemon: { agentProfiles: [profile] } }));
 
   const bridge = createDeskBridge({
@@ -117,6 +132,7 @@ function managedBridge(t, options = {}) {
     payload: { files: [{ path: 'bin/slp-desk-mcp.mjs', sha256: bridgeSha256 }] },
     paseoRef,
     taskHost: () => taskHost,
+    formationWorkspace: () => formationWorkspace,
     audit: auditCapabilities,
     detectDaemonHome: () => ({ daemonHome: home, source: 'env' }),
     realpath: realpathSync,
@@ -128,7 +144,7 @@ function managedBridge(t, options = {}) {
     home, stableRoot, candidates, bindingFor, profile, setBinding: candidate => { currentBinding = bindingFor(candidate); },
     verifiedLaunchSets, bridge, paseoRef, effects,
     ready: bridge.whenReady(),
-    repo,
+    repo, workspaceSnapshots,
   };
 }
 
@@ -345,4 +361,32 @@ test('wire armed Peer decision error never falls back and exact replay performs 
  assert.equal(out.phases[0].name,'route-issued');assert.equal(f.effects.creates.length,0);assert.ok(fetched>=1);
  const count=fetched;const replay=await callTool(f,202,'slp_seat_create',request);
  assert.equal(replay.receiptSha256,out.receiptSha256);assert.equal(fetched,count);
+});
+
+test('wire existing worktree pins native workspace/cwd and parent before delivery',async t=>{
+ const f=await boundFormationSeat(t);
+ execFileSync('git',['-C',f.repo.dir,'-c','user.name=Fixture','-c','user.email=fixture@example.invalid',
+  'commit','--allow-empty','-qm','fixture base']);
+ const target=join(f.home,'fixture-target');
+ execFileSync('git',['-C',f.repo.dir,'worktree','add','--detach',target,'HEAD'],{stdio:'pipe'});
+ f.workspaceSnapshots.set('lane',{id:'lane',workspaceDirectory:target,status:'done',archivingAt:null});
+ const input={...seatCreate('worktree-existing'),placement:{kind:'existing',workspaceId:'lane',reason:'isolated lane'}};
+ const out=await callTool(f,301,'slp_seat_create',input);
+ assert.equal(out.result.state,'awaiting-caller-delivery');assert.equal(out.result.workspaceId,'lane');assert.equal(out.result.parent,'parent');
+ assert.equal(out.phases.length,8);assert.equal(out.phases.find(p=>p.name==='target-observed').value.cwd,target);
+ assert.equal(out.phases.find(p=>p.name==='create-issued').value.workspaceId,'lane');
+ assert.equal(f.effects.creates[0].workspaceId,'lane');assert.equal(f.effects.sends.length,0);
+ assert.ok(out.result.delivery.prompt.includes('Repository: '+target));
+ const replay=await callTool(f,302,'slp_seat_create',input);assert.equal(replay.receiptSha256,out.receiptSha256);assert.equal(f.effects.creates.length,1);
+});
+
+for(const registration of ['missing','revoked','wrong-role'])test('wire '+registration+' membership is pending even with an exact native child tuple',async t=>{
+ const f=await boundFormationSeat(t,{registration});
+ execFileSync('git',['-C',f.repo.dir,'-c','user.name=Fixture','-c','user.email=fixture@example.invalid','commit','--allow-empty','-qm','fixture base']);
+ const input={...seatCreate('pending-member'),placement:{kind:'caller'},delivery:'server'};
+ const out=await callTool(f,401,'slp_seat_create',input);
+ assert.equal(out.result.state,'seat-pending');assert.equal(out.result.agentId,'child');assert.equal(out.result.sent,false);
+ assert.equal(Object.hasOwn(out.result,'delivery'),false);assert.equal(f.effects.sends.length,0);
+ const replay=await callTool(f,402,'slp_seat_create',input);assert.equal(replay.receiptSha256,out.receiptSha256);
+ assert.equal(f.effects.creates.length,1);assert.equal(f.effects.sends.length,0);
 });

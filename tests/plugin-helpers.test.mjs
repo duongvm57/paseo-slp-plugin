@@ -156,8 +156,10 @@ test('role instructions carry the spawn kit and policy locators at session entry
   install(root, installed);
   // Unmanaged render: locators resolve under the installation itself.
   const lead = roleBundle(installed, 'lead', {});
-  assert.match(lead.instructions, /\nSpawn kit — role-scoped Paseo MCP signatures \(approximate; consult the specific live schema for unfamiliar parameters or a mismatch\):\n/);
+  assert.match(lead.instructions, /\nSpawn kit — role-scoped Paseo MCP signatures \(approximate; consult the specific live schema for unfamiliar parameters or a mismatch;[^\n]+\):\n/);
   assert.ok(lead.instructions.includes('- create_agent(title: string'));
+  assert.match(lead.instructions, /new worktree: use Paseo create_workspace under its host-setup grant, then slp_seat_create placement existing/);
+  assert.match(lead.instructions, /pending: slp_operation_get with the same requestId, keep the ID, never recreate/);
   // The locator set derives from the install receipt: docs/contract.md lives
   // outside the install unit and is never declared.
   assert.ok(!lead.instructions.includes('docs/contract.md'));

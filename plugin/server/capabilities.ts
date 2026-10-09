@@ -32,6 +32,17 @@ export const PASEO_SOURCE_REVISION = "0f20e6dfe4c2573e203dea2aae00aa5983ce4d62";
 const src = (path: string) => `paseo@${PASEO_SOURCE_REVISION}:${path}`;
 const sdk = (pkg: string, path: string) => `${pkg}@0.8.0:${path}`;
 
+// Formation ABI evidence, not an extra status inventory row: the status
+// capacity stays pinned at 39. The typed server entry also checks assignability
+// against the published SDK; these facts establish no live delivery claim.
+export const FORMATION_WORKSPACE_CONTRACT = {
+  sourceRef: "@getpaseo/client@0.10.0:dist/index.d.ts PaseoWorkspaceActions/PaseoWorkspaceHandle",
+  evidenceKind: "source-static-compat",
+  primitives: ["workspaces.ref(id).refresh(options)", "workspaces.open({cwd,requestId})", "handle.agents.create(options)"],
+  limits: ["active-only refresh cannot inventory archived history", "open may register/revive a workspace and outlive timeout",
+    "new worktree creation has no setup-suppression flag; no formation V1 workspace.create"],
+} as const;
+
 export const CAPABILITY_IDS = {
   hookAgentCreate: "hook.agent.create",
   hookSessionOpen: "hook.agent.session-open",

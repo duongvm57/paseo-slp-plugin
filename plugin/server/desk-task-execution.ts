@@ -39,6 +39,7 @@ import type { TaskRuntimeBinding, TaskRuntimeSelection } from "./desk-task-runti
 import { taskDeliveryTrailer } from "./desk-delivery-trailer.ts";
 import type { RunnerCtx } from "./desk-runner.ts";
 import { readLedger, isRejection } from "./desk-runner.ts";
+import { registeredMembership } from "./desk-membership.ts";
 import type { DeskStore, LedgerValue, MembershipValue } from "./desk-store.ts";
 import { DESK_TASK_CREATE_TICKET_KEY } from "./desk-seat.ts";
 import type { MutationOutcome } from "./desk-handback.ts";
@@ -202,23 +203,6 @@ const actionRows = (ledger: Readonly<LedgerValue>): IntegrationRow[] => {
 
 const resultRows = (ledger: Readonly<LedgerValue>): ResultStreamRow[] =>
   taskEntriesOf(ledger, "result").filter((r): r is ResultStreamRow => r.kind === "result");
-
-/** The exact registered membership row for a created seat — host-created
- *  or empty listings never satisfy this. */
-function registeredMembership(
-  ledger: Readonly<LedgerValue>,
-  pin: { agentId: string; provider?: string; createCwd?: string; workspaceId: string | null },
-): MembershipValue | null {
-  const row = ledger.memberships.find(
-    m => m.agentId === pin.agentId
-      && (pin.provider === undefined || m.provider === pin.provider)
-      && (pin.createCwd === undefined || m.createCwd === pin.createCwd)
-      && m.workspaceId === pin.workspaceId,
-  );
-  if (row === undefined) return null;
-  if (row.registeredAt === null || row.revokedAt !== null) return null;
-  return row;
-}
 
 const stopHeld = (attempt: AttemptStreamRow): boolean =>
   attempt.state === "stop-requested" || attempt.stop.requested === true
@@ -752,7 +736,7 @@ async function tryBind(
 ): Promise<{ bound: true } | { bound: false; reason: string } | Rejection> {
   const ledger = readLedger(deps, ctx.repoKey);
   if (isRejection(ledger)) return ledger;
-  const membership = registeredMembership(ledger, {
+  const membership = registeredMembership(ledger.memberships, {
     agentId: pin.agentId, provider: pin.provider,
     createCwd: pin.createCwd, workspaceId: pin.workspaceId,
   });

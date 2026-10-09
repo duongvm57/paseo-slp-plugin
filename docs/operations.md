@@ -456,8 +456,8 @@ and fail on drift; they never decide again. Exact replay reads old recorded or
 partial evidence before choice discovery, performs no decision/create/send and
 never resumes a crashed operation. Keep returned IDs and uncertainties. Old
 full-runtime requests retain their original five-phase path and receipt bytes.
-New automatic formation uses at most seven phases of the existing 16-phase cap
-(six with no network). Oversized automatic input refuses in preflight before
+Omitted-placement automatic formation uses at most seven phases of the existing
+16-phase cap (six with no network); explicit placement uses at most twelve. Oversized automatic input refuses in preflight before
 intent or Jev, using the same three-copy allowance and 32KiB reserve as the
 final evidence check; shorten it and reuse the unconsumed requestId.
 Selection/plan evidence only known after decision is also checked before native
@@ -466,10 +466,64 @@ allocation. Existing full-runtime validation and retained replay stay unchanged.
 The child is created without work, its native tuple is observed, then the default
 caller delivery returns an exact prompt for send_agent_prompt with
 notifyOnFinish=true. Server delivery has no native finish callback; a finish
-event is neither the report nor acceptance. This group uses caller workspace;
-new placement/worktree support remains a separate change. CLI prepare stays
+event is neither the report nor acceptance. Placement defaults to caller;
+explicit existing workspace/worktree support is
+described below. CLI prepare stays
 explicit/offline; a bound older candidate lacking selection exports reports a
 capability gap for the new path while explicit full pins remain compatible.
+
+### Caller and existing placement
+
+Both Lead and Peer accept placement. Omitted input retains the old caller
+invocation shape; explicit `{kind:"caller"}` is a different immutable body.
+Use `{kind:"existing", workspaceId:"…", reason:"…"}` for an active workspace;
+or give an absolute cwd for an already-existing same-Git checkout and let SDK
+open return its workspace ID. If both are given, exact canonical cwd must match.
+A second workspace on the same checkout does not provide filesystem isolation.
+
+The server checks Git-common-dir equality, rejecting foreign/nested Git repos.
+Explicit placement pins source top, config/HEAD and SDK target ID/cwd/HEAD;
+routing/protocol come from source and provider snapshots/execution use target.
+Conflicting target-local catalog/protocol refuses; no local/user-pool switch or
+materialize fallback. Before create/delivery the target is freshly requalified.
+A linked Lead whose top has neither routing nor protocol inherits the configured
+main checkout verified by Git-common-dir, with source HEAD/file pins. Without a
+trustworthy configured main checkout, formation fails closed; it does not silently
+use the user pool. A top with its own configuration keeps its existing resolution
+(including an intentional protocol-only user pool). Source pin revalidation adds
+no phase. Legacy omitted placement without inheritance qualifies caller
+cwd/repository and active workspace without adding phases or HEAD/config leases. SDK/Git observations are not an
+atomic fence against external writers; post-handoff native send remains separate.
+
+kind=worktree deliberately returns CAPABILITY_GAP before Jev or host/Git effects.
+New worktree: Lead uses Paseo create_workspace under the host-setup authority,
+then calls slp_seat_create with placement existing and a new requestId. The
+plugin never runs setup, installs dependencies or creates a worktree. SDK open
+may register/revive a directory workspace and trigger Git/forge observations;
+active-only refresh cannot discover all archived records, so prefer a known
+active workspace ID. An expired open/refresh retains placement-uncertain with
+known workspaceId/cwd/correlationKey; it never licenses retry or blind cleanup.
+
+Only new formation semantics (placement, automatic Peer runtime or selection)
+require exact live role/provider/cwd/workspace membership; omitted full-pin Peer
+and omitted Lead preserve the historical delivery path. The server polls local
+registration read-only for up to 1500ms with capped backoff, then revalidates
+actor/plan/target after a positive delayed registration. No repair or phase per
+poll is introduced. Missing membership returns seat-pending with the known
+child ID and assignmentEvidence prompt/hash, no runnable delivery. Follow its
+nextAction: slp_operation_get with kind="seat-create" and the same requestId.
+Retain the child ID; do not recreate. This reads the immutable evidence, not a
+readiness refresh or pending-resume API. Report any remaining registration gap;
+a separately authorized follow-up needs fresh identity/membership/authority
+proof. Recorded receipts and exact replay stay unchanged after registration
+arrives. Only explicit placement adds membership-observed to the phase stream.
+
+Worst case: placement-planned + open-issued/open-returned + target-observed
++ route-issued/selected + prepared + create-issued/returned/observed
++ membership-observed + delivery-handed-off OR send-issued = 12/16 phases.
+ID/caller placement skips two open phases; full pin/Lead skips Jev selection
+phases; omitted full-runtime success retains 5 phases and exact old intent bytes.
+No task enrollment, setup-suppression claim or archive/settlement proof is added.
 
 ### Peer quota fallback
 

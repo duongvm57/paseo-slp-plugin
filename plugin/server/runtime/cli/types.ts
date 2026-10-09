@@ -133,6 +133,10 @@ export interface LaunchRequest {
   [key: string]: unknown;
 }
 
+// Server-internal third argument after Git identity qualification; CLI JSON
+// fields never populate this context. Execution repository stays in request.
+export type TrustedLaunchContext = { routingRepository: string; protocolRepository: string; protocolPinned?: boolean };
+
 export interface Handoff extends Record<string, unknown> {
   previousAgentId: string;
   reason: string;

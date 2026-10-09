@@ -73,7 +73,9 @@ async function fixture(t, { execution = false, lostSendAck = false, lostCreateAc
     return { id };
   }, list: async () => ({ entries: [], pageInfo: { hasMore: false } }) },
   providers: { snapshot: async () => ({ entries: [{ provider: formation ? 'slp-codex-lead' : 'slp-codex-peer', enabled: true, status: 'ready', ...(formation ? { modes: [{ id: 'full-access' }] } : {}) }] }) },
-  workspaces: { ref: workspaceId => ({ agents: { create: async options => {
+  workspaces: { ref: workspaceId => ({ id:workspaceId,
+    refresh:async()=>({id:workspaceId,workspaceDirectory:git.dir,status:'done',archivingAt:null}),
+    agents: { create: async options => {
     if (!formation) throw new Error('workspace create not selected');
     assert.equal(workspaceId, 'wire-workspace'); assert.equal(options.parent, lead.agentId);
     assert.equal('prompt' in options, false); assert.equal('cwd' in options, false);
@@ -81,6 +83,12 @@ async function fixture(t, { execution = false, lostSendAck = false, lostCreateAc
     snapshots.set('formed-lead', { id: 'formed-lead', provider: 'slp-codex-lead', model: 'fixture-model', cwd: git.dir,
       workspaceId, archivedAt: null, labels: { ...options.labels, 'paseo.parent-agent-id': options.parent },
       currentModeId: options.config.modeId, thinkingOptionId: options.config.thinkingOptionId, features: [] });
+    const minted=await seatHooks.deskMint({provider:'slp-codex-lead',family:'codex',role:'lead',cwd:git.dir,env:{}});
+    assert.ok(minted,'ordinary Lead must mint a real membership');
+    await seatHooks.deskBind({agentId:'formed-lead',workspaceId,provider:'slp-codex-lead',cwd:git.dir,
+      reason:'create',purpose:'interactive',env:{SLP_DESK_HANDLE:minted.handle}});
+    await seatHooks.deskRegister({agent:{id:'formed-lead',workspaceId,provider:'slp-codex-lead',cwd:git.dir,
+      parentAgentId:lead.agentId,title:null}});
     if (changeBindingAfterCreate) active = false;
     return { id: 'formed-lead' };
   } } }) },
@@ -90,7 +98,7 @@ async function fixture(t, { execution = false, lostSendAck = false, lostCreateAc
     launchSetSha256: raw.launchSetSha, runtimePath: raw.runtimePath, node: { path: process.execPath },
     candidateSha256: raw.candidateSha } }) } : undefined;
   raw = bridgeFixture(t, 'slp-task-wire-home-', PIN, { paseoRef: { current: paseo },
-    taskHost: execution || formation ? () => paseo : undefined, journal });
+    taskHost: execution || formation ? () => paseo : undefined, formationWorkspace: formation ? () => paseo : undefined, journal });
   if (execution || formation) {
     rmSync(raw.runtimePath, { recursive: true });
     install(fileURLToPath(new URL('..', import.meta.url)), raw.runtimePath);

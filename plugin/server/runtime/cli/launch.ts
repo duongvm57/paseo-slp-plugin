@@ -241,7 +241,8 @@ function agentTitle(role: string, disposition: string | undefined, request: Laun
 // their historical inventory-first order and continue after individual failures;
 // planning checks request shape first and throws immediately. Nothing is cached
 // across calls: launchCheck's final plan must read the live inputs again.
-function prepareInputs(request: LaunchRequest, inspect?: (name: string, fn: () => unknown) => unknown) {
+function prepareInputs(request: LaunchRequest, inspect?: (name: string, fn: () => unknown) => unknown,
+  context?: import('./types.ts').TrustedLaunchContext) {
   const role = request.role ?? 'supervisor';
   const disposition = request.disposition ?? request.route?.disposition;
   let merged = request, assignmentSelection: ReturnType<typeof assignmentFileSelection> | undefined, resolved: (ResolvedBinding & { bindingSource: string }) | undefined;
@@ -250,7 +251,7 @@ function prepareInputs(request: LaunchRequest, inspect?: (name: string, fn: () =
     inventoryFile: () => { merged = mergeInventory(request); },
     assignmentFile: () => { assignmentSelection = assignmentFileSelection(merged); },
     binding: () => {
-      const result = resolveBinding(role, merged, disposition);
+      const result = resolveBinding(role, context ? { ...merged, repository: context.routingRepository } : merged, disposition);
       roleProvider(role, result.binding?.provider);
       resolved = result;
       return result;
@@ -267,17 +268,21 @@ function prepareInputs(request: LaunchRequest, inspect?: (name: string, fn: () =
 }
 
 // The single owner of the create_agent argument record. Nothing edits it afterwards.
-function plan(root: string, request: LaunchRequest, packet: HandoffPacket | null) {
+function plan(root: string, request: LaunchRequest, packet: HandoffPacket | null,
+  context?: import('./types.ts').TrustedLaunchContext) {
   verifyInstall(root);
-  const prepared = prepareInputs(request) as ReturnType<typeof prepareInputs> & ResolvedBinding;
+  const prepared = prepareInputs(request, undefined, context) as ReturnType<typeof prepareInputs> & ResolvedBinding;
   const { role, disposition, assignmentSelection, binding, routing, bindingSource } = prepared;
   request = prepared.request;
-  const assignment = `Repository: ${request.repository}\nWorkspace ID: ${request.workspaceId}\n${disposition ? `Disposition: ${disposition}\n` : ''}${request.assignment}`
+  const assignment = `Repository: ${request.repository}\nWorkspace ID: ${request.workspaceId}\n`
+    + (context ? `Routing/protocol repository: ${context.routingRepository}\n`
+      + (context.protocolPinned === true ? `Use ${context.protocolRepository}/.paseo-slp/workspace-protocol.md for the source protocol; execute this assignment in ${request.repository}.\n` : '') : '')
+    + `${disposition ? `Disposition: ${disposition}\n` : ''}${request.assignment}`
     + assignmentCarrier(assignmentSelection);
   // Surface the intended mode once, at plan level, with its provenance: an
   // unresolved mode would silently fall back to the caller's default at
   // create_agent time — and cross-family inheritance fails at the host.
-  const { modeId, modeIdSource, warnings: modeWarnings } = resolveMode(binding, bindingSource, request.repository);
+  const { modeId, modeIdSource, warnings: modeWarnings } = resolveMode(binding, bindingSource, context?.protocolRepository ?? request.repository);
   const warnings = [...(prepared.warnings ?? []), ...modeWarnings];
   const kit = spawnKit(role);
   const manifest = orientation(root, role, routing);
@@ -309,7 +314,8 @@ function plan(root: string, request: LaunchRequest, packet: HandoffPacket | null
   };
 }
 
-export const launchPlan = (root: string, request: LaunchRequest) => plan(root, request, null);
+export const FORMATION_CAPABILITIES = { existingPlacement: 1 } as const;
+export const launchPlan = (root: string, request: LaunchRequest, context?: import('./types.ts').TrustedLaunchContext) => plan(root, request, null, context);
 export const handoffPlan = (root: string, request: LaunchRequest) => plan(root, request, handoffPacket(request));
 
 // The provider id the request points at, for the live-verification diagnostic

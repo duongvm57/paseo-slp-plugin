@@ -32,12 +32,13 @@ import { getWorkspaceWorkflow } from "./shared/workflow-view.ts";
 import { readWorkspaceWorkflow } from "./server/workflow-view.ts";
 import type { TaskHostApi } from "./server/desk-task-execution-host.ts";
 import type { TaskRuntimeApi } from "./server/desk-task-runtime.ts";
+import type { FormationWorkspaceApi } from "./server/desk-placement.ts";
 // Host note: this must stay a hoisted function declaration, not a const —
 // the daemon compiler's Hermes interop eagerly copies export values before
 // module bodies run, so `export default const` evaluates to undefined.
 export default function contribute(server: Parameters<PluginServerContribution>[0]): ReturnType<PluginServerContribution> {
-  let taskApi: (TaskHostApi & TaskRuntimeApi) | null = null;
-  const noteTaskApi = (paseo: (TaskHostApi & TaskRuntimeApi) | undefined) => { if (paseo !== undefined) taskApi = paseo; };
+  let taskApi: (TaskHostApi & TaskRuntimeApi & FormationWorkspaceApi) | null = null;
+  const noteTaskApi = (paseo: (TaskHostApi & TaskRuntimeApi & FormationWorkspaceApi) | undefined) => { if (paseo !== undefined) taskApi = paseo; };
   const materializer = createMaterializer(embeddedPayload);
   const manager: Manager = createManager({
     payload: embeddedPayload,
@@ -131,6 +132,7 @@ export default function contribute(server: Parameters<PluginServerContribution>[
     payload: embeddedPayload,
     paseoRef: { current: null },
     taskHost: () => taskApi,
+    formationWorkspace: () => taskApi,
   });
   void deskBridge.start();
   const enforcement = createEnforcement({

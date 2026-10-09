@@ -118,6 +118,7 @@ import type { TaskRuntimeApi } from "./desk-task-runtime.ts";
 import { buildTaskRecap } from "./runtime/handoff-recap.ts";
 import { DeskSeatCreateInput, DeskOperationGetInput, DeskTaskDeliverInput, DeskTaskGetInput } from "../shared/delegation.ts";
 import { createFormationPlanner, runSeatCreate } from "./desk-formation.ts";
+import { createFormationPlacement, type FormationWorkspaceApi } from "./desk-placement.ts";
 import { createDeskOperations } from "./desk-operation.ts";
 import { projectTaskCurrent, runTaskDeliver } from "./desk-delivery.ts";
 import { isRejection } from "./desk-runner.ts";
@@ -421,7 +422,7 @@ export const DESK_TOOL_CATALOG = [
     roles: ["supervisor", "lead"],
     visible: true,
     mutation: true,
-    description: "Form Lead/Peer; Peer runtime optional, selection independent. Armed fails closed; choices unadmitted. Prompt for caller notifyOnFinish; delivery=server sends.",
+    description: "Form Lead/Peer; optional Peer runtime/selection. Placement caller/existing; worktree gap. Pending retains ID. Caller sends prompt notifyOnFinish; server sends.",
   },
   {
     name: "slp_operation_get",
@@ -494,6 +495,8 @@ export interface DeskBridgeDeps {
   paseoRef: { current: PaseoLike | null };
   /** The actual connected task SDK, supplied by hook/RPC contexts. */
   taskHost?: () => (TaskHostApi & TaskRuntimeApi) | null;
+  /** Formation-only read/open surface; never workspace.create/setup. */
+  formationWorkspace?: () => FormationWorkspaceApi | null;
   platform?: string;
   now?: () => Date;
   uuid?: () => string;
@@ -1311,8 +1314,16 @@ export function createDeskBridge(deps: DeskBridgeDeps) {
       const pinnedBinding = fresh.binding;
       const host = deps.taskHost ?? (() => null);
       const plan = createFormationPlanner({ runtimePath: pinnedBinding.runtimePath, daemonHome: dirname(pinnedRoot), host });
+      const placement = ctx.seatRead?.state === "ok" ? createFormationPlacement({
+        repo: ctx.seatRead.ledger.repo, host: deps.formationWorkspace ?? (() => null),
+      }) : undefined;
       return runSeatCreate(ctx.row, ctx.input, { stableRoot: pinnedRoot, repoKey: ctx.bound.repoKey, host, plan,
         preflightPeer: plan.preflightPeer, selectPeer: plan.selectPeer,
+        placement, placementCapability: plan.placementCapability,
+        readMemberships: () => {
+          const fresh = freshRow(ctx.bound);
+          return "error" in fresh || fresh.read.state !== "ok" ? null : fresh.read.ledger.memberships;
+        },
         guard: async () => {
           if (stopped) return rejection("CAPABILITY_GAP", "bridge stopped during formation", "retain the original operation");
           const capability = capabilityGate(); if (capability !== null) return capability;

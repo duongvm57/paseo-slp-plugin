@@ -9,6 +9,16 @@ Use this workflow when several outcomes must survive interruption or depend on
 one another. A small assignment can still use a single bounded handback without
 creating a task queue.
 
+Ordinary seat formation is separate: slp_seat_create supports caller/existing,
+including a linked worktree with the same canonical Git-common-dir. It pins
+source routing/protocol separately from execution cwd, and live membership is
+required before delivery. Foreign/nested Git repositories still need a Lead
+bound to that repository, not a path override. New worktree creation remains
+outside seat placement V1: use Paseo create_workspace under its host-setup grant,
+then slp_seat_create placement existing. Existing task dispatch/deliver retain
+their own guarded task placement; this change adds no multi-repo Lead or task
+enrollment. Pending/uncertain seat IDs remain retained, never a recreate signal.
+
 ## Work and evidence
 
 | Record | Responsibility |
@@ -55,7 +65,11 @@ actual checkout or intended Git base.
    outstanding attempts for reconciliation.
 
 If registration arrives after bootstrap, an unbound send returns
-`seat-pending` without changing the ledger or sending work. Reconcile the
+`seat-pending` without changing the ledger or sending work. Ordinary new
+formation also waits read-only up to 1500ms for registration; pending names
+`slp_operation_get` with the same seat-create requestId. Retain the child ID;
+receipt reads do not resume or license replacement. Legacy omitted full-pin
+Peer/Lead formation retains its historical delivery behavior. Reconcile the
 known attempt once its exact registration can be positively verified. That
 step attaches the worker and claims its scope atomically. Read the new revisions
 before sending; the original send pins remain stale and are refused.
