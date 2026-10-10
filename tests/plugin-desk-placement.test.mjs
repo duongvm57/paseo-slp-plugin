@@ -152,6 +152,39 @@ test('target HEAD drift after child creation retains ID and withholds delivery',
  assert.equal(f.hostCalls.some(c=>c.kind==='send'),false);assert.equal(Object.hasOwn(out.result,'delivery'),false);
 });
 
+// Exercise the public formation interface: a successful first qualification
+// is not a lease across the actor guard awaited before the native effect.
+for(const delivery of ['caller','server'])for(const stage of ['create','delivery'])for(const fault of ['revoked','drift']){
+ test('qualification '+delivery+' '+stage+' fences '+fault+' between final workspace observations',async t=>{
+  const f=placementFixture(t),plan=f.deps.plan,verify=f.placement.verify;
+  const boundaryPlan=stage==='create'?2:3;
+  let plans=0,observations=0,revoked=false;
+  f.deps.plan=async(...args)=>{const out=await plan(...args);plans++;return out;};
+  f.placement.verify=async(...args)=>{
+   await verify(...args);
+   if(plans===boundaryPlan && ++observations===1){
+    if(fault==='revoked')revoked=true;
+    else fixtureGit(f.target,'-c','user.name=Fixture','-c','user.email=fixture@example.invalid',
+     'commit','--allow-empty','-qm','drift across awaited guard');
+   }
+  };
+  const refusal={ok:false,code:'STALE_EPOCH',message:'fixture actor revoked',recovery:'stop'};
+  f.deps.guard=async()=>revoked?refusal:null;
+  const input={...f.input,delivery,placement:{kind:'existing',workspaceId:'target',reason:'lane'}};
+  const out=await f.run(input);
+  assert.equal(out.result.code,fault==='revoked'?'STALE_EPOCH':'ROUTE_DRIFT',JSON.stringify(out));
+  assert.equal(f.hostCalls.filter(c=>c.kind==='create').length,stage==='create'?0:1);
+  assert.equal(f.hostCalls.some(c=>c.kind==='send'),false);
+  assert.equal(Object.hasOwn(out.result,'delivery'),false);
+  assert.equal(out.phases.some(p=>p.name==='delivery-handed-off'||p.name==='send-issued'),false);
+  if(stage==='delivery')assert.equal(out.result.agentId,'child');
+  else assert.equal(Object.hasOwn(out.result,'agentId'),false);
+  if(fault==='revoked')assert.deepEqual(out.result,stage==='create'?refusal:{...refusal,agentId:'child'});
+  const calls=f.hostCalls.length,replay=await f.run(input);
+  assert.equal(replay.receiptSha256,out.receiptSha256);assert.equal(f.hostCalls.length,calls);
+ });
+}
+
 test('Lead existing workspace uses its saved profile and exact live role registration',async t=>{
  const f=placementFixture(t,{role:'lead'});const out=await f.run({...f.input,placement:{kind:'existing',workspaceId:'target',reason:'lane'}});
  assert.equal(out.result.state,'awaiting-caller-delivery');assert.equal(out.result.runtime.provider,'slp-codex-lead/model/variant');

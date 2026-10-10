@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { candidateModulePath } from "./candidate-module.ts";
 import { canonicalSha256, profilesArray, readRawConfig } from "./config-view.ts";
 import { createDeskOperations, type OperationIdentity } from "./desk-operation.ts";
-import { verifySeat } from "./desk-task-execution.ts";
+import { verifySeat } from "./desk-seat-observation.ts";
 import { createTaskBoundedHost } from "./desk-task-host.ts";
 import type { TaskHostApi } from "./desk-task-execution-host.ts";
 import type { TaskRuntimeApi } from "./desk-task-runtime.ts";
@@ -298,6 +298,24 @@ export async function runSeatCreate(row: MembershipValue, input: DeskSeatCreateI
           : reject("INVALID_RECORD", "fresh formation preparation failed");
       }
     };
+    // Qualification immediately before create and delivery shares one order.
+    // The awaited actor guard is not a lease: observe the target again after it.
+    // Decision and delayed-registration checks have different orders and stay local.
+    const verifyEffectPlacement = async (agentId?: string) => {
+      if (target) {
+        try { await deps.placement!.verify(row, target); }
+        catch (error) { return placementFailure(error, agentId, target); }
+        const afterTarget = await deps.guard();
+        if (afterTarget !== null) return agentId === undefined ? afterTarget : { ...afterTarget, agentId };
+        try { await deps.placement!.verify(row, target); }
+        catch (error) { return placementFailure(error, agentId, target); }
+      } else {
+        if (agentId === undefined && !deps.placement) return reject("CAPABILITY_GAP", "caller repository/workspace qualification unavailable");
+        try { await deps.placement!.verifyCaller(row); await verifySource(); }
+        catch (error) { return placementFailure(error, agentId); }
+      }
+      return null;
+    };
     const plan = await prepare(); if ("ok" in plan) return plan;
     const { create } = plan;
     if ((selected || target) && formationEvidenceTooLarge({ ...(selected ? { selected } : {}), ...(target ? { target } : {}), plan })) {
@@ -315,17 +333,7 @@ export async function runSeatCreate(row: MembershipValue, input: DeskSeatCreateI
     const createPlan = await prepare(); if ("ok" in createPlan) return createPlan;
     if (canonicalSha256({ create: createPlan.create, modeSupport: createPlan.modeSupport }) !== pin) return reject("ROUTE_DRIFT", "formation bundle or provider mode evidence changed before create");
     const beforeCreate = await deps.guard(); if (beforeCreate !== null) return beforeCreate;
-    if (target) {
-      try { await deps.placement!.verify(row, target); }
-      catch (error) { return placementFailure(error, undefined, target); }
-      const afterTarget = await deps.guard(); if (afterTarget !== null) return afterTarget;
-      try { await deps.placement!.verify(row, target); }
-      catch (error) { return placementFailure(error, undefined, target); }
-    } else {
-      if (!deps.placement) return reject("CAPABILITY_GAP", "caller repository/workspace qualification unavailable");
-      try { await deps.placement.verifyCaller(row); await verifySource(); }
-      catch (error) { return placementFailure(error); }
-    }
+    const createPlacement = await verifyEffectPlacement(); if (createPlacement !== null) return createPlacement;
     const label = canonicalSha256(identity);
     phase("create-issued", { label, parent: row.agentId, workspaceId: create.workspaceId, runtimePin: pin,
       ...(target ? { target } : {}) });
@@ -356,16 +364,7 @@ export async function runSeatCreate(row: MembershipValue, input: DeskSeatCreateI
     const sendPlan = await prepare(); if ("ok" in sendPlan) return { ...sendPlan, agentId };
     if (canonicalSha256({ create: sendPlan.create, modeSupport: sendPlan.modeSupport }) !== pin) return { ...reject("ROUTE_DRIFT", "bundle or provider mode evidence changed before assignment delivery"), agentId };
     const beforeSend = await deps.guard(); if (beforeSend !== null) return { ...beforeSend, agentId };
-    if (target) {
-      try { await deps.placement!.verify(row, target); }
-      catch (error) { return placementFailure(error, agentId, target); }
-      const afterTarget = await deps.guard(); if (afterTarget !== null) return { ...afterTarget, agentId };
-      try { await deps.placement!.verify(row, target); }
-      catch (error) { return placementFailure(error, agentId, target); }
-    } else {
-      try { await deps.placement!.verifyCaller(row); await verifySource(); }
-      catch (error) { return placementFailure(error, agentId); }
-    }
+    const sendPlacement = await verifyEffectPlacement(agentId); if (sendPlacement !== null) return sendPlacement;
     // Full-runtime/Lead requests without placement preserve historical delivery
     // and bytes. Only the new formation semantics wait for event registration.
     if (placed || automaticPeer || input.role === "peer" && input.selection !== undefined) {

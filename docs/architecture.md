@@ -539,6 +539,13 @@ longer qualify under the new owner. See [assignment continuity](work-continuity.
 
 ## Boundaries
 
+- Native seat observation has one owner shared by formation and managed task
+  execution: a read-only refresh interface verifies exact tuple/parent/label
+  evidence and private-ticket diagnostics without importing task orchestration.
+  Formation concentrates its repeated pre-create/pre-delivery placement
+  qualification in one private module, preserving both target observations
+  around the awaited actor guard. Observation grants no delivery or readiness;
+  registration, operation admission and effect phases keep their existing owners.
 - The plugin installs and manages the runtime and exposes the desk MCP
   tools for durable assignments, handbacks, settlements, scopes, checks and
   rollout decisions. Authority resolves from host-bound memberships and
