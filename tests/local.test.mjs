@@ -4,11 +4,11 @@ import { mkdirSync, mkdtempSync, writeFileSync, readFileSync, rmSync, existsSync
 import { fileURLToPath } from 'node:url';
 import { join, dirname, resolve } from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { identity, install, verifyInstall, uninstall, snapshot, json } from '../src/package.mjs';
-import { configurationPlan } from '../src/paseo-install.mjs';
-import { prompt, launchPlan } from '../src/launch.mjs';
-import { roleBundle } from '../src/role-bundle.mjs';
-import { peerPaseoToolsPolicy, resolveProfile } from '../src/profiles.mjs';
+import { identity, install, verifyInstall, uninstall, snapshot, json } from '../plugin/server/runtime/cli/package.ts';
+import { configurationPlan } from '../plugin/server/runtime/cli/paseo-install.ts';
+import { prompt, launchPlan } from '../plugin/server/runtime/cli/launch.ts';
+import { roleBundle } from '../plugin/server/runtime/cli/role-bundle.ts';
+import { peerPaseoToolsPolicy, resolveProfile } from '../plugin/server/runtime/cli/profiles.ts';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const binding = { provider: 'codex', model: 'gpt-5.6-luna', modeId: 'auto', thinkingOptionId: 'medium' };
@@ -29,7 +29,7 @@ test('standalone provider plan applies the sorted Paseo tool policy to Peer only
   assert.deepEqual(peerPaseoToolsPolicy.disabledTools, expected);
   assert.deepEqual(peerPaseoToolsPolicy.disabledTools, [...peerPaseoToolsPolicy.disabledTools].sort());
   const plan = configurationPlan('/tmp/slp', { agents: { providers: {}, agentProfiles: [] } });
-  for (const family of ['codex', 'pi', 'devin', 'claude']) {
+  for (const family of ['codex', 'pi', 'devin', 'claude', 'opencode']) {
     assert.deepEqual(plan.providers[`slp-${family}-peer`].paseoTools, { disabledTools: expected });
     for (const role of ['supervisor', 'lead']) {
       assert.equal(Object.hasOwn(plan.providers[`slp-${family}-${role}`], 'paseoTools'), false);
@@ -106,38 +106,40 @@ test('onboarding Markdown resource links resolve from an installed package', t =
 test('installed common protocol supports combined configuration without losing gates', t => {
   const installed = join(fixture(t), 'release');
   install(root, installed);
-  const base = readFileSync(join(installed, 'src/templates/workspace-protocol.md'), 'utf8');
-  assert.match(base, /^template_sha256:/m);
-  assert.equal(base.match(/^## Repository configuration$/gm).length, 1);
-  for (const field of ['Assignment source', 'Execution scope', 'Delivery and completion point', 'Shared-state controls', 'Lead topology']) {
+  const text = path => readFileSync(join(installed, path), 'utf8');
+  const baseRaw = text('src/templates/workspace-protocol.md');
+  const base = baseRaw.replace(/\s+/gu, ' ');
+  assert.match(baseRaw, /^template_sha256:/m);
+  assert.equal(baseRaw.match(/^## Repository configuration$/gm).length, 1);
+  for (const field of ['Assignment and execution', 'Delivery/completion', 'Shared-state execution']) {
     assert.ok(base.includes(`| ${field} |`), field);
   }
-  assert.match(base, /All four recipes remain available by default/);
-  assert.match(base, /tracker does not\nrequire a separate Task Lead/);
-  assert.match(base, /requires an independent review gate/);
-  assert.match(base, /minimum sufficient independent\s+mandate/);
-  const transition = base.split('## Recipe C')[1].split('## Recipe D')[0];
-  assert.ok(transition.indexOf('| Gate |') < transition.indexOf('| Execute |'));
+  assert.match(base, /One Lead is default; split only for authority\/capacity under a Human formation mandate/);
+  for (const method of ['Lean:', 'Feature:', 'Transition:', 'Investigation:']) assert.ok(base.includes(method), method);
+  assert.match(base, /Configuration fields can coexist and select no Lead type/);
+  assert.match(base, /Independent review triggers across methods/);
+  assert.match(base, /minimum sufficient independent mandates/);
+  const transition = base.split('| Transition:')[1].split('| Investigation:')[0];
+  assert.ok(transition.indexOf('Gate on preparation') < transition.indexOf('execution checkpoint/grant'));
   assert.match(transition, /outcome verdict/);
-  const skill = readFileSync(join(installed, 'skills/paseo-slp-onboarding/SKILL.md'), 'utf8');
+  const skill = text('skills/paseo-slp-onboarding/SKILL.md').replace(/\s+/gu, ' ');
+  const examplesRaw = text('skills/paseo-slp-onboarding/SKILL.md');
+  const examples = examplesRaw.replace(/\s+/gu, ' ');
   assert.ok(!skill.includes('templates/profiles/'));
-  assert.match(skill, /combine every applicable setting/);
-  const examples = readFileSync(join(installed, 'skills/paseo-slp-onboarding/references/repository-configuration.md'), 'utf8');
-  assert.match(skill, /Do not\nadd tracker setup questions or activation gates/);
+  assert.match(skill, /Resolve applicable decisions from evidence\/current grant/);
+  assert.match(skill, /Unused integrations and optional queue\/recipe branches create no setup gates/);
   assert.ok(!base.includes('| Connector and cadence |'));
-  assert.match(examples, /new pricing feature with a database backfill/);
-  assert.match(examples, /Opening a PR does not grant production\nexecution/);
-  // Operational facts live in .paseo-slp/references/; moving them there is
-  // configuration, never a deviation the Overrides table must register.
-  assert.equal(base.match(/^## Repository references$/gm).length, 1);
-  assert.match(base, /`\.paseo-slp\/references\/<topic>\.md`/);
-  assert.match(base, /never adds, relaxes or overrides a rule/);
-  assert.match(base, /never as a grant/);
-  assert.match(base, /live in its checks reference under Repository\nreferences/);
-  assert.match(base, /referenced files is configuration, not an override/);
-  assert.match(skill, /`\.paseo-slp\/references\/<topic>\.md`/);
-  assert.match(skill, /split is configuration, not an Override/);
-  assert.match(examples, /^## Protocol and references$/m);
+  assert.match(examples, /shared-state rehearsal\/ recovery\/reconciliation when relevant/);
+  assert.match(examples, /separate grants and required gates/);
+  assert.equal(baseRaw.match(/^## Repository references$/gm).length, 1);
+  assert.match(base, /operational facts in Repository references/);
+  assert.match(base, /Facts add no authority/);
+  assert.match(base, /verify stale\/missing\/contradicted ones before dependent decisions/);
+  assert.match(base, /Use established checks from the repository\/assignment/);
+  assert.match(base, /wording compression and filled configuration\/references are not overrides/);
+  assert.match(skill, /operational facts need references with decision triggers/);
+  assert.match(skill, /compression\/configuration is no override/);
+  assert.match(examplesRaw, /^## Inspect and choose$/m);
 });
 
 test('launcher loads installed role bytes, excludes private review material, preserves configured custom provider/full-access', t => {
@@ -157,6 +159,8 @@ test('launcher loads installed role bytes, excludes private review material, pre
   const peer = prompt(installed, 'peer', 'bounded outcome', binding);
   assert.deepEqual(roleBundle(installed, 'peer').parts, ['common.md', 'roles/peer.md']);
   assert.ok(peer.includes(readFileSync(join(installed, 'src/roles/peer.md'), 'utf8')));
+  assert.match(peer, /reading consumes about 1\/3[\s\S]*labelled estimate[\s\S]*No timeout\/quota/);
+  assert.match(peer, /TestcaseAuthor[\s\S]*TestEngineer/);
   for (const role of ['supervisor', 'lead']) {
     const child = launchPlan(installed, { ...request, role });
     assert.ok(child.create.initialPrompt.includes(readFileSync(join(installed, `src/roles/${role}.md`), 'utf8')));
@@ -487,90 +491,55 @@ test('role bundle load paths are the contract: Peer never receives delegation po
   assert.throws(() => roleBundle(installed, 'engineer'), /Unknown role/);
 });
 
-test('decision-doctrine lines reach the standalone bundles that need them and never reach Peer', t => {
+test('standalone bundles deliver semantic obligations and conditional operation paths', t => {
   const installed = join(fixture(t), 'release');
   install(root, installed);
-  // The review-gate invariant and the create_agent parentage rule ride
-  // delegation.md (Supervisor + Lead); gate applicability, freshness and
-  // fail-closed behavior live in Lead. Peer must receive none.
-  const [supervisor, lead] = ['supervisor', 'lead'].map(role => roleBundle(installed, role, {}).instructions);
-  for (const instructions of [supervisor, lead]) {
-    assert.match(instructions, /does not license merging\s+the axes into one seat/, 'review-gate invariant');
-    assert.match(instructions, /cannot carry a new\s+delegation/, 'agent-scoped create_agent rule');
-    // C8 formation pins ride delegation.md into both orchestrating bundles:
-    // the three-way decision table, the formation record, the placement pin
-    // and the post-create parentage verification.
-    assert.match(instructions, /New-team delegation/, 'decision table: new-team row');
-    assert.match(instructions, /Continuation: same team and ownership/, 'decision table: continuation row');
-    assert.match(instructions, /Observe-existing-work/, 'decision table: observe-existing row');
-    assert.match(instructions, /formation record/, 'preflight formation record');
-    assert.match(instructions, /not evidence of parentage/, 'post-create verification');
-    assert.match(instructions, /paseo\.parent-agent-id label must match/, 'inbound-route self-check rides common.md');
-    assert.match(instructions, /distinct from your\s+parent/, 'observe-existing carve-out: recipient need not equal parent');
-    assert.match(instructions, /not a hard block/, 'unexposed label is a recorded gap, not a block');
-    assert.match(instructions, /names no agent\s+recipient/, 'no-named-recipient case is classified, not a block');
-    assert.match(instructions, /not filesystem\s+isolation/, 'workspace placement pin');
-    assert.match(instructions, /send_agent_prompt to a\s+parentless or differently parented/, 'B21 formation-defect trigger');
-    assert.match(instructions, /second workspace\s+for the same team with no isolation reason/, 'B22 placement-defect trigger');
+  const body = (path) => readFileSync(join(installed, path), 'utf8');
+  for (const role of ['supervisor', 'lead', 'peer']) {
+    const instructions = roleBundle(installed, role, {}).instructions;
+    for (const path of ['src/common.md', `src/roles/${role}.md`]) assert.ok(instructions.includes(body(path)));
+    assert.match(instructions, /A Lead writer\s+never stands in for required independent review/);
+    assert.match(instructions, /Review selection never waives\s+a Human, assignment or protocol obligation/);
+    assert.match(instructions, /parent\/report recipient must match your paseo\.parent-agent-id\s+label/);
+    assert.match(instructions, /Unexposed labels are a visibility gap/);
+    assert.match(instructions, /policy delivered in your bundle needs no re-read or hash check unless lost to compaction/);
+    if (role === 'peer') {
+      assert.ok(!instructions.includes(body('src/delegation.md')));
+      assert.match(instructions, /Reviewer\/Auditor stays independent of writer and accepting owner/);
+      assert.match(instructions, /You do not spawn\/manage agents/);
+      continue;
+    }
+    assert.ok(instructions.includes(body('src/delegation.md')));
+    for (const ref of ['delegation-execution.md', 'task-execution.md', 'review-gates.md']) {
+      assert.ok(instructions.includes(`references/${ref}`));
+      assert.ok(!instructions.includes(body(`src/references/${ref}`)), `${ref} remains conditional`);
+    }
+    assert.match(instructions, /minimum\s+sufficient independent mandates for material decision-changing questions/);
+    assert.match(instructions, /Unavailable\s+required reviewers or adverse findings never relax the gate/);
+    assert.match(instructions, /Check desk binding first \(slp_status if available\); use bound slp_seat_create\s+for Lead\/Peer, including existing worktrees/);
+    assert.match(instructions, /New worktree: Paseo create_workspace under host-setup authority, then\s+slp_seat_create placement existing/);
+    assert.match(instructions, /create_agent remains compatibility\/recovery/);
+    assert.match(instructions, /create_agent remains compatibility\/recovery/);
+    assert.match(instructions, /satisfying generic Paseo create_agent or inspectability rules;\s+repository rules, protocol clauses or Human instructions\s+forbidding desk creation or requiring another formation path exclusively override this default/);
   }
-  assert.match(lead, /When the assignment or protocol\s+requires independent review, follow its gate rules and references\/review-gates\.md\.\s+While that gate applies/);
-  assert.match(lead, /immediately before each\s+decision.*including after resume or compaction; a surviving summary like\s+"Engineer → Reviewer" is not the rule/s);
-  assert.ok(!/When the assignment or protocol\s+requires independent review/.test(supervisor), 'the re-read trigger is Lead-scoped');
-  assert.match(supervisor, /before replying to the Human/, 'B12 protocol-read timing');
-  assert.match(lead, /before your first reply/, 'B12 protocol-read timing');
-  // Role-scoped C8 cues: the observe-vs-establish distinction is Supervisor's;
-  // the conditional parent-label fallback and no-adoption rule are Lead's.
-  assert.match(supervisor, /standalone session never makes\s+it your child/, 'Supervisor new-team vs observe cue');
-  assert.ok(!/standalone session never makes\s+it your child/.test(lead), 'Supervisor cue stays role-scoped');
-  assert.match(lead, /does not adopt it/, 'Lead continuity boundary');
-  assert.match(lead, /does not repair a wrong parent/, 'Lead conditional parent-label fallback');
-  assert.ok(!/does not adopt it/.test(supervisor), 'Lead cue stays role-scoped');
-  const peer = roleBundle(installed, 'peer', {}).instructions;
-  assert.ok(!/does not license merging/.test(peer));
-  assert.ok(!/When the assignment or protocol\s+requires independent review/.test(peer));
-  assert.ok(!/cannot carry a new\s+delegation/.test(peer));
-  assert.ok(!/New-team delegation|Observe-existing-work|formation record/.test(peer), 'Peer gets no formation doctrine');
-  assert.ok(!/not evidence of parentage|not filesystem\s+isolation/.test(peer));
-  // The inbound-route self-check is a Peer-visible self-check on the seat's own
-  // assignment envelope (common.md), not formation doctrine — it must reach Peer.
-  assert.match(peer, /paseo\.parent-agent-id label must match/, 'inbound-route self-check is Peer-visible');
-  assert.match(peer, /distinct from your\s+parent/, 'Peer self-check keeps the observe-existing carve-out');
-  assert.match(peer, /not a hard block/, 'Peer self-check tolerates an unexposed label');
-  assert.match(peer, /names no agent\s+recipient/, 'Peer self-check classifies the no-recipient case');
-  for (const ref of ['orchestration.md', 'review-gates.md']) {
-    assert.ok(!peer.includes(readFileSync(join(installed, 'src/references', ref), 'utf8')), `Peer must not load ${ref} bytes`);
-  }
-  // The shipped protocol template carries the same doctrine: read-on-landing,
-  // trigger-based gate wording, task-scoped rework continuity, create_agent-only seats and the
-  // shared-workspace placement default with the owner-map/receipt record.
-  const template = readFileSync(join(installed, 'src/templates/workspace-protocol.md'), 'utf8');
-  assert.match(template, /when the assignment lands/);
-  assert.match(template, /a fired trigger\s+requires an independent review gate/);
-  assert.match(template, /same Engineer and\s+independent review seats available for correction or re-review/);
-  assert.match(template, /bounded task\s+settles after Delivery completes and no correction or re-review remains open/);
-  assert.doesNotMatch(template, /batch archive/);
-  assert.match(template, /agent-scoped create_agent/);
-  assert.match(template, /share the\s+assignment'?s workspace by default/, 'team-workspace default');
-  assert.match(template, /owner map and\s+creation receipts/, 'formation receipts tactic');
-  // B25: split-seat naming convention — slash suffix, never an "axis" suffix.
-  assert.match(template, /Reviewer — <task> \/ Spec/, 'Spec seat naming convention');
-  assert.match(template, /Reviewer — <task> \/ Standard`/, 'Standard seat naming convention, unabbreviated');
-  assert.match(template, /never\s+an "axis" suffix/);
-  // B24: monitoring doctrine enumerates seats by identity, not cwd, and never
-  // infers nonexistence from an empty listing (references ship as locators —
-  // pin the installed bytes directly).
-  const monitoring = readFileSync(join(installed, 'src/references/monitoring.md'), 'utf8');
-  assert.match(monitoring, /never by cwd/, 'seat enumeration is not cwd-scoped');
-  assert.match(monitoring, /empty list_agents result does not prove/, 'empty list is not nonexistence');
-  assert.match(monitoring, /refs\/heads\/<lane>/, 'lane branches carry lane commits');
-  // M2: the gate rule is protocol-owned — a fixed shape or a bounded
-  // selection rule with the split-axis Spec/Standards package default; the
-  // single-seat exception stays class-listed and Lead-recorded, and a
-  // required gate never merges ad hoc.
-  const gates = readFileSync(join(installed, 'src/references/review-gates.md'), 'utf8');
-  assert.match(gates, /rule the effective workspace protocol\s+declares/, 'gate rule is protocol-declared');
-  assert.match(gates, /bounded selection rule/, 'protocol may delegate seat choice via a selection rule');
-  assert.match(gates, /change classes the\s+protocol\s+lists\s+explicitly/, 'single-seat exception is class-listed');
-  assert.match(gates, /never\s+skipped or merged ad hoc/, 'a required gate never merges ad hoc');
-  assert.match(gates, /Lead decides it and\s+records/, 'exception authority and record are pinned');
+  const lead = roleBundle(installed, 'lead', {}).instructions;
+  const supervisor = roleBundle(installed, 'supervisor', {}).instructions;
+  assert.match(lead, /When the assignment or protocol requires independent review/);
+  assert.match(lead, /before a\s+reply or decision depending on repository tactics/);
+  assert.match(supervisor, /read .paseo-slp\/workspace-protocol.md fully before replies\/tactics/);
+  const direct = body('src/references/delegation-execution.md').replace(/\s+/gu, ' ');
+  assert.match(direct, /agent-scoped Paseo create_agent/);
+  assert.match(direct, /actual host parent\/workspace\/cwd and bundle/);
+  assert.match(direct, /Default placement is the parent workspace, including read-only review/);
+  assert.match(direct, /formation in that brief\/receipt: parent, seat, workspace\/cwd/);
+  assert.match(direct, /preserve taskLabel\/disposition and the actual parent/);
+  assert.match(direct, /Empty inventory alone proves no absence/);
+  const monitoring = body('src/references/monitoring.md').replace(/\s+/gu, ' ');
+  assert.match(monitoring, /not cwd/);
+  assert.match(monitoring, /refs\/heads\/<lane>/);
+  assert.match(monitoring, /Delivery completes and no correction or re-review remains open/);
+  const gates = body('src/references/review-gates.md').replace(/\s+/gu, ' ');
+  assert.match(gates, /required independent mandates, not-required only with no material trigger, or exempt only with explicit waiver authority/);
+  assert.match(gates, /Runtime enforces the declared set.*does not decide sufficiency or risk/);
+  assert.match(gates, /Spec and Standards are optional descriptive lenses unless the effective rule requires them/);
 });

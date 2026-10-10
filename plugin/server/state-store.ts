@@ -25,7 +25,7 @@ import {
   type SetPeerPoolResult,
   type SetRoleRoutingResult,
 } from "../shared/contracts.ts";
-import { catalogTokenConflicts } from "../shared/routing-vocabulary.ts";
+import { catalogTokenConflicts } from "../shared/runtime/routing-vocabulary.ts";
 import { sha256Hex } from "./config-view.ts";
 import { resolveDaemonHome } from "./daemon-home.ts";
 
@@ -65,7 +65,7 @@ export function readLanguage(stableRoot: string): string | null {
 // desiredProviderEntries/desiredProfiles generate from. Backward
 // compatibility decision (settings-driven-providers.md §5 Phase 1): an
 // absent file, unparseable bytes, or a schema/legacy-version mismatch all
-// mean "no routing" — activation then keeps the v1 all-twelve provider
+// mean "no routing" — activation then keeps the v1 all-family provider
 // generation exactly as before. The file is plugin-owned and rewritten
 // atomically by set-role-routing, so foreign or truncated content degrades
 // to the legacy path rather than blocking activation on a recoverable file.
@@ -87,7 +87,7 @@ export function readRoleRouting(stableRoot: string): RoleRoutingValue | null {
 }
 
 // Plugin-owned user-scope Peer pool: <stableRoot>/state/peer-pool.json is the
-// catalog src/routing.mjs resolves for repositories without their own
+// catalog plugin/server/runtime/cli/routing.ts resolves for repositories without their own
 // .paseo-slp/slp-routing.json. The plugin is its sole writer; set-peer-pool
 // overwrites it atomically under sha256 CAS (same class of state write as
 // set-role-routing). The retired pre-plugin catalog still sits directly under

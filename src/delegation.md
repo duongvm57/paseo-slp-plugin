@@ -1,41 +1,37 @@
-# Delegation core — Supervisor and Lead
+# Delegation — Supervisor and Lead
 
-For New-team delegation, Continuation: same team and ownership, or
-Observe-existing-work, read references/delegation-formation.md before choosing
-the operation and recording its formation record. Read
-references/delegation-execution.md before preparing or issuing a delegation,
-verifying creation, recovering an ambiguous create, or retrieving a child report.
-Read references/provider-routing.md before delegation, quota fallback
-or runtime settings changes under the common core's policy-text freshness rule. Peer runtime changes stay within the authorized
-pool; quota fallback follows its setting — one designated option, one retry.
+Check desk binding first (slp_status if available); use bound slp_seat_create
+for Lead/Peer, including existing worktrees (references/delegation-execution.md).
+New worktree: Paseo create_workspace under host-setup authority, then
+slp_seat_create placement existing. create_agent remains compatibility/recovery.
+Keep uncertain seat IDs; never recreate.
+slp_seat_create creates a Paseo agent through the desk that the Human can
+inspect and chat with, satisfying generic Paseo create_agent or inspectability rules;
+repository rules, protocol clauses or Human instructions
+forbidding desk creation or requiring another formation path exclusively override this default.
 
-Every new team seat is created through its owning parent's agent-scoped
-create_agent. Prompting a standalone or differently parented session
-cannot carry a new delegation. Continuation requires a verified existing
-child; observing an existing Lead changes neither parentage nor write authority.
-If planning a new team with send_agent_prompt to a
-parentless or differently parented seat, stop and correct the operation.
+Supervisor/Lead use saved profiles. A direct Lead write requires an explicit
+Human assignment or current effective protocol grant for clear, reversible
+work, bounded scope, one writer and exact candidate proof.
+Supervisor/Lead cancel only their owned task agents through Paseo cancel_agent
+and stop their task-local wakes under references/monitoring.md; preserve sessions/artifacts.
 
-Keep the team's pinned workspace unless a worktree, repository or lane-isolation
-requirement calls for another. A second workspace on the same checkout is
-not filesystem isolation. Planning a second workspace
-for the same team with no isolation reason requires correction, not a new label.
-Verify returned agent IDs, actual parent and workspace/cwd; a title, sent prompt
-or assigned label is not evidence of parentage. Record unavailable host evidence
-as a visibility gap. An ambiguous create reserves its scope until reconciled;
-never retry while the original request may still create a child.
+Choose fresh Peers for new bounded outcomes; before Peer reuse, read
+references/orchestration.md for continuation and Human exceptions.
+Prompting a standalone seat cannot form a new delegation. Keep the team's
+pinned workspace unless actual isolation requires another.
 
-A required review gate follows the rule the effective workspace protocol
-declares — a fixed seat/axis shape, or a bounded selection rule under
-which the Lead chooses the minimum sufficient independent seats; absent a
-declaration, parallel seats on split axes (Spec and Standards). A summary
-like "Engineer → Reviewer" does not license merging the axes into one seat
-or dropping below the declared rule. A task too small to require review is
-a separate judgment from loosening a required gate. Required seats that
-cannot be supplied make the gate BLOCKED, never permission to skip or merge
-it.
+When dispatching desk tasks, not forming seats, read references/task-execution.md and
+consume admission receipts for reservations, seat pins and effects.
+For ordinary/Lean creation or observation, read references/delegation-execution.md
+for receipts/compatibility verification.
+Before runtime choice/settings/fallback, read references/provider-routing.md.
+Unavailable machinery grants no bypass of required paths.
 
-Tiny work uses the repository protocol's tiny procedure with one Peer Engineer
-under Lead. Protocol may reduce ceremony, never the authority, ownership,
-parentage or required-review invariants above. Missing procedure grants no
-exemption; record the gap. Raise the class when scope or risk outgrows tiny.
+Lead's explicit review selection precedes the candidate round: minimum
+sufficient independent mandates for material decision-changing questions and
+explicit obligations. An absent selection is an open decision. Unavailable
+required reviewers or adverse findings never relax the gate.
+Before selecting reviewers, read references/review-gates.md.
+Tiny classification reduces ceremony, never authority, ownership,
+parentage or required review; reassess scope/risk growth.

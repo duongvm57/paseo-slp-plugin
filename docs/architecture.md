@@ -1,11 +1,12 @@
 # Architecture — how SLP rides on Paseo
 
 SLP is a way of organizing agents: a Supervisor watches, a Lead owns the
-project's technical calls, Peers do bounded work. The plugin's whole job is
-to make that organization exist **on a stock Paseo daemon** — using only
+project's technical calls, Peers do bounded work. The plugin makes
+that organization exist **on a stock Paseo daemon** — using
 the primitives Paseo already has (custom providers, agent profiles,
-`config.patch`, workspaces, agent parentage) plus one ingredient Paseo does
-not have: a hidden instruction channel into each session.
+`config.patch`, workspaces, agent parentage) plus role instructions delivered
+separately from each task prompt and a
+durable repository desk for work, evidence and supervised execution.
 
 This document draws that architecture. For requirements and file-level
 contracts see [contract.md](contract.md); for the implementation spec see
@@ -54,8 +55,36 @@ Five ideas carry the design:
 4. **Three instruction layers, not one fat prompt.** Role bundle →
    workspace protocol → assignment. Precedence is one-way: a lower layer
    narrows but never widens a higher layer.
-5. **Paseo is the only control plane.** The plugin adds policy bytes and
-   managed configuration — not another scheduler or agent database.
+5. **Paseo owns agents and lifecycle.** The plugin adds policy bytes,
+   managed configuration and one repository work ledger. The Lead invokes
+   bounded dispatch/integration phases; no independent scheduler owns agents.
+
+## Native work execution
+
+The desk separates assignment intent, task outcomes, execution attempts and
+owner judgments. Tasks retain dependencies and operation grants; scopes retain
+moving write ownership and selected review obligations. Shared resolvers qualify
+prerequisite results and supply the same readiness and current evidence to
+execution gates, the workspace panel and recaps.
+
+External effects use a recorded intent, locked admission, bounded SDK/Git
+execution and an observed receipt or uncertainty. The ledger transaction cannot
+make a host call atomic. Bootstrap creates no work prompt; registered membership
+and atomic scope binding precede delivery. Unknown effects retain resources and
+require positive-identity reconciliation.
+An issued-create ticket connects the supported native configuration hook to one
+reserved membership claim. Actual post-create identity is checked separately;
+losing a secret does not authorize creation again.
+
+Integration measures the worker's original base, result and actual target,
+stages the granted delta separately, runs pinned proof recipes and rechecks
+freshness before application. It preserves unrelated target work and retained
+proof. Cleanup verifies an account before separately issuing stage and backup
+removal permits. Recovery uses that immutable inventory and each resource's
+issued history, with finite continuation and retained target reservations.
+Post-state capacity accounting funds the remaining supported edges across all
+ledger writers. The task's accepted output and the integrated project's acceptance are
+separate judgments. See [native task execution](task-execution.md).
 
 ## The role model
 
@@ -95,18 +124,25 @@ coordination attention free.
 drifting scope, weak evidence. It may observe assigned workspaces, ask
 the bound Lead why a strategy was chosen, report risk to the Human, relay
 a recorded Human decision, propose profile or protocol revisions, and
-record causal evidence in the notebook. It does not hold implementation
-scope, architecture or acceptance; it messages only a bound Lead — never
-Peers — and never acts as a substitute Lead.
+record causal evidence in the notebook. It can discuss architecture and
+direction with the Human; the Lead retains project technical decisions and
+acceptance. Ordinary observation addresses the bound Lead. A specific
+Human recovery mandate can permit direct Peer contact, with material
+steering reconciled into the Lead's shared state. Observation alone grants
+no implementation scope.
 
 **Lead — project authority.** Turns an objective into a trustworthy
 project-level result: framing, topology, decomposition, ownership,
 dependencies, checkpoints, review, integration, verdict. It reconstructs
 the task without pre-solving it, assigns exactly one owner per moving
 scope, writes neutral bounded briefs, and grants Peers the right to
-reopen, request dependencies or stop blocked. All implementation writes,
-including tiny work, belong to a Peer Engineer; tiny work uses one Peer
-Engineer. Difficult acceptance goes to an independent Reviewer;
+reopen, request dependencies or stop blocked. Implementation normally
+belongs to a Peer Engineer so the Lead can retain the coordination view.
+An explicit Human assignment or effective protocol grant can authorize a
+bounded direct Lead write on clear, reversible work. That grant retains
+one writer per moving scope, candidate proof and every required independent
+review; tiny work alone supplies no exemption. Difficult acceptance goes to
+an independent Reviewer;
 subjective or product decisions go to the Human with evidence, not a
 simulated proof.
 
@@ -145,12 +181,12 @@ Six rules fall out of the role model and shape everything below:
   would share no ledger and review/cleanup would become unreliable.
 - **Independent judgment needs an independent seat.** A reviewer created
   from the author's context inherits its framing. Reviewers are fresh
-  seats briefed neutrally against an exact candidate — the split-axis
-  gate (a spec reviewer and a standards reviewer in parallel) is the
-  package default for work that needs review, the workspace protocol
-  owns the rule — a fixed shape or a bounded selection rule under which
-  the Lead chooses minimum sufficient seats — and a required gate never
-  bypasses its declared rule.
+  seats briefed neutrally against an exact candidate. Lead selects the
+  minimum sufficient mandates for material questions and Human/protocol
+  requirements. Related questions can share a mandate; extra seats need
+  distinct questions or required separation. A reasoned no-trigger decision
+  still needs candidate proof and Lead adjudication. Mandatory review keeps
+  its declared obligations; unavailable required seats leave it blocked.
 - **Workspace isolation is explicit.** One workspace ID is not
   filesystem isolation. The minimum safe rule is one writer per moving
   scope; same-team seats share the assignment workspace by default, and
@@ -228,16 +264,16 @@ The plugin is a **manager**, not an agent feature. It exposes a small set
 of administrative operations (`status`, `activate`, `reconcile`,
 `deactivate`, `local-target`, `catalog`) that a human drives from the SLP
 sidebar. Agents never see these. Activation writes the provider entries
-(up to twelve — all twelve without routing; the chosen supervisor/lead
-combos plus all four peers when `role-routing.json` is set) and 2 profiles
+(up to fifteen — all fifteen without routing; the chosen supervisor/lead
+combos plus all five peers when `role-routing.json` is set) and 2 profiles
 into `config.json` atomically through `config.patch`,
 materializes the SLP payload into an immutable `slp-runtime/<sha>` tree,
 and records a receipt. Nothing changes on the daemon until a human
 explicitly activates.
 
-Two saved profiles are the only doors in: **SLP Supervisor** and **SLP
-Lead**. Peers never get saved profiles — the Lead chooses a peer provider
-per task from the routing pool: a repository's `.paseo-slp/slp-routing.json`
+Two saved profiles anchor **SLP Supervisor** and **SLP Lead** runtimes.
+Peers use complete pool bundles, selected server-side or independently by the
+Lead per task from the routing pool: a repository's `.paseo-slp/slp-routing.json`
 when pinned, else the user-scope `state/peer-pool.json` above. Either scope
 is what lets one project mix e.g. a Codex Lead with Devin peers.
 
@@ -277,12 +313,12 @@ provider session begins with SLP instructions already in its
 durable context
 
 
-devin — shim + role wrapper (unchanged)
+devin / opencode — shim + ACP role wrapper
 
 human or agent calls create_agent(profile/provider, prompt)
         │
         ▼
-Paseo resolves the slp-devin-* provider entry
+Paseo resolves the slp-{devin,opencode}-* provider entry
         │
         ▼
 launcher process starts  ── env: SLP_MANAGED_RUNTIME, SLP_NODE_BIN,
@@ -291,16 +327,15 @@ launcher process starts  ── env: SLP_MANAGED_RUNTIME, SLP_NODE_BIN,
 slp-shim verifies the runtime payload (manifest digest + identity)
         │
         ▼
-role wrapper renders the role bundle and rewrites the session/new
-request — this is the injection — then starts the real provider
-transport (ACP)
+OpenCode shim requires the live session-open grant before child spawn;
+role wrapper starts the real ACP child and prepends role instructions
+to every session/prompt (entry carrier on first/re-armed prompts)
         │
         ▼
-provider session (devin) begins with SLP
-instructions already in its durable context
+provider receives SLP instructions before the user content on each prompt
 ```
 
-Devin keeps the wrapper transport because its ACP adapter drops
+Devin and OpenCode use the wrapper transport because generic ACP drops
 `systemPrompt` outright — the hook path cannot reach it (Phase 0 probe,
 2026-09-19). For hook families the plugin is in the loop at session entry
 via the two before-hooks, but never afterwards — no proxy, no monitoring
@@ -447,12 +482,106 @@ Deactivation detaches the owned provider/profile entries and restores the
 shared MCP flag — but retains all runtime files, because live sessions may
 still be executing from them.
 
+## Runtime source and execution
+
+The former `src/` runtime modules now live under `plugin/`. The standalone CLI,
+installer, verifier, policy renderer and transport helpers live in
+`plugin/server/runtime/cli/`; `src/` contains only policy and template assets.
+The CLI uses erasable TypeScript and participates in strict typechecking with
+the host plugin. `bin/` contains executable bootstraps and transport relays;
+`scripts/` contains development-only payload generation and graph checks.
+Bootstrap scripts stay JavaScript so the Node version check runs before loading
+TypeScript. The installed CLI and host plugin use the same dependency-free core
+for report validation, desk recovery and handoff recaps. Canonical Node
+core lives in `plugin/server/runtime/`; routing vocabulary, Jev provider and
+credential rules, the family/role registry, recovery constants and the
+bootstrap-safe Node version check live in `plugin/shared/runtime/`. The Manager
+uses the same routing vocabulary and family registry as the CLI.
+Paseo rejects imports outside the plugin root. Keeping runtime source there
+gives both executions one implementation without copying source. The CLI
+subtree remains an adapter: core modules cannot import it, and it imports no
+host SDK or external package. The shim retains its bootstrap family/role sets
+so argv and Node-version diagnostics work before TypeScript imports and its
+recorded-manifest checks stay independent.
+
+`installUnitPaths()` includes these two subtrees alongside `bin/`, `src/`,
+`skills/`, `package.json` and `install.sh`. The payload preserves their exact
+source bytes and paths. Ordinary Node 22.18+ or 23.6+ runs the erasable TS
+directly; there is no runtime build or npm dependency. `bin/slp.mjs` checks
+the version before importing the CLI command body. The generator checks both
+runtime and type-only imports: adapters may reach the core, server core may
+reach shared core and Node builtins, and shared core stays free of Node.
+
+Report evidence reads remain a CLI adapter capability. Desk validation without
+injected IO never dereferences a claimed path. Recovery has one state machine
+with two protocol checkpoints: the CLI driver returns synchronously; the
+plugin driver awaits race hooks and feeds hook failures back through cleanup.
+Role injection and desk snapshot capture load the verified candidate's own
+runtime modules, not the current plugin's copy. Selection requires exactly one
+receipt-declared layout: `plugin/server/runtime/cli/*.ts`, retained `src/*.ts`
+or retained `src/*.mjs`. Import failures never trigger a layout fallback.
+Snapshot algorithm identifiers remain unchanged.
+
+RPC provenance and output bounds stay in the plugin adapter; CLI home and
+operator identity resolution stay in the CLI adapter.
+
+Legacy runtime receipts remain verifiable without the new subtrees. Ledger
+v1–v8 migration support remains in the v9 store because deployed older ledgers
+have not been ruled out.
+
+Assignment registration is immutable; planned owner succession appends an
+offer and the exact receiving Lead's acknowledgment on the same assignment.
+Current command guards resolve the accepted agent/membership tuple; historical
+refinements resolve ownership at each committed event. Scope and rollout gates
+share current review qualification, while history retains reviews that no
+longer qualify under the new owner. See [assignment continuity](work-continuity.md).
+
 ## Boundaries
 
-- The plugin installs and manages; it does **not** orchestrate. No
-  agent-facing tools, no `create_agent`, no delegation logic.
+- Native seat observation has one owner shared by formation and managed task
+  execution: a read-only refresh interface verifies exact tuple/parent/label
+  evidence and private-ticket diagnostics without importing task orchestration.
+  Formation concentrates its repeated pre-create/pre-delivery placement
+  qualification in one private module, preserving both target observations
+  around the awaited actor guard. Observation grants no delivery or readiness;
+  registration, operation admission and effect phases keep their existing owners.
+- The plugin installs and manages the runtime and exposes the desk MCP
+  tools for durable assignments, handbacks, settlements, scopes, checks and
+  rollout decisions. Authority resolves from host-bound memberships and
+  durable owner bindings; these tools record evidence and state. They do
+  not choose delegation or deploy a rollout. Ordinary formation and supervised
+  bootstrap invoke the host SDK only under their separate admissions.
+- Ordinary Peer runtime selection is composed into durable formation, not the
+  CLI planner. Replay inspection precedes local choice preflight; choices admit
+  no intent. The exclusive executor imports the bound candidate selector, pins
+  one choice/full receipt, then replans offline before create and delivery.
+  Mode/source/catalog drift blocks dependent effects; old full-runtime requests
+  preserve their five phases. Omitted-placement automatic paths use six phases
+  without Jev and seven with it; explicit placement uses at most twelve (of 16). Decline retains evidence without allocating a seat. No default
+  pool, task enrollment or retry/resume scheduler is introduced.
+- Formation placement owns live SDK/Git qualification. Caller/existing source
+  and execution roots are separate: local configured top or same-Git main checkout pins pool/protocol; a linked
+  checkout without a trustworthy configured source fails closed. This persists
+  across Lead→Peer hops with omitted placement. Target pins
+  canonical workspace/cwd/HEAD. Foreign/nested common-dir, configuration conflicts
+  or later drift block effects. New worktree creation is a gap; Lead uses Paseo
+  create_workspace under its setup authority, then seat-create existing. The
+  plugin never invokes setup/worktree-create/install. SDK open can register or
+  revive a directory workspace; a timeout retains uncertainty, not cancellation.
+  Cached qualified SDK handles avoid an unverified implicit directory lookup;
+  no cross-host/Git atomic fence is claimed.
+- New formation semantics (placement or automatic Peer runtime/selection) use
+  the task adapter's exact live membership predicate plus role. A read-only
+  registration wait is bounded to 1500ms, then fresh guards run before delivery;
+  polling adds no phases. Missing/revoked/wrong tuple returns seat-pending with
+  its child ID, evidence and slp_operation_get action for the same requestId.
+  Receipt reads do not resume; no replacement or automatic repair is introduced.
+  Historical omitted full-pin Peer/Lead requests bypass the membership gate,
+  retaining delivery/bytes and five phases. Retained receipts replay before
+  qualification. Explicit placement alone records membership-observed;
+  ordinary formation still does not bind a task scope.
 - Jev is an explicit helper primitive, not an agent feature: the
-  `route-decide` CLI is the only CLI call path (no loops, schedules or
+  `route-decide` CLI and admitted ordinary formation invoke routing decisions (no loops, schedules or
   prepare-time calls), its key lives in per-daemon state, and routing
   stays deterministic — prepare verifies the receipt offline and fails
   closed on any config/transport/validation error. The plugin-side
@@ -471,6 +600,15 @@ still be executing from them.
   its bounded metadata rings. On the client, the supervision bell re-reads
   the stored notify recipients every 60 s while the app runs — a cheap
   status RPC, not a daemon-side watcher.
-- The Supervisor/Lead/Peer intelligence is **policy text + Paseo
-  primitives**, not code in the plugin. The plugin's correctness job ends
-  at "the right bytes reach the right session through the right channel."
+- The Supervisor/Lead/Peer intelligence uses **policy text + Paseo
+  primitives**. The plugin delivers those instructions and enforces the
+  desk's authority, state and evidence invariants; workflow acceptance
+  remains with the receiving owner and required review seats.
+
+`plugin/server/runtime/cli/` owns executable CLI behavior: installation/update,
+launch planning, provider transports, report capture and monitoring. Policy
+documents shipped to seats live in `src/`. These modules have production
+callers. Shared logic moves into the
+runtime tiers when CLI and plugin need the same implementation; a CLI-only
+module keeps its own implementation. Routing no longer has a JS/TS mirror. External work trackers remain a
+workspace/harness concern, outside plugin settings and session delivery.

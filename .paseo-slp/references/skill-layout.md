@@ -1,6 +1,6 @@
 # Repository skill layout
 
-Operational facts for "Routing and skills" in
+Operational facts for the "Skill layout" entry under "Repository references" in
 `.paseo-slp/workspace-protocol.md`; the rules stay there. Verified 2026-09-25.
 
 Two skill homes, by audience:

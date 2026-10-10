@@ -5,8 +5,8 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
-import { notebook } from '../src/notebook.mjs';
-import { json } from '../src/package.mjs';
+import { notebook } from '../plugin/server/runtime/cli/notebook.ts';
+import { json } from '../plugin/server/runtime/cli/package.ts';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 function fixture(t) {

@@ -9,7 +9,13 @@
 
 import { z } from "zod";
 import { defineRpc } from "@getpaseo/plugin";
-import { FAMILY_IDS, OWNED_PROVIDER_ID_RE, PROVIDER_EXTENDS_IDS, ROLES } from "./families.ts";
+import { JEV_TRANSPORTS } from "./runtime/jev-transport.ts";
+import { FAMILY_IDS, OWNED_PROVIDER_ID_RE, PROVIDER_EXTENDS_IDS, ROLES, persistedProviderIds, persistedFamilyIds } from "./runtime/families.ts";
+
+/** The serialized-RPC byte contract: every request and response envelope
+ *  stays inside this many UTF-8 bytes. Defined once here — producers bound
+ *  or shed to it, never restate the literal. */
+export const MAX_RPC_BYTES = 64 * 1024;
 
 // ---------------------------------------------------------------------------
 // §3 wire schemas
@@ -26,8 +32,9 @@ export const Family = z.enum(FAMILY_IDS);
  *  with the family set; the inferred type stays Record<FamilyName, …>. */
 const familyKeyed = <S extends z.ZodType>(schema: S): Record<FamilyName, S> =>
   Object.fromEntries(FAMILY_IDS.map(id => [id, schema])) as Record<FamilyName, S>;
-export const AbsolutePath = z.string().min(1).max(4096)
-  .refine(s => !s.includes("\0") && /^(\/|[A-Za-z]:[\\/]|\\\\)/.test(s));
+export const isAbsolutePath = (s: string): boolean =>
+  !s.includes("\0") && /^(\/|[A-Za-z]:[\\/]|\\\\)/.test(s);
+export const AbsolutePath = z.string().min(1).max(4096).refine(isAbsolutePath);
 export const Target = z.object({
   hostId: z.string().min(1).max(256),
   daemonHome: AbsolutePath,
@@ -199,7 +206,7 @@ export const GetRoleRoutingInput = z.object({
 export const GetRoleRoutingOutput = z.object({
   schemaVersion: z.literal(1),
   /** The stored routing, or null when no routing file exists (activation
-   *  then keeps the v1 all-twelve provider generation). */
+   *  then keeps the v1 all-family provider generation). */
   routing: RoleRouting.nullable(),
 }).strict();
 /** Plugin-owned state mutation, same shape as set-language: writes
@@ -216,7 +223,7 @@ export const SetRoleRoutingOutput = z.object({
   routing: RoleRouting,
 }).strict();
 /** One seat in the user-scope Peer pool — the wire mirror of the package's
- *  routing-catalog option (src/routing.mjs validateCatalog). `provider` and
+ *  routing-catalog option (plugin/server/runtime/cli/routing.ts validateCatalog). `provider` and
  *  `model` may be empty while `enabled` is false: an archetype-seeded seat
  *  stays parked until the Human fills both from live catalog discovery. The
  *  editor writes availability:"ready" and roles:["peer"] always; the schema
@@ -224,7 +231,7 @@ export const SetRoleRoutingOutput = z.object({
  *  Passthrough, not strict — the package validator tolerates extra option
  *  keys (a legacy file may still carry `priority`), so the wire does too. */
 // These three patterns mirror settingIdPattern / unsafeModelPattern /
-// swe2ModelPattern in src/binding.mjs — the shared boundary cannot import the
+// swe2ModelPattern in plugin/server/runtime/cli/binding.ts — the shared boundary cannot import the
 // package, so the parity test in tests/plugin-routing.test.mjs pins this
 // schema to the same accept/reject verdicts as validateCatalog.
 const POOL_SETTING_ID = /^[a-zA-Z0-9._-]+$/;
@@ -232,7 +239,7 @@ const POOL_UNSAFE_MODEL = /[\s\x00-\x1f\x7f]/;
 const POOL_SWE2_MODEL = /^swe-2($|-)/;
 const poolNonempty = (s: string) => s.trim().length > 0;
 
-/** The Jev decline sentinel (src/routing.mjs ROUTE_DECLINE_CANDIDATE) — a
+/** The Jev decline sentinel (plugin/server/runtime/cli/routing.ts ROUTE_DECLINE_CANDIDATE) — a
  *  seat may never take it as an id; validateCatalog rejects it the same way. */
 export const ROUTE_DECLINE_OPTION_ID = "no-suitable-option";
 
@@ -354,7 +361,7 @@ export const SetPeerPoolOutput = z.object({
  *  typesafe (first-party, verified against docs.typesafe.ai): model is a
  *  pinned bare `jev-<semver>` id; baseUrl accepts a bare https origin or an
  *  origin+path prefix (custom endpoint/proxy). Both require https and reject
- *  query/hash (parity with src/jev.mjs readJevConfig); absent baseUrl → the
+ *  query/hash (parity with plugin/server/runtime/cli/jev.ts readJevConfig); absent baseUrl → the
  *  kind's default origin. */
 const jevBaseUrl = (allowPath: (path: string) => boolean) =>
   z.string().min(1).max(512)
@@ -367,18 +374,18 @@ const jevBaseUrl = (allowPath: (path: string) => boolean) =>
 export const JevProvider = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("openrouter"),
-    baseUrl: jevBaseUrl(path => path === "" || path === "/api/v1").default("https://openrouter.ai"),
-    model: z.string().regex(/^[a-z0-9-]+\/jev-\d+\.\d+(\.\d+)?$/),
+    baseUrl: jevBaseUrl(JEV_TRANSPORTS.openrouter.baseUrlPathAllowed).default(JEV_TRANSPORTS.openrouter.defaultBaseUrl),
+    model: z.string().regex(JEV_TRANSPORTS.openrouter.modelPattern),
   }).strict(),
   z.object({
     kind: z.literal("typesafe"),
-    baseUrl: jevBaseUrl(() => true).default("https://api.typesafe.ai"),
-    model: z.string().regex(/^jev-\d+\.\d+\.\d+$/),
+    baseUrl: jevBaseUrl(JEV_TRANSPORTS.typesafe.baseUrlPathAllowed).default(JEV_TRANSPORTS.typesafe.defaultBaseUrl),
+    model: z.string().regex(JEV_TRANSPORTS.typesafe.modelPattern),
   }).strict(),
 ]);
 /** Per-daemon Jev config — all toggles default off; capabilities is a bool
  *  record so a future capability arrives without a schema bump (a missing
- *  capability defaults to off, matching src/jev.mjs). Stored as
+ *  capability defaults to off, matching plugin/server/runtime/cli/jev.ts). Stored as
  *  jev.json (0600); the key lives in a separate jev-<kind>.key file. */
 export const JevConfig = z.object({
   schemaVersion: z.literal(1),
@@ -450,48 +457,6 @@ export const TestJevOutput = z.object({
   detail: z.string().max(512).nullable(),
   latencyMs: z.number().nonnegative(),
 }).strict();
-/** Beads work-tracker toggle — plugin-owned state at
- *  slp-runtime/state/work-tracker.json whose sole writer is set-work-tracker
- *  (atomic 0600 whole-file write, same class as jev.json). Strict so a
- *  foreign shape is rejected rather than silently coerced; the package
- *  reader (src/work-tracker.mjs) applies the same checks byte-for-byte. */
-export const WorkTrackerConfig = z.object({
-  schemaVersion: z.literal(1),
-  tracker: z.literal("beads"),
-  enabled: z.boolean(),
-}).strict();
-/** Wire view of the tracker state. `configured` means a valid setting file
- *  exists; `enabled` is its flag (false when absent or invalid). `error`
- *  surfaces an unparseable/foreign file — never blocks, matching the
- *  session-entry gap line. `bd`/`bdError` report live detection of `bd` on
- *  the plugin process PATH (= daemon PATH): a failure is evidence in
- *  bdError, never an RPC failure. SLP never installs or initializes bd. */
-export const WorkTrackerView = z.object({
-  configured: z.boolean(),
-  enabled: z.boolean(),
-  error: z.string().nullable(),
-  bd: z.object({
-    path: z.string().min(1),
-    version: z.string().nullable(),
-  }).strict().nullable(),
-  bdError: z.string().nullable(),
-}).strict();
-export const GetWorkTrackerInput = z.object({
-  schemaVersion: z.literal(1),
-  target: Target,
-}).strict();
-export const GetWorkTrackerOutput = z.object({
-  schemaVersion: z.literal(1),
-  workTracker: WorkTrackerView,
-}).strict();
-/** Plugin-owned state mutation, same class as set-language: writes
- *  work-tracker.json atomically (0600) and returns the post-write view. */
-export const SetWorkTrackerInput = z.object({
-  schemaVersion: z.literal(1),
-  target: Target,
-  enabled: z.boolean(),
-}).strict();
-export const SetWorkTrackerOutput = GetWorkTrackerOutput;
 export const LocalTargetInput = z.object({
   schemaVersion: z.literal(1),
 }).strict();
@@ -521,10 +486,12 @@ export const CatalogInput = z.object({
   model: z.string().min(1).optional(),
   modeId: z.string().min(1).optional(),
 }).strict();
+// Host-owned descriptors may gain fields independently of this plugin.
+// Strip unknown descriptor keys; the plugin-owned RPC envelopes stay strict.
 export const CatalogOption = z.object({
   id: z.string().min(1),
   label: z.string(),
-}).strict();
+});
 /** One selectable option inside a provider feature or model descriptor —
  *  id + display label plus optional description, default marker and
  *  free-form metadata. Shared by CatalogFeature's select options and a
@@ -537,14 +504,14 @@ export const CatalogSelectOption = z.object({
   description: z.string().optional(),
   isDefault: z.boolean().optional(),
   metadata: z.record(z.string(), z.unknown()).optional(),
-}).strict();
+});
 /** One catalog model: the picker identity plus the thinking options the
  *  model declares and its declared default option id. Providers that bake
  *  thinking into model ids declare an empty/absent list. */
 export const CatalogModel = CatalogOption.extend({
   thinkingOptions: z.array(CatalogSelectOption).optional(),
   defaultThinkingOptionId: z.string().min(1).optional(),
-}).strict();
+});
 /** Provider feature definition — the same descriptor the host's profile
  *  editor renders as a toggle or select. `value` is the provider default;
  *  profile-level overrides live in `featureValues`. */
@@ -556,8 +523,9 @@ export const CatalogFeature = z.discriminatedUnion("type", [
     description: z.string().optional(),
     tooltip: z.string().optional(),
     icon: z.string().optional(),
+    desktopTrigger: z.string().optional(),
     value: z.boolean(),
-  }).strict(),
+  }),
   z.object({
     type: z.literal("select"),
     id: z.string().min(1),
@@ -565,9 +533,10 @@ export const CatalogFeature = z.discriminatedUnion("type", [
     description: z.string().optional(),
     tooltip: z.string().optional(),
     icon: z.string().optional(),
+    desktopTrigger: z.string().optional(),
     value: z.string().nullable(),
     options: z.array(CatalogSelectOption),
-  }).strict(),
+  }),
 ]);
 export const CatalogOutput = z.object({
   schemaVersion: z.literal(1),
@@ -596,8 +565,6 @@ export const getJev = defineRpc({ name: "get-jev", input: GetJevInput, output: G
 export const setJev = defineRpc({ name: "set-jev", input: SetJevInput, output: SetJevOutput });
 export const setJevKey = defineRpc({ name: "set-jev-key", input: SetJevKeyInput, output: SetJevKeyOutput });
 export const testJev = defineRpc({ name: "test-jev", input: TestJevInput, output: TestJevOutput });
-export const getWorkTracker = defineRpc({ name: "get-work-tracker", input: GetWorkTrackerInput, output: GetWorkTrackerOutput });
-export const setWorkTracker = defineRpc({ name: "set-work-tracker", input: SetWorkTrackerInput, output: SetWorkTrackerOutput });
 
 // ---------------------------------------------------------------------------
 // §7 receipt / operation-intent journal schemas (server-internal; the client
@@ -650,15 +617,25 @@ export const OwnedProvider = z.object({
     disabledTools: z.array(z.string()).optional(),
   }).strict().optional(),
 }).strict();
+// Persisted observations retain the already-recorded native OpenCode field.
+// Current authored providers still use OwnedProvider/current emission values;
+// this decoder does not normalize native records into ACP or widen ID domains.
+export const PersistedProvider = OwnedProvider.extend({
+  extends: z.enum([...PROVIDER_EXTENDS_IDS, "opencode"]),
+});
 export const OwnedProfileSlot = z.object({
   index: z.number().int().nonnegative(), value: Profile,
 }).strict();
 export const Projection = z.object({
-  providers: z.record(ProviderId, Presence(OwnedProvider)),
+  providers: z.record(ProviderId, Presence(PersistedProvider)),
   profilesPresent: z.boolean(),
   profiles: z.array(OwnedProfileSlot).max(2),
   injectIntoAgents: Presence(z.boolean()),
-}).strict();
+}).strict().superRefine((projection, ctx) => {
+  if (persistedProviderIds(Object.keys(projection.providers)) === null) {
+    ctx.addIssue({ code: "custom", path: ["providers"], message: "projection requires exact legacy12 or current15 provider keys" });
+  }
+});
 export const Snapshot = z.object({
   rawConfigSha256: Sha,
   owned: Projection,
@@ -683,13 +660,15 @@ export const Binding = z.object({
   launchSetSha256: Sha,
   launchManifestSha256: Sha,
   // Legacy bindings record all twelve shim launchers; Phase 2 bindings
-  // record all twelve launchers too — nine gate launchers plus the three
+  // current bindings record fifteen — twelve gates plus the three
   // devin shim launchers (the transitional devin-only layout also
   // validates). The launch manifest's launcherFamilies/gateFamilies fields
   // carry the per-file kind.
   launcherFiles: z.array(LauncherFile).min(1),
   node: z.object({ path: AbsolutePath, version: z.string().min(1) }).strict(),
-  binaries: z.object(familyKeyed(Binary)).strict(),
+  // No defaults: absence belongs to the historical domain and must stay
+  // absent when old fields and their digests are verified.
+  binaries: z.object({ ...familyKeyed(Binary), opencode: Binary.optional() }).strict(),
   baseline: z.enum(["fresh", "adopted-observed"]),
   beforeActivation: Snapshot,
   mcpBefore: z.object({ enabled: FlagBefore, injectIntoAgents: FlagBefore }).strict(),
@@ -697,7 +676,23 @@ export const Binding = z.object({
   postPatchPersistedShapeSha256: Sha,
   activatedAt: Time,
   verifiedAt: Time,
-}).strict();
+}).strict().superRefine((binding, ctx) => {
+  const families = persistedFamilyIds(Object.keys(binding.binaries));
+  const ids = persistedProviderIds(Object.keys(binding.owned.providers));
+  if (families === null || ids === null || ids.length !== families.length * ROLES.length) {
+    ctx.addIssue({ code: "custom", path: ["binaries"], message: "binding binary/owned domains must both be exact legacy4/12 or current5/15" });
+  }
+  if (ids !== null && Object.keys(binding.beforeActivation.owned.providers).length > ids.length) {
+    ctx.addIssue({ code: "custom", path: ["beforeActivation"], message: "a historical binding cannot have a newer baseline vocabulary" });
+  }
+  const names = binding.launcherFiles.map(file => file.path.split(/[\\/]/).at(-1)!);
+  if (new Set(names).size !== names.length || names.some(name => {
+    const match = OWNED_PROVIDER_ID_RE.exec(name);
+    return match === null || !families?.includes(match[1] as FamilyName);
+  })) {
+    ctx.addIssue({ code: "custom", path: ["launcherFiles"], message: "launcher IDs must be unique owned IDs in the binding's recorded family domain" });
+  }
+});
 export const Plan = z.object({
   before: Snapshot,
   afterOwned: Projection,
@@ -706,7 +701,16 @@ export const Plan = z.object({
   previousBinding: Binding.nullable(),
   nextBinding: Binding.nullable(),
   restoreInjectionTo: z.boolean().nullable(),
-}).strict();
+}).strict().superRefine((plan, ctx) => {
+  if (Object.keys(plan.before.owned.providers).length !== Object.keys(plan.afterOwned.providers).length) {
+    ctx.addIssue({ code: "custom", path: ["afterOwned"], message: "plan endpoints require one exact legacy12 or current15 domain" });
+  }
+  const size = Object.keys(plan.afterOwned.providers).length;
+  if ((plan.nextBinding !== null && Object.keys(plan.nextBinding.owned.providers).length !== size)
+    || (plan.previousBinding !== null && Object.keys(plan.previousBinding.owned.providers).length > size)) {
+    ctx.addIssue({ code: "custom", path: ["nextBinding"], message: "plan binding vocabularies must match the intended endpoint and cannot reverse history" });
+  }
+});
 export const Intent = z.object({
   operationId: Id,
   requestSha256: Sha,
@@ -801,12 +805,6 @@ export type SetJevKeyRequest = z.infer<typeof SetJevKeyInput>;
 export type SetJevKeyResult = z.infer<typeof SetJevKeyOutput>;
 export type TestJevRequest = z.infer<typeof TestJevInput>;
 export type TestJevResult = z.infer<typeof TestJevOutput>;
-export type WorkTrackerConfigValue = z.infer<typeof WorkTrackerConfig>;
-export type WorkTrackerViewValue = z.infer<typeof WorkTrackerView>;
-export type GetWorkTrackerRequest = z.infer<typeof GetWorkTrackerInput>;
-export type GetWorkTrackerResult = z.infer<typeof GetWorkTrackerOutput>;
-export type SetWorkTrackerRequest = z.infer<typeof SetWorkTrackerInput>;
-export type SetWorkTrackerResult = z.infer<typeof SetWorkTrackerOutput>;
 export type StartResult = z.infer<typeof StartOutput>;
 export type StatusResult = z.infer<typeof StatusOutput>;
 export type BindingViewValue = z.infer<typeof BindingView>;
@@ -972,6 +970,11 @@ export interface LaunchSet {
   /** The generated launcher files (Phase 2: the three devin wrapper
    *  launchers), with recorded sha256/mode. */
   files: LauncherFileValue[];
+  /** P2-d — the manifest's desk-bridge pin, when the published manifest
+   *  carries it. Absent on pre-P2-d launch sets; the bridge treats absence
+   *  as "no pin recorded" and refuses graft/hello rather than guessing. */
+  bridgeSha256?: string;
+  bridgeProtocolVersion?: string;
 }
 export interface LauncherBuilder {
   /** Build launch.json deterministically, stage the POSIX launchers, verify

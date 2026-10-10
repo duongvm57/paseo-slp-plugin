@@ -1,17 +1,17 @@
 // tests/routing-criteria.test.mjs — the routing-criteria contract
 // (docs/spec/routing-criteria.md): vocabulary integrity, §4 reading rules,
 // §6.2 overlaps, §7.2 reserved-id/token-conflict semantics, the §7.4
-// form/save/import flows, the src↔plugin vocabulary mirror, and the Jev
+// form/save/import flows and the Jev
 // guidance/receipt binding.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
-import { json, hash } from '../src/package.mjs';
-import { readCatalog, catalogBinding, validateCatalog, ROUTE_DECISION_QUESTION, ROUTE_DECLINE_CANDIDATE } from '../src/routing.mjs';
-import { routeDecide } from '../src/jev-routing.mjs';
-import { canonicalJson } from '../src/jev.mjs';
+import { json, hash } from '../plugin/server/runtime/cli/package.ts';
+import { readCatalog, catalogBinding, validateCatalog, ROUTE_DECISION_QUESTION, ROUTE_DECLINE_CANDIDATE } from '../plugin/server/runtime/cli/routing.ts';
+import { routeDecide } from '../plugin/server/runtime/cli/jev-routing.ts';
+import { canonicalJson } from '../plugin/server/runtime/cli/jev.ts';
 import { fakeOrKey } from './fake-secrets.mjs';
 import {
   HOW_TO_READ,
@@ -30,8 +30,7 @@ import {
   seatTokenConflict,
   suitabilityMatch,
   tokenDefinition,
-} from '../src/routing-vocabulary.mjs';
-import * as mirror from '../plugin/shared/routing-vocabulary.ts';
+} from '../plugin/shared/runtime/routing-vocabulary.ts';
 import { PEER_SEAT_ARCHETYPES } from '../plugin/shared/archetypes.ts';
 import {
   buildPeerPool,
@@ -82,58 +81,6 @@ const okFetch = choice => async () => ({
     answers: { [ROUTE_DECISION_QUESTION]: { type: 'choice', choice, confidence: 0.9, probabilities: { [choice]: 0.9 } } },
     usage: { cost: 0.0001, input_tokens: 10, output_tokens: 5 },
   }),
-});
-
-// ---------------------------------------------------------------------------
-// Mirror parity — src/ is canonical at runtime, plugin/shared/ is the Manager
-// surface's mirror; neither can import the other, so the data is pinned here.
-// ---------------------------------------------------------------------------
-
-test('the plugin mirror and the canonical runtime vocabulary are identical data', () => {
-  assert.equal(mirror.ROUTING_VOCABULARY_VERSION, ROUTING_VOCABULARY_VERSION);
-  assert.deepEqual(mirror.SUITABILITY_AXES, SUITABILITY_AXES);
-  assert.deepEqual(mirror.SUITABILITY_TOKENS, SUITABILITY_TOKENS);
-  assert.deepEqual(mirror.STANDARD_SEAT_TOKENS, STANDARD_SEAT_TOKENS);
-  assert.deepEqual(mirror.STANDARD_SEAT_IDS, STANDARD_SEAT_IDS);
-  assert.equal(mirror.JEV_SUITABILITY_GUIDANCE, JEV_SUITABILITY_GUIDANCE);
-  assert.deepEqual(mirror.JEV_TOKEN_DEFINITIONS, JEV_TOKEN_DEFINITIONS);
-  assert.deepEqual(mirror.HOW_TO_READ, HOW_TO_READ);
-  // Behavioral parity on the shared semantic checks.
-  const divergent = { id: 'security-review', suitableFor: ['work:verify'], avoidFor: [] };
-  const custom = { id: 'my-seat', suitableFor: ['anything goes'], avoidFor: ['work:verify'] };
-  for (const option of [divergent, custom, { id: 'security-review', ...STANDARD_SEAT_TOKENS['security-review'] }]) {
-    assert.deepEqual(mirror.seatTokenConflict(option), seatTokenConflict(option), option.id);
-  }
-  assert.deepEqual(
-    mirror.catalogTokenConflicts(pool([seat('security-review', divergent), seat('my-seat', custom)])),
-    catalogTokenConflicts(pool([seat('security-review', divergent), seat('my-seat', custom)])),
-  );
-  // The §4 reading helpers must agree across the module boundary too —
-  // mirror drift here would make the Manager and the router disagree.
-  const tokenSets = [
-    STANDARD_SEAT_TOKENS['standard-coding'].suitableFor,
-    STANDARD_SEAT_TOKENS['security-review'].avoidFor,
-    ['free string', 'work:change'],
-    [],
-  ];
-  const tasks = [
-    { work: 'change', depth: 'bounded', flow: 'direct', domains: ['software', 'tests'] },
-    { work: 'verify', domains: ['security'] },
-    { work: 'enumerate', depth: 'open', domains: [] },
-    {},
-    undefined,
-  ];
-  for (const tokens of tokenSets) {
-    for (const task of tasks) {
-      assert.equal(mirror.suitabilityMatch(tokens, task), suitabilityMatch(tokens, task), `suitabilityMatch ${JSON.stringify(tokens)}`);
-      assert.deepEqual(mirror.avoidWarnings(tokens, task), avoidWarnings(tokens, task), `avoidWarnings ${JSON.stringify(tokens)}`);
-      assert.equal(mirror.domainCoverage(tokens, task?.domains ?? []), domainCoverage(tokens, task?.domains ?? []), `domainCoverage ${JSON.stringify(tokens)}`);
-    }
-  }
-  assert.equal(mirror.isStandardToken('work:change'), isStandardToken('work:change'));
-  assert.equal(mirror.isStandardToken('legacy-tag'), isStandardToken('legacy-tag'));
-  assert.deepEqual(mirror.tokenDefinition('work:change'), tokenDefinition('work:change'));
-  assert.equal(mirror.tokenDefinition('legacy-tag'), tokenDefinition('legacy-tag'));
 });
 
 // ---------------------------------------------------------------------------

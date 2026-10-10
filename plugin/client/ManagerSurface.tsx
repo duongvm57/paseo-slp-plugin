@@ -17,10 +17,10 @@ import {
   Text,
   View,
 } from "react-native";
-import { activate, catalog, deactivate, reconcile, status, localTarget, setLanguage, getRoleRouting, setRoleRouting, getJev, setJev, setJevKey, testJev, getPeerPool, setPeerPool, getWorkTracker, setWorkTracker } from "../shared/contracts.ts";
+import { activate, catalog, deactivate, reconcile, status, localTarget, setLanguage, getRoleRouting, setRoleRouting, getJev, setJev, setJevKey, testJev, getPeerPool, setPeerPool } from "../shared/contracts.ts";
 import { getSupervision, setSupervision } from "../shared/supervision.ts";
-import { FAMILY_IDS, FAMILY_LABEL, FAMILY_PICKER_ORDER } from "../shared/families.ts";
-import type { RoleName } from "../shared/families.ts";
+import { FAMILY_IDS, FAMILY_LABEL, FAMILY_PICKER_ORDER } from "../shared/runtime/families.ts";
+import type { RoleName } from "../shared/runtime/families.ts";
 import { PEER_SEAT_ARCHETYPES } from "../shared/archetypes.ts";
 import {
   HOW_TO_READ,
@@ -28,7 +28,7 @@ import {
   SUITABILITY_AXES,
   SUITABILITY_TOKENS,
   tokenDefinition,
-} from "../shared/routing-vocabulary.ts";
+} from "../shared/runtime/routing-vocabulary.ts";
 import type { CatalogOptionValue, CatalogResult, FamilyName, StartResult, StatusResult, TargetValue } from "../shared/contracts.ts";
 import {
   DISABLE_REMOVE_NOTICE,
@@ -81,14 +81,14 @@ import {
   styles,
 } from "./ui-kit.tsx";
 import type { Colors, ControlState } from "./ui-kit.tsx";
+import { useCatalogCache, useCatalogDemand } from "./catalog-demand.ts";
 import { useLanguageCard } from "./cards/language.ts";
 import { useRoutingCard, RoutingCard } from "./cards/routing.tsx";
 import { useJevCard, JevCard, JEV_KIND_DEFAULT, JEV_KIND_LABEL } from "./cards/jev.tsx";
 import { usePeerPoolCard, PeerPoolCard } from "./cards/peer-pool.tsx";
-import { useWorkTrackerCard, WorkTrackerCard } from "./cards/work-tracker.tsx";
 import { useSupervisionCard, SupervisionCard } from "./cards/supervision.tsx";
 
-// Family knowledge derives from the shared registry (shared/families.ts):
+// Family knowledge derives from the shared registry (shared/runtime/families.ts):
 // FAMILY_IDS is the canonical order, FAMILY_PICKER_ORDER the picker order
 // (registry pickerRank), FAMILY_LABEL the display names — no local literals.
 const AUTHORITY = { exclusiveAdministrativeWindow: true, verifiedHostHomeMapping: true } as const;
@@ -100,7 +100,6 @@ const MANAGER_SECTIONS = [
   { id: "profiles", label: "Role profiles" },
   { id: "pool", label: "Peer pool" },
   { id: "language", label: "Communication language" },
-  { id: "tracker", label: "Work tracker" },
   { id: "jev", label: "Jev" },
 ] as const;
 type ManagerSectionId = (typeof MANAGER_SECTIONS)[number]["id"];
@@ -141,8 +140,6 @@ export function ManagerSurface({ host, layout, theme, navigation }: PluginSurfac
   const callSetJevKey = useRpc(setJevKey);
   const callTestJev = useRpc(testJev);
   const callGetPeerPool = useRpc(getPeerPool);
-  const callGetWorkTracker = useRpc(getWorkTracker);
-  const callSetWorkTracker = useRpc(setWorkTracker);
   const callSetPeerPool = useRpc(setPeerPool);
   const callGetSupervision = useRpc(getSupervision);
   const callSetSupervision = useRpc(setSupervision);
@@ -156,16 +153,6 @@ export function ManagerSurface({ host, layout, theme, navigation }: PluginSurfac
   const [binaries, setBinaries] = useState<Record<FamilyName, string>>(
     () => Object.fromEntries(FAMILY_IDS.map(family => [family, ""])) as Record<FamilyName, string>,
   );
-  // Catalog entries are scoped `family|role` — providers.snapshot resolves
-  // the managed provider id slp-<family>-<role>, so a supervisor and a peer
-  // on the same family can report different catalogs.
-  const [catalogs, setCatalogs] = useState<Partial<Record<string, CatalogResult>>>({});
-  const [catalogRevision, setCatalogRevision] = useState(0);
-  const [catalogLoadingFor, setCatalogLoadingFor] = useState<string | null>(null);
-  // Feature definitions depend on the selected model (the host requires a
-  // provider/model draft) — cached per family|model|modeId key.
-  const [featureSets, setFeatureSets] = useState<Record<string, { defs: CatalogResult["features"]; error: string | null }>>({});
-  const [featuresLoadingFor, setFeaturesLoadingFor] = useState<string | null>(null);
   const [reconcileAction, setReconcileAction] = useState<ReconcileAction>("inspect");
   const [interruptedId, setInterruptedId] = useState("");
   const [showAdvanced, setShowAdvanced] = useState(false);
@@ -194,7 +181,6 @@ export function ManagerSurface({ host, layout, theme, navigation }: PluginSurfac
   const key = target ? targetKey(target) : null;
   const keyRef = useRef<string | null>(key);
   const autoLoadedFor = useRef<string | null>(null);
-  const refreshedActivation = useRef<string | null>(null);
 
   // Prefill the daemon home from the plugin process's own environment
   // (PASEO_HOME else ~/.paseo). A suggestion only — the §4 mapping
@@ -249,28 +235,11 @@ export function ManagerSurface({ host, layout, theme, navigation }: PluginSurfac
 
   const statusView = view.status;
 
-  // Catalogs depend on the daemon and on the executable bound by activation.
-  // A successful rebind can change the model set under the same family|role
-  // key; stale cached options must not survive it.
-  useEffect(() => {
-    refreshedActivation.current = null;
-    setCatalogs({});
-    setFeatureSets({});
-    setCatalogRevision(current => current + 1);
-  }, [key]);
-  useEffect(() => {
-    const operation = statusView?.operation;
-    if (operation?.kind !== "activate" || !["succeeded", "no-op"].includes(operation.outcome)) return;
-    if (refreshedActivation.current === operation.operationId) return;
-    refreshedActivation.current = operation.operationId;
-    setCatalogs({});
-    setFeatureSets({});
-    setCatalogRevision(current => current + 1);
-  }, [key, statusView?.operation]);
+  const cache = useCatalogCache(target, key, statusView?.operation, callCatalog);
+  const { catalogs, featureSets, catalogLoadingFor, featuresLoadingFor, retryCatalog, retryFeatureSet } = cache;
 
-  // The stale-guard predicates are shell-owned — they read keyRef so every
-  // card hook gates its post-await writes against the DISPLAYED target, not
-  // the target the request was issued for.
+  // Retain the existing card-hook argument contract. Cards now own their
+  // async session tickets, while shell patches remain target-bound.
   const sameTarget = (forTarget: TargetValue): boolean => keyRef.current === targetKey(forTarget);
   const isCurrentKey = (issueKey: string): boolean => keyRef.current === issueKey;
 
@@ -280,8 +249,7 @@ export function ManagerSurface({ host, layout, theme, navigation }: PluginSurfac
 
   // The routing card owns the stored value, the editable form, its
   // once-per-target load, prefill and save — cards/routing.tsx. `form` and
-  // `featureKeys` feed the catalog-demand computation below; the caches
-  // themselves stay shell-owned.
+  // `featureKeys` feed the catalog-demand computation below; the cache module owns their lifecycle.
   const routing = useRoutingCard({
     target,
     targetKey: key,
@@ -296,8 +264,7 @@ export function ManagerSurface({ host, layout, theme, navigation }: PluginSurfac
   });
 
   // The Jev card owns its view, draft fields, load/save/key/test handlers
-  // and target-switch reset — cards/jev.tsx. `sameTarget` is the shell-owned
-  // stale-guard mechanism passed down unchanged.
+  // and target-switch reset — cards/jev.tsx.
   const jev = useJevCard({
     target,
     targetKey: key,
@@ -309,22 +276,9 @@ export function ManagerSurface({ host, layout, theme, navigation }: PluginSurfac
     update,
   });
 
-  // The work-tracker card owns its view, once-per-target load and the
-  // immediate toggle — cards/work-tracker.tsx. Per-daemon-home like Jev:
-  // shows whenever a target resolves, independent of activation state.
-  const tracker = useWorkTrackerCard({
-    target,
-    targetKey: key,
-    sameTarget,
-    callGetWorkTracker,
-    callSetWorkTracker,
-    update,
-  });
-
   // The peer-pool card owns its snapshot/draft, seat handlers, editor UI
   // state and save/reload/import/copy — cards/peer-pool.tsx. `form` and
-  // `featureKeys` feed the catalog-demand computation below; the caches,
-  // the issueKey stale guard and the scroll helper stay shell-owned.
+  // `featureKeys` declare catalog demand; the scroll helper stays shell-owned.
   const pool = usePeerPoolCard({
     target,
     targetKey: key,
@@ -351,125 +305,11 @@ export function ManagerSurface({ host, layout, theme, navigation }: PluginSurfac
     update,
   });
 
-  // "Retry catalog" (§7.4.E): the cached error entry is only overwritten
-  // by a fresh RPC — a failed retry keeps the last error visible.
-  const retryCatalog = async (family: FamilyName, role: RoleName) => {
-    const scope = catalogScope(family, role);
-    const issueKey = keyRef.current;
-    setCatalogLoadingFor(scope);
-    try {
-      const result = await callCatalog({
-        schemaVersion: 1, family, role,
-        ...(target ? { cwd: target.daemonHome } : {}),
-      });
-      if (keyRef.current === issueKey) setCatalogs(current => ({ ...current, [scope]: result }));
-    } catch (error) {
-      if (keyRef.current === issueKey) {
-        setCatalogs(current => ({
-          ...current,
-          [scope]: { schemaVersion: 1, models: [], modes: [], features: [], error: errorMessage(error) },
-        }));
-      }
-    } finally {
-      if (keyRef.current === issueKey) {
-        setCatalogLoadingFor(current => (current === scope ? null : current));
-      }
-    }
-  };
-
-
-  // Fetch the model/mode catalog for the scopes the routing card and the
-  // peer-pool seats pick — the routing card's two role-scoped picks plus
-  // every seated family's peer scope are the only ones the form needs.
-  // Cached per family|role scope; a failure caches an error result so the
-  // picker degrades to free text instead of retrying forever.
-  const neededScopes = [
-    { family: routing.form.supervisor.family, role: "supervisor" as const },
-    { family: routing.form.lead.family, role: "lead" as const },
+  useCatalogDemand(cache, [
+    { family: routing.form.supervisor.family, role: "supervisor" },
+    { family: routing.form.lead.family, role: "lead" },
     ...pool.poolForm.seats.map(seat => ({ family: seat.family, role: "peer" as const })),
-  ].filter((scope): scope is { family: FamilyName; role: RoleName } => scope.family !== "");
-  const neededKey = [...new Set(neededScopes.map(scope => catalogScope(scope.family, scope.role)))].join(",");
-  useEffect(() => {
-    const missing = neededKey.split(",").filter(k => k !== "" && catalogs[k] === undefined);
-    if (missing.length === 0) return;
-    let cancelled = false;
-    void (async () => {
-      for (const scope of missing) {
-        const [family, role] = scope.split("|") as [FamilyName, RoleName];
-        setCatalogLoadingFor(scope);
-        try {
-          const result = await callCatalog({
-            schemaVersion: 1, family, role,
-            ...(target ? { cwd: target.daemonHome } : {}),
-          });
-          if (!cancelled) setCatalogs(current => ({ ...current, [scope]: result }));
-        } catch {
-          if (!cancelled) {
-            const failed: CatalogResult = {
-              schemaVersion: 1, models: [], modes: [], features: [],
-              error: "Catalog query failed",
-            };
-            setCatalogs(current => ({ ...current, [scope]: failed }));
-          }
-        }
-      }
-      if (!cancelled) setCatalogLoadingFor(null);
-    })();
-    return () => { cancelled = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on the needed scope set
-  }, [neededKey, catalogRevision]);
-
-  // Feature definitions need a model — fetch per role's routing-form
-  // family|role|model|modeId pick (features resolve against the managed
-  // provider id, which differs per role on the snapshot path). The routing
-  // card declares its keys; each pool seat declares its own below.
-  const neededFeatureKeys = routing.featureKeys.concat(pool.featureKeys);
-  const neededFeaturesKey = neededFeatureKeys.join(",");
-  // A failed feature-defs fetch keeps the raw-JSON fallback but records the
-  // error — silently caching [] made a dropped mobile RPC look exactly like
-  // "provider declares no features". One automatic retry absorbs transient
-  // drops; only a persistent failure degrades to the JSON field + Retry.
-  const fetchFeatureSet = async (key: string) => {
-    const [family, role, model, modeId] = key.split("|") as [FamilyName, RoleName, string, string];
-    const request = {
-      schemaVersion: 1 as const, family, role, model,
-      ...(modeId ? { modeId } : {}),
-      ...(target ? { cwd: target.daemonHome } : {}),
-    };
-    for (let attempt = 0; attempt < 2; attempt++) {
-      try {
-        const result = await callCatalog(request);
-        setFeatureSets(current => ({ ...current, [key]: { defs: result.features, error: result.error } }));
-        return;
-      } catch (error) {
-        if (attempt === 1) {
-          setFeatureSets(current => ({ ...current, [key]: { defs: [], error: errorMessage(error) } }));
-        } else {
-          await new Promise(resolve => setTimeout(resolve, 1500));
-        }
-      }
-    }
-  };
-  useEffect(() => {
-    const missing = neededFeaturesKey.split(",").filter(k => k !== "" && featureSets[k] === undefined);
-    if (missing.length === 0) return;
-    let cancelled = false;
-    void (async () => {
-      for (const key of missing) {
-        setFeaturesLoadingFor(key);
-        await fetchFeatureSet(key);
-        if (cancelled) return;
-      }
-      if (!cancelled) setFeaturesLoadingFor(null);
-    })();
-    return () => { cancelled = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on the needed feature set
-  }, [neededFeaturesKey, catalogRevision]);
-  const retryFeatureSet = async (key: string) => {
-    setFeaturesLoadingFor(key);
-    await fetchFeatureSet(key);
-    setFeaturesLoadingFor(null);
-  };
+  ], routing.featureKeys.concat(pool.featureKeys));
 
   // Poll the tracked operation until it reaches a terminal outcome. The first
   // delay is the server's pollAfterMs; later polls run every STATUS_POLL_MS.
@@ -862,15 +702,6 @@ export function ManagerSurface({ host, layout, theme, navigation }: PluginSurfac
           onChangeText={language.onChangeText}
           onApply={language.onApply}
         />
-        </View>
-      ) : null}
-
-      {target ? (
-        // Work tracker is per-daemon-home like Jev — shows whenever a target
-        // resolves. Detect, never install: the card reports bd presence and
-        // the toggle only; there is deliberately no install/init button.
-        <View style={sectionShown("tracker")}>
-        <WorkTrackerCard colors={colors} target={target} tracker={tracker} />
         </View>
       ) : null}
 

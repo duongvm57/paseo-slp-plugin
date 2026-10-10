@@ -17,11 +17,12 @@
 //                        gap the grant stays the empty sentinel and the
 //                        gate fails closed.
 //
-// slp-devin-* and non-slp providers pass through untouched — devin keeps the
-// shim+wrapper transport (the 0.8.0 ACP adapter drops systemPrompt anyway).
+// slp-devin-* and slp-opencode-* use shim+ACP wrappers: agent.create keeps
+// config intact; role bytes are injected at the subprocess protocol boundary.
+// Managed OpenCode also requires the per-open grant before its child starts.
 //
 // The role bundle is dynamically imported from the binding's materialized
-// candidate (<stableRoot>/<candidateSha256>/src/role-bundle.mjs) — never from
+// candidate (<stableRoot>/<candidateSha256>/plugin/server/runtime/cli/role-bundle.ts) — never from
 // this plugin checkout (the §2 no-cross-boundary rule); imports are cached
 // per candidate sha so a hook call costs one receipt read plus a render.
 //
@@ -38,11 +39,11 @@
 // loads candidate code.
 
 import { createHash, randomUUID } from "node:crypto";
-import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { PluginBeforeRequests } from "@getpaseo/plugin/server";
-import { HOOK_PROVIDER_ID_RE, ROLES, WRAPPER_PROVIDER_ID_RE } from "../shared/families.ts";
-import { beadsSeatEnv } from "./work-tracker.ts";
+import { familyFromProviderId, HOOK_PROVIDER_ID_RE, GRANT_PROVIDER_ID_RE, ROLES, WRAPPER_PROVIDER_ID_RE, type FamilyId } from "../shared/runtime/families.ts";
+import { candidateModulePath } from "./candidate-module.ts";
+import { DESK_HANDLE_KEY, DESK_TASK_CREATE_TICKET_KEY, type DeskSeatTaskCreateTicketContext } from "./desk-seat.ts";
 
 type AgentCreateRequest = PluginBeforeRequests["agent.create"];
 type SessionOpenRequest = PluginBeforeRequests["agent.session_open"];
@@ -62,7 +63,7 @@ export interface ActiveBinding {
   daemonHome: string;
 }
 
-/** Minimal structural type of the candidate's src/role-bundle.mjs. */
+/** Minimal structural type of the candidate's plugin/server/runtime/cli/role-bundle.ts. */
 export interface RoleBundleModule {
   roleBundle(
     root: string,
@@ -88,29 +89,47 @@ export interface RoleInjectionDeps {
   importModule?: (specifier: string) => Promise<RoleBundleModule>;
   /** Grant-token derivation seam for tests; must return a non-empty token. */
   grantToken?: (request: { agentId: string; reason: string }) => string;
-  /** Work-tracker enablement for the seat env overlay (spec §6.3).
-   *  Production wires work-tracker.ts readWorkTrackerEnabled against the
-   *  resolved daemon home's stable root. Absent dep or any read error →
-   *  disabled: sessionOpen emits only the grant overlay, exactly as before
-   *  the feature. */
-  readWorkTrackerEnabled?: () => boolean;
+  /** P2-c desk seams — both optional and asynchronous; absent means the
+   *  pre-P2-c behavior byte-for-byte for ordinary requests. Ordinary mint
+   *  remains fail-open, but a reserved task create ticket is deliberately
+   *  fail-closed before native create unless deskMint validates and consumes
+   *  its exact claim. deskMint resolves the membership handle AFTER the
+   *  seat.mint commit (G1) or null on ordinary failure; deskBind reports the
+   *  env-echoed handle and never throws. */
+  deskMint?: (input: {
+    provider: string;
+    family: FamilyId;
+    role: string;
+    cwd: string | undefined;
+    env: Record<string, string>;
+    taskCreateTicketContext?: DeskSeatTaskCreateTicketContext;
+  }) => Promise<{ handle: string } | null>;
+  deskBind?: (input: {
+    agentId: string;
+    workspaceId: string | null;
+    provider: string;
+    cwd: string;
+    reason: SessionOpenRequest["reason"];
+    purpose: SessionOpenRequest["purpose"];
+    env: Record<string, string>;
+  }) => Promise<void>;
 }
 
-// The id classes derive from the family registry (shared/families.ts): hook
-// transport = thin alias + gate launcher; wrapper transport = devin's shim.
+// The id classes derive from the family registry (shared/runtime/families.ts): hook
+// transport = thin alias + gate launcher; wrapper transport = shim + ACP.
 const HOOK_FAMILY_PROVIDER = HOOK_PROVIDER_ID_RE;
-const DEVIN_PROVIDER = WRAPPER_PROVIDER_ID_RE;
+const WRAPPER_PROVIDER = WRAPPER_PROVIDER_ID_RE;
 const VALID_ROLES = new Set<string>(ROLES);
 
 /** Resolve the role a provider id carries, or null for pass-through
- *  providers (non-slp and the devin wrapper path). Every other slp-* id must
+ *  providers (non-slp and the ACP wrapper path). Every other slp-* id must
  *  resolve — through the owned suffix or the `slp_role` feature marker (the
  *  4-provider variant seam) — or the create fails closed: an slp-* provider
  *  we cannot map would otherwise spawn a silently unroled managed seat. */
 function roleForCreate(provider: string, featureValues: Record<string, unknown> | undefined): string | null {
   const owned = HOOK_FAMILY_PROVIDER.exec(provider);
   if (owned !== null) return owned[2];
-  if (!provider.startsWith("slp-") || DEVIN_PROVIDER.test(provider)) return null;
+  if (!provider.startsWith("slp-") || WRAPPER_PROVIDER.test(provider)) return null;
   const marker = featureValues?.["slp_role"];
   if (typeof marker === "string" && VALID_ROLES.has(marker)) return marker;
   throw new Error(
@@ -155,7 +174,7 @@ export function createRoleInjection(deps: RoleInjectionDeps) {
   function loadRoleBundleModule(binding: ActiveBinding): Promise<RoleBundleModule> {
     const cached = moduleCache.get(binding.candidateSha256);
     if (cached !== undefined) return cached;
-    const specifier = pathToFileURL(join(binding.runtimePath, "src", "role-bundle.mjs")).href;
+    const specifier = pathToFileURL(candidateModulePath(binding.runtimePath, "role-bundle")).href;
     const promise = Promise.resolve(importModule(specifier));
     promise.catch(() => {
       if (moduleCache.get(binding.candidateSha256) === promise) {
@@ -166,6 +185,70 @@ export function createRoleInjection(deps: RoleInjectionDeps) {
     return promise;
   }
 
+  /** P2-c mint — ordinary requests keep the fail-open W5/G4 behavior. A
+   *  reserved task ticket takes the deliberate fail-closed branch: missing
+   *  or rejecting desk validation aborts that native create without echoing
+   *  the ticket. No seam, or an unknown family, means no handle for ordinary
+   *  requests — those still return exactly as before P2-c. */
+  async function mintFor(input: {
+    provider: string;
+    family: FamilyId | null;
+    role: string;
+    config: AgentCreateRequest["config"];
+    env: Record<string, string>;
+    taskCreateTicketContext?: DeskSeatTaskCreateTicketContext;
+  }): Promise<string | null> {
+    const seam = deps.deskMint;
+    if (seam === undefined || input.family === null) {
+      if (input.taskCreateTicketContext !== undefined) throw new Error("task create ticket cannot be validated by the desk mint seam");
+      return null;
+    }
+    try {
+      const out = await seam({
+        provider: input.provider,
+        family: input.family,
+        role: input.role,
+        cwd: input.config.cwd,
+        env: input.env,
+        ...(input.taskCreateTicketContext === undefined ? {} : { taskCreateTicketContext: input.taskCreateTicketContext }),
+      });
+      if (out === null && input.taskCreateTicketContext !== undefined) throw new Error("task create ticket claim was not accepted");
+      return out === null ? null : out.handle;
+    } catch {
+      if (input.taskCreateTicketContext !== undefined) throw new Error("task create ticket claim could not be validated");
+      return null;
+    }
+  }
+
+  function taskCreateTicketContext(request: AgentCreateRequest): DeskSeatTaskCreateTicketContext | undefined {
+    const hasTicket = request.env !== undefined && Object.hasOwn(request.env, DESK_TASK_CREATE_TICKET_KEY);
+    if (!hasTicket) return undefined;
+    const value = request.env?.[DESK_TASK_CREATE_TICKET_KEY];
+    const config = request.config;
+    if (typeof value !== "string" || !/^[0-9a-f]{64}$/.test(value) || typeof config?.provider !== "string" ||
+        typeof config?.cwd !== "string" || config.cwd.length === 0) {
+      throw new Error("task create ticket hook context is invalid");
+    }
+    return {
+      ticket: value,
+      config: {
+        provider: config.provider,
+        model: typeof config.model === "string" ? config.model : null,
+        cwd: config.cwd,
+        modeId: typeof config.modeId === "string" ? config.modeId : null,
+        thinkingOptionId: typeof config.thinkingOptionId === "string" ? config.thinkingOptionId : null,
+        featureValues: config.featureValues ?? null,
+      },
+    };
+  }
+
+  function envAfterTicket(request: AgentCreateRequest, handle: string): Record<string, string> {
+    const env = { ...(request.env ?? {}) };
+    delete env[DESK_TASK_CREATE_TICKET_KEY];
+    env[DESK_HANDLE_KEY] = handle;
+    return env;
+  }
+
   return {
     /** agent.create before-hook. Returns nothing for pass-through providers;
      *  throws (aborts the create) for slp-* providers whose role, binding or
@@ -173,9 +256,34 @@ export function createRoleInjection(deps: RoleInjectionDeps) {
     async agentCreate(input: { request: AgentCreateRequest }) {
       const config = input.request.config;
       const provider = config?.provider;
+      const taskTicketContext = taskCreateTicketContext(input.request);
+      if (taskTicketContext !== undefined && (typeof provider !== "string" || !provider.startsWith("slp-"))) {
+        throw new Error("task create ticket is unsupported for this native provider");
+      }
       if (typeof provider !== "string" || !provider.startsWith("slp-")) return;
+      // R2 (C10) — the ACP wrapper path grafts ONLY the desk handle
+      // into request.env: no config change, no binding, no role bytes. A
+      // failed or absent mint returns the request untouched, exactly as
+      // before P2-c.
+      const wrapper = WRAPPER_PROVIDER.exec(provider);
+      if (wrapper !== null) {
+        const handle = await mintFor({
+          provider,
+          family: familyFromProviderId(provider),
+          role: wrapper[2],
+          config,
+          env: input.request.env ?? {},
+          ...(taskTicketContext === undefined ? {} : { taskCreateTicketContext: taskTicketContext }),
+        });
+        if (handle === null && taskTicketContext !== undefined) throw new Error("task create ticket claim is unavailable");
+        if (handle === null) return;
+        return {
+          ...input.request,
+          env: taskTicketContext === undefined ? { ...(input.request.env ?? {}), [DESK_HANDLE_KEY]: handle } : envAfterTicket(input.request, handle),
+        };
+      }
       const role = roleForCreate(provider, config.featureValues);
-      if (role === null) return; // slp-devin-* — wrapper transport handles it
+      if (role === null) return;
       const binding = deps.readActiveBinding();
       if (binding === null) {
         throw new Error(
@@ -202,36 +310,69 @@ export function createRoleInjection(deps: RoleInjectionDeps) {
             ? bundle.instructions + existing
             : `${bundle.instructions}\n${existing}`
           : bundle.instructions;
+      // P2-c — after every fail-closed gate has passed, mint the seat
+      // membership; the handle joins the request env only after the
+      // seat.mint commit (G1). No handle → the request as before P2-c.
+      const handle = await mintFor({
+        provider,
+        family: familyFromProviderId(provider),
+        role,
+        config,
+        env: input.request.env ?? {},
+        ...(taskTicketContext === undefined ? {} : { taskCreateTicketContext: taskTicketContext }),
+      });
+      if (handle === null) {
+        if (taskTicketContext !== undefined) throw new Error("task create ticket claim is unavailable");
+        return {
+          ...input.request,
+          config: { ...config, systemPrompt },
+        };
+      }
       return {
         ...input.request,
         config: { ...config, systemPrompt },
+        env: taskTicketContext === undefined ? { ...(input.request.env ?? {}), [DESK_HANDLE_KEY]: handle } : envAfterTicket(input.request, handle),
       };
     },
 
-    /** agent.session_open before-hook: overlay the per-open grant onto the
-     *  provider env for hook-family managed ids — plus the beads seat env
-     *  (BEADS_ACTOR and the two BD_* defaults) when the manager-owned
-     *  work-tracker setting is enabled. A disabled/absent/corrupt setting
-     *  emits only the grant overlay: any read error is a gap, never an
-     *  aborted open. All other fields are returned unchanged (the host
-     *  rejects changes beyond env). Runs for every open reason — create,
-     *  resume, refresh, import — so a resumed seat keeps its actor. */
+    /** agent.session_open before-hook: with the desk seam present, first
+     *  bind the env-echoed handle for every managed slp-* open (the seam's
+     *  GATE/JOIN cells decide whether anything happens), then overlay as
+     *  before. Without the seam the hook stays synchronous and returns
+     *  byte-for-byte the pre-P2-c result. The overlay itself is unchanged:
+     *  a per-open grant only; all other fields return unchanged (the host
+     *  rejects changes beyond env). */
     sessionOpen(input: { request: SessionOpenRequest }) {
       const request = input.request;
-      const owned = HOOK_FAMILY_PROVIDER.exec(request.provider);
-      if (owned === null) return;
-      let enabled = false;
-      try {
-        enabled = deps.readWorkTrackerEnabled?.() === true;
-      } catch { /* a setting read failure must never abort the open */ }
-      return {
-        ...request,
-        env: {
-          ...(request.env ?? {}),
-          ...(enabled ? beadsSeatEnv({ role: owned[2], agentId: request.agentId, env: request.env ?? {} }) : {}),
-          SLP_SESSION_OPEN_GRANT: grantToken(request),
-        },
+      const overlay = () => {
+        const owned = GRANT_PROVIDER_ID_RE.exec(request.provider);
+        if (owned === null) return;
+        return {
+          ...request,
+          env: {
+            ...(request.env ?? {}),
+            SLP_SESSION_OPEN_GRANT: grantToken(request),
+          },
+        };
       };
+      const seam = deps.deskBind;
+      if (seam === undefined || !request.provider.startsWith("slp-")) return overlay();
+      // P2-c — bind before the overlay (§5); fail-open belt: the seam never
+      // rejects, and a belt catch keeps a seam bug from aborting the open.
+      return (async () => {
+        try {
+          await seam({
+            agentId: request.agentId,
+            workspaceId: request.workspaceId,
+            provider: request.provider,
+            cwd: request.cwd,
+            reason: request.reason,
+            purpose: request.purpose,
+            env: request.env ?? {},
+          });
+        } catch { /* fail-open: the open proceeds unbound */ }
+        return overlay();
+      })();
     },
   };
 }

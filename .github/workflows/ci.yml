@@ -9,24 +9,80 @@ on:
 permissions:
   contents: read
 
+env:
+  # The test-shard matrix below must list exactly 1..SHARD_COUNT; the validate
+  # coverage gate re-measures the partition and fails closed on any missing,
+  # duplicate or extra shard.
+  SHARD_COUNT: '4'
+
 jobs:
-  validate:
+  test-shard:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
     steps:
       - uses: actions/checkout@v7
 
       - uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version: '24'
+          cache: npm
+
+      - name: Install Paseo host modules for parity coverage
+        run: |
+          MODS="$RUNNER_TEMP/paseo-cli/lib/node_modules/@getpaseo/cli/node_modules"
+          npm install --global --prefix "$RUNNER_TEMP/paseo-cli" --no-audit --no-fund "@getpaseo/cli@0.10.0"
+          test -f "$MODS/@getpaseo/server/dist/server/server/daemon-config-store.js"
+          echo "PASEO_CLI_MODULES=$MODS" >> "$GITHUB_ENV"
+
+      - run: npm ci
+
+      - name: Test shard ${{ matrix.shard }}/${{ env.SHARD_COUNT }}
+        run: |
+          temp_paseo_home="$(mktemp -d)"
+          trap 'rm -rf "$temp_paseo_home"' EXIT
+          record_dir="${RUNNER_TEMP}/shard-record-${{ matrix.shard }}"
+          PASEO_HOME="$temp_paseo_home" node scripts/test-isolated.mjs \
+            "--shard=${{ matrix.shard }}/${{ env.SHARD_COUNT }}" \
+            "--slp-record=${record_dir}"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: shard-${{ matrix.shard }}
+          path: ${{ runner.temp }}/shard-record-${{ matrix.shard }}
+          retention-days: 1
+
+  validate:
+    needs: test-shard
+    # Run even when a shard failed, was cancelled or was skipped, so the
+    # required check fails by name instead of disappearing as a skip.
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node: ['24']
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ matrix.node }}
           cache: npm
 
       - run: npm ci
 
-      - name: Test
-        run: |
-          temp_paseo_home="$(mktemp -d)"
-          trap 'rm -rf "$temp_paseo_home"' EXIT
-          PASEO_HOME="$temp_paseo_home" npm test
+      - name: Gate on shard results
+        run: node scripts/test-shards-gate.mjs "${{ needs.test-shard.result }}"
+
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: shard-*
+          path: ${{ runner.temp }}/shard-records
+
+      - name: Verify shard coverage
+        run: node scripts/test-shards-verify.mjs "${RUNNER_TEMP}/shard-records" "--expect-node=${{ matrix.node }}" "--expect-count=${{ env.SHARD_COUNT }}"
 
       - run: npm run typecheck
 

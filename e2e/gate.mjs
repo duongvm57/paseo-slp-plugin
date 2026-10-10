@@ -3,13 +3,13 @@
 // and runtime-source gates before anything may launch.
 import { mkdirSync, readFileSync, readdirSync, realpathSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
-import { identity, hash } from '../src/package.mjs';
+import { identity, hash } from '../plugin/server/runtime/cli/package.ts';
 import { scenarios } from './scenarios.mjs';
 import { criterionIds, criterionEvidence } from './criteria.mjs';
 import { evidenceKinds, evidenceVersion } from './evidence.mjs';
-import { savedProfileBinding, roles, profileRoles, providerId } from '../src/profiles.mjs';
-import { validateCatalog } from '../src/routing.mjs';
-import { bindingCheck, verifyProvider } from '../src/binding.mjs';
+import { savedProfileBinding, roles, profileRoles, providerId } from '../plugin/server/runtime/cli/profiles.ts';
+import { validateCatalog } from '../plugin/server/runtime/cli/routing.ts';
+import { bindingCheck, verifyProvider } from '../plugin/server/runtime/cli/binding.ts';
 import { getScenario, harnessIdentity, nonempty, now, put, requireValue, reviewIntegrityVersion, sourceRoot } from './runs.mjs';
 import { summary } from './report.mjs';
 import { reviewHistory } from './integrity.mjs';

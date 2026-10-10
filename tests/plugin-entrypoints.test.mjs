@@ -17,7 +17,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { tmpdir } from 'node:os';
@@ -45,28 +45,42 @@ test('paseo-plugin.json parses through the host readPluginManifest', async t => 
   const manifest = await host.readPluginManifest(PLUGIN_DIR);
   assert.deepEqual(manifest, {
     id: 'paseo-slp',
-    requirements: { paseo: '>=0.8.0' },
+    requirements: { paseo: '>=0.10.3' },
     build: [['npm', 'install', '--omit=dev', '--no-audit', '--no-fund']],
   });
 });
 
-test('host manifest validator rejects invented/extra keys', async t => {
+test('host manifest rejects invalid fields and never preserves unknown top-level keys', async t => {
   const host = await loadHostPluginModules();
   if (!host || typeof host.readPluginManifest !== 'function') {
     t.skip('HOST MANIFEST VALIDATOR UNAVAILABLE — rejection coverage skipped (set PASEO_CLI_MODULES; see warning above)');
     return;
   }
   const cases = [
-    { name: 'extra top-level key', doc: { id: 'x', extraField: true } },
+    { name: 'extra top-level key', doc: { id: 'x', extraField: true }, unknownKey: 'extraField' },
     { name: 'invented requirements key', doc: { id: 'x', requirements: { bogus: '1' } } },
     { name: 'missing id', doc: { requirements: { paseo: '>=0.8.0' } } },
     { name: 'non-string id', doc: { id: 42 } },
   ];
-  for (const { name, doc } of cases) {
+  for (const { name, doc, unknownKey } of cases) {
     const dir = mkdtempSync(join(tmpdir(), 'slp-manifest-'));
     t.after(() => rmSync(dir, { recursive: true, force: true }));
     writeFileSync(join(dir, 'paseo-plugin.json'), JSON.stringify(doc));
-    await assert.rejects(() => host.readPluginManifest(dir), undefined, name);
+    if (unknownKey) {
+      // 0.10.x rejects; 0.11.x strips. Neither may retain the unknown key.
+      // Keep assertions outside the rejection handler so a failed assertion
+      // cannot be mistaken for the host rejecting the manifest.
+      const outcome = await host.readPluginManifest(dir).then(
+        manifest => ({ accepted: true, manifest }),
+        () => ({ accepted: false }),
+      );
+      if (outcome.accepted) {
+        assert.equal(Object.hasOwn(outcome.manifest, unknownKey), false, name);
+        assert.equal(outcome.manifest.id, doc.id, 'accepted manifest retains its valid identity');
+      }
+    } else {
+      await assert.rejects(() => host.readPluginManifest(dir), undefined, name);
+    }
   }
 });
 
@@ -110,6 +124,20 @@ export const createLauncherBuilder = () => ({
   async publish() { throw new Error('not exercised by contribute()'); },
   async verify() { throw new Error('not exercised by contribute()'); },
 });
+export const createDeskBridge = deps => {
+  const probe = globalThis.__paseoDeskBridgeProbe;
+  if (probe) probe.deps = deps;
+  return {
+    start() {},
+    state() { return { kind: 'listening' }; },
+    notePaseo(paseo) { if (paseo === undefined) return; deps.paseoRef.current = paseo; if (probe) probe.notePaseo.push(paseo); },
+    noteDispatch(paseo) { if (probe) probe.noteDispatch.push(paseo); },
+    taskTurnEnded() {},
+    agentCreateGraft() {},
+    sessionOpenStash() {},
+    stop() { if (probe) probe.stopCalls++; },
+  };
+};
 `,
   );
   return file;
@@ -117,12 +145,17 @@ export const createLauncherBuilder = () => ({
 
 // Import the real contribute() with the lane-stub resolve hook armed (real
 // lane modules win; stubs only cover lane-isolated worktrees).
-async function importContribute(t) {
+async function importContribute(t, options = {}) {
   const stubFile = writeLaneStubs(t);
   const stubUrl = pathToFileURL(stubFile).href;
   const hooks = registerHooks({
     resolve(specifier, context, nextResolve) {
-      if (context.parentURL?.endsWith('/plugin/index.server.ts') && LANE_SPECIFIERS.has(specifier)) {
+      const parentPath = context.parentURL?.split('?')[0];
+      if (parentPath?.endsWith('/plugin/index.server.ts') && options.deskBridgeProbe === true
+        && specifier === './server/desk-bridge.ts') {
+        return { url: `${stubUrl}#desk-bridge`, shortCircuit: true };
+      }
+      if (parentPath?.endsWith('/plugin/index.server.ts') && LANE_SPECIFIERS.has(specifier)) {
         // Real lane modules first — the stub is only a fallback for
         // lane-isolated worktrees where the sibling module is absent.
         try {
@@ -136,7 +169,9 @@ async function importContribute(t) {
   });
   t.after(() => hooks.deregister());
 
-  const entry = await import(pathToFileURL(join(PLUGIN_DIR, 'index.server.ts')).href);
+  const entryUrl = pathToFileURL(join(PLUGIN_DIR, 'index.server.ts'));
+  if (options.deskBridgeProbe === true) entryUrl.searchParams.set('deskBridgeProbe', 'observer-absent');
+  const entry = await import(entryUrl.href);
   return entry.default;
 }
 
@@ -182,12 +217,15 @@ test('contribute() registers the RPCs plus the two before-hooks, cleanup unregis
       'catalog',
       'deactivate',
       'disable-supervision-notifications',
+      'enforcement-recover-lock',
+      'enforcement-runtime-pin',
+      'enforcement-status',
       'get-jev',
       'get-peer-pool',
       'get-role-routing',
       'get-supervision',
       'get-supervision-status',
-      'get-work-tracker',
+      'get-workspace-workflow',
       'local-target',
       'reconcile',
       'set-jev',
@@ -196,7 +234,6 @@ test('contribute() registers the RPCs plus the two before-hooks, cleanup unregis
       'set-peer-pool',
       'set-role-routing',
       'set-supervision',
-      'set-work-tracker',
       'status',
       'test-jev',
     ],
@@ -204,17 +241,31 @@ test('contribute() registers the RPCs plus the two before-hooks, cleanup unregis
   for (const { handler } of registrations) {
     assert.equal(typeof handler, 'function');
   }
+  // Two hooks per event: the P2-c role-injection pair, then the P2-d
+  // bridge graft/session-stash pair — registration order is the wiring
+  // contract, so names sort identically and duplicates are expected.
   assert.deepEqual(
     beforeHooks.map(h => h.name).sort(),
-    ['agent.create', 'agent.session_open'],
+    ['agent.create', 'agent.create', 'agent.session_open', 'agent.session_open'],
   );
   for (const { handler } of beforeHooks) {
     assert.equal(typeof handler, 'function');
   }
-  // Shadow-observer lifecycle hooks (Phase B): synchronous capture only.
+  // Shadow-observer lifecycle hooks (Phase B) plus the P2-c desk
+  // registration/revoke handlers — the desk handlers register separately on
+  // the same two events, so those names appear twice.
   assert.deepEqual(
     onHooks.map(h => h.name).sort(),
-    ['agent.archived', 'agent.created', 'agent.turn_ended', 'agent.turn_started'],
+    [
+      'agent.archived',
+      'agent.archived',
+      'agent.created',
+      'agent.created',
+      'agent.turn_ended',
+      'agent.turn_ended',
+      'agent.turn_started',
+      'agent.turn_started',
+    ],
   );
   for (const { handler } of onHooks) {
     assert.equal(typeof handler, 'function');
@@ -223,28 +274,128 @@ test('contribute() registers the RPCs plus the two before-hooks, cleanup unregis
   assert.doesNotThrow(() => cleanup());
   assert.deepEqual(
     unregistered.sort(),
-    ['agent.archived', 'agent.create', 'agent.created', 'agent.session_open', 'agent.turn_ended', 'agent.turn_started'],
+    [
+      'agent.archived',
+      'agent.archived',
+      'agent.create',
+      'agent.create',
+      'agent.created',
+      'agent.created',
+      'agent.session_open',
+      'agent.session_open',
+      'agent.turn_ended',
+      'agent.turn_ended',
+      'agent.turn_started',
+      'agent.turn_started',
+    ],
   );
   assert.doesNotThrow(() => cleanup(), 'cleanup must be idempotent');
 });
 
-test('contribute() leaves the shadow observer inert when the served home is only a default guess', async t => {
-  const contribute = await importContribute(t);
+test('turn_started stashes the SDK for Desk without the optional observer and cleanup unregisters it', async t => {
+  const deskProbe = { deps: null, notePaseo: [], noteDispatch: [], stopCalls: 0 };
+  globalThis.__paseoDeskBridgeProbe = deskProbe;
+  t.after(() => { if (globalThis.__paseoDeskBridgeProbe === deskProbe) delete globalThis.__paseoDeskBridgeProbe; });
+  const contribute = await importContribute(t, { deskBridgeProbe: true });
   // No PASEO_HOME export → detectDaemonHome() answers source "default" and
   // the observer must stay null: a default-guessed home is never observed
   // (spec §Configuration — a prefill is not proof of host-home mapping).
+  // The P2-c desk handshake handlers are NOT gated the same way: their
+  // stable-root resolution deliberately accepts the default home (contract
+  // §4.2, Q1), so exactly the desk pair registers here.
   const prevHome = process.env.PASEO_HOME;
   delete process.env.PASEO_HOME;
   t.after(() => { if (prevHome !== undefined) process.env.PASEO_HOME = prevHome; });
-  const onHooks = [];
+  // Hermetic default home: with PASEO_HOME unset, detectDaemonHome() resolves
+  // join(homedir(), '.paseo') and contribute() realpaths it for the desk-seat
+  // stableRoot — point HOME at a fixture dir holding a real .paseo so the
+  // test never depends on the ambient user home. The default source still
+  // leaves the observer inert; only the desk handshake pair registers.
+  const defaultHome = mkdtempSync(join(tmpdir(), 'paseo-entry-defaulthome-'));
+  mkdirSync(join(defaultHome, '.paseo'));
+  const prevHomeDir = process.env.HOME;
+  process.env.HOME = defaultHome;
+  t.after(() => {
+    if (prevHomeDir === undefined) delete process.env.HOME;
+    else process.env.HOME = prevHomeDir;
+    rmSync(defaultHome, { recursive: true, force: true });
+  });
+  // L1(3) — the warn spy is installed BEFORE contribute(): the observation
+  // window covers construction and the whole drive, so a warning emitted
+  // during contribute() itself cannot escape the oracle.
+  const warnings = [];
+  const originalWarn = console.warn;
+  console.warn = line => warnings.push(String(line));
+  t.after(() => { console.warn = originalWarn; });
+  const registrations = [];
+  const unregistered = [];
   const server = {
     handle() {},
     before() { return () => {}; },
-    on(name) { onHooks.push(name); return () => {}; },
+    on(name, handler) { registrations.push({ name, handler }); return () => unregistered.push(name); },
   };
   const cleanup = contribute(server);
-  assert.deepEqual(onHooks, [], 'no lifecycle hooks register without a verified served home');
+  assert.equal(deskProbe.deps.taskHost(), null, 'a resumed ACP turn has no SDK slot before its lifecycle start callback');
+  assert.equal(deskProbe.deps.paseoRef.current, null, 'Desk has no identity context before turn_started');
+  // The desk registers membership lifecycle plus positive task-send
+  // observation. The optional communication observer remains inert.
+  assert.deepEqual(
+    registrations.map(r => r.name).sort(),
+    ['agent.archived', 'agent.created', 'agent.turn_ended', 'agent.turn_started'],
+    'only desk lifecycle registers without a verified served home; communication supervision stays inert',
+  );
+  // (c) provenance: driving each handler with an slp-* payload over a
+  // non-git cwd yields exactly the desk diagnostic warn and never throws —
+  // the desk handlers are fail-open. An observer handler driven the same
+  // way would throw on the missing hook context, so a mutant that swaps
+  // the pairs fails here. The non-git cwd keeps the drive off the real
+  // daemon home (the resolver fails before any store access).
+  const plainDir = mkdtempSync(join(tmpdir(), 'paseo-entry-plain-'));
+  t.after(() => rmSync(plainDir, { recursive: true, force: true }));
+  const slpEvent = {
+    agent: { id: 'agent-1', workspaceId: null, parentAgentId: null, provider: 'slp-codex-peer', cwd: plainDir, title: null },
+  };
+  const expectedOp = { 'agent.created': 'register', 'agent.archived': 'revoke' };
+  for (const { name, handler } of registrations) {
+    assert.equal(typeof handler, 'function');
+    if (name === 'agent.turn_started') continue;
+    if (name === 'agent.turn_ended') {
+      const before = warnings.length;
+      await handler({ agent: slpEvent.agent, turnId: 'fixture-turn', outcome: { kind: 'completed' }, timeline: [] }, {});
+      assert.equal(warnings.length, before, 'unbound task observation stays inert');
+      continue;
+    }
+    await handler(slpEvent, {});
+    assert.deepEqual(warnings.at(-1), `slp: desk ${expectedOp[name]} skipped: not-git`, `${name} handler is the desk ${expectedOp[name]}`);
+    const beforeSilent = warnings.length;
+    await handler({ agent: { ...slpEvent.agent, provider: 'custom-tool' } }, {});
+    assert.equal(warnings.length, beforeSilent, 'a non-slp provider is a silent no-op');
+  }
+  const started = registrations.filter(row => row.name === 'agent.turn_started');
+  assert.equal(started.length, 1, 'the SDK stash registers even though observer is absent');
+  const identity = { id: 'agent-1', provider: 'slp-codex-peer', cwd: plainDir, workspaceId: null };
+  const paseo = {
+    agents: { ref: id => ({ refresh: async () => ({ agent: id === identity.id ? identity : null, project: null }) }) },
+  };
+  await started[0].handler({ agent: slpEvent.agent, turnId: 'fixture-start' }, { paseo, signal: new AbortController().signal });
+  assert.strictEqual(deskProbe.deps.taskHost(), paseo, 'TaskHostApi receives the exact lifecycle SDK object');
+  assert.strictEqual(deskProbe.deps.paseoRef.current, paseo, 'Desk bridge identity uses that same SDK object');
+  assert.deepEqual(deskProbe.notePaseo, [paseo]);
+  assert.deepEqual(deskProbe.noteDispatch, [], 'a lifecycle hook never claims RPC dispatch evidence');
+  const refreshed = await deskProbe.deps.paseoRef.current.agents.ref(identity.id).refresh();
+  assert.strictEqual(refreshed.agent, identity, 'the captured Desk identity context can refresh its live agent');
+  // L1(3) — the FULL console.warn stream from the spy install (before
+  // contribute()) through the whole drive is exactly the two desk
+  // diagnostics: no filter, no narrower window — any extra warning
+  // (prefixed or not) fails the oracle.
+  assert.deepEqual(
+    warnings,
+    ['slp: desk register skipped: not-git', 'slp: desk revoke skipped: not-git'],
+    'every console.warn from construction through the drive is exactly the two desk diagnostics',
+  );
   cleanup();
+  assert.equal(unregistered.filter(name => name === 'agent.turn_started').length, 1, 'cleanup unregisters the independent SDK stash hook');
+  assert.equal(deskProbe.stopCalls, 1);
 });
 
 // ---------------------------------------------------------------------------
@@ -295,7 +446,7 @@ test('the catalog RPC passes per-model thinking options through to CatalogOutput
   assert.deepEqual(CatalogOutput.parse(result), result);
 });
 
-test('CatalogModel round-trips thinking options and stays strict', () => {
+test('CatalogModel round-trips thinking options and strips future host keys', () => {
   const model = {
     id: 'gpt-5.6',
     label: 'GPT 5.6',
@@ -305,7 +456,9 @@ test('CatalogModel round-trips thinking options and stays strict', () => {
     defaultThinkingOptionId: 'medium',
   };
   assert.deepEqual(CatalogModel.parse(model), model);
-  assert.throws(() => CatalogModel.parse({ ...model, bogus: 1 }));
+  assert.deepEqual(CatalogModel.parse({ ...model, futureHostKey: true,
+    thinkingOptions: model.thinkingOptions.map(option => ({ ...option, futureHostKey: true })),
+  }), model);
 });
 
 // ---------------------------------------------------------------------------

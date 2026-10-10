@@ -12,22 +12,24 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync 
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { join } from 'node:path';
 import { createRoleInjection } from '../plugin/server/role-injection.ts';
+import { DESK_FIELD_POLICY, DESK_TASK_CREATE_TICKET_KEY } from '../plugin/server/desk-seat.ts';
 import { desiredProviderEntries } from '../plugin/server/config-transaction.ts';
 import { createMaterializer } from '../plugin/server/materializer.ts';
 import { embeddedPayload } from '../plugin/server/generated/runtime-payload.ts';
 import { OperationConflict } from '../plugin/shared/contracts.ts';
-import { FAMILY_LABEL } from '../plugin/shared/families.ts';
-import { identity, install } from '../src/package.mjs';
-import { roleBundle } from '../src/role-bundle.mjs';
+import { FAMILY_LABEL } from '../plugin/shared/runtime/families.ts';
+import { identity, install } from '../plugin/server/runtime/cli/package.ts';
+import { roleBundle } from '../plugin/server/runtime/cli/role-bundle.ts';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const GATE = join(root, 'bin', 'slp-gate.mjs');
 const HOOK_FAMILIES = ['codex', 'pi', 'claude'];
-const ALL_FAMILIES = [...HOOK_FAMILIES, 'devin'];
+const ALL_FAMILIES = [...HOOK_FAMILIES, 'devin', 'opencode'];
 const ROLES = ['supervisor', 'lead', 'peer'];
 const HOOK_IDS = HOOK_FAMILIES.flatMap(f => ROLES.map(r => `slp-${f}-${r}`));
 const DEVIN_IDS = ROLES.map(r => `slp-devin-${r}`);
-const OWNED_IDS = [...HOOK_IDS, ...DEVIN_IDS].sort();
+const WRAPPER_IDS = [...DEVIN_IDS, ...ROLES.map(r => `slp-opencode-${r}`)];
+const OWNED_IDS = [...HOOK_IDS, ...WRAPPER_IDS].sort();
 
 function tmp(t, prefix = 'roleinj-') {
   mkdirSync(join(root, '.local-checks'), { recursive: true });
@@ -37,7 +39,7 @@ function tmp(t, prefix = 'roleinj-') {
 }
 
 // A real materialized candidate (same layout the stable root publishes) so
-// the hook's dynamic import loads the candidate's own role-bundle.mjs.
+// the hook's dynamic import loads the candidate's own role-bundle.ts.
 function fixtureCandidate(t) {
   const dir = tmp(t);
   const home = join(dir, 'home');
@@ -100,18 +102,184 @@ function makeInjection(t, overrides = {}) {
 // agent.create — role resolution and injection
 // ---------------------------------------------------------------------------
 
-test('agent.create: all nine hook-family ids inject; all three devin ids pass through', async t => {
-  const { injection } = makeInjection(t);
+test('agent.create: hook-family ids inject; ACP wrapper ids graft only the desk handle (R2, C10)', async t => {
+  const mintInputs = [];
+  const { injection } = makeInjection(t, {
+    deps: {
+      deskMint: async input => {
+        mintInputs.push({ ...input });
+        return { handle: `${'ab'.repeat(32)}${''.padEnd(0)}`.slice(0, 64) };
+      },
+    },
+  });
   for (const id of OWNED_IDS) {
     const out = await injection.agentCreate(createReq(id));
-    if (DEVIN_IDS.includes(id)) {
-      assert.equal(out, undefined, `${id} must pass through untouched`);
+    if (WRAPPER_IDS.includes(id)) {
+      // C10: the devin wrapper path returns the request with ONLY
+      // env.SLP_DESK_HANDLE added — config is never touched.
+      assert.ok(out?.config, `${id} returns the request`);
+      assert.equal(out.config.provider, id, `${id} keeps its config`);
+      assert.equal(out.config.systemPrompt, undefined, `${id} gets no role bytes`);
+      assert.match(out.env.SLP_DESK_HANDLE, /^[0-9a-f]{64}$/, `${id} carries only the desk handle in env`);
       continue;
     }
     assert.ok(out?.config?.systemPrompt?.startsWith('SLP role='), `${id} must get role bytes`);
     assert.equal(out.config.provider, id, 'provider identity is never rewritten');
     assert.equal(out.config.cwd, '/work');
   }
+  // The mint input carries exactly the §2.1 mint RECORD cells: provider,
+  // family, role, cwd — one call per owned id.
+  assert.equal(mintInputs.length, OWNED_IDS.length);
+  assert.deepEqual(mintInputs.map(input => input.provider).sort(), OWNED_IDS);
+});
+
+test('agent.create: mint.config IGNORED cells never reach the mint input (policy §2.1)', async t => {
+  const mintInputs = [];
+  const { injection } = makeInjection(t, {
+    deps: {
+      deskMint: async input => {
+        mintInputs.push({ ...input });
+        return { handle: 'c'.repeat(64) };
+      },
+    },
+  });
+  // Every IGNORED cell of the mint policy is mutated; the mint input for
+  // the same provider/cwd is unchanged — the policy is the only field list.
+  const ignored = Object.entries(DESK_FIELD_POLICY.mint.config)
+    .filter(([, rule]) => rule.cell === 'IGNORED')
+    .map(([field]) => field);
+  assert.ok(ignored.length >= 1, 'the policy names its IGNORED mint cells');
+  const baseline = await injection.agentCreate(createReq('slp-codex-peer'));
+  const baselineInput = mintInputs.at(-1);
+  for (const field of ignored) {
+    await injection.agentCreate(createReq('slp-codex-peer', { [field]: 'mutated' }));
+    const input = mintInputs.at(-1);
+    assert.deepEqual(
+      { provider: input.provider, family: input.family, role: input.role, cwd: input.cwd },
+      { provider: baselineInput.provider, family: baselineInput.family, role: baselineInput.role, cwd: baselineInput.cwd },
+      `${field} is IGNORED — mutating it cannot change the mint input`,
+    );
+  }
+});
+
+test('agent.create: a null mint leaves the request byte-identical to the no-seam path', async t => {
+  const { injection } = makeInjection(t, {
+    deps: { deskMint: async () => null },
+  });
+  const out = await injection.agentCreate(createReq('slp-codex-peer'));
+  assert.ok(out.config.systemPrompt.startsWith('SLP role='));
+  assert.equal(out.env, undefined, 'no handle → no env graft, exactly the pre-P2-c shape');
+  const devin = await injection.agentCreate(createReq('slp-devin-peer'));
+  assert.equal(devin, undefined, 'a failed devin mint is the untouched pass-through');
+});
+
+test('agent.create: a rejecting seam never aborts the create (W5 fail-open)', async t => {
+  const { injection } = makeInjection(t, {
+    deps: { deskMint: async () => null },
+  });
+  const out = await injection.agentCreate(createReq('slp-codex-peer'));
+  assert.ok(out.config.systemPrompt.startsWith('SLP role='), 'the create proceeds unbound');
+});
+
+test('session_open: with the desk seam the bind runs before the overlay for every slp-* id', async t => {
+  const bindInputs = [];
+  const { injection } = makeInjection(t, {
+    deps: {
+      deskBind: async input => {
+        bindInputs.push({ ...input });
+      },
+    },
+  });
+  // Hook families AND devin bind (§5); the overlay still only applies to
+  // hook families — devin's open returns undefined as before.
+  for (const provider of ['slp-codex-peer', 'slp-devin-peer']) {
+    const out = await injection.sessionOpen(openReq(provider));
+    if (provider === 'slp-devin-peer') {
+      assert.equal(out, undefined, 'devin keeps passing through the overlay');
+    } else {
+      assert.ok(out.env.SLP_SESSION_OPEN_GRANT, `${provider} keeps the grant overlay`);
+    }
+  }
+  assert.deepEqual(bindInputs.map(input => input.provider).sort(), ['slp-codex-peer', 'slp-devin-peer']);
+  // The composer passes the GATE cells through verbatim; the seam's own
+  // gate (desk-seat suite) decides whether the phase runs.
+  for (const reason of ['resume', 'refresh', 'import']) {
+    bindInputs.length = 0;
+    await injection.sessionOpen(openReq('slp-codex-peer', { reason }));
+    assert.deepEqual(bindInputs.map(input => input.reason), [reason], `${reason} reaches the seam with its reason`);
+  }
+  // Non-slp providers never reach the seam.
+  bindInputs.length = 0;
+  assert.equal(await injection.sessionOpen(openReq('custom-tool')), undefined);
+  assert.equal(bindInputs.length, 0);
+});
+
+test('session_open without the desk seam stays synchronous and byte-identical (R8–R12)', async t => {
+  const { injection } = makeInjection(t);
+  const out = injection.sessionOpen(openReq('slp-codex-peer'));
+  assert.equal(typeof out?.then, 'undefined', 'no seam → the hook stays synchronous');
+  assert.ok(out.env.SLP_SESSION_OPEN_GRANT);
+});
+
+test('agent.create: C10 exact-only — the devin output is the original request plus exactly env.SLP_DESK_HANDLE', async t => {
+  const { injection } = makeInjection(t, {
+    deps: { deskMint: async () => ({ handle: 'c'.repeat(64) }) },
+  });
+  const config = {
+    provider: 'slp-devin-peer',
+    cwd: '/work',
+    systemPrompt: 'sentinel-prompt',
+    modeId: 'mode-1',
+    model: 'sentinel-model',
+    thinkingOptionId: 'high',
+    featureValues: { marker: 'sentinel' },
+    title: 'sentinel-title',
+    providerOptions: { apiKey: 'sentinel' },
+    toolPolicy: { preapproved: [] },
+    mcpServers: { sentinel: { command: 'bin' } },
+    internal: false,
+  };
+  const env = { SLP_FAMILY_BIN: '/bin/x' };
+  // L1 — the expected value is a deep-frozen COPY built before the call, so
+  // a mutant that mutates the input (e.g. rewrites mcpServers) or grafts a
+  // field into the output diverges from it and fails.
+  const freeze = value => {
+    for (const key of Object.keys(value)) {
+      if (value[key] && typeof value[key] === 'object') freeze(value[key]);
+    }
+    return Object.freeze(value);
+  };
+  const expected = freeze(structuredClone({ config, env: { ...env, SLP_DESK_HANDLE: 'c'.repeat(64) } }));
+  const out = await injection.agentCreate({ request: { config, env } });
+  assert.deepEqual(out, expected, 'exactly one env key added; every config field (mcpServers included) untouched');
+});
+
+test('agent.create: devin without the desk seam returns undefined and never mutates the input (R2-S1)', async t => {
+  // No deskMint seam — the pre-C10 pass-through. The request carries a
+  // sentinel mcpServers; the hook must return undefined AND leave the
+  // input byte-identical (no graft, no mutation).
+  const { injection } = makeInjection(t);
+  const config = {
+    provider: 'slp-devin-peer',
+    cwd: '/work',
+    mcpServers: { sentinel: { command: 'bin' } },
+    featureValues: { marker: 'sentinel' },
+  };
+  const env = { SLP_FAMILY_BIN: '/bin/x' };
+  const freeze = value => {
+    for (const key of Object.keys(value)) {
+      if (value[key] && typeof value[key] === 'object') freeze(value[key]);
+    }
+    return Object.freeze(value);
+  };
+  const frozenInput = freeze(structuredClone({ config, env }));
+  const out = await injection.agentCreate({ request: { config, env } });
+  assert.equal(out, undefined, 'no seam → the devin pass-through returns undefined');
+  assert.deepEqual(
+    { config, env },
+    { config: frozenInput.config, env: frozenInput.env },
+    'the input request is never mutated on the no-seam devin path',
+  );
 });
 
 test('agent.create: role suffix selects the correct bundle for every hook id', async t => {
@@ -131,6 +299,21 @@ test('agent.create: foreign providers and bare family ids pass through', async t
     const out = await injection.agentCreate(createReq(provider));
     assert.equal(out, undefined, `${provider} must pass through`);
   }
+});
+
+test('agent.create: task ticket carriers fail closed before foreign-provider passthrough or native create', async t => {
+  const { injection } = makeInjection(t);
+  const ticket = 'f'.repeat(64);
+  const foreign = { request: { config: { provider: 'custom-tool', cwd: '/work' }, env: { [DESK_TASK_CREATE_TICKET_KEY]: ticket } } };
+  await assert.rejects(injection.agentCreate(foreign), /unsupported for this native provider/);
+  assert.equal(await injection.agentCreate(createReq('custom-tool')), undefined, 'no-ticket ordinary pass-through stays unchanged');
+  await assert.rejects(injection.agentCreate({ request: { config: { provider: 'custom-tool', cwd: '/work' },
+    env: { [DESK_TASK_CREATE_TICKET_KEY]: 'bad' } } }), /ticket hook context is invalid/);
+  await assert.rejects(injection.agentCreate({ request: { config: { provider: 'slp-codex-peer', cwd: '/work' },
+    env: { [DESK_TASK_CREATE_TICKET_KEY]: ticket } } }), error => {
+    assert.equal(String(error.message).includes(ticket), false, 'ticket errors never echo the opaque secret');
+    return true;
+  });
 });
 
 test('agent.create: slp_role feature marker resolves the role on an un-suffixed slp-* id', async t => {
@@ -160,39 +343,27 @@ test('agent.create: slp-* provider without resolvable role fails closed', async 
   }
 });
 
-test('agent.create: injected bundle carries the review-gate invariant and Lead trigger, never to Peer', async t => {
+test('agent.create: guarded and ordinary operation pointers reach each role without leaking procedures to Peer', async t => {
   const { injection } = makeInjection(t);
   for (const id of HOOK_IDS) {
     const role = id.split('-')[2];
     const out = await injection.agentCreate(createReq(id));
     const prompt = out.config.systemPrompt;
+    assert.match(prompt, /Review selection never waives\s+a Human, assignment or protocol obligation/, id);
+    assert.match(prompt, /parent\/report recipient must match your paseo\.parent-agent-id\s+label/, id);
+    assert.match(prompt, /recipient distinct from your\s+parent/, id);
+    assert.match(prompt, /With no agent\s+recipient, report to the sender/, id);
+    assert.match(prompt, /Desk guards apply to admitted tool operations, not arbitrary shell\/filesystem\s+work/, id);
     if (role === 'peer') {
-      assert.ok(!/does not license merging/.test(prompt), id);
+      assert.match(prompt, /Reviewer\/Auditor stays independent of writer and accepting owner/, id);
+      assert.ok(!/ordinary\/Lean creation or observation/.test(prompt), id);
       assert.ok(!/When the assignment or protocol\s+requires independent review/.test(prompt), id);
-      assert.ok(!/cannot carry a new\s+delegation/.test(prompt), id);
-      assert.ok(!/New-team delegation|Observe-existing-work|formation record/.test(prompt), `${id} gets no formation doctrine`);
-      // The inbound-route self-check is a Peer-visible self-check (common.md),
-      // not formation doctrine.
-      assert.match(prompt, /paseo\.parent-agent-id label must match/, id);
-      assert.match(prompt, /distinct from your\s+parent/, `${id} keeps the observe-existing carve-out`);
-      assert.match(prompt, /not a hard block/, id);
-      assert.match(prompt, /names no agent\s+recipient/, id);
       continue;
     }
-    assert.match(prompt, /does not license merging\s+the axes into one seat/, id);
+    assert.match(prompt, /references\/delegation-execution.md/, id);
+    assert.match(prompt, /references\/task-execution.md/, id);
+    assert.match(prompt, /Unavailable\s+required reviewers or adverse findings never relax the gate/, id);
     assert.equal(/When the assignment or protocol\s+requires independent review/.test(prompt), role === 'lead', id);
-    // The C8 formation pins reach both orchestrating roles through the hook too.
-    assert.match(prompt, /Observe-existing-work/, id);
-    assert.match(prompt, /Continuation: same team and ownership/, id);
-    assert.match(prompt, /not evidence of parentage/, id);
-    assert.match(prompt, /not filesystem\s+isolation/, id);
-    assert.match(prompt, /send_agent_prompt to a\s+parentless or differently parented/, id);
-    assert.match(prompt, /second workspace\s+for the same team with no isolation reason/, id);
-    assert.match(prompt, /distinct from your\s+parent/, `${id} keeps the observe-existing carve-out`);
-    assert.match(prompt, /not a hard block/, id);
-    assert.match(prompt, /names no agent\s+recipient/, id);
-    assert.equal(/standalone session never makes\s+it your child/.test(prompt), role === 'supervisor', id);
-    assert.equal(/does not adopt it/.test(prompt), role === 'lead', id);
   }
 });
 
@@ -310,7 +481,7 @@ test('agent.create: a tampered candidate file aborts through the real verifyPubl
     verifyCandidate: b => materializer.verifyPublished(b.runtimePath, b.candidateSha256, b.payloadSha256),
   });
 
-  const bundlePath = join(published.runtimePath, 'src', 'role-bundle.mjs');
+  const bundlePath = join(published.runtimePath, 'plugin', 'server', 'runtime', 'cli', 'role-bundle.ts');
   const original = readFileSync(bundlePath);
   writeFileSync(bundlePath, '// tampered\n' + original.toString('utf8'));
   const error = await injection.agentCreate(createReq('slp-codex-lead')).then(
@@ -366,56 +537,41 @@ test('session_open: every hook id gets a fresh non-empty grant; others pass thro
       assert.equal(out.agentId, 'agent-1');
     }
   }
-  assert.equal(seen.size, 36, 'every open gets a distinct grant token');
+  assert.equal(seen.size, 48, 'every open gets a distinct grant token');
   for (const provider of ['codex', 'custom-tool', 'slp-devin-peer']) {
     assert.equal(injection.sessionOpen(openReq(provider)), undefined);
   }
 });
 
 // ---------------------------------------------------------------------------
-// agent.session_open — the work-tracker env overlay (spec §6.3)
+// agent.session_open — grant overlay only; no seat env is ever added
 // ---------------------------------------------------------------------------
 
-test('session_open: absent/disabled/throwing tracker dep emits only the grant overlay (T2)', async t => {
-  for (const [name, deps] of [
-    ['dep absent', {}],
-    ['dep returns false', { readWorkTrackerEnabled: () => false }],
-    ['dep throws (corrupt/foreign setting)', { readWorkTrackerEnabled: () => { throw new Error('EISDIR state file'); } }],
-  ]) {
-    const { injection } = makeInjection(t, { deps });
-    for (const reason of ['create', 'resume']) {
-      const out = injection.sessionOpen(openReq('slp-codex-peer', { reason }));
-      assert.ok(out.env.SLP_SESSION_OPEN_GRANT.length > 0, `${name} still grants`);
-      assert.equal(out.env.BEADS_ACTOR, undefined, `${name}: no actor overlay`);
-      assert.equal(out.env.BD_AGENT_PROFILE, undefined, `${name}: no profile overlay`);
-      assert.equal(out.env.BD_DISABLE_METRICS, undefined, `${name}: no metrics overlay`);
-      assert.equal(out.env.SLP_FAMILY_BIN, '/bin/x');
-    }
+test('session_open: emits only the grant overlay on hook ids', async t => {
+  const { injection } = makeInjection(t);
+  for (const reason of ['create', 'resume', 'refresh', 'import']) {
+    const out = injection.sessionOpen(openReq('slp-codex-peer', { reason }));
+    assert.ok(out.env.SLP_SESSION_OPEN_GRANT.length > 0, `${reason} still grants`);
+    assert.equal(out.env.BEADS_ACTOR, undefined, `${reason}: no actor overlay`);
+    assert.equal(out.env.BD_AGENT_PROFILE, undefined, `${reason}: no profile overlay`);
+    assert.equal(out.env.BD_DISABLE_METRICS, undefined, `${reason}: no metrics overlay`);
+    assert.equal(out.env.SLP_FAMILY_BIN, '/bin/x');
   }
 });
 
-test('session_open: enabled tracker overlays the seat env on hook ids only (T6 plugin)', async t => {
-  const { injection } = makeInjection(t, { deps: { readWorkTrackerEnabled: () => true } });
-  const out = injection.sessionOpen(openReq('slp-pi-peer'));
-  assert.equal(out.env.BEADS_ACTOR, 'slp-peer-agent-1');
-  assert.equal(out.env.BD_AGENT_PROFILE, 'conservative');
-  assert.equal(out.env.BD_DISABLE_METRICS, '1');
-  assert.ok(out.env.SLP_SESSION_OPEN_GRANT.length > 0, 'grant still lands');
-  // Human-set BD_* values win; BEADS_ACTOR is always SLP's per-seat identity.
-  const preset = injection.sessionOpen(openReq('slp-codex-lead', {
-    env: { SLP_SESSION_OPEN_GRANT: '', BD_AGENT_PROFILE: 'aggressive', BD_DISABLE_METRICS: '0', BEADS_ACTOR: 'daemon-wide' },
+test('session_open: Human-set tracker env passes through untouched beside the grant', async t => {
+  const { injection } = makeInjection(t);
+  const out = injection.sessionOpen(openReq('slp-codex-lead', {
+    env: { SLP_SESSION_OPEN_GRANT: '', BD_AGENT_PROFILE: 'aggressive', BD_DISABLE_METRICS: '0', BEADS_ACTOR: 'human-cli' },
   }));
-  assert.equal(preset.env.BD_AGENT_PROFILE, 'aggressive');
-  assert.equal(preset.env.BD_DISABLE_METRICS, '0');
-  assert.equal(preset.env.BEADS_ACTOR, 'slp-lead-agent-1', 'a preset actor is replaced — attribution names the seat');
-  // Wrapper transports (devin) and non-slp providers never get the overlay.
+  // User-supplied values are preserved verbatim; the retired overlay can
+  // neither overwrite them nor add new keys.
+  assert.equal(out.env.BD_AGENT_PROFILE, 'aggressive');
+  assert.equal(out.env.BD_DISABLE_METRICS, '0');
+  assert.equal(out.env.BEADS_ACTOR, 'human-cli');
+  assert.ok(out.env.SLP_SESSION_OPEN_GRANT.length > 0, 'grant still lands');
   for (const provider of ['slp-devin-peer', 'codex', 'custom-tool']) {
     assert.equal(injection.sessionOpen(openReq(provider)), undefined, `${provider} passes through`);
-  }
-  // Every open reason gets the overlay — a resumed seat keeps its actor.
-  for (const reason of ['create', 'resume', 'refresh', 'import']) {
-    const open = injection.sessionOpen(openReq('slp-claude-supervisor', { reason }));
-    assert.equal(open.env.BEADS_ACTOR, 'slp-supervisor-agent-1', `${reason} keeps the actor`);
   }
 });
 
@@ -555,7 +711,7 @@ test('thin aliases: every entry gets a single-element launcher argv0; hook env a
   );
   const resolution = { node: { path: '/opt/node/bin/node', version: '24.0.0' }, binaries };
   const entries = desiredProviderEntries(launchSet, resolution, f.candidate, f.home, null);
-  assert.equal(Object.keys(entries).length, 12);
+  assert.equal(Object.keys(entries).length, 15);
   for (const id of OWNED_IDS) {
     const family = id.split('-')[1];
     const entry = entries[id];
@@ -574,7 +730,7 @@ test('thin aliases: every entry gets a single-element launcher argv0; hook env a
     // One label template for every transport: `SLP <Family> <Role>` with
     // FAMILY_LABEL as the single display-name source.
     assert.equal(entry.label, `SLP ${FAMILY_LABEL[family]} ${roleDisplay}`);
-    if (family === 'devin') {
+    if (['devin', 'opencode'].includes(family)) {
       assert.equal(entry.extends, 'acp');
       assert.equal(entry.env.SLP_FAMILY_BIN, undefined);
       continue;
@@ -606,14 +762,14 @@ test('parity: hook systemPrompt and devin wrapper inject the identical bundle fo
   // The candidate's own role-bundle module, loaded the same way the devin
   // wrapper loads it (static import inside the candidate tree — here via
   // dynamic import of the materialized file, the hook's own mechanism).
-  const wrapperModule = await import(pathToFileURL(join(f.candidate, 'src', 'role-bundle.mjs')).href);
+  const wrapperModule = await import(pathToFileURL(join(f.candidate, 'plugin', 'server', 'runtime', 'cli', 'role-bundle.ts')).href);
   for (const id of OWNED_IDS) {
     const role = id.split('-')[2];
     // (b) the session-entry render the devin wrapper injects via acpRolePrompt
     // on first and re-armed prompts — delivery.entry() under the frozen managed
     // env; recurring prompts get the shorter delivery.anchor().
     const wrapperBytes = wrapperModule.roleBundle(f.candidate, role, managedEnv(f)).instructions;
-    if (DEVIN_IDS.includes(id)) {
+    if (WRAPPER_IDS.includes(id)) {
       // The devin path is the wrapper itself — nothing to compare, just
       // assert its own render is what the parity contract defines.
       assert.ok(wrapperBytes.startsWith(`SLP role=${role}`));

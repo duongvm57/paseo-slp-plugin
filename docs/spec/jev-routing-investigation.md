@@ -114,7 +114,7 @@ subcommand for the current small pool with zero recorded mis-picks.
 **Surviving residue, justified by existing defects (independent of Jev):**
 
 - Extract `optionExclusions(option, role)` as a shared predicate so
-  `catalogBinding` (`src/routing.mjs`) reports specific exclusion tokens
+  `catalogBinding` (`plugin/server/runtime/cli/routing.ts`) reports specific exclusion tokens
   instead of the fused `"disabled, unavailable or excluded for <role>"` —
   one predicate, two consumers, view and enforcement cannot drift.
 - Fix documented drift: `docs/agent-guide.md` claims `routes` returns
@@ -138,8 +138,8 @@ against the codebase: `src/` contains zero network calls today;
 
 | Layer | File | Knows |
 |---|---|---|
-| Transport/capability | `src/jev.mjs` (new) | Config resolution (toggle + key per daemon), `{state, model, questions}` build, `fetch` + timeout, typed-answer validation, redaction guard, error taxonomy, decision-receipt shape. **Nothing about routing.** Exposes all three primitives (`choice`/`score`/`noul`) so future consumers (monitor triage, quotaFallback target selection, handoff readiness) do not rewrite it |
-| First consumer | `src/jev-routing.mjs` (new) | Builds `state` from catalog + Lead-authored brief; `choice` over the eligible option set computed via `optionExclusions` from `src/routing.mjs` |
+| Transport/capability | `plugin/server/runtime/cli/jev.ts` (new) | Config resolution (toggle + key per daemon), `{state, model, questions}` build, `fetch` + timeout, typed-answer validation, redaction guard, error taxonomy, decision-receipt shape. **Nothing about routing.** Exposes all three primitives (`choice`/`score`/`noul`) so future consumers (monitor triage, quotaFallback target selection, handoff readiness) do not rewrite it |
+| First consumer | `plugin/server/runtime/cli/jev-routing.ts` (new) | Builds `state` from catalog + Lead-authored brief; `choice` over the eligible option set computed via `optionExclusions` from `plugin/server/runtime/cli/routing.ts` |
 
 **MUST-FIX 1 — no network inside `prepare`.** `prepare` is offline,
 deterministic, and its `--check` mode runs the same stages; injecting a paid
@@ -312,12 +312,12 @@ per-option "date + source consulted" at onboarding — never benchmark scores.
 
 | File | Change |
 |---|---|
-| `src/jev.mjs` | New transport: config, three primitives, fetch+timeout, validation, redaction, error taxonomy, receipt shape |
-| `src/jev-routing.mjs` | New consumer; reuses `optionExclusions` |
-| `src/routing.mjs` | Export `optionExclusions`; `catalogBinding` exclusion errors name tokens (surviving fix from §3) |
+| `plugin/server/runtime/cli/jev.ts` | New transport: config, three primitives, fetch+timeout, validation, redaction, error taxonomy, receipt shape |
+| `plugin/server/runtime/cli/jev-routing.ts` | New consumer; reuses `optionExclusions` |
+| `plugin/server/runtime/cli/routing.ts` | Export `optionExclusions`; `catalogBinding` exclusion errors name tokens (surviving fix from §3) |
 | `bin/slp.mjs` | `route-decide <request.json>` subcommand; `prepare` requires receipt in Jev mode; **no network in `prepare`/`--check`** |
-| `src/launch.mjs` | Accept receipt as a binding source; state whether `prepare-handoff` applies Jev mode |
-| `src/runtime-state.mjs` | Key redaction rule in `runtimeStatus` (`hasKey` only) |
+| `plugin/server/runtime/cli/launch.ts` | Accept receipt as a binding source; state whether `prepare-handoff` applies Jev mode |
+| `plugin/server/runtime/cli/runtime-state.ts` | Key redaction rule in `runtimeStatus` (`hasKey` only) |
 | `plugin/client/ManagerSurface.tsx`, `plugin/shared/contracts.ts`, `plugin/index.server.ts`, new server module | Jev card: key, Test connection, per-capability toggles; status reports `hasKey` |
 | Doctrine | `docs/contract.md` (scoped amendment), `src/references/provider-routing.md`, `src/delegation.md`, `docs/architecture.md`, `docs/agent-guide.md` (fix existing drift), `.paseo-slp/workspace-protocol.md`, `README.md`/`README.vi.md` |
 | Tests | Both modes; no-key; API error/timeout/HTTP codes; invalid choice; stale hash; receipt-hash mismatch; **key never leaks via `runtimeStatus` or logs**; `prepare --check` stays offline; view↔`catalogBinding` exclusion parity |

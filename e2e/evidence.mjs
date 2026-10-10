@@ -1,5 +1,5 @@
 import { basename, relative, resolve, isAbsolute } from 'node:path';
-import { hash } from '../src/package.mjs';
+import { hash } from '../plugin/server/runtime/cli/package.ts';
 
 // One contract per evidence kind. The ledger keeps a registry; it does not know
 // what a Paseo coordinator transcript or a host resource inventory looks like.

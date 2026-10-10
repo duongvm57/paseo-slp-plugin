@@ -1,140 +1,106 @@
-# Review gates
+# Review selection and gates
 
-A review gate runs independent reviewer seats against a frozen candidate.
-When the assignment or protocol requires independent review of a stable
-candidate, the gate follows the rule the effective workspace protocol
-declares — either a fixed seat/axis shape or a bounded selection rule
-delegating the choice. Under a declared selection rule the Lead chooses the
-minimum sufficient independent seats and axes for the task's material
-risks: one independent reviewer when one lens covers the decision-changing
-risk, another seat only for a distinct unresolved risk, a
-separation-of-concerns need or a difficult council — a selection rule
-carries no default reviewer count. Absent a declaration the package default
-applies: parallel Peer seats on split Spec and Standards axes so no axis
-can mask another. A single-seat gate is valid where the declared rule
-yields one independent seat, for the change classes the protocol lists
-explicitly (for example docs-only edits that touch no semantics,
-generated-payload regeneration, typo or metadata fixes), or as a declared
-one-seat shape; a required gate over doctrine, delegation, packaging,
-behaviour or code keeps the split default unless the protocol records
-otherwise.
+Lead selects minimum sufficient independent mandates for material
+decision-changing questions or explicit Human/assignment/protocol obligations.
+Record a selection before the candidate round: questions/obligations,
+mandates or no-trigger reason, authority/rule source, candidate,
+brief/scope/plan revision, authorized effort bound and stop condition.
+Required seats, axes and obligations remain binding despite unavailability or adverse findings;
+an unavailable required seat makes the gate BLOCKED.
 
-## Policy provenance
+## Declare and use the gate
 
-The package default is a two-seat gate on separate Spec and Standards axes —
-stricter than corpus §§9–11, which leaves each repository to choose its
-review rigor. The Human chose this default in `cc80974` (2026-09-24) so one
-review axis cannot mask the other, then made the gate rule protocol-owned
-(2026-09-30): the protocol declares either a fixed seat/axis shape or a
-bounded selection rule delegating per-task seat choice to the Lead, and
-each deviation from the default is a Human protocol decision recorded under
-Overrides. A required gate always has at least one independent seat;
-removing review for a change class is the listed-class mechanism, not a
-gate shape. What no protocol or Lead relaxes: a required gate is never
-skipped or merged ad hoc — under a declared selection rule the Lead chooses
-within the rule's bounds and may never bypass the declared rule or the
-required independence — and seats the declared rule requires that cannot be
-supplied BLOCK the gate rather than license merging or skipping.
+Choose required independent mandates, not-required only with no material
+trigger, or exempt only with explicit waiver authority. Source/reason/grant
+pointers remain claims, not authenticated Human decisions. Tiny labels supply
+no waiver.
+Desk round: slp_scope_declare → slp_scope_transition claim → Engineer
+slp_handback_submit and observe → slp_scope_transition submit-for-review →
+reviewers slp_scope_review → slp_scope_transition review-observed → approve/advance;
+use slp_workflow_get to resolve observedCandidateId to the candidate's snapshotSha256
+and head, and obtain current round, revision and mandate pins.
+Runtime enforces the declared set, independent writer/owner separation and current
+brief/mandate/candidate pins; it does not decide sufficiency or risk.
+Explicit reviewPlan:null opts into legacy Spec/Standards compatibility;
+new decisions use named plans. Preserve historical obligations and use a fresh
+round for authorized requirement changes. Dropping mandates after adverse
+findings to evade obligations is prohibited.
+Outside those tools, record selection/pins in the bounded brief and manually
+keep candidate/declaration/mandate current. A changed candidate invalidates
+standing review; a new no-trigger decision cannot erase a required old gate.
 
-## Axes
+## Independent seats and briefs
 
-Two default axes, each on its own fresh seat — a fixed-shape declaration
-replaces or adds to this set, and under a selection rule the Lead names the
-axis each seat owns:
+Reviewers are distinct from writer and accepting owner, with separate judgment,
+neutral context and a stable candidate. One seat may assess related questions,
+with Lead ordering lenses by risk; added seats address distinct unresolved risk
+or separation needs. Reviewer/Auditor are bounded Peer dispositions, not
+permanent phases. Provider-family diversity may help but proves no independence
+or default quota. An unavailable optional lens does not block adequate
+selection; a specifically required lens does. Spec and Standards are optional
+descriptive lenses unless the effective rule requires them. Spec checks
+objective/acceptance with requirement citations; Standards checks documented
+conventions, separates hard violations from judgment and skips
+tooling-established facts. Other mandates may test ownership, lifecycle,
+failure, migration, authority, integrity or proof.
 
-- **Spec** — does the candidate implement what the spec/assignment asked?
-  Findings: requirements missing or partial; behaviour beyond the ask
-  (scope creep); requirements that look implemented but are wrong. Quote
-  the spec line per finding.
-- **Standards** — does the candidate follow the repo's documented
-  conventions? Sources: the repo's standards documents (AGENTS.md, style
-  or contract docs) plus the smell baseline below. Distinguish hard
-  violations (documented standards) from judgement calls (baseline
-  smells); a documented repo standard overrides the baseline; skip
-  whatever tooling already enforces.
+A fresh first-review brief gives objective/acceptance, actual authority
+constraints, exact candidate, mandate/lens, relevant source paths, facts,
+unknowns and focused proof questions, each falsifiable, drawn from facts and
+carrying no conclusion. Withhold desired verdict, writer
+identity and prior findings. Reviewer verifies candidate identity before work;
+drift invalidates the attempt. Lead may attach a facts-only review packet (`slp.mjs review-packet`).
+For same-assignment re-review, continue that independent seat with new
+candidate, changes and its own prior findings to assess closure/regression;
+broaden for new material risk. Other lenses' findings/verdicts are not answer
+keys. A replacement receives a neutral first brief. Sealed design follows
+orchestration.md's visibility boundary.
+Reports stay in-session unless artifact writes are assigned. Bind findings
+to mandate/source, evidence/checks and unverifiable claims; distinguish
+confirmed failures, hypotheses and hard violations/judgment, and state which
+failure classes were checked and which were not. A reviewer may send findings
+first, naming pending proof, then its own addendum. It may rely on a valid
+measured result bound to the same candidate pin, command and scope instead of
+rerunning it; rerun or probe narrowly only on pin drift, a missing/invalid
+result or an unresolved proof question such as the test's own strength. A
+narrow result proves only its scope; verification sufficiency, R1/R2 replay (report-records.md) and
+acceptance stay with Lead.
+Drop SLP_* and PASEO_HOME from the environment before running a suite in a probe.
 
-The protocol's declared seats — the two split seats under the default, or
-the seats the declared rule requires for the task — are the complete
-required gate. A **cross-family** seat — one reviewer running
-the declared axes from a provider family different from the writer's, whose
-blind spots differ — is a suggested extra for a second opinion worth its
-cost, never a required seat. When routing declines the cross-family option
-or the pool holds no other-family seat, that seat reports BLOCKED: the gate
-does not fail and still runs on its declared seats. A blocked seat is never
-permission to merge axes into one seat or to skip the gate.
+## Verify and adjudicate
 
-## Verification stays with the Lead
+Lead owns verification sufficiency around the gate. Inspect actual measured
+check/integration records for their class, output and candidate pins; reuse
+valid execution proof rather than rerun it ceremonially. Independently verify
+shell-reported checks and any outcome the measured classes do not cover.
+Keep the writer paused and current candidate identical to the reviewed one.
+Neither reviewer verdict nor green checks alone accepts the project.
+Preserve conflicting findings in shared state. Lead rules on each material
+finding with reason, supporting/contrary evidence and residual risk: correct,
+reject with counterevidence, accept permitted risk, or reopen/escalate.
+Unanimity, severity or reproduction alone is no verdict rule; an
+unreproduced concern can expose a material proof gap. Missing required proof
+or constraints cannot be accepted as recorded risk. Decisions beyond mandate
+go to their owner; unresolved prerequisites block dependent acceptance.
+Keep selection, waivers, verification and project verdict distinct, with
+findings visible after ruling.
 
-Reviewer seats read and report findings; verification executes — re-running
-the established checks and pinning the candidate snapshot before and after
-review. Verification is the Lead's own duty around the gate, not a council
-seat, and it binds the same frozen candidate the reviewers saw.
-
-## Smell baseline
-
-Fixed baseline applying even when the repo documents nothing — labelled
-heuristics, never hard violations: Mysterious Name, Duplicated Code,
-Feature Envy, Data Clumps, Primitive Obsession, Repeated Switches,
-Shotgun Surgery, Divergent Change, Speculative Generality, Message
-Chains, Middle Man, Refused Bequest.
-
-## Seat briefs
-
-Every fresh seat gets a neutral first-review brief: the frozen candidate
-identity (snapshot hash or exact commit), its axis, the spec/standards source paths — and
-nothing else. No prior findings, no Lead verdict, no writer identity.
-The seat verifies the candidate identity before reviewing; a changed
-snapshot invalidates the attempt.
-
-For re-review within the same assignment, continue the same independent seat
-with the new candidate identity, changes and that seat's prior findings so it
-can check closure and regressions. Another seat's verdict or the Lead's desired
-verdict is never an answer key. A fresh replacement receives the neutral
-first-review brief, not the previous reviewer's conclusions.
-
-Reports stay in-session, bounded: findings quoted against the axis source,
-hard violations separated from judgement calls.
-
-## Aggregation
-
-Report axes side by side; never merge or rerank findings into one verdict
-list — a candidate can pass one axis and fail the other, and merged
-rankings let one axis mask the failure. Corrections route to the owning
-lane; re-review returns to the same seat under session continuity. The
-protocol owns the gate's rule in either direction through a recorded
-Overrides decision — a fixed shape binds the seats it names, a selection
-rule bounds the Lead's choice, and a listed-class exception removes the
-requirement rather than relaxing it; the Lead decides it and records the
-call in the task's brief or reconcile checkpoint. Inside a task the Lead
-chooses the minimum sufficient seats and axes only when the protocol
-delegates that choice, and may not bypass the declared rule or the required
-independence.
-
-## Correction loops
-
-Consecutive rounds returning findings of one class — the same root
-mechanism surfacing at different sites — is the signal to stop briefing
-point-fixes: each correction clears one site while the mechanism produces
-the next. Require an enumeration of the mechanism's sites or a refactor of
-the broken invariant instead of another local patch. When the sweep needs
-independent design judgment, or majors in one cluster repeat across two
-consecutive rounds, escalate to a findings committee rather than issue the
-next correction brief.
-
-Committee shape: two seats from provider families different from the
-writer's — and from each other where the pool allows — briefed neutrally on
-the findings history and the frozen candidate; at most two rounds of
-cross-examination between them; the Lead reconciles and records one binding
-decision. The committee analyzes and recommends; it holds no write
-authority over the candidate.
-
-The same cluster surfacing after the invariant refactor marks the class as
-beyond point-fixing: escalate the strategy as an explicit decision, not the
-default loop. The committee itself still holds no write authority. When the
-decision is a direct patch, the Lead issues a separate Engineer assignment
-— agent-scoped under the Lead, naming the write scope and its single
-owner; the assignee may be a former committee member, but the authority
-comes from that assignment, never from membership. The patch forms a new
-candidate that re-freezes and re-enters the gate — frozen identity,
-declared seats, Lead verification — without bypass. The alternative branch is a
-property or enumeration test covering the whole matrix.
+Corrections return to the same authorized writer and re-review to the same
+independent seat under orchestration.md's Session continuity. Freeze the new
+candidate and re-enter the declared gate; previous approval does not transfer.
+Consecutive same-class findings call for mechanism investigation,
+affected-site enumeration and evidence-supported invariant repair, not an
+unbounded point-fix queue. A property/enumeration test may verify the settled
+invariant. A ruling requiring repair may state the property to restore
+(structurally fail-closed where possible, e.g. allowlist over blacklist; not
+the implementation), the docs/tests still describing the replaced mechanism and
+any trade-off to publish when chosen; an accepted risk reopens only on new
+evidence. Apply task/protocol correction/review/challenge effort and stop
+bounds; establish an authorized bound before continuing if absent.
+Stop at sufficient proof, unresolved premise/prerequisite or exhaustion.
+Exhaustion is not ACCEPT but a checkpoint: the seat reports what was and was
+not checked; Lead extends, records a proof gap or escalates strategy/resources.
+Recurrence after mechanism work reopens the premise/strategy. Any repair needs
+an authorized write phase; direct Lead writes follow delegation policy's explicit
+grant; changing candidate, seat or session
+neither resets obligations nor expands the bound.

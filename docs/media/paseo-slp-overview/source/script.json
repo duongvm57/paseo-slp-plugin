@@ -1,0 +1,342 @@
+{
+  "title": "Paseo SLP — how a brief becomes a controlled operation",
+  "language": "en",
+  "basis": {
+    "workingSource": "8365ce9551b6861d76a93095079977163311ace1",
+    "plugin": "0.5.0",
+    "sdk": "0.10.0",
+    "guide": "docs/plugin-explained.html",
+    "guideSha256": "a86ab998b719e742d47beff123df2fd6d9e14d72a8a5b83d57e3b5051444cac3",
+    "note": "Explanatory animation of the working source. Not footage of a live daemon and not E2E proof."
+  },
+  "labels": {
+    "honest": "explanatory animation · not live footage"
+  },
+  "pronunciation": {
+    "seat-pending": "seat pending"
+  },
+  "scenes": [
+    {
+      "id": "title",
+      "chapter": "Overview",
+      "title": "How a brief becomes a controlled operation",
+      "cues": [
+        {
+          "text": "Paseo SLP organizes coding agents as a Supervisor, a Lead, and independent Peers."
+        },
+        {
+          "text": "Here's how a brief becomes a controlled operation, and where human judgment still matters."
+        }
+      ]
+    },
+    {
+      "id": "owners",
+      "chapter": "Who owns what",
+      "title": "Three owners share every operation",
+      "cues": [
+        {
+          "text": "Three owners share the work."
+        },
+        {
+          "text": "Paseo runs sessions, workspaces and agent parentage."
+        },
+        {
+          "text": "The plugin adds role policy, and a runtime that checks recorded facts."
+        },
+        {
+          "text": "The Human keeps intent, authority and final acceptance."
+        },
+        {
+          "text": "And the plugin is not an agent scheduler."
+        }
+      ]
+    },
+    {
+      "id": "policy",
+      "chapter": "Policy and enforcement",
+      "title": "Role policy is read. Enforcement is checked.",
+      "cues": [
+        {
+          "text": "Role policy is what a seat reads, layered from common rules down to one assignment."
+        },
+        {
+          "text": "Lower layers narrow, never widen."
+        },
+        {
+          "text": "Enforcement is code, checking membership, ownership and revisions on guarded desk calls."
+        },
+        {
+          "text": "Policy guides judgment. Enforcement guards recorded facts."
+        }
+      ]
+    },
+    {
+      "id": "install",
+      "chapter": "Install, activate, bind",
+      "title": "A checkout, a published runtime and a session are different objects",
+      "cues": [
+        {
+          "text": "The SLP Manager activates a published runtime."
+        },
+        {
+          "text": "Verified bytes land in a pinned runtime directory, with launchers and profiles."
+        },
+        {
+          "text": "A binding pins the runtime, Node, transport and daemon home."
+        },
+        {
+          "text": "At launch, a hook or wrapper delivers the role before the provider starts."
+        },
+        {
+          "text": "Rebinding changes future launches; running sessions keep their bytes."
+        }
+      ]
+    },
+    {
+      "id": "desk",
+      "chapter": "Membership and the desk",
+      "title": "A title is presentation. Membership is identity.",
+      "cues": [
+        {
+          "text": "A session acts on the desk only through bound membership."
+        },
+        {
+          "text": "It records the exact agent, runtime family, role, directory and binding generation."
+        },
+        {
+          "text": "Every desk call crosses the bridge: fresh identity, capability, strict schema."
+        },
+        {
+          "text": "The desk is an append-only, hash-chained ledger, shared by related worktrees."
+        },
+        {
+          "text": "It guards desk calls. It is not a shell sandbox."
+        }
+      ]
+    },
+    {
+      "id": "review",
+      "chapter": "Ownership and review",
+      "title": "One writer per scope. Review selected, then pinned.",
+      "cues": [
+        {
+          "text": "Each moving scope has one writer."
+        },
+        {
+          "text": "Review is selected: required, not required, or exempt with an authority pointer."
+        },
+        {
+          "text": "A review round pins the candidate, scope, brief and neutral mandate."
+        },
+        {
+          "text": "Change one, and the review goes stale."
+        },
+        {
+          "text": "Owner and writer can't clear their own independent gate."
+        }
+      ]
+    },
+    {
+      "id": "dispatch",
+      "chapter": "Managed dispatch",
+      "title": "The worker receives work only after binding",
+      "cues": [
+        {
+          "text": "Managed dispatch is a chain of recorded steps."
+        },
+        {
+          "text": "Reserve the attempt, then create the worker with no work prompt."
+        },
+        {
+          "text": "Verify its observed runtime, labels, parent, workspace and directory."
+        },
+        {
+          "text": "Bind the membership, claim the scope, and only then send the work."
+        },
+        {
+          "text": "Late registration returns seat-pending and sends nothing."
+        },
+        {
+          "text": "A lost create receipt stays uncertain, and is never blindly replaced."
+        }
+      ]
+    },
+    {
+      "id": "dependencies",
+      "chapter": "Task dependencies",
+      "title": "A finished prerequisite is not necessarily usable",
+      "cues": [
+        {
+          "text": "A finished prerequisite isn't automatically usable."
+        },
+        {
+          "text": "Readiness needs a qualified result, and availability measured in the consumer's actual base."
+        },
+        {
+          "text": "B and C are landed and qualified, but D's base has only B. So D stays blocked."
+        },
+        {
+          "text": "Reopening A invalidates readiness; history keeps what was consumed."
+        }
+      ]
+    },
+    {
+      "id": "effects",
+      "chapter": "The ledger / effect boundary",
+      "title": "One issued effect, recorded on both sides of the cut",
+      "cues": [
+        {
+          "text": "A ledger transaction can't make a host effect atomic."
+        },
+        {
+          "text": "So each effect is split: intent, locked issue, the bounded SDK or Git call, then observe."
+        },
+        {
+          "text": "Lose the receipt, and the effect stays uncertain."
+        },
+        {
+          "text": "Exact replay returns the recorded outcome; reconciliation measures the original identity."
+        },
+        {
+          "text": "A fresh request is not recovery. There's no automatic retry engine."
+        }
+      ]
+    },
+    {
+      "id": "integrate",
+      "chapter": "Integration",
+      "title": "Integrate a delta, preserve unrelated work",
+      "cues": [
+        {
+          "text": "Integration measures the worker's base, its result, and the actual target."
+        },
+        {
+          "text": "A three-way merge keeps unrelated work, and holds conflicts."
+        },
+        {
+          "text": "Stage builds the candidate outside the target; check runs owner-pinned recipes."
+        },
+        {
+          "text": "Land rechecks, records a recovery plan, backs up, applies, and measures."
+        },
+        {
+          "text": "It never commits, pushes, or deploys."
+        }
+      ]
+    },
+    {
+      "id": "cleanup",
+      "chapter": "Cleanup",
+      "title": "Cleanup is a proof-gated workflow too",
+      "cues": [
+        {
+          "text": "Cleanup is gated by proof, too."
+        },
+        {
+          "text": "First, an account binds the original proof and the resource inventory."
+        },
+        {
+          "text": "The stage is removed under its own permit, and only then the backup."
+        },
+        {
+          "text": "Each gets two total cycles. Exhaustion keeps the obligation, instead of looping."
+        }
+      ]
+    },
+    {
+      "id": "limits",
+      "chapter": "Honest boundaries",
+      "title": "What the mechanism does not prove",
+      "cues": [
+        {
+          "text": "Some limits stay explicit."
+        },
+        {
+          "text": "Stop fences new effects, but doesn't prove a running turn was cancelled."
+        },
+        {
+          "text": "Archive doesn't prove processes are quiescent."
+        },
+        {
+          "text": "A grant reference doesn't authenticate a Human grant."
+        },
+        {
+          "text": "Language guidance, quota fallback, Jev routing and supervision are opt-in, not an autonomous scheduler."
+        }
+      ]
+    },
+    {
+      "id": "value",
+      "chapter": "Why it helps",
+      "title": "Durable, inspectable work — with real human judgment",
+      "cues": [
+        {
+          "text": "Work, ownership, review and effects survive interruption, and stay inspectable in Read SLP work."
+        },
+        {
+          "text": "Human judgment and project acceptance remain real decisions."
+        },
+        {
+          "text": "For details and source pins, open docs/plugin-explained.html.",
+          "say": "For details and source pins, open the plugin explained guide in the docs folder."
+        }
+      ]
+    }
+  ],
+  "voices": {
+    "elevenlabs": {
+      "provider": "ElevenLabs",
+      "model": "eleven_v3",
+      "voiceName": "Alice",
+      "voiceId": "Xb7hH8MSUJpSbSDYk0k2",
+      "languageCode": "en",
+      "outputFormat": "mp3_44100_128",
+      "settings": {
+        "stability": 0.5,
+        "similarity_boost": 0.75,
+        "speed": 0.95
+      },
+      "license": "ElevenLabs free tier: non-commercial use with attribution to elevenlabs.io",
+      "backend": "elevenlabs",
+      "labels": {
+        "credit": "Voice: Alice · ElevenLabs eleven_v3 · elevenlabs.io",
+        "titleCredit": "narration voice generated with elevenlabs.io",
+        "poster": "Watch the {dur} overview  ·  English narration + captions  ·  voice: elevenlabs.io",
+        "mp4Title": "Paseo SLP overview (English) — voice: elevenlabs.io"
+      }
+    },
+    "omnivoice": {
+      "backend": "command",
+      "provider": "OmniVoice (k2-fsa), local",
+      "model": "k2-fsa/OmniVoice",
+      "voiceName": "synthetic male narrator (OmniVoice voice design → clone prompt)",
+      "languageCode": "en",
+      "settings": {
+        "dtype": "bfloat16",
+        "numStep": 32,
+        "speed": 0.95,
+        "seedBase": 20261005,
+        "device": "cpu"
+      },
+      "outputFormat": "wav",
+      "cueGap": 0.38,
+      "labels": {
+        "credit": "Voice: OmniVoice (k2-fsa, CC BY-NC) · synthetic male · generated locally",
+        "titleCredit": "narration voice generated locally with OmniVoice",
+        "poster": "Watch the {dur} overview  ·  English narration + captions",
+        "mp4Title": "Paseo SLP overview (English)"
+      },
+      "instruct": "male, middle-aged, very low pitch",
+      "reference": {
+        "kind": "own OmniVoice voice-design sample",
+        "seed": 7,
+        "numStep": 32,
+        "text": "Hello. This short video explains how Paseo SLP organizes work across coding agents.",
+        "wavSha256": "c7c6b8118d54bd0ecaac245ff259a280c712cebc8620f5d5cc3c24d81ba684b9"
+      },
+      "note": "Synthetic male voice from OmniVoice voice design; no cloning of any real or third-party voice.",
+      "license": "OmniVoice code Apache-2.0; pre-trained model CC BY-NC (k2-fsa/OmniVoice model card). Audio tokenizer: Boson Higgs Audio 2 Community License — Built with Higgs Materials licensed from Boson AI USA, Inc., Copyright Boson AI USA, Inc., All Rights Reserved and Meta Llama 3 licensed under the Meta Llama 3 Community License, Copyright Meta Platforms, Inc., All Rights Reserved."
+    }
+  },
+  "defaultVoice": "omnivoice"
+}

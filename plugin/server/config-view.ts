@@ -11,7 +11,7 @@
 import { createHash } from "node:crypto";
 import { lstatSync, readFileSync } from "node:fs";
 import {
-  OwnedProvider,
+  PersistedProvider,
   Profile,
   OperationConflict,
   type ConflictCode,
@@ -20,7 +20,7 @@ import {
 } from "../shared/contracts.ts";
 
 // Domain constants derive from the shared family registry
-// (../shared/families.ts) — the plugin bundle may not import ../src/*.mjs
+// (../shared/runtime/families.ts) — the plugin bundle may not import ../src/*.mjs
 // across the plugin boundary (§2), and there is no second literal family
 // list. The historical export names stay so consumers keep one import site.
 import {
@@ -29,11 +29,18 @@ import {
   OWNED_PROVIDER_IDS,
   PROVIDER_EXTENDS,
   ROLES,
+  persistedProviderIds,
   type FamilyId,
   type RoleName,
-} from "../shared/families.ts";
+} from "../shared/runtime/families.ts";
 export { OWNED_PROVIDER_IDS, PROVIDER_EXTENDS, ROLES };
 export const FAMILIES = FAMILY_IDS;
+/** Historical keys are an ownership boundary, not implicit false slots. */
+export function projectionProviderIds(projection: ProjectionValue): readonly string[] {
+  const ids = persistedProviderIds(Object.keys(projection.providers));
+  if (ids === null) throw new Error("projection requires exact legacy12 or current15 provider keys");
+  return ids;
+}
 export type FamilyName = FamilyId;
 export type { RoleName };
 
@@ -146,9 +153,12 @@ export function readRawConfig(configPath: string): RawConfigView {
   try {
     json = JSON.parse(bytes.toString("utf8"));
   } catch (error) {
+    // V8 parse messages quote raw input fragments — a config may carry
+    // secrets, so only the byte position (never the bytes) may surface.
+    const position = /position (\d+)/.exec((error as Error).message)?.[1];
     throw new OperationConflict(
       "SCHEMA_LOSS",
-      `config.json is not valid JSON; persisted-schema validation cannot run: ${(error as Error).message}`,
+      `config.json is not valid JSON${position ? ` (at position ${position})` : ""}; persisted-schema validation cannot run`,
       { path: configPath },
     );
   }
@@ -185,15 +195,16 @@ export function mcpFlagPresence(rawJson: unknown, key: "enabled" | "injectIntoAg
  * owned persisted shapes (OwnedProvider / Profile); anything else is a
  * collision or drift — the caller picks the conflict code.
  */
-export function extractProjection(rawJson: unknown, code: ConflictCode): ProjectionValue {
+export function extractProjection(rawJson: unknown, code: ConflictCode, ids: readonly string[] = OWNED_PROVIDER_IDS): ProjectionValue {
+  if (persistedProviderIds(ids) === null) throw new Error("unknown projection domain");
   const providers = providersRecord(rawJson);
   const projectedProviders: ProjectionValue["providers"] = {};
-  for (const id of OWNED_PROVIDER_IDS) {
+  for (const id of ids) {
     if (!Object.hasOwn(providers, id)) {
       projectedProviders[id] = { present: false };
       continue;
     }
-    const parsed = OwnedProvider.safeParse(providers[id]);
+    const parsed = PersistedProvider.safeParse(providers[id]);
     if (!parsed.success) {
       throw new OperationConflict(
         code,
@@ -201,7 +212,8 @@ export function extractProjection(rawJson: unknown, code: ConflictCode): Project
         { path: `agents.providers.${id}` },
       );
     }
-    projectedProviders[id] = { present: true, value: parsed.data };
+    // Validation is read-only: preserve the raw field order and values.
+    projectedProviders[id] = { present: true, value: providers[id] as typeof parsed.data };
   }
   const profiles = profilesArray(rawJson);
   const slots: ProjectionValue["profiles"] = [];
@@ -243,20 +255,21 @@ export function extractProjection(rawJson: unknown, code: ConflictCode): Project
 }
 
 /**
- * Raw JSON minus the twelve owned providers, the two owned profiles and
+ * Raw JSON minus the registry-owned providers, the two owned profiles and
  * daemon.mcp.injectIntoAgents, with empty containers normalized away (§7):
  * missing/empty agents.providers and daemon.agentProfiles compare equal, and
  * empty agents / daemon.mcp / daemon containers are pruned so intentional
  * container creation does not masquerade as unrelated drift.
  */
-export function unrelatedPersistedView(rawJson: unknown): unknown {
+export function unrelatedPersistedView(rawJson: unknown, ids: readonly string[] = OWNED_PROVIDER_IDS): unknown {
+  if (persistedProviderIds(ids) === null) throw new Error("unknown projection domain");
   if (!isRecord(rawJson)) return rawJson;
   const clone = structuredClone(rawJson);
   const agents = getKey(clone, "agents");
   if (isRecord(agents.value)) {
     const providers = getKey(agents.value, "providers");
     if (isRecord(providers.value)) {
-      for (const id of OWNED_PROVIDER_IDS) delete providers.value[id];
+      for (const id of ids) delete providers.value[id];
       if (Object.keys(providers.value).length === 0) delete agents.value.providers;
     }
     if (Object.keys(agents.value).length === 0) delete clone.agents;

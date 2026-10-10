@@ -6,6 +6,9 @@ import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
+import ts from 'typescript';
+import { CatalogFeature, CatalogInput, CatalogOutput } from '../plugin/shared/contracts.ts';
+import * as hostDescriptors from './helpers/provider-descriptors.mts';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const MODULE = join(root, 'plugin/server/provider-catalog.ts');
@@ -64,7 +67,7 @@ test('snapshot path: managed-id entry wins, resolvedProvider recorded, models fi
 });
 
 test('picker catalog refreshes each managed provider before reading models after a CLI update', async () => {
-  for (const family of ['codex', 'pi', 'devin', 'claude']) {
+  for (const family of ['codex', 'pi', 'devin', 'claude', 'opencode']) {
     const loadCatalog = await freshCatalog();
     let model = 'old-model';
     const calls = [];
@@ -262,3 +265,140 @@ test('role-less input resolves the base family entry directly', async () => {
   const out = await loadCatalog({ schemaVersion: 1, family: 'devin' }, paseo);
   assert.equal(out.resolvedProvider, 'devin');
 });
+
+test('preview budget: a cold-alias refresh that outlives the budget still yields the measured snapshot', async () => {
+  // Real-elapsed check of the live repro: the no-model picker call hung in
+  // providers.refresh until the daemon abandoned the RPC, while the same
+  // snapshot answered ready in ~1s. The bound is real seconds — the handler
+  // must answer inside it with the measured catalog, no fake clock.
+  const loadCatalog = await freshCatalog();
+  const { paseo } = fakePaseo({
+    refresh: () => new Promise(() => {}),
+    snapshot: snapshotEntries([
+      { provider: 'slp-pi-supervisor', status: 'ready', models: [{ id: 'openai/gpt-6-luna' }], modes: [] },
+    ]),
+  });
+  const out = await loadCatalog({ schemaVersion: 1, family: 'pi', role: 'supervisor' }, paseo);
+  assert.equal(out.resolvedProvider, 'slp-pi-supervisor');
+  assert.deepEqual(out.models.map(m => m.id), ['openai/gpt-6-luna']);
+  assert.equal(out.error, null);
+});
+
+test('preview budget: an exhausted warm-up budget never starts loading-entry listings', async () => {
+  // Real-elapsed second bound check: refresh consumes the whole shared
+  // deadline, then the still-loading entry must answer with its measured
+  // state without starting any advisory listing call — expired budget is a
+  // no-start, not a started-then-abandoned call.
+  const loadCatalog = await freshCatalog();
+  const { paseo, calls } = fakePaseo({
+    refresh: () => new Promise(() => {}),
+    snapshot: snapshotEntries([
+      { provider: 'pi', status: 'ready', models: [{ id: 'base-m' }], modes: [] },
+      { provider: 'slp-pi-supervisor', status: 'loading' },
+    ]),
+  });
+  const out = await loadCatalog({ schemaVersion: 1, family: 'pi', role: 'supervisor' }, paseo);
+  assert.equal(calls.listModels, 0, 'expired budget must not start listings');
+  assert.equal(calls.listModes, 0);
+  assert.equal(calls.listFeatures.length, 0);
+  assert.equal(out.resolvedProvider, 'slp-pi-supervisor');
+  assert.match(out.error, /slp-pi-supervisor is loading/);
+  assert.deepEqual(out.models, []);
+  assert.deepEqual(out.modes, []);
+});
+
+const knownThinking = { id: 'high', label: 'High', description: 'More reasoning',
+  isDefault: true, metadata: { tier: 2 } };
+const knownToggle = { type: 'toggle', id: 'fast', label: 'Fast', description: 'Faster replies',
+  tooltip: 'Host tooltip', icon: 'zap', value: true, desktopTrigger: 'icon' };
+const knownSelect = { type: 'select', id: 'thinking', label: 'Thinking', value: null,
+  options: [knownThinking], desktopTrigger: 'label' };
+
+test('host descriptor fixture typechecks against the installed protocol', () => {
+  const fixture = join(root, 'tests/helpers/provider-descriptors.mts');
+  const program = ts.createProgram([fixture], {
+    noEmit: true, strict: true, skipLibCheck: true,
+    target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.NodeNext,
+    moduleResolution: ts.ModuleResolutionKind.NodeNext, types: ['node'],
+  });
+  const diagnostics = ts.getPreEmitDiagnostics(program);
+  assert.equal(diagnostics.length, 0, ts.formatDiagnosticsWithColorAndContext(diagnostics, {
+    getCurrentDirectory: () => root, getCanonicalFileName: file => file, getNewLine: () => '\n',
+  }));
+});
+
+test('toggle desktop trigger survives while future host feature keys are stripped', () => {
+  assert.deepEqual(CatalogFeature.parse(hostDescriptors.toggle), knownToggle);
+});
+
+test('select desktop trigger and option metadata survive while future host keys are stripped', () => {
+  assert.deepEqual(CatalogFeature.parse(hostDescriptors.select), knownSelect);
+});
+
+test('future desktop trigger strings survive catalog parsing without damaging descriptors', () => {
+  const parsed = CatalogOutput.parse({ schemaVersion: 1, models: [], modes: [],
+    features: hostDescriptors.futureFeatures, error: null });
+  assert.deepEqual(parsed.features, [
+    { ...knownToggle, desktopTrigger: 'both' },
+    { ...knownSelect, desktopTrigger: 'both' },
+  ]);
+  assert.equal(parsed.error, null);
+});
+
+test('model mode and thinking descriptors accept future host keys at the wire boundary', () => {
+  const parsed = CatalogOutput.parse({
+    schemaVersion: 1, models: [hostDescriptors.model], modes: [hostDescriptors.mode],
+    features: [], error: null,
+  });
+  assert.deepEqual(parsed.models, [{ id: 'host-model', label: 'Host model',
+    thinkingOptions: [knownThinking], defaultThinkingOptionId: 'high' }]);
+  assert.deepEqual(parsed.modes, [{ id: 'full-access', label: 'Full access' }]);
+});
+
+test('legacy feature descriptors still parse without an invented desktop trigger', () => {
+  for (const { desktopTrigger, futureHostKey, ...legacy } of hostDescriptors.features) {
+    const raw = legacy.type === 'select' ? { ...legacy, options: [knownThinking] } : legacy;
+    const parsed = CatalogFeature.parse(raw);
+    assert.deepEqual(parsed, raw);
+    assert.equal(Object.hasOwn(parsed, 'desktopTrigger'), false);
+  }
+});
+
+test('host descriptor evolution keeps known fields and plugin envelopes validated', () => {
+  for (const raw of [
+    { ...hostDescriptors.toggle, desktopTrigger: 1 },
+    { ...hostDescriptors.toggle, value: 'true' },
+    { ...hostDescriptors.select, desktopTrigger: null },
+    { ...hostDescriptors.select, value: {} },
+    { ...hostDescriptors.select, options: [{ id: '', label: 'Empty' }] },
+  ]) assert.throws(() => CatalogFeature.parse(raw));
+  assert.throws(() => CatalogOutput.parse({ schemaVersion: 1, models: [], modes: [],
+    features: [], error: null, futurePluginKey: true }));
+  assert.throws(() => CatalogInput.parse({ schemaVersion: 1, family: 'codex', futurePluginKey: true }));
+});
+
+for (const path of ['snapshot', 'legacy']) {
+  test(path + ' host catalog preserves desktop triggers through loader and RPC parser', async () => {
+    const loadCatalog = await freshCatalog();
+    const overrides = {
+      listModels: async () => ({ models: [hostDescriptors.model] }),
+      listModes: async () => ({ modes: [hostDescriptors.mode] }),
+      listFeatures: async () => ({ features: hostDescriptors.features }),
+      ...(path === 'snapshot' ? { snapshot: snapshotEntries([{
+        provider: 'slp-codex-peer', status: 'ready',
+        models: [hostDescriptors.model], modes: [hostDescriptors.mode],
+      }]) } : {}),
+    };
+    const { paseo } = fakePaseo(overrides);
+    const raw = await loadCatalog({ schemaVersion: 1, family: 'codex', role: 'peer',
+      model: 'host-model', cwd: '/catalog-workspace' }, paseo);
+    assert.equal(raw.features[0].futureHostKey, true,
+      'raw host payload reaches the plugin parser; it was not stripped by an older protocol first');
+    const parsed = CatalogOutput.parse(raw);
+    assert.deepEqual(parsed.features, [knownToggle, knownSelect]);
+    assert.equal(parsed.error, null);
+    assert.equal(parsed.models[0].defaultThinkingOptionId, 'high');
+    assert.deepEqual(parsed.models[0].thinkingOptions, [knownThinking]);
+    assert.deepEqual(parsed.modes, [{ id: 'full-access', label: 'Full access' }]);
+  });
+}

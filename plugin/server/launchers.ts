@@ -10,7 +10,7 @@
 // absent — so a single shared candidate-level gate script cannot work (no
 // node path, no family binary); per-entry generated files are the only
 // shape that carries the frozen resolution into the probe. The manifest
-// keeps the full four-family resolution record because the shipped devin
+// keeps the full five-family resolution record because the shipped devin
 // shim validates the complete family/role sets before entering the wrapper
 // (verifyLaunchManifest stays generic — that is the documented choice).
 // `launchSetSha256` is the sha256 of the canonical launch.json bytes; the
@@ -29,7 +29,6 @@ import {
   chmod,
   lstat,
   mkdir,
-  open,
   readdir,
   readFile,
   realpath,
@@ -38,7 +37,9 @@ import {
   stat,
 } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join } from "node:path";
+import { readFileSync } from "node:fs";
 import { OperationConflict } from "../shared/contracts.ts";
+import { DESK_BRIDGE_PROTOCOL } from "../shared/enforcement.ts";
 import type {
   BinaryResolution,
   FamilyName,
@@ -47,7 +48,18 @@ import type {
   LaunchSet,
   LaunchSetRequest,
 } from "../shared/contracts.ts";
-import { FAMILY_IDS, HOOK_FAMILY_IDS, ROLES, type RoleName } from "../shared/families.ts";
+import { FAMILY_IDS, HOOK_FAMILY_IDS, ROLES, persistedFamilyIds, type RoleName } from "../shared/runtime/families.ts";
+import {
+  PRIVATE_DIR_MODE,
+  PrivateDirectoryCreationError,
+  ensurePrivateDirectory as ensurePublicationDirectory,
+  fsyncDirectory,
+  inspectDirectoryChain,
+  isSafeStagingOperationId,
+  lstatOrNull,
+  openExclusiveFile,
+  publicationStagingPaths,
+} from "./publication-files.ts";
 
 // The family/role axes derive from the shared registry (families.ts) — the
 // exports keep their historical names so existing imports keep working.
@@ -56,7 +68,6 @@ export { ROLES };
 type Role = RoleName;
 export const LAUNCHER_MODE = 0o755;
 export const MANIFEST_MODE = 0o644;
-const PRIVATE_DIR_MODE = 0o700;
 const MANIFEST_NAME = "launch.json";
 const SHIM_RELATIVE_PATH = join("bin", "slp-shim.mjs");
 const GATE_RELATIVE_PATH = join("bin", "slp-gate.mjs");
@@ -88,6 +99,12 @@ interface LaunchManifest {
    *  shim-style (the v1 and devin-only layouts). Must be a subset of
    *  `launcherFamilies`. */
   gateFamilies?: FamilyName[];
+  /** P2-d — the desk-bridge provenance pin recorded at publish: sha256 of
+   *  the candidate's packaged bin/slp-desk-mcp.mjs plus the bridge protocol
+   *  literal. Optional so pre-P2-d manifests still verify; a candidate that
+   *  ships the binary always publishes both fields. */
+  bridgeSha256?: string;
+  bridgeProtocolVersion?: string;
 }
 
 const sha256 = (bytes: string | Buffer): string =>
@@ -115,7 +132,10 @@ function buildManifest(request: LaunchSetRequest): LaunchManifest {
       ? { available: true, path: entry.path, version: entry.version }
       : { available: false, path: null, version: null };
   }
-  return {
+  if (persistedFamilyIds(Object.keys(request.binaries)) !== FAMILY_IDS) {
+    throw new OperationConflict("INVALID_REQUEST", "new launch sets require the exact current5 binary domain");
+  }
+  const manifest: LaunchManifest = {
     schemaVersion: 1,
     daemonHome: request.daemonHome,
     candidate: { sha256: request.candidate.sha256, path: request.candidate.runtimePath },
@@ -126,6 +146,20 @@ function buildManifest(request: LaunchSetRequest): LaunchManifest {
     launcherFamilies: [...FAMILIES],
     gateFamilies: [...GATE_FAMILIES],
   };
+  // P2-d — the bridge pin is recorded at publish, inside the manifest the
+  // binding's launchManifestSha256 already commits to (P2-b amend seam:
+  // the manager's Binding record carries no per-file fields). A candidate
+  // that ships bin/slp-desk-mcp.mjs always publishes the pin; an older
+  // candidate without the file simply omits it.
+  try {
+    manifest.bridgeSha256 = sha256(
+      readFileSync(join(request.candidate.runtimePath, "bin", "slp-desk-mcp.mjs")),
+    );
+    manifest.bridgeProtocolVersion = DESK_BRIDGE_PROTOCOL;
+  } catch {
+    /* candidate ships no bridge binary — the pin stays absent */
+  }
+  return manifest;
 }
 
 const manifestBytes = (manifest: LaunchManifest): Buffer =>
@@ -161,11 +195,15 @@ function gateLauncherScript(
   node: { path: string },
   gatePath: string,
   binaryPath: string,
+  family: FamilyName,
 ): string {
   return (
     "#!/bin/sh\n" +
     "unset NODE_OPTIONS\n" +
     `export SLP_FAMILY_BIN=${quote(binaryPath)}\n` +
+    // Recorded native manifests retain their exact historical script bytes.
+    // Current publication never puts OpenCode in gateFamilies.
+    (family === "opencode" ? "export SLP_OPENCODE_V2_ONLY=1\n" : "") +
     `exec ${quote(node.path)} ${quote(gatePath)} "$@"\n`
   );
 }
@@ -197,6 +235,7 @@ function planFiles(manifest: LaunchManifest, directory: string): PlannedFile[] {
             manifest.node,
             gatePath,
             manifest.binaries[family]?.path ?? "",
+            family,
           )
         : launcherScript(manifestPath, digest, manifest.node, shimPath, family, role);
       files.push({
@@ -222,6 +261,8 @@ function parseManifest(bytes: Buffer): LaunchManifest {
   }
   if (m === null || typeof m !== "object" || Array.isArray(m)) fail("is not an object");
   if (m.schemaVersion !== 1) fail("schemaVersion is not 1");
+  const manifestKeys = ['schemaVersion', 'daemonHome', 'candidate', 'node', 'binaries', 'families', 'roles', 'launcherFamilies', 'gateFamilies', 'bridgeSha256', 'bridgeProtocolVersion'];
+  if (Object.keys(m).some(key => !manifestKeys.includes(key))) fail("contains unknown fields");
   if (typeof m.daemonHome !== "string" || !isAbsolute(m.daemonHome)) fail("daemonHome is not absolute");
   const candidate = m.candidate;
   if (
@@ -239,7 +280,12 @@ function parseManifest(bytes: Buffer): LaunchManifest {
   }
   const binaries = m.binaries;
   if (!binaries || typeof binaries !== "object") fail("binaries is missing");
-  for (const family of FAMILIES) {
+  const historicalFamilies = Array.isArray(m.families) ? persistedFamilyIds(m.families) : null;
+  const binaryFamilies = persistedFamilyIds(Object.keys(binaries));
+  if (historicalFamilies === null || binaryFamilies === null || historicalFamilies.length !== binaryFamilies.length) {
+    fail("families/binaries must share exact legacy4 or current5 domain");
+  }
+  for (const family of historicalFamilies) {
     const b = (binaries as Record<string, unknown>)[family] as BinaryResolution | undefined;
     if (
       !b ||
@@ -253,8 +299,6 @@ function parseManifest(bytes: Buffer): LaunchManifest {
   }
   if (
     !Array.isArray(m.families) ||
-    m.families.length !== FAMILIES.length ||
-    !FAMILIES.every(f => (m.families as string[]).includes(f)) ||
     !Array.isArray(m.roles) ||
     m.roles.length !== ROLES.length ||
     !ROLES.every(r => (m.roles as string[]).includes(r))
@@ -264,24 +308,35 @@ function parseManifest(bytes: Buffer): LaunchManifest {
   if (
     m.launcherFamilies !== undefined &&
     (!Array.isArray(m.launcherFamilies) ||
-      !m.launcherFamilies.every(f => (FAMILIES as readonly string[]).includes(f)))
+      new Set(m.launcherFamilies).size !== m.launcherFamilies.length ||
+      !m.launcherFamilies.every(f => historicalFamilies.includes(f)))
   ) {
     fail("launcherFamilies is malformed");
   }
   if (m.gateFamilies !== undefined) {
-    const launchers = m.launcherFamilies ?? FAMILIES;
+    const launchers = m.launcherFamilies ?? historicalFamilies;
     if (
       !Array.isArray(m.gateFamilies) ||
+      new Set(m.gateFamilies).size !== m.gateFamilies.length ||
       !m.gateFamilies.every(f => launchers.includes(f as FamilyName))
     ) {
       fail("gateFamilies is malformed or outside launcherFamilies");
     }
   }
+  if (
+    m.bridgeSha256 !== undefined &&
+    (typeof m.bridgeSha256 !== "string" || !/^[0-9a-f]{64}$/.test(m.bridgeSha256))
+  ) {
+    fail("bridgeSha256 is malformed");
+  }
+  if (m.bridgeProtocolVersion !== undefined && m.bridgeProtocolVersion !== DESK_BRIDGE_PROTOCOL) {
+    fail("bridgeProtocolVersion is not the pinned bridge protocol");
+  }
   return m as LaunchManifest;
 }
 
 async function writeExclusive(path: string, bytes: Buffer, mode: number): Promise<void> {
-  const handle = await open(path, "wx", 0o600);
+  const handle = await openExclusiveFile(path);
   try {
     await handle.writeFile(bytes);
     await handle.sync();
@@ -290,15 +345,6 @@ async function writeExclusive(path: string, bytes: Buffer, mode: number): Promis
   }
   // Modes are applied explicitly after writing; creation mode is umask-bound.
   await chmod(path, mode);
-}
-
-async function fsyncDir(path: string): Promise<void> {
-  const handle = await open(path, "r");
-  try {
-    await handle.sync();
-  } finally {
-    await handle.close();
-  }
 }
 
 async function readPlanned(directory: string, file: PlannedFile): Promise<void> {
@@ -366,13 +412,7 @@ function validateRequest(request: LaunchSetRequest): void {
   if (!isAbsolute(request.node.path)) {
     throw new OperationConflict("INVALID_REQUEST", "node.path must be absolute");
   }
-  // Same operation-id space as materializer.ts OPERATION_ID_RE — both modules
-  // stage under .staging/<operationId>/.
-  if (
-    !/^[A-Za-z0-9][A-Za-z0-9._-]{0,255}$/.test(request.operationId) ||
-    request.operationId === "." ||
-    request.operationId === ".."
-  ) {
+  if (!isSafeStagingOperationId(request.operationId)) {
     throw new OperationConflict("INVALID_REQUEST", "operationId is not a safe staging name");
   }
 }
@@ -385,30 +425,14 @@ async function pathIsDirectory(path: string): Promise<boolean> {
   }
 }
 
-const lstatOrNull = async (path: string) => {
-  try {
-    return await lstat(path);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
-    throw error;
-  }
-};
-
-/** mkdir(0700) if absent; whatever exists must be a real directory, never a
- * symlink — same staging discipline as materializer.ts. */
+/** Launcher diagnostics intentionally omit the underlying mkdir failure. */
 async function ensurePrivateDirectory(directory: string, what: string): Promise<void> {
-  try {
-    await mkdir(directory, { mode: PRIVATE_DIR_MODE });
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
+  try { await ensurePublicationDirectory(directory, what); }
+  catch (error) {
+    if (error instanceof PrivateDirectoryCreationError) {
       throw new OperationConflict("IO_FAILURE", `cannot create ${what}`, { path: directory });
     }
-  }
-  const info = await lstatOrNull(directory);
-  if (!info || info.isSymbolicLink() || !info.isDirectory()) {
-    throw new OperationConflict("RUNTIME_INTEGRITY", `${what} is not a real directory`, {
-      path: directory,
-    });
+    throw error;
   }
 }
 
@@ -428,20 +452,15 @@ export function createLauncherBuilder(deps: { platform?: string } = {}): Launche
    * different launch set (§4 symlink rejection). */
   async function assertRealSetPath(directory: string): Promise<void> {
     const levels = [directory, dirname(directory), dirname(dirname(directory))];
-    for (const level of levels) {
-      const info = await lstatOrNull(level);
-      if (info === null) {
-        throw new OperationConflict("RUNTIME_INTEGRITY", `launch set path ${level} does not exist`, {
-          path: level,
-        });
-      }
-      if (info.isSymbolicLink() || !info.isDirectory()) {
-        throw new OperationConflict(
-          "RUNTIME_INTEGRITY",
-          `launch set path ${level} is not a real directory`,
-          { path: level },
-        );
-      }
+    const refusal = await inspectDirectoryChain(levels);
+    if (refusal) {
+      throw new OperationConflict(
+        "RUNTIME_INTEGRITY",
+        refusal.kind === "missing"
+          ? `launch set path ${refusal.path} does not exist`
+          : `launch set path ${refusal.path} is not a real directory`,
+        { path: refusal.path },
+      );
     }
   }
 
@@ -510,6 +529,13 @@ export function createLauncherBuilder(deps: { platform?: string } = {}): Launche
       launchManifestSha256,
       directory: real,
       files,
+      // P2-d — project the verified manifest's bridge pin so the desk
+      // bridge can compare it against the packaged/runtime binary without
+      // re-reading the manifest a second time.
+      ...(manifest.bridgeSha256 !== undefined ? { bridgeSha256: manifest.bridgeSha256 } : {}),
+      ...(manifest.bridgeProtocolVersion !== undefined
+        ? { bridgeProtocolVersion: manifest.bridgeProtocolVersion }
+        : {}),
     };
   }
 
@@ -525,11 +551,10 @@ export function createLauncherBuilder(deps: { platform?: string } = {}): Launche
         // authoritative, a mismatch is integrity drift — never overwrite.
         return verifyDirectory(directory);
       }
-      const stagingRoot = join(request.stableRoot, ".staging");
+      const { root: stagingRoot, operation: opStaging, launchSet: staging } =
+        publicationStagingPaths(request.stableRoot, request.operationId);
       await ensurePrivateDirectory(stagingRoot, "staging root");
-      const opStaging = join(stagingRoot, request.operationId);
       await ensurePrivateDirectory(opStaging, "operation staging directory");
-      const staging = join(opStaging, "launch-set");
       const leftover = await lstatOrNull(staging);
       if (leftover) {
         // A pre-placed symlink or non-directory is never traversed or removed.
@@ -553,7 +578,7 @@ export function createLauncherBuilder(deps: { platform?: string } = {}): Launche
       for (const file of planned) {
         await writeExclusive(join(staging, file.name), file.bytes, file.mode);
       }
-      await fsyncDir(staging);
+      await fsyncDirectory(staging);
       for (const file of planned) {
         await readPlanned(staging, file);
       }
@@ -570,7 +595,7 @@ export function createLauncherBuilder(deps: { platform?: string } = {}): Launche
         }
         throw error;
       }
-      await fsyncDir(launchersRoot);
+      await fsyncDirectory(launchersRoot);
       return verifyDirectory(directory);
     },
 

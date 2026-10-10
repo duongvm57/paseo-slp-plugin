@@ -1,0 +1,792 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Paseo SLP overview — render stage</title>
+<!--
+  Deterministic render stage for docs/media/paseo-slp-overview.
+  build.py loads this page, calls init(timeline) and then renderAt(t) for every
+  frame. Nothing here animates on its own clock, so the same timeline always
+  produces the same frames. Palette and card style follow docs/plugin-explained.html.
+-->
+<style>
+  :root { --paper:#eef3f7; --ink:#233249; --muted:#596b80; --blue:#335e9e; --teal:#167b70;
+    --orange:#a65b2d; --red:#b4443a; --line:#d3deea; --soft:#e3ebf3; --code:#192c44; --panel:#fff; }
+  html, body { margin:0; width:1920px; height:1080px; overflow:hidden; background:var(--paper); }
+  body, svg text { font-family:"Ubuntu Sans","Segoe UI","Liberation Sans",Arial,sans-serif; color:var(--ink); }
+  .mono, svg .mono { font-family:"Ubuntu Sans Mono","Cascadia Mono",Consolas,"DejaVu Sans Mono",monospace; }
+  /* Ubuntu Sans Mono stacks Vietnamese diacritics poorly; DejaVu Sans Mono places them correctly. */
+  body.vi .mono, body.vi svg .mono { font-family:"DejaVu Sans Mono","Cascadia Mono",Consolas,monospace; }
+  .fo { width:100%; height:100%; box-sizing:border-box; }
+  .fo div { box-sizing:border-box; }
+  .card { padding:22px 26px; }
+  .card .t { font-size:30px; font-weight:700; line-height:1.18; letter-spacing:-.3px; }
+  .card .s { font-size:22px; line-height:1.38; color:var(--muted); margin-top:10px; }
+  .card.small { padding:16px 20px; }
+  .card.small .t { font-size:25px; }
+  .card.small .s { font-size:20px; margin-top:6px; }
+  .chip { display:flex; align-items:center; justify-content:center; height:100%; font-size:22px;
+    font-weight:600; white-space:nowrap; }
+  .cap { display:flex; align-items:center; justify-content:center; height:100%; text-align:center;
+    font-size:35px; line-height:1.32; color:#fff; padding:0 60px; box-sizing:border-box; }
+  .note { font-size:23px; line-height:1.4; color:var(--muted); }
+  .rows div { display:flex; justify-content:space-between; align-items:center; font-size:24px;
+    padding:14px 24px; border-top:1px solid var(--line); }
+  .rows div:first-child { border-top:0; }
+  .tag { font:600 18px "Ubuntu Sans Mono",Consolas,monospace; padding:4px 10px; border-radius:4px; }
+</style>
+</head>
+<body>
+<svg id="stage" xmlns="http://www.w3.org/2000/svg" width="1920" height="1080" viewBox="0 0 1920 1080">
+  <defs>
+    <filter id="shadow" x="-5%" y="-5%" width="110%" height="120%">
+      <feDropShadow dx="0" dy="3" stdDeviation="5" flood-color="#233249" flood-opacity=".10"/>
+    </filter>
+  </defs>
+  <rect width="1920" height="1080" fill="#eef3f7"/>
+  <g id="scenes"></g>
+  <g id="chrome"></g>
+</svg>
+<script>
+const NS = 'http://www.w3.org/2000/svg', XH = 'http://www.w3.org/1999/xhtml';
+const C = { blue:'#335e9e', teal:'#167b70', orange:'#a65b2d', red:'#b4443a', ink:'#233249',
+  muted:'#596b80', line:'#d3deea', soft:'#e3ebf3', code:'#192c44', panel:'#ffffff', paper:'#eef3f7' };
+const ease = x => x <= 0 ? 0 : x >= 1 ? 1 : 1 - Math.pow(1 - x, 3);
+const easeIO = x => x <= 0 ? 0 : x >= 1 ? 1 : (x < .5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2);
+let TL = null, SCENES = [], CAPTIONS = [], CHROME = {}, LANG = 'en', LBL = {}, SKIP = new Set(), MISSING = new Set();
+const I18N = { vi: {
+"How a brief becomes a controlled operation": "Một brief trở thành thao tác có kiểm soát như thế nào",
+"explanatory animation": "hoạt hình minh họa",
+"intent · authority · final acceptance": "mục tiêu · thẩm quyền · nghiệm thu cuối",
+"observes workflow and governance": "quan sát quy trình và quản trị",
+"frames, coordinates, integrates, judges": "định khung, điều phối, tích hợp, phán quyết",
+"each owns one bounded outcome": "mỗi Peer sở hữu một kết quả có giới hạn",
+"human judgment stays here": "phán đoán của con người nằm ở đây",
+"LAYER": "LỚP",
+"OWNS": "SỞ HỮU",
+"EXAMPLE": "VÍ DỤ",
+"Processes, sessions, workspaces, agent parentage, SDK operations and the filesystem.": "Tiến trình, session, workspace, quan hệ cha con của agent, thao tác SDK và hệ thống file.",
+"Create the session; execute the bounded Git command.": "Tạo session; chạy lệnh Git có giới hạn.",
+"Plugin runtime": "Runtime của plugin",
+"Role policy delivery, declared identities, revision gates, durable records and controlled effects.": "Phân phối role policy, danh tính đã khai báo, cổng revision, bản ghi bền vững và hiệu ứng có kiểm soát.",
+"Is this exact owner allowed to issue this recorded phase?": "Đúng owner này có được issue pha đã ghi này không?",
+"Human judgment": "Phán đoán của Human",
+"Intent, real authority, independent judgment and final acceptance.": "Mục tiêu, thẩm quyền thật, phán đoán độc lập và nghiệm thu cuối.",
+"Is this the right outcome, and is deployment authorized?": "Đây có đúng kết quả cần đạt, và việc deploy đã được phép chưa?",
+"Own agent scheduler": "Bộ lập lịch agent riêng",
+"Paseo keeps agent lifecycle, workspaces and parentage. The plugin never runs a hidden control plane.": "Paseo giữ vòng đời agent, workspace và quan hệ cha con. Plugin không chạy control plane ẩn.",
+"ROLE POLICY  ·  read by the seat": "ROLE POLICY  ·  seat đọc",
+"Common policy": "Policy chung",
+"Role contract — Supervisor / Lead / Peer": "Hợp đồng vai trò — Supervisor / Lead / Peer",
+"narrows": "thu hẹp",
+"never widens": "không mở rộng",
+"RUNTIME ENFORCEMENT  ·  checked by code": "RUNTIME ENFORCEMENT  ·  code kiểm tra",
+"Guarded desk operation": "Thao tác desk được bảo vệ",
+"a tool call admitted through the bound desk bridge": "lệnh tool được nhận qua desk bridge đã bind",
+"matches the recorded fact": "khớp dữ kiện đã ghi",
+"ownership": "quyền sở hữu",
+"guides judgment": "dẫn dắt phán đoán",
+"guards recorded facts": "canh giữ dữ kiện đã ghi",
+"app sidebar · preview, activate, reconcile": "sidebar của app · xem trước, kích hoạt, reconcile",
+"Verified candidate": "Candidate đã xác minh",
+"· immutable bytes": "· byte bất biến",
+"published, journaled with owned-entry receipts": "đã công bố, ghi journal kèm receipt cho mục sở hữu",
+"runtime root · Node binary · transport · daemon home": "gốc runtime · file Node · transport · daemon home",
+"pins exact bytes": "ghim đúng byte",
+"Paseo creates the session": "Paseo tạo session",
+"Provider session": "Session của provider",
+"role bytes already in durable context": "byte role đã nằm trong ngữ cảnh bền vững",
+"Running session": "Session đang chạy",
+"keeps earlier bytes": "giữ byte cũ",
+"Future launch": "Lần khởi chạy sau",
+"uses the new binding": "dùng binding mới",
+"Rebind changes future launches. Deactivation removes owned configuration but keeps runtime files that live sessions may still execute.": "Rebind đổi các lần khởi chạy sau. Hủy kích hoạt gỡ cấu hình do plugin sở hữu nhưng giữ file runtime mà session đang chạy có thể vẫn dùng.",
+"Paseo session": "Session Paseo",
+"title + injected role": "tiêu đề + role được nạp",
+"mint handle": "tạo handle",
+"bind at session open": "bind khi mở session",
+"register agent": "đăng ký agent",
+"Bound membership": "Membership đã bind",
+"exact agent": "agent chính xác",
+"recorded": "đã ghi",
+"runtime family": "họ runtime",
+"role": "vai trò",
+"working directory": "thư mục làm việc",
+"binding generation": "thế hệ binding",
+"Bound bridge": "Bridge đã bind",
+"fresh identity": "danh tính mới",
+"strict schema": "schema chặt chẽ",
+"REPOSITORY DESK  ·  append-only ledger": "DESK CỦA REPOSITORY  ·  ledger chỉ ghi thêm",
+"same Git common directory → one shared desk": "cùng Git common directory → một desk dùng chung",
+"Arbitrary shell commands and file edits are outside these guards.": "Lệnh shell và chỉnh sửa file tùy ý nằm ngoài các chốt này.",
+"Moving scope": "Scope đang thay đổi",
+"one writer": "một người ghi",
+"second writer refused": "người ghi thứ hai bị từ chối",
+"REVIEW PLAN — selected": "KẾ HOẠCH REVIEW — được chọn",
+"named independent lenses + reason": "góc nhìn độc lập có tên + lý do",
+"a reasoned no-trigger decision": "quyết định không kích hoạt, có lý do",
+"waiver class + authority pointer": "loại miễn trừ + con trỏ thẩm quyền",
+"exempt: shape is checked; the Human authority behind it is not authenticated": "exempt: hình thức được kiểm tra; thẩm quyền Human phía sau không được xác thực",
+"Review round binds": "Vòng review ghim",
+"◆ exact candidate": "◆ candidate chính xác",
+"◆ scope declaration": "◆ khai báo scope",
+"◆ current brief": "◆ brief hiện hành",
+"◆ neutral mandate": "◆ mandate trung lập",
+"✎ candidate changed": "✎ candidate đã đổi",
+"STALE": "CŨ",
+"cannot discharge their own independent gate": "không thể tự xả cổng độc lập của mình",
+"a fresh, neutrally briefed reviewer can": "reviewer mới, được brief trung lập thì có thể",
+"each step is a separate recorded fact": "mỗi bước là một dữ kiện được ghi riêng",
+"Reserve": "Giữ chỗ",
+"attempt · task revision · runtime bundle · placement": "attempt · revision task · bundle runtime · vị trí",
+"Create": "Tạo",
+"worker with no work prompt": "worker không kèm prompt công việc",
+"Verify": "Xác minh",
+"runtime · labels · parent · workspace · cwd": "runtime · nhãn · agent cha · workspace · cwd",
+"exact registered membership · scope claim": "membership đã đăng ký chính xác · claim scope",
+"Send": "Gửi",
+"the work, with fresh pins": "công việc, với pin mới",
+"Late registration": "Đăng ký muộn",
+"send returns": "send trả về",
+": nothing is delivered, the ledger is unchanged. Reconcile, re-read pins, then send.": ": không gửi gì, ledger không đổi. Reconcile, đọc lại pin, rồi mới send.",
+"Lost create receipt": "Mất receipt tạo agent",
+"The original action and its uncertainty are kept. Positive identity first — an empty agent list is not enough.": "Action gốc và trạng thái bất định được giữ lại. Cần danh tính khẳng định trước — danh sách agent rỗng là chưa đủ.",
+"knowledge · ruling": "tri thức · phán quyết",
+"code · landed": "code · đã land",
+"consumer": "bên dùng",
+"Ready =": "Sẵn sàng =",
+"current qualified result": "kết quả đủ điều kiện hiện hành",
+"AND": "VÀ",
+"measured availability in the consumer's actual base": "khả dụng đo được trong base thật của bên dùng",
+"landed · qualified": "đã land · đủ điều kiện",
+"D's declared base": "Base đã khai báo của D",
+"B's delta present": "có delta của B",
+"C's delta missing": "thiếu delta của C",
+"measured by a bounded read-only Git reference check before reservation": "đo bằng kiểm tra Git reference chỉ đọc, có giới hạn, trước khi giữ chỗ",
+"BLOCKED": "BỊ CHẶN",
+"reopened": "mở lại",
+"current readiness": "sẵn sàng hiện tại",
+"invalidated": "mất hiệu lực",
+"History keeps the pins earlier attempts consumed.": "Lịch sử giữ các pin mà attempt trước đã dùng.",
+"LEDGER TRANSACTION BOUNDARY — no atomicity across this line": "RANH GIỚI TRANSACTION CỦA LEDGER — không có tính nguyên tử qua đường này",
+"exact operation and its controls become durable": "thao tác chính xác và các kiểm soát được ghi bền vững",
+"locked admission commits permission first": "admission có khóa ghi quyền trước",
+"bounded SDK / Git / FS call, outside the transaction": "lệnh SDK / Git / FS có giới hạn, ngoài transaction",
+"record the receipt, failure or uncertainty": "ghi receipt, lỗi hoặc trạng thái bất định",
+"observe → ? uncertain": "observe → ? bất định",
+"receipt lost — the effect may already have happened": "mất receipt — hiệu ứng có thể đã xảy ra",
+"Exact replay": "Replay chính xác",
+"returns the recorded outcome": "trả về kết quả đã ghi",
+"measures the original identity": "đo danh tính gốc",
+"✗ fresh request ID": "✗ request ID mới",
+"could create a second worker, duplicate a prompt or apply a delta twice. No automatic retry engine.": "có thể tạo worker thứ hai, gửi trùng prompt hoặc áp delta hai lần. Không có cơ chế tự động thử lại.",
+"worker's captured base": "base đã chụp của worker",
+"worker's output": "kết quả của worker",
+"actual target, incl. unrelated dirty work": "target thật, gồm cả thay đổi không liên quan",
+"3-way": "3 chiều",
+"✓ unrelated work preserved": "✓ giữ thay đổi không liên quan",
+"‖ conflicts held": "‖ giữ lại xung đột",
+"combined candidate, outside the target": "candidate kết hợp, bên ngoài target",
+"owner-pinned proof recipe IDs": "ID recipe bằng chứng do owner ghim",
+"recheck · recovery plan · backup · apply · measure": "kiểm lại · kế hoạch phục hồi · sao lưu · áp dụng · đo",
+"Only a measured full application establishes a landed pin; partial or unknown keeps resources reserved.": "Chỉ áp dụng đầy đủ đã đo mới tạo pin landed; một phần hoặc không rõ thì tài nguyên vẫn bị giữ.",
+"stay separate Human / Lead decisions": "vẫn là quyết định riêng của Human / Lead",
+"1 · Verify account": "1 · Xác minh account",
+"original proof + complete resource inventory, kept outside removable directories": "bằng chứng gốc + danh mục tài nguyên đầy đủ, giữ ngoài thư mục có thể xóa",
+"2 · Remove stage": "2 · Xóa stage",
+"own permit · fresh source, target and survivor checks": "giấy phép riêng · kiểm tra mới source, target và phần còn lại",
+"3 · Remove backup": "3 · Xóa bản sao lưu",
+"separate permit · only after the stage is accounted for": "giấy phép riêng · chỉ sau khi stage đã được đối soát",
+"stage before backup — a stage failure stops before any backup removal": "stage trước backup — stage lỗi thì dừng trước mọi thao tác xóa backup",
+"cycles": "lượt",
+"2 / 2 total": "2 / 2 tổng",
+"Exhausted": "Hết lượt",
+"→ the unresolved obligation is retained and reported, not retried in an unbounded loop.": "→ nghĩa vụ chưa giải quyết được giữ lại và báo cáo, không thử lại vô hạn.",
+"fences new task effects": "chặn hiệu ứng task mới",
+"≠ running turn cancelled": "≠ lượt đang chạy đã bị hủy",
+"separately granted lifecycle step": "bước vòng đời được cấp quyền riêng",
+"≠ processes quiescent": "≠ tiến trình đã dừng hẳn",
+"a declared pointer to authority": "con trỏ khai báo tới thẩm quyền",
+"≠ authenticated Human grant": "≠ grant của Human đã xác thực",
+"OPTIONAL — OFF UNTIL YOU OPT IN": "TÙY CHỌN — TẮT CHO ĐẾN KHI BẠN BẬT",
+"Communication language": "Ngôn ngữ giao tiếp",
+"Communication supervision": "Giám sát giao tiếp",
+"not an autonomous scheduler": "không phải bộ lập lịch tự động",
+"read projection · reload after changes": "bản chiếu chỉ đọc · tải lại sau khi đổi",
+"Current brief": "Brief hiện hành",
+"Decisions": "Quyết định",
+"3 recorded": "3 đã ghi",
+"Scopes & ownership": "Scope & quyền sở hữu",
+"1 writer each": "mỗi scope 1 người ghi",
+"Reviews": "Review",
+"pinned · 1 stale": "đã ghim · 1 cũ",
+"Evidence": "Bằng chứng",
+"claim vs observed": "khai báo vs quan sát",
+"Tasks": "Task",
+"ready / blocked / held": "sẵn sàng / bị chặn / bị giữ",
+"intent · authority · project acceptance — real decisions, not tool transitions": "mục tiêu · thẩm quyền · nghiệm thu dự án — quyết định thật, không phải chuyển trạng thái của tool",
+"READ THE SOURCE-PINNED GUIDE": "ĐỌC HƯỚNG DẪN CÓ GHIM SOURCE",
+"EN / VI · 16 chapters · 57 implementation sources with SHA-256 pins": "EN / VI · 16 chương · 57 nguồn triển khai có pin SHA-256"
+} };
+const KEEP = new Set(["Paseo SLP","SUPERVISOR  ·  LEAD  ·  PEER", "plugin 0.5.0 · SDK 0.10.0", "working source 8365ce9", "Human", "Supervisor", "Lead", "Peers", "Paseo · provider · OS", "Workspace protocol", "Assignment", "membership", "revision", "SLP Manager", "slp-runtime/<sha>", "Launchers · providers · profiles", "Binding", "create_agent", "Role hook + gate", "Claude · Codex · Pi", "ACP role wrapper", "Devin", "capability", "assignment rev 1", "scope rev 1", "task rev 1", "action: intent", "action: observed", "↓ hash", "worktree A", "worktree B", "$ shell", "src/checkout/**", "required", "not-required", "exempt", "Own", "Wr", "Rv", "E2", "Bind + claim", "seat-pending", "LEDGER", "HOST · SDK / Git / FS", "intent", "issue", "effect", "observe", "Reconcile", "BASE", "RESULT", "TARGET", "stage", "check", "land", "commit", "push", "deploy", "Stop", "Archive", "grantRef", "Quota fallback", "Jev routing", "Read SLP work", "docs/plugin-explained.html"]);
+
+
+function el(tag, attrs, parent) {
+  const e = document.createElementNS(NS, tag);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  if (parent) parent.appendChild(e);
+  return e;
+}
+function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+
+// Scene context: every element is placed at absolute coordinates and given an
+// entrance time anchored to a narration cue (cue index + fraction of that cue).
+function makeCtx(scene, group) {
+  const starts = scene.cues.map(c => c.start - scene.start);
+  const ends = scene.cues.map(c => c.end - scene.start);
+  const items = [];
+  const at = (cue, frac = 0, d = 0) => {
+    if (cue == null) return d;
+    return starts[cue] + (ends[cue] - starts[cue]) * frac + d;
+  };
+  const timing = o => ({ tIn: o.tIn != null ? o.tIn : at(o.cue ?? 0, o.f ?? 0, o.d ?? 0),
+    tOut: o.out != null ? at(o.out[0], o.out[1] ?? 0, o.out[2] ?? 0) : Infinity });
+  const wrap = o => { const g = el('g', {}, group); items.push({ kind:'fade', node:g, ...timing(o), dy:o.dy ?? 14 }); return g; };
+  const ctx = {
+    items, at,
+    group: o => wrap(o || {}),
+    fo(g, x, y, w, h, html) {
+      const f = el('foreignObject', { x, y, width:w, height:h }, g);
+      const d = document.createElementNS(XH, 'div'); d.className = 'fo'; d.innerHTML = html; f.appendChild(d);
+      return f;
+    },
+    card(x, y, w, h, title, sub, o = {}) {
+      const g = wrap(o), col = o.color || C.teal;
+      el('rect', { x, y, width:w, height:h, rx:10, fill:o.fill || C.panel, stroke:o.stroke || C.line,
+        'stroke-width':o.sw || 1.5, filter:'url(#shadow)', 'stroke-dasharray':o.dash || 'none' }, g);
+      if (!o.noBar) el('rect', { x:x + 1, y, width:w - 2, height:6, rx:3, fill:col }, g);
+      ctx.fo(g, x, y + 4, w, h - 4, `<div class="card ${o.small ? 'small' : ''}" style="${o.center ? 'text-align:center' : ''}">` +
+        `<div class="t" style="color:${o.tcolor || C.ink}">${title}</div>${sub ? `<div class="s">${sub}</div>` : ''}</div>`);
+      return g;
+    },
+    chip(x, y, w, h, text, o = {}) {
+      const g = wrap(o), col = o.color || C.teal;
+      el('rect', { x, y, width:w, height:h, rx:h / 2, fill:o.fill || '#ffffff', stroke:col, 'stroke-width':2 }, g);
+      ctx.fo(g, x, y, w, h, `<div class="chip ${o.mono ? 'mono' : ''}" style="color:${o.tcolor || col};font-size:${o.size || 22}px">${text}</div>`);
+      return g;
+    },
+    text(x, y, s, o = {}) {
+      const g = wrap(o);
+      const t = el('text', { x, y, 'font-size':o.size || 26, 'font-weight':o.weight || 400, fill:o.color || C.ink,
+        'text-anchor':o.anchor || 'start', 'letter-spacing':o.ls || 0, class:o.mono ? 'mono' : '' }, g);
+      t.textContent = s;
+      return g;
+    },
+    html(x, y, w, h, html, o = {}) { const g = wrap(o); ctx.fo(g, x, y, w, h, html); return g; },
+    // A connector that draws itself, with an arrow head that appears as it lands.
+    arrow(d, o = {}) {
+      const g = el('g', {}, group), col = o.color || C.muted;
+      const p = el('path', { d, fill:'none', stroke:col, 'stroke-width':o.w || 3, 'stroke-linecap':'round',
+        'stroke-linejoin':'round' }, g);
+      const L = p.getTotalLength();
+      const head = el('path', { d:'M -13 -8 L 0 0 L -13 8', fill:'none', stroke:col, 'stroke-width':o.w || 3,
+        'stroke-linecap':'round', 'stroke-linejoin':'round' }, g);
+      const end = p.getPointAtLength(L), pre = p.getPointAtLength(Math.max(0, L - 2));
+      const ang = Math.atan2(end.y - pre.y, end.x - pre.x) * 180 / Math.PI;
+      head.setAttribute('transform', `translate(${end.x},${end.y}) rotate(${ang})`);
+      if (o.noHead) head.remove();
+      items.push({ kind:'draw', node:g, path:p, head, L, dash:o.dash, dur:o.dur || .7, ...timing(o) });
+      return g;
+    },
+    // A moving dot along a path: the "brief" travelling through the mechanism.
+    token(d, o = {}) {
+      const g = el('g', {}, group);
+      const p = el('path', { d, fill:'none', stroke:'none' }, g);
+      const dot = el('circle', { r:o.r || 11, fill:o.color || C.orange, stroke:'#fff', 'stroke-width':3 }, g);
+      items.push({ kind:'token', node:g, path:p, dot, L:p.getTotalLength(), dur:o.dur || 1.6, repeat:!!o.repeat,
+        hold:o.hold !== false, ...timing(o) });
+      return g;
+    },
+    stamp(x, y, s, o = {}) {
+      const g = wrap({ ...o, dy:0 }), col = o.color || C.red;
+      const inner = el('g', { transform:`translate(${x},${y}) rotate(${o.rot ?? -8})` }, g);
+      const w = o.w || (s.length * 25 + 50);
+      el('rect', { x:-w / 2, y:-34, width:w, height:68, rx:8, fill:'#ffffffee', stroke:col, 'stroke-width':4 }, inner);
+      const t = el('text', { x:0, y:13, 'text-anchor':'middle', 'font-size':38, 'font-weight':800, fill:col,
+        'letter-spacing':3 }, inner);
+      t.textContent = s;
+      items.push({ kind:'pop', node:inner, x, y, rot:o.rot ?? -8, ...timing(o) });
+      return g;
+    },
+    strike(x1, y1, x2, y2, o = {}) {
+      return ctx.arrow(`M ${x1} ${y1} L ${x2} ${y2}`, { ...o, color:o.color || C.red, noHead:true, w:5, dur:.35 });
+    },
+    avatar(cx, cy, label, o = {}) {
+      const g = wrap(o), col = o.color || C.teal;
+      el('circle', { cx, cy, r:o.r || 38, fill:o.fill || col, stroke:'#fff', 'stroke-width':4, filter:'url(#shadow)' }, g);
+      const t = el('text', { x:cx, y:cy + 10, 'text-anchor':'middle', 'font-size':o.size || 28, 'font-weight':700, fill:'#fff' }, g);
+      t.textContent = label;
+      return g;
+    },
+  };
+  return ctx;
+}
+
+function chrome(ctx, scene, idx, total) {
+  // Scene header: chapter marker, title and the honesty label.
+  const head = `${String(idx).padStart(2, '0')} / ${String(total).padStart(2, '0')}  ·  ${scene.chapter.toUpperCase()}`;
+  SKIP.add(head); SKIP.add(scene.title);
+  ctx.text(96, 104, head,
+    { size:22, weight:700, color:C.teal, ls:2.5, mono:true, tIn:.05, dy:0 });
+  ctx.text(96, 172, scene.title, { size:52, weight:700, color:C.ink, ls:-1, tIn:.12, dy:8 });
+}
+
+// ---------------------------------------------------------------- scenes ----
+const BUILD = {
+  title(x) {
+    // Typographic wordmark only — no pictorial logo.
+    x.text(960, 250, 'SUPERVISOR  ·  LEAD  ·  PEER', { size:24, weight:700, color:C.teal, anchor:'middle', ls:6, mono:true, tIn:.15 });
+    x.text(960, 385, 'Paseo SLP', { size:128, weight:800, anchor:'middle', ls:-4, tIn:.3 });
+    x.arrow('M 840 414 L 1080 414', { tIn:.55, color:C.teal, w:5, noHead:true, dur:.6 });
+    x.text(960, 470, 'How a brief becomes a controlled operation', { size:46, color:C.muted, anchor:'middle', tIn:.7 });
+    x.chip(470, 515, 330, 48, 'plugin 0.5.0 · SDK 0.10.0', { color:C.blue, mono:true, size:20, tIn:1.0 });
+    x.chip(820, 515, 300, 48, 'working source 8365ce9', { color:C.blue, mono:true, size:20, tIn:1.1 });
+    x.chip(1140, 515, 310, 48, 'explanatory animation', { color:C.orange, mono:true, size:20, tIn:1.2 });
+    if (TL.narration && LBL.titleCredit) { SKIP.add(LBL.titleCredit);
+      x.text(960, 603, LBL.titleCredit, { size:21, color:C.muted, anchor:'middle', mono:true, tIn:1.35 }); }
+    const roles = [
+      ['Human', 'intent · authority · final acceptance', C.blue, .05],
+      ['Supervisor', 'observes workflow and governance', C.teal, .42],
+      ['Lead', 'frames, coordinates, integrates, judges', C.teal, .56],
+      ['Peers', 'each owns one bounded outcome', C.teal, .72],
+    ];
+    roles.forEach(([t, s, col, f], i) => x.card(150 + i * 410, 630, 380, 170, t, s, { color:col, cue:0, f, small:true }));
+    x.html(150, 630, 380, 170, `<div style="width:100%;height:100%;box-sizing:border-box;border:5px solid ${C.blue};border-radius:12px"></div>`,
+      { cue:1, f:.62 });
+    x.text(340, 845, 'human judgment stays here', { size:24, weight:700, color:C.blue, anchor:'middle', cue:1, f:.66 });
+  },
+
+  owners(x) {
+    const band = (y, col, name, owns, ex, o) => {
+      const g = x.group(o);
+      el('rect', { x:96, y, width:1728, height:150, rx:10, fill:'#fff', stroke:C.line, 'stroke-width':1.5, filter:'url(#shadow)' }, g);
+      el('rect', { x:96, y, width:14, height:150, rx:4, fill:col }, g);
+      x.fo(g, 140, y, 420, 150, `<div style="display:flex;align-items:center;height:100%;font-size:34px;font-weight:700;color:${col}">${name}</div>`);
+      x.fo(g, 580, y, 720, 150, `<div style="display:flex;align-items:center;height:100%;font-size:26px;line-height:1.4">${owns}</div>`);
+      x.fo(g, 1330, y, 470, 150, `<div style="display:flex;align-items:center;height:100%;font-size:22px;line-height:1.4;color:${C.muted};font-style:italic">${ex}</div>`);
+    };
+    [['LAYER', 96], ['OWNS', 580], ['EXAMPLE', 1330]].forEach(([t, xx]) =>
+      x.text(xx, 238, t, { size:19, weight:700, color:C.muted, ls:2, mono:true, cue:0 }));
+    band(620, C.orange, 'Paseo · provider · OS', 'Processes, sessions, workspaces, agent parentage, SDK operations and the filesystem.',
+      'Create the session; execute the bounded Git command.', { cue:1, f:.05 });
+    band(440, C.teal, 'Plugin runtime', 'Role policy delivery, declared identities, revision gates, durable records and controlled effects.',
+      'Is this exact owner allowed to issue this recorded phase?', { cue:2, f:.05 });
+    band(260, C.blue, 'Human judgment', 'Intent, real authority, independent judgment and final acceptance.',
+      'Is this the right outcome, and is deployment authorized?', { cue:3, f:.05 });
+    x.html(96, 800, 520, 86, `<div style="height:100%;display:flex;align-items:center;justify-content:center;background:#fff;border:1.5px solid ${C.line};border-radius:10px;font-size:27px;font-weight:700;color:${C.muted}">Own agent scheduler</div>`,
+      { cue:4, f:.15 });
+    x.strike(150, 843, 562, 843, { cue:4, f:.45 });
+    x.html(650, 800, 1170, 86, `<div class="note" style="display:flex;align-items:center;height:100%">Paseo keeps agent lifecycle, workspaces and parentage. The plugin never runs a hidden control plane.</div>`,
+      { cue:4, f:.5 });
+  },
+
+  policy(x) {
+    x.text(96, 262, 'ROLE POLICY  ·  read by the seat', { size:22, weight:700, color:C.blue, ls:2, mono:true, cue:0 });
+    const layers = [['Common policy', 760, 0], ['Role contract — Supervisor / Lead / Peer', 680, .18],
+      ['Workspace protocol', 600, .55], ['Assignment', 520, .8]];
+    layers.forEach(([t, w, f], i) => {
+      const y = 292 + i * 104, xx = 120 + (760 - w) / 2;
+      const g = x.group({ cue:0, f });
+      el('rect', { x:xx, y, width:w, height:84, rx:10, fill:i === 3 ? '#e9f0fb' : '#fff', stroke:C.blue,
+        'stroke-width':i === 3 ? 3 : 1.5, filter:'url(#shadow)' }, g);
+      x.fo(g, xx, y, w, 84, `<div style="display:flex;align-items:center;justify-content:center;height:100%;font-size:27px;font-weight:600">${t}</div>`);
+    });
+    x.arrow('M 96 300 L 96 690', { cue:1, f:.05, color:C.blue, w:4 });
+    x.text(70, 720, 'narrows', { size:22, weight:700, color:C.blue, cue:1, f:.2 });
+    x.arrow('M 905 690 L 905 300', { cue:1, f:.55, color:C.red, w:4 });
+    x.strike(880, 470, 930, 520, { cue:1, f:.75 });
+    x.text(938, 720, 'never widens', { size:22, weight:700, color:C.red, anchor:'end', cue:1, f:.8 });
+
+    x.text(1040, 262, 'RUNTIME ENFORCEMENT  ·  checked by code', { size:22, weight:700, color:C.teal, ls:2, mono:true, cue:2 });
+    x.card(1040, 292, 784, 120, 'Guarded desk operation', 'a tool call admitted through the bound desk bridge', { cue:2, f:.05 });
+    ['membership', 'ownership', 'revision'].forEach((t, i) => {
+      x.html(1040, 440 + i * 84, 784, 70, `<div style="display:flex;align-items:center;gap:18px;height:100%;padding:0 26px;background:#fff;border:1.5px solid ${C.line};border-radius:10px;font-size:27px">` +
+        `<span style="color:${C.teal};font-weight:800;font-size:32px">✓</span><span><b>${t}</b> matches the recorded fact</span></div>`, { cue:2, f:.35 + i * .17 });
+    });
+    x.token('M 1000 352 L 1820 352', { cue:2, f:.25, dur:2.4, color:C.orange, hold:false });
+    x.chip(250, 790, 500, 64, 'guides judgment', { cue:3, f:.05, color:C.blue, size:26 });
+    x.chip(1182, 790, 500, 64, 'guards recorded facts', { cue:3, f:.5, color:C.teal, size:26 });
+  },
+
+  install(x) {
+    const r1 = 280, w = 380, xs = [96, 528, 960, 1392];
+    x.card(xs[0], r1, w, 170, 'SLP Manager', 'app sidebar · preview, activate, reconcile', { cue:0, f:.05 });
+    x.card(xs[1], r1, w, 170, 'Verified candidate', '<span class="mono">slp-runtime/&lt;sha&gt;</span> · immutable bytes', { cue:1, f:.08 });
+    x.card(xs[2], r1, w, 170, 'Launchers · providers · profiles', 'published, journaled with owned-entry receipts', { cue:1, f:.55 });
+    x.card(xs[3], r1, w, 170, 'Binding', 'runtime root · Node binary · transport · daemon home', { cue:2, f:.05, color:C.blue });
+    for (let i = 0; i < 3; i++) x.arrow(`M ${xs[i] + w + 6} ${r1 + 85} L ${xs[i + 1] - 8} ${r1 + 85}`, { cue:i === 0 ? 1 : i === 1 ? 1 : 2, f:i === 1 ? .5 : 0 });
+    x.arrow(`M ${xs[3] + w / 2} ${r1 + 176} L ${xs[3] + w / 2} 492 L ${xs[1] + w / 2} 492 L ${xs[1] + w / 2} 514`, { cue:2, f:.6, color:C.blue, dur:1 });
+    x.text(1180, 482, 'pins exact bytes', { size:20, weight:700, color:C.blue, cue:2, f:.75 });
+    x.card(xs[0], 560, w, 170, 'create_agent', 'Paseo creates the session', { cue:3, f:.02, color:C.orange });
+    x.card(xs[1], 520, w, 118, 'Role hook + gate', 'Claude · Codex · Pi', { cue:3, f:.18, small:true });
+    x.card(xs[1], 652, w, 118, 'ACP role wrapper', 'Devin', { cue:3, f:.28, small:true });
+    x.card(xs[2], 560, w, 170, 'Provider session', 'role bytes already in durable context', { cue:3, f:.6, color:C.orange });
+    x.arrow(`M ${xs[0] + w + 6} 645 L ${xs[1] - 8} 645`, { cue:3, f:.12 });
+    x.arrow(`M ${xs[1] + w + 6} 645 L ${xs[2] - 8} 645`, { cue:3, f:.5 });
+    x.token(`M ${xs[0] + w / 2} 645 L ${xs[2] + w / 2} 645`, { cue:3, f:.1, dur:2.6, hold:false });
+    x.html(xs[3], 540, 432, 90, `<div style="height:100%;display:flex;align-items:center;gap:14px;padding:0 20px;border-radius:10px;background:${C.soft};font-size:23px;color:${C.muted}"><b style="color:${C.ink}">Running session</b> keeps earlier bytes</div>`,
+      { cue:4, f:.05 });
+    x.html(xs[3], 650, 432, 90, `<div style="height:100%;display:flex;align-items:center;gap:14px;padding:0 20px;border-radius:10px;background:#e2f2ef;border:2px solid ${C.teal};font-size:23px"><b style="color:${C.teal}">Future launch</b> uses the new binding</div>`,
+      { cue:4, f:.4 });
+    x.html(96, 790, 1728, 80, `<div class="note">Rebind changes future launches. Deactivation removes owned configuration but keeps runtime files that live sessions may still execute.</div>`,
+      { cue:4, f:.7 });
+  },
+
+  desk(x) {
+    x.card(96, 250, 480, 110, 'Paseo session', 'title + injected role', { cue:0, f:.02, color:C.orange, small:true });
+    ['mint handle', 'bind at session open', 'register agent'].forEach((t, i) =>
+      x.chip(126, 380 + i * 58, 420, 46, t, { cue:0, f:.2 + i * .2, color:C.teal, size:21 }));
+    x.html(96, 560, 480, 300, `<div style="height:100%;box-sizing:border-box;background:#fff;border:3px solid ${C.teal};border-radius:12px;padding:18px 24px">` +
+      `<div style="font-size:28px;font-weight:700;color:${C.teal}">Bound membership</div><div class="rows" style="margin-top:6px">` +
+      ['exact agent', 'runtime family', 'role', 'working directory', 'binding generation'].map(s => `<div style="padding:7px 0;font-size:22px">${s}<span class="mono" style="color:${C.muted};font-size:18px">recorded</span></div>`).join('') +
+      `</div></div>`, { cue:1, f:.05 });
+    // bridge gate
+    const gate = x.group({ cue:2, f:.02 });
+    el('rect', { x:690, y:270, width:300, height:560, rx:14, fill:'#fff', stroke:C.blue, 'stroke-width':3, filter:'url(#shadow)' }, gate);
+    x.fo(gate, 690, 285, 300, 60, `<div style="text-align:center;font-size:27px;font-weight:700;color:${C.blue}">Bound bridge</div>`);
+    ['fresh identity', 'capability', 'strict schema'].forEach((t, i) =>
+      x.html(715, 360 + i * 120, 250, 96, `<div style="height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;border-radius:10px;background:#e9f0fb;font-size:23px;font-weight:600">` +
+        `<span style="font-size:30px;color:${C.blue}">✓</span>${t}</div>`, { cue:2, f:.25 + i * .2 }));
+    x.token('M 576 700 L 690 700 L 690 540 L 990 540 L 1100 540', { cue:2, f:.2, dur:3.2, hold:false });
+    // ledger
+    x.text(1110, 262, 'REPOSITORY DESK  ·  append-only ledger', { size:21, weight:700, color:C.teal, ls:1.5, mono:true, cue:3 });
+    const revs = ['assignment rev 1', 'scope rev 1', 'task rev 1', 'action: intent', 'action: observed'];
+    revs.forEach((t, i) => {
+      const y = 292 + i * 92;
+      x.html(1110, y, 470, 72, `<div style="height:100%;display:flex;align-items:center;justify-content:space-between;padding:0 22px;background:#fff;border:1.5px solid ${C.line};border-left:8px solid ${C.teal};border-radius:8px;font-size:23px">` +
+        `<span>${t}</span><span class="mono" style="font-size:17px;color:${C.muted}">#${(0x3a7 + i * 0x51b).toString(16)}…</span></div>`, { cue:3, f:.05 + i * .13 });
+      if (i) x.html(1300, y - 20, 90, 20, `<div class="mono" style="text-align:center;font-size:15px;color:${C.teal}">↓ hash</div>`, { cue:3, f:.05 + i * .13 });
+    });
+    x.chip(1610, 330, 214, 50, 'worktree A', { cue:3, f:.55, color:C.muted, size:20 });
+    x.chip(1610, 400, 214, 50, 'worktree B', { cue:3, f:.62, color:C.muted, size:20 });
+    x.html(1610, 470, 214, 140, `<div class="note" style="font-size:19px">same Git common directory → one shared desk</div>`, { cue:3, f:.7 });
+    x.html(1110, 770, 714, 100, `<div style="height:100%;display:flex;align-items:center;gap:16px;padding:0 22px;border:2.5px dashed ${C.red};border-radius:10px;font-size:22px;background:#fbefed">` +
+      `<span class="mono" style="font-weight:700;color:${C.red}">$ shell</span><span>Arbitrary shell commands and file edits are outside these guards.</span></div>`, { cue:4, f:.1 });
+  },
+
+  review(x) {
+    const sc = x.group({ cue:0, f:.02 });
+    el('rect', { x:96, y:262, width:640, height:250, rx:12, fill:'#fff', stroke:C.teal, 'stroke-width':3, filter:'url(#shadow)' }, sc);
+    x.fo(sc, 96, 262, 640, 60, `<div style="padding:18px 24px;font-size:27px;font-weight:700;color:${C.teal}">Moving scope <span class="mono" style="font-weight:400;font-size:22px;color:${C.ink}">src/checkout/**</span></div>`);
+    x.avatar(250, 420, 'E', { cue:0, f:.25 });
+    x.text(310, 430, 'one writer', { size:26, weight:700, cue:0, f:.3 });
+    x.avatar(660, 600, 'E2', { cue:0, f:.6, color:C.muted, size:24 });
+    x.arrow('M 632 568 L 592 518', { cue:0, f:.65, color:C.red });
+    x.strike(586, 562, 638, 524, { cue:0, f:.8 });
+    x.text(660, 676, 'second writer refused', { size:22, weight:700, color:C.red, anchor:'middle', cue:0, f:.85 });
+
+    x.text(800, 290, 'REVIEW PLAN — selected', { size:21, weight:700, color:C.blue, ls:1.5, mono:true, cue:1 });
+    [['required', 'named independent lenses + reason'], ['not-required', 'a reasoned no-trigger decision'],
+      ['exempt', 'waiver class + authority pointer']].forEach(([k, s], i) =>
+      x.html(800, 312 + i * 104, 470, 90, `<div style="height:100%;box-sizing:border-box;padding:12px 20px;background:#fff;border:1.5px solid ${C.line};border-left:8px solid ${C.blue};border-radius:8px">` +
+        `<div class="mono" style="font-size:22px;font-weight:700;color:${C.blue}">${k}</div><div style="font-size:20px;color:${C.muted};margin-top:2px">${s}</div></div>`, { cue:1, f:.25 + i * .22 }));
+    x.html(800, 628, 470, 60, `<div class="note" style="font-size:19px">exempt: shape is checked; the Human authority behind it is not authenticated</div>`, { cue:1, f:.9 });
+
+    const rr = x.group({ cue:2, f:.02 });
+    el('rect', { x:1330, y:262, width:494, height:400, rx:12, fill:'#fff', stroke:C.line, 'stroke-width':1.5, filter:'url(#shadow)' }, rr);
+    el('rect', { x:1331, y:262, width:492, height:6, rx:3, fill:C.blue }, rr);
+    x.fo(rr, 1330, 270, 494, 60, `<div style="padding:16px 24px;font-size:27px;font-weight:700">Review round binds</div>`);
+    ['exact candidate', 'scope declaration', 'current brief', 'neutral mandate'].forEach((t, i) =>
+      x.html(1356, 340 + i * 76, 442, 62, `<div style="height:100%;display:flex;align-items:center;justify-content:space-between;padding:0 18px;background:${C.soft};border-radius:8px;font-size:23px">` +
+        `<span>◆ ${t}</span><span class="mono" style="font-size:16px;color:${C.muted}">rev ${i + 3}</span></div>`, { cue:2, f:.2 + i * .18 }));
+    x.html(1356, 340, 442, 62, `<div style="height:100%;display:flex;align-items:center;justify-content:space-between;padding:0 18px;background:#fbefed;border:2px solid ${C.red};border-radius:8px;font-size:23px;box-sizing:border-box">` +
+      `<span>✎ candidate changed</span><span class="mono" style="font-size:16px;color:${C.red}">rev 4</span></div>`, { cue:3, f:.05 });
+    x.stamp(1577, 560, 'STALE', { cue:3, f:.35, color:C.red });
+
+    x.avatar(250, 790, 'Own', { cue:4, f:.05, color:C.blue, size:22 });
+    x.avatar(380, 790, 'Wr', { cue:4, f:.12, size:22 });
+    x.html(450, 755, 520, 70, `<div style="height:100%;display:flex;align-items:center;font-size:24px"><b style="color:${C.red}">✗</b>&nbsp;cannot discharge their own independent gate</div>`, { cue:4, f:.25 });
+    x.avatar(1080, 790, 'Rv', { cue:4, f:.55, color:'#5a4a9c', size:22 });
+    x.html(1140, 755, 680, 70, `<div style="height:100%;display:flex;align-items:center;font-size:24px"><b style="color:${C.teal}">✓</b>&nbsp;a fresh, neutrally briefed reviewer can</div>`, { cue:4, f:.62 });
+  },
+
+  dispatch(x) {
+    const xs = [220, 570, 920, 1270, 1620], y = 380;
+    const steps = [['Reserve', 'attempt · task revision · runtime bundle · placement', 1, 0],
+      ['Create', 'worker with no work prompt', 1, .45], ['Verify', 'runtime · labels · parent · workspace · cwd', 2, .05],
+      ['Bind + claim', 'exact registered membership · scope claim', 3, .02], ['Send', 'the work, with fresh pins', 3, .62]];
+    x.arrow(`M ${xs[0]} ${y} L ${xs[4]} ${y}`, { cue:0, f:.1, color:C.line, w:6, noHead:true, dur:1.2 });
+    x.text(96, 268, 'each step is a separate recorded fact', { size:24, color:C.muted, cue:0, f:.35 });
+    steps.forEach(([t, s, cue, f], i) => {
+      const g = x.group({ cue, f, dy:0 });
+      el('circle', { cx:xs[i], cy:y, r:34, fill:i === 4 ? C.orange : C.teal, stroke:'#fff', 'stroke-width':5, filter:'url(#shadow)' }, g);
+      const n = el('text', { x:xs[i], y:y + 11, 'text-anchor':'middle', 'font-size':30, 'font-weight':800, fill:'#fff' }, g);
+      n.textContent = i + 1;
+      x.card(xs[i] - 160, 448, 320, 168, t, s, { cue, f, small:true, center:true, color:i === 4 ? C.orange : C.teal });
+    });
+    x.token(`M ${xs[0]} ${y} L ${xs[1]} ${y}`, { cue:1, f:.42, dur:.9, color:C.blue, hold:false });
+    x.token(`M ${xs[1]} ${y} L ${xs[2]} ${y}`, { cue:2, f:.02, dur:.9, color:C.blue, hold:false });
+    x.token(`M ${xs[2]} ${y} L ${xs[3]} ${y}`, { cue:3, f:0, dur:.9, color:C.blue, hold:false });
+    x.token(`M ${xs[3]} ${y} L ${xs[4]} ${y}`, { cue:3, f:.6, dur:.9, color:C.blue, hold:false });
+    x.arrow(`M ${xs[3]} 622 L ${xs[3]} 700`, { cue:4, f:.02, color:C.orange });
+    x.html(1000, 706, 824, 150, `<div style="height:100%;box-sizing:border-box;padding:18px 24px;border:2.5px solid ${C.orange};border-radius:12px;background:#fbf2ea">` +
+      `<div style="font-size:26px;font-weight:700;color:${C.orange}">Late registration</div><div style="font-size:22px;margin-top:6px">send returns <span class="mono">seat-pending</span>: nothing is delivered, the ledger is unchanged. Reconcile, re-read pins, then send.</div></div>`, { cue:4, f:.1 });
+    x.arrow(`M ${xs[1]} 622 L ${xs[1]} 700`, { cue:5, f:.02, color:C.red });
+    x.html(96, 706, 860, 150, `<div style="height:100%;box-sizing:border-box;padding:18px 24px;border:2.5px solid ${C.red};border-radius:12px;background:#fbefed">` +
+      `<div style="font-size:26px;font-weight:700;color:${C.red}">Lost create receipt</div><div style="font-size:22px;margin-top:6px">The original action and its uncertainty are kept. Positive identity first — an empty agent list is not enough.</div></div>`, { cue:5, f:.1 });
+  },
+
+  dependencies(x) {
+    const N = { A:[330, 560], B:[700, 400], C:[700, 720], D:[1070, 560] };
+    const sub = { A:'knowledge · ruling', B:'code · landed', C:'code · landed', D:'consumer' };
+    [['A', 'B'], ['A', 'C'], ['B', 'D'], ['C', 'D']].forEach(([a, b], i) => {
+      const [x1, y1] = N[a], [x2, y2] = N[b], dx = x2 - x1, dy = y2 - y1, L = Math.hypot(dx, dy);
+      x.arrow(`M ${x1 + dx / L * 72} ${y1 + dy / L * 72} L ${x2 - dx / L * 80} ${y2 - dy / L * 80}`, { cue:0, f:.25 + i * .1, color:C.muted });
+    });
+    Object.entries(N).forEach(([k, [cx, cy]], i) => {
+      const g = x.group({ cue:0, f:.05 + i * .1 });
+      el('circle', { cx, cy, r:70, fill:'#fff', stroke:k === 'D' ? C.blue : C.teal, 'stroke-width':4, filter:'url(#shadow)' }, g);
+      const t = el('text', { x:cx, y:cy + 18, 'text-anchor':'middle', 'font-size':54, 'font-weight':800, fill:C.ink }, g); t.textContent = k;
+      const s = el('text', { x:cx, y:cy + 106, 'text-anchor':'middle', 'font-size':21, fill:C.muted, class:'mono' }, g); s.textContent = sub[k];
+    });
+    x.html(96, 236, 1728, 70, `<div style="height:100%;display:flex;align-items:center;gap:18px;font-size:27px">Ready&nbsp;=` +
+      `<span class="tag" style="background:#e2f2ef;color:${C.teal};font-size:22px">current qualified result</span><b>AND</b>` +
+      `<span class="tag" style="background:#e9f0fb;color:${C.blue};font-size:22px">measured availability in the consumer's actual base</span></div>`, { cue:1, f:.05 });
+    x.chip(590, 312, 220, 42, 'landed · qualified', { cue:2, f:.08, color:C.teal, size:19 });
+    x.chip(590, 842, 220, 42, 'landed · qualified', { cue:2, f:.2, color:C.teal, size:19 });
+    x.html(1260, 360, 564, 330, `<div style="height:100%;box-sizing:border-box;padding:20px 26px;background:#fff;border:2px solid ${C.blue};border-radius:12px">` +
+      `<div style="font-size:26px;font-weight:700;color:${C.blue}">D's declared base</div>` +
+      `<div style="margin-top:18px;font-size:24px"><b style="color:${C.teal}">✓</b> B's delta present</div>` +
+      `<div style="margin-top:12px;font-size:24px;color:${C.red}"><b>✗</b> C's delta missing</div>` +
+      `<div class="note" style="margin-top:18px;font-size:19px">measured by a bounded read-only Git reference check before reservation</div></div>`, { cue:2, f:.4 });
+    x.stamp(1070, 470, 'BLOCKED', { cue:2, f:.78, color:C.red, rot:-6 });
+    x.chip(200, 400, 260, 46, 'reopened', { cue:3, f:.05, color:C.orange, size:21, fill:'#fbf2ea' });
+    x.html(420, 480, 190, 160, `<div style="height:100%;display:flex;align-items:center;justify-content:center;text-align:center;font-size:21px;font-weight:700;color:${C.orange};background:#eef3f7e6;border-radius:12px">current readiness<br>invalidated</div>`,
+      { cue:3, f:.25 });
+    x.html(1260, 720, 564, 110, `<div style="height:100%;box-sizing:border-box;display:flex;align-items:center;padding:0 24px;background:${C.soft};border-radius:10px;font-size:22px">` +
+      `History keeps the pins earlier attempts consumed.</div>`, { cue:3, f:.55 });
+  },
+
+  effects(x) {
+    x.arrow('M 96 560 L 1824 560', { cue:0, f:.1, color:C.red, w:3, noHead:true, dur:1.1 });
+    x.html(96, 566, 1000, 40, `<div class="mono" style="font-size:19px;color:${C.red};letter-spacing:1px">LEDGER TRANSACTION BOUNDARY — no atomicity across this line</div>`, { cue:0, f:.35 });
+    x.text(96, 534, 'LEDGER', { size:20, weight:700, color:C.teal, ls:3, mono:true, cue:0, f:.45 });
+    x.text(96, 650, 'HOST · SDK / Git / FS', { size:20, weight:700, color:C.orange, ls:3, mono:true, cue:0, f:.5 });
+    const box = (xx, y, k, s, col, f) => x.card(xx, y, 360, 150, k, s, { cue:1, f, color:col, small:true });
+    box(170, 300, 'intent', 'exact operation and its controls become durable', C.teal, .14);
+    box(620, 300, 'issue', 'locked admission commits permission first', C.teal, .3);
+    box(880, 680, 'effect', 'bounded SDK / Git / FS call, outside the transaction', C.orange, .58);
+    box(1300, 300, 'observe', 'record the receipt, failure or uncertainty', C.teal, .82);
+    x.arrow('M 534 375 L 612 375', { cue:1, f:.25 });
+    x.arrow('M 800 456 L 960 672', { cue:1, f:.5 });
+    x.arrow('M 1150 672 L 1360 456', { cue:1, f:.76 });
+    x.token('M 350 375 L 800 375 L 1060 755 L 1480 375', { cue:1, f:.15, dur:5.2, hold:false });
+    x.html(1300, 300, 360, 150, `<div style="height:100%;box-sizing:border-box;padding:16px 20px;background:#fbf2ea;border:3px solid ${C.orange};border-radius:10px">` +
+      `<div style="font-size:26px;font-weight:700;color:${C.orange}">observe → ? uncertain</div><div style="font-size:20px;margin-top:6px">receipt lost — the effect may already have happened</div></div>`, { cue:2, f:.05 });
+    x.card(1360, 640, 464, 110, 'Exact replay', 'returns the recorded outcome', { cue:3, f:.02, small:true, color:C.teal });
+    x.card(1360, 762, 464, 110, 'Reconcile', 'measures the original identity', { cue:3, f:.45, small:true, color:C.teal });
+    x.html(96, 690, 700, 170, `<div style="height:100%;box-sizing:border-box;padding:16px 22px;border:2.5px dashed ${C.red};border-radius:12px;background:#fbefed">` +
+      `<div style="font-size:25px;font-weight:700;color:${C.red}">✗ fresh request ID</div><div style="font-size:21px;margin-top:6px">could create a second worker, duplicate a prompt or apply a delta twice. No automatic retry engine.</div></div>`, { cue:4, f:.05 });
+  },
+
+  integrate(x) {
+    const src = [['BASE', 'worker\'s captured base', C.muted, .15], ['RESULT', 'worker\'s output', C.teal, .45],
+      ['TARGET', 'actual target, incl. unrelated dirty work', C.orange, .78]];
+    src.forEach(([t, s, col, f], i) => x.card(96, 250 + i * 150, 380, 132, `<span class="mono">${t}</span>`, s, { cue:0, f, color:col, small:true }));
+    src.forEach((_, i) => x.arrow(`M 482 ${316 + i * 150} L 566 ${466}`, { cue:1, f:.02 + i * .06 }));
+    const m = x.group({ cue:1, f:.15 });
+    el('circle', { cx:630, cy:466, r:62, fill:C.code }, m);
+    const mt = el('text', { x:630, y:476, 'text-anchor':'middle', 'font-size':26, 'font-weight':700, fill:'#fff' }, m); mt.textContent = '3-way';
+    x.chip(96, 712, 380, 50, '✓ unrelated work preserved', { cue:1, f:.45, color:C.teal, size:21 });
+    x.chip(96, 776, 380, 50, '‖ conflicts held', { cue:1, f:.65, color:C.orange, size:21 });
+    const ph = [['stage', 'combined candidate, outside the target', 2, .02], ['check', 'owner-pinned proof recipe IDs', 2, .55],
+      ['land', 'recheck · recovery plan · backup · apply · measure', 3, .02]];
+    ph.forEach(([t, s, cue, f], i) => x.card(760 + i * 360, 360, 330, 210, `<span class="mono">${t}</span>`, s, { cue, f, color:i === 2 ? C.blue : C.teal }));
+    x.arrow('M 698 466 L 752 466', { cue:2, f:0 });
+    x.arrow('M 1096 466 L 1112 466', { cue:2, f:.5 });
+    x.arrow('M 1456 466 L 1472 466', { cue:3, f:0 });
+    x.token('M 630 466 L 1640 466', { cue:2, f:.02, dur:6, hold:false });
+    x.html(1480, 588, 330, 120, `<div class="note" style="font-size:19px">Only a measured full application establishes a landed pin; partial or unknown keeps resources reserved.</div>`, { cue:3, f:.6 });
+    ['commit', 'push', 'deploy'].forEach((t, i) => {
+      x.chip(760 + i * 200, 760, 170, 56, t, { cue:4, f:.05 + i * .12, color:C.muted, size:23 });
+      x.strike(770 + i * 200, 788, 920 + i * 200, 788, { cue:4, f:.12 + i * .12 });
+    });
+    x.html(1360, 748, 464, 80, `<div class="note" style="font-size:21px">stay separate Human / Lead decisions</div>`, { cue:4, f:.5 });
+  },
+
+  cleanup(x) {
+    const cards = [['1 · Verify account', 'original proof + complete resource inventory, kept outside removable directories', 1, .05],
+      ['2 · Remove stage', 'own permit · fresh source, target and survivor checks', 2, .05],
+      ['3 · Remove backup', 'separate permit · only after the stage is accounted for', 2, .58]];
+    cards.forEach(([t, s, cue, f], i) => x.card(96 + i * 594, 300, 540, 230, t, s, { cue, f, color:i ? C.orange : C.teal }));
+    x.arrow('M 642 415 L 684 415', { cue:2, f:0 });
+    x.arrow('M 1236 415 L 1278 415', { cue:2, f:.5 });
+    x.text(96, 250, 'stage before backup — a stage failure stops before any backup removal', { size:23, color:C.muted, cue:2, f:.75 });
+    [0, 1, 2].forEach(i => {
+      x.html(120 + i * 594, 550, 500, 56, `<div style="height:100%;display:flex;align-items:center;gap:12px;font-size:22px"><span class="mono" style="color:${C.muted}">cycles</span>` +
+        `<span style="font-size:30px;color:${C.blue}">●</span><span style="font-size:30px;color:${C.line}">●</span><span class="mono" style="font-size:19px;color:${C.muted}">1 / 2</span></div>`,
+        { cue:3, f:.05 + i * .06, out:[3, .42] });
+      x.html(120 + i * 594, 550, 500, 56, `<div style="height:100%;display:flex;align-items:center;gap:12px;font-size:22px"><span class="mono" style="color:${C.muted}">cycles</span>` +
+        `<span style="font-size:30px;color:${C.blue}">●</span><span style="font-size:30px;color:${C.blue}">●</span><span class="mono" style="font-size:19px;color:${C.muted}">2 / 2 total</span></div>`,
+        { cue:3, f:.42 + i * .02 });
+    });
+    x.html(96, 660, 1728, 120, `<div style="height:100%;box-sizing:border-box;display:flex;align-items:center;gap:22px;padding:0 30px;border:2.5px solid ${C.orange};border-radius:12px;background:#fbf2ea;font-size:25px">` +
+      `<b style="color:${C.orange}">Exhausted</b><span>→ the unresolved obligation is retained and reported, not retried in an unbounded loop.</span></div>`, { cue:3, f:.6 });
+  },
+
+  limits(x) {
+    const cards = [['Stop', 'fences new task effects', '≠ running turn cancelled', 1], ['Archive', 'separately granted lifecycle step', '≠ processes quiescent', 2],
+      ['grantRef', 'a declared pointer to authority', '≠ authenticated Human grant', 3]];
+    cards.forEach(([t, s, neg, cue], i) => x.html(96 + i * 588, 260, 552, 250,
+      `<div style="height:100%;box-sizing:border-box;padding:24px 28px;background:#fff;border:1.5px solid ${C.line};border-top:6px solid ${C.red};border-radius:10px">` +
+      `<div class="mono" style="font-size:32px;font-weight:700">${t}</div><div style="font-size:22px;color:${C.muted};margin-top:10px">${s}</div>` +
+      `<div style="font-size:28px;font-weight:700;color:${C.red};margin-top:26px">${neg}</div></div>`, { cue, f:.05 }));
+    x.text(96, 580, 'OPTIONAL — OFF UNTIL YOU OPT IN', { size:21, weight:700, color:C.blue, ls:2, mono:true, cue:4, f:.02 });
+    ['Communication language', 'Quota fallback', 'Jev routing', 'Communication supervision'].forEach((t, i) => {
+      x.html(96 + i * 438, 604, 410, 110, `<div style="height:100%;box-sizing:border-box;display:flex;align-items:center;gap:18px;padding:0 22px;background:#fff;border:1.5px solid ${C.line};border-radius:10px">` +
+        `<span style="flex:none;width:62px;height:34px;border-radius:17px;background:${C.line};position:relative"><span style="position:absolute;left:4px;top:4px;width:26px;height:26px;border-radius:13px;background:#fff"></span></span>` +
+        `<span style="font-size:23px;font-weight:600">${t}</span></div>`, { cue:4, f:.08 + i * .14 });
+    });
+    x.chip(96, 760, 620, 62, 'not an autonomous scheduler', { cue:4, f:.75, color:C.blue, size:25 });
+  },
+
+  value(x) {
+    const p = x.group({ cue:0, f:.02 });
+    el('rect', { x:96, y:250, width:900, height:620, rx:14, fill:'#fff', stroke:C.line, 'stroke-width':1.5, filter:'url(#shadow)' }, p);
+    el('rect', { x:96, y:250, width:900, height:76, rx:14, fill:C.code }, p);
+    el('rect', { x:96, y:300, width:900, height:26, fill:C.code }, p);
+    x.fo(p, 96, 250, 900, 76, `<div style="height:100%;display:flex;align-items:center;justify-content:space-between;padding:0 28px;color:#fff;font-size:27px;font-weight:700">Read SLP work<span class="mono" style="font-size:17px;font-weight:400;opacity:.8">read projection · reload after changes</span></div>`);
+    [['Current brief', 'rev 7', C.blue], ['Decisions', '3 recorded', C.blue], ['Scopes & ownership', '1 writer each', C.teal],
+      ['Reviews', 'pinned · 1 stale', C.orange], ['Evidence', 'claim vs observed', C.teal], ['Tasks', 'ready / blocked / held', C.teal]].forEach(([t, s, col], i) =>
+      x.html(120, 346 + i * 84, 852, 72, `<div style="height:100%;display:flex;align-items:center;justify-content:space-between;padding:0 18px;border-bottom:1px solid ${C.line};font-size:26px">` +
+        `<span>${t}</span><span class="tag" style="background:${C.soft};color:${col}">${s}</span></div>`, { cue:0, f:.12 + i * .12 }));
+    x.card(1060, 250, 764, 190, 'Human', 'intent · authority · project acceptance — real decisions, not tool transitions', { cue:1, f:.05, color:C.blue });
+    x.html(1060, 470, 764, 240, `<div style="height:100%;box-sizing:border-box;padding:26px 30px;background:${C.code};border-radius:14px;color:#fff">` +
+      `<div class="mono" style="font-size:19px;color:#8fd3c7;letter-spacing:1px">READ THE SOURCE-PINNED GUIDE</div>` +
+      `<div class="mono" style="font-size:34px;margin-top:16px">docs/plugin-explained.html</div>` +
+      `<div style="font-size:21px;margin-top:16px;opacity:.85">EN / VI · 16 chapters · 57 implementation sources with SHA-256 pins</div></div>`, { cue:2, f:.02 });
+    x.text(1062, 810, 'Paseo SLP', { size:58, weight:800, ls:-1.5, cue:2, f:.5 });
+    x.arrow('M 1064 834 L 1204 834', { cue:2, f:.6, color:C.teal, w:5, noHead:true, dur:.5 });
+  },
+};
+
+// --------------------------------------------------------------- runtime ----
+function translate(root) {
+  if (LANG === 'en') return;
+  const dict = I18N[LANG] || {};
+  const w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  let n;
+  while ((n = w.nextNode())) {
+    const raw = n.nodeValue, t = raw.replace(/\u00a0/g, ' ').trim();
+    if (!t || SKIP.has(t) || KEEP.has(t) || /^(rev \d+|#[0-9a-f]+…)$/.test(t)) continue;
+    if (dict[t] != null) { n.nodeValue = raw.replace(/\u00a0/g, ' ').replace(t, dict[t]); continue; }
+    if (/[A-Za-z]{3,}/.test(t)) MISSING.add(t);
+  }
+}
+
+function init(timeline) {
+  TL = timeline; LANG = timeline.lang || 'en'; LBL = timeline.labels || {};
+  SKIP = new Set(); MISSING = new Set();
+  document.body.classList.toggle('vi', LANG === 'vi');
+  const root = document.getElementById('scenes');
+  root.innerHTML = '';
+  SCENES = TL.scenes.map((scene, i) => {
+    const g = el('g', { opacity:0 }, root);
+    const ctx = makeCtx(scene, g);
+    if (scene.id !== 'title') chrome(ctx, scene, i, TL.scenes.length - 1);
+    BUILD[scene.id](ctx);
+    translate(g);
+    return { scene, g, ctx };
+  });
+  CAPTIONS = TL.scenes.flatMap(s => s.cues.map((c, k) => ({ ...c, show:k + 1 < s.cues.length ? s.cues[k + 1].start : s.end })));
+  const ch = document.getElementById('chrome');
+  ch.innerHTML = '';
+  const cap = el('g', {}, ch);
+  el('rect', { x:96, y:928, width:1728, height:118, rx:14, fill:C.code, opacity:.96 }, cap);
+  const f = el('foreignObject', { x:96, y:928, width:1728, height:118 }, cap);
+  const d = document.createElementNS(XH, 'div'); d.className = 'cap'; f.appendChild(d);
+  const honest = el('g', {}, ch), hText = LBL.honest || 'explanatory animation · not live footage';
+  const hw = Math.max(420, Math.round(hText.length * 11 + 44));
+  el('rect', { x:1824 - hw, y:72, width:hw, height:42, rx:21, fill:'#fff', stroke:C.orange, 'stroke-width':1.5 }, honest);
+  const ht = el('text', { x:1824 - hw / 2, y:100, 'text-anchor':'middle', 'font-size':18, fill:C.orange, class:'mono' }, honest);
+  ht.textContent = hText;
+  if (TL.narration && LBL.credit) {
+    const cr = el('text', { x:1824, y:1064, 'text-anchor':'end', 'font-size':16, fill:C.muted, class:'mono' }, ch);
+    cr.textContent = LBL.credit;
+  }
+  el('rect', { x:0, y:1072, width:1920, height:8, fill:C.soft }, ch);
+  const bar = el('rect', { x:0, y:1072, width:0, height:8, fill:C.teal }, ch);
+  CHROME = { cap, capDiv:d, honest, bar };
+  return { scenes:SCENES.length, duration:TL.duration, lang:LANG, untranslated:[...MISSING] };
+}
+
+function renderItem(it, lt) {
+  const out = it.tOut === Infinity ? 0 : ease((lt - it.tOut) / .35);
+  if (it.kind === 'fade') {
+    const p = ease((lt - it.tIn) / .5);
+    it.node.setAttribute('opacity', (p * (1 - out)).toFixed(3));
+    it.node.setAttribute('transform', `translate(0,${((1 - p) * it.dy).toFixed(2)})`);
+  } else if (it.kind === 'pop') {
+    const u = (lt - it.tIn) / .35, p = ease(u), s = u <= 0 ? 1.6 : 1 + .6 * (1 - p);
+    it.node.parentNode.setAttribute('opacity', (p * (1 - out)).toFixed(3));
+    it.node.setAttribute('transform', `translate(${it.x},${it.y}) rotate(${it.rot}) scale(${s.toFixed(3)})`);
+  } else if (it.kind === 'draw') {
+    const p = easeIO((lt - it.tIn) / it.dur);
+    it.node.setAttribute('opacity', (p > 0 ? 1 - out : 0).toFixed(3));
+    if (it.dash && p >= 1) { it.path.setAttribute('stroke-dasharray', it.dash); it.path.removeAttribute('stroke-dashoffset'); }
+    else { it.path.setAttribute('stroke-dasharray', `${it.L} ${it.L}`); it.path.setAttribute('stroke-dashoffset', (it.L * (1 - p)).toFixed(2)); }
+    if (it.head.parentNode) it.head.setAttribute('opacity', p > .92 ? 1 : 0);
+  } else if (it.kind === 'token') {
+    let u = (lt - it.tIn) / it.dur;
+    let vis = u >= 0 && lt < it.tOut;
+    if (it.repeat) u = u - Math.floor(u);
+    else if (u > 1) { vis = vis && it.hold; u = 1; }
+    const q = easeIO(Math.max(0, u)), pt = it.path.getPointAtLength(q * it.L);
+    it.dot.setAttribute('cx', pt.x.toFixed(2)); it.dot.setAttribute('cy', pt.y.toFixed(2));
+    it.node.setAttribute('opacity', vis ? 1 : 0);
+  }
+}
+
+function renderAt(t, opts = {}) {
+  for (const s of SCENES) {
+    const { start, end } = s.scene;
+    if (t < start - .01 || t > end + .01) { s.g.setAttribute('opacity', 0); s.g.setAttribute('display', 'none'); continue; }
+    s.g.removeAttribute('display');
+    const lt = t - start;
+    const vis = Math.min(ease(lt / .45), s.scene.last ? 1 : ease((end - t) / .4));
+    s.g.setAttribute('opacity', vis.toFixed(3));
+    for (const it of s.ctx.items) renderItem(it, lt);
+  }
+  const cur = CAPTIONS.find(c => t >= c.start && t < c.show);
+  const cap = CHROME.capDiv;
+  if (cur) {
+    if (cap.dataset.k !== String(cur.start)) {
+      cap.textContent = cur.text; cap.dataset.k = String(cur.start);
+      cap.style.fontSize = cur.text.length > 150 ? '30px' : cur.text.length > 120 ? '33px' : '35px';
+    }
+    const a = Math.min(ease((t - cur.start) / .2), ease((cur.show - t) / .2));
+    cap.style.opacity = a.toFixed(3);
+    CHROME.cap.setAttribute('opacity', 1);
+  } else {
+    CHROME.cap.setAttribute('opacity', opts.poster ? 0 : 1);
+    cap.textContent = ''; cap.dataset.k = '';
+  }
+  const inTitle = SCENES[0] && t < SCENES[0].scene.end;
+  CHROME.honest.setAttribute('opacity', inTitle ? 0 : 1);
+  CHROME.bar.setAttribute('width', (1920 * Math.min(1, t / TL.duration)).toFixed(1));
+  const old = document.getElementById('poster'); if (old) old.remove();
+  if (opts.poster) {
+    CHROME.cap.setAttribute('opacity', 0); CHROME.bar.setAttribute('width', 0);
+    const g = el('g', { id:'poster' }, document.getElementById('chrome'));
+    el('rect', { x:96, y:928, width:1728, height:118, rx:14, fill:C.code }, g);
+    el('circle', { cx:186, cy:987, r:38, fill:C.orange }, g);
+    el('path', { d:'M 174 966 L 174 1008 L 208 987 Z', fill:'#fff' }, g);
+    const tx = el('text', { x:254, y:1000, 'font-size':36, 'font-weight':700, fill:'#fff' }, g);
+    tx.textContent = opts.poster;
+  }
+  return true;
+}
+window.init = init; window.renderAt = renderAt;
+</script>
+</body>
+</html>

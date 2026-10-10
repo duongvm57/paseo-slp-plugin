@@ -1,5 +1,5 @@
 {
   "id": "paseo-slp",
-  "requirements": { "paseo": ">=0.8.0" },
+  "requirements": { "paseo": ">=0.10.3" },
   "build": [["npm", "install", "--omit=dev", "--no-audit", "--no-fund"]]
 }

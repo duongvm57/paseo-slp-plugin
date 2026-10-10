@@ -1,11 +1,9 @@
-// Routing-card ownership (wave 11 S3b/D): the card owns the stored routing
-// value, the editable form, the once-per-target load, the prefill effect,
-// the field/family/feature setters and saveRouting. The shell supplies the
-// target and its stale-guard key (the mechanism stays shell-owned), the
-// status view, the RPC callers, read-only views of the shared
-// catalog/feature caches and the lastError plumbing. `form` and
-// `featureKeys` feed the shell's catalog-demand computation.
-import { useEffect, useRef, useState } from "react";
+// Routing owns its stored value, draft/prefill, setters and save. Target async
+// owns snapshot reads and session tickets; RPC callables are the adapter seam.
+// Dirty routing drafts intentionally persist across targets. The shell supplies
+// status, shared catalog read views and target-bound lastError plumbing.
+import { useEffect, useState } from "react";
+import { useTargetSnapshot } from "../target-async.ts";
 import { Text, View } from "react-native";
 import type {
   CatalogResult,
@@ -18,8 +16,8 @@ import type {
   StatusResult,
   TargetValue,
 } from "../../shared/contracts.ts";
-import { FAMILY_LABEL, FAMILY_PICKER_ORDER } from "../../shared/families.ts";
-import type { RoleName } from "../../shared/families.ts";
+import { FAMILY_LABEL, FAMILY_PICKER_ORDER } from "../../shared/runtime/families.ts";
+import type { RoleName } from "../../shared/runtime/families.ts";
 import {
   activationLabel,
   applyFamilyChange,
@@ -79,33 +77,15 @@ export function useRoutingCard({ target, targetKey, isCurrentKey, statusView, ca
   // copy covering every RoleChoice field. The saved choice spreads the
   // stored entry first so any field the schema later adds passes through
   // untouched — the card never silently drops a stored choice.
-  const [routing, setRouting] = useState<RoleRoutingValue | null>(null);
+  const snapshot = useTargetSnapshot(target, targetKey, async target =>
+    (await callGetRoleRouting({ schemaVersion: 1, target })).routing);
+  const { data: routing, replace: setRouting, capture } = snapshot;
   const [routingForm, setRoutingForm] = useState<RoutingForm>(emptyRoutingForm);
   const [routingDirty, setRoutingDirty] = useState(false);
   const [routingBusy, setRoutingBusy] = useState(false);
   // `routingSaved` shows a one-line confirmation after a bound save until
   // the next edit — the bound case otherwise gives no visible feedback.
   const [routingSaved, setRoutingSaved] = useState(false);
-
-  // Fetch the stored role routing once per target — the file is
-  // plugin-owned and independent of any binding, so it loads with the
-  // first status.
-  const routingLoadedFor = useRef<string | null>(null);
-  useEffect(() => {
-    if (!target || !targetKey || routingLoadedFor.current === targetKey) return;
-    routingLoadedFor.current = targetKey;
-    let cancelled = false;
-    void (async () => {
-      try {
-        const result = await callGetRoleRouting({ schemaVersion: 1, target });
-        if (!cancelled) setRouting(result.routing);
-      } catch {
-        if (!cancelled) setRouting(null);
-      }
-    })();
-    return () => { cancelled = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- targetKey captures target
-  }, [targetKey]);
 
   // Prefill the routing form from the stored routing until the Human edits —
   // every field falls back to the live profile's value, then the defaults.
@@ -247,7 +227,7 @@ export function useRoutingCard({ target, targetKey, isCurrentKey, statusView, ca
     if ("error" in supervisor) { update({ lastError: supervisor.error }, target); return; }
     const lead = builds.lead;
     if ("error" in lead) { update({ lastError: lead.error }, target); return; }
-    const issueKey = targetKey;
+    const ticket = capture();
     setRoutingBusy(true);
     try {
       const result = await callSetRoleRouting({
@@ -258,7 +238,7 @@ export function useRoutingCard({ target, targetKey, isCurrentKey, statusView, ca
       // Stale-write guard (the issueKey discipline the pool ops use): a save
       // issued for home A must not land its routing on home B's view, clear
       // B's dirty gate, or flash "Saved" for a write B never saw.
-      if (!isCurrentKey(issueKey)) return;
+      if (!ticket.isCurrent()) return;
       setRouting(result.routing);
       setRoutingDirty(false);
       setRoutingSaved(true);
@@ -268,7 +248,7 @@ export function useRoutingCard({ target, targetKey, isCurrentKey, statusView, ca
       // A stale op must not clear the busy flag of a newer op already
       // in-flight on the displayed target — the target-switch reset above
       // releases the flag for the abandoned view instead.
-      if (isCurrentKey(issueKey)) setRoutingBusy(false);
+      if (ticket.isCurrent()) setRoutingBusy(false);
     }
   };
 
@@ -409,15 +389,32 @@ export function RoutingCard({ colors, target, statusView, routing, catalogs, cat
                   disabled={disabled}
                 />
               </View>
+            ) : roleCatalog && !roleCatalog.error && form.modeId === "" ? (
+              // Successful catalog declaring no modes — nothing to pick and
+              // nothing stored; a free-text "e.g. bypass" would teach a mode
+              // the provider does not have.
+              <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
+                {FAMILY_LABEL[form.family]} declares no modes.
+              </Text>
             ) : (
-              <Field
-                colors={colors}
-                label="Mode"
-                value={form.modeId}
-                onChangeText={routing.setField(role, "modeId")}
-                placeholder="Mode ID — e.g. bypass"
-                disabled={disabled}
-              />
+              <View style={styles.field}>
+                {roleCatalog && !roleCatalog.error ? (
+                  // A stored mode the ready catalog doesn't declare — keep it
+                  // visible as an actionable warning; clearing stays a
+                  // deliberate Human edit, never a silent rewrite.
+                  <Text style={[styles.mutedSmall, { color: colors.statusWarning }]}>
+                    Stored mode &quot;{form.modeId}&quot; is not declared — {FAMILY_LABEL[form.family]} lists no modes.
+                  </Text>
+                ) : null}
+                <Field
+                  colors={colors}
+                  label="Mode"
+                  value={form.modeId}
+                  onChangeText={routing.setField(role, "modeId")}
+                  placeholder={roleCatalog && !roleCatalog.error ? "Leave empty — no modes declared" : "Mode ID — e.g. bypass"}
+                  disabled={disabled}
+                />
+              </View>
             )}
             {featureDefs.loading ? (
               <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>Loading features…</Text>

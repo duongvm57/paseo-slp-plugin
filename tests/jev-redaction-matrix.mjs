@@ -1,13 +1,6 @@
-// tests/jev-redaction-matrix.mjs — one fixture matrix driving BOTH Jev
-// credential-shape detectors:
-//   - src/jev.mjs          assertRedacted (throws jev-redacted naming the
-//                          pattern class) + sanitizeRemoteText (exported)
-//   - plugin/server/jev.ts sanitizeRemoteText (module-private — reached
-//                          through testJev's key-label and error-message
-//                          paths)
-// The two collections have different shapes ({name, pattern}[] vs bare
-// RegExp[]) so parity is pinned on behavior, never by comparing the arrays.
-// A pattern that drifts on either side fails the fixture that exercises it.
+// Jev credential fixtures exercise the shared preflight/sanitizer through
+// CLI errors and the plugin RPC's key-label/error-message paths. The adapters
+// preserve their own error classes and caps; the patterns have one owner.
 //
 // Every fixture is assembled from tests/fake-secrets.mjs fragments — no
 // detector-matching literal exists in this file either.

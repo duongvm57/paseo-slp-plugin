@@ -1,11 +1,49 @@
 # CLI reference
 
-The offline `slp.mjs` CLI ships inside the materialized runtime:
-`SLP_RT="$HOME/.paseo/slp-runtime/<candidate-sha256>"` — the active binding's
-`runtimePath` on the SLP screen. Every command is read-only or dry-run unless
-it takes `--apply`. Setup commands (`init`, repo-pinned catalogs) are in
-[operations.md](operations.md#repository-setup).
+The `slp.mjs` CLI ships in both the source checkout and the materialized
+runtime. Use `node bin/slp.mjs <command>` in a checkout, or
+`node "$SLP_RT/bin/slp.mjs" <command>` for the installed runtime. `SLP_RT`
+is the active binding's `runtimePath` on the SLP screen (also recorded in
+`<paseoHome>/slp-runtime/state/receipt.json`). An installed-runtime failure
+reports that receipt's concrete CLI path when available; missing, malformed
+or unusable guidance keeps the generic installation hint. This lookup is
+read-only and does not verify or select a runtime for execution.
 
+| Command / mode | Needs this CLI's installed runtime? | Works from a source checkout? |
+|---|---|---|
+| `prepare`, `prepare-handoff` (plan or `--emit create`, including `prepare --live`) | Yes | No; run the installed CLI |
+| `prepare --check`, `prepare-handoff --check` | Install verification is a check | Yes, but the install check fails and exit is 1 |
+| `prepare --schema`, `prepare-handoff --schema` | No | Yes |
+| `monitor`, `record-build` (including `--schema`) | No | Yes |
+| `identity`, `snapshot`, `review-packet`, `records`, `verify-handback` | No | Yes |
+| `routes`, `route-decide` (including `--schema`), `inventory`, `agents`, `notebook`, `status`, `local-target` | No | Yes; relevant daemon files/configuration are still needed |
+| `instructions` | No for a source preview | Yes; a managed render needs its binding environment |
+| `init`, `materialize`, `install` | No | Yes |
+| `upgrade`, `uninstall`, `verify` | No for the invoking CLI | Yes; the previous/target directory must be installed |
+| `desk-recover` | No | Yes; targets the selected home's desk state |
+
+`prepare`, `prepare-handoff`, `route-decide`, `monitor` and `record-build`
+accept `-` instead of a request filename to parse JSON from stdin. `records`
+also reads report text from `-`.
+The parser accepts `-` as a positional target for every command; only these readers interpret it as stdin.
+For example:
+
+```bash
+printf '%s\n' '{"agents":[{"id":"agent-id"}],"paseoHome":"/absolute/paseo-home"}' | node bin/slp.mjs monitor -
+node bin/slp.mjs monitor --schema
+node bin/slp.mjs record-build --schema
+```
+
+`--schema` takes no positional request; it prints required and optional keys,
+types and value constraints without an installed receipt or daemon. CLI
+exceptions with a code print `CODE: message` on stderr; ordinary exceptions
+print their message. Most failures exit 1; `desk-recover` usage errors exit 2.
+
+Read commands do not grant acceptance or launch authority. `--out` writes a
+response file, `monitor` writes a checkpoint when `stateFile` is supplied, and
+`desk-recover` performs operator recovery immediately. Installation and
+workspace setup commands are dry-run until `--apply`. Setup context is in
+[operations.md](operations.md#repository-setup).
 
 ## `prepare` / `prepare-handoff`
 
@@ -13,7 +51,11 @@ The optional offline path: `prepare` accepts role, repository, workspaceId
 and assignment. Supervisor/Lead additionally take the `profiles`/`providers`
 inventory; a Peer takes `providers` and `route: {optionId, catalogSha256}`
 from `routes`. Profiles may accompany a Peer request for discovery, but they
-never replace the pool. Three more optional fields, all also honored by
+never replace the pool. The [mixed-Peer request](../examples/mixed-peer.request.json)
+is a template: replace its paths/hash and the entire illustrative `providers`
+array with the current daemon's live `list_providers` array, preserving every
+returned field. Example availability values are not launch evidence.
+Three more optional fields, all also honored by
 `prepare-handoff`:
 
 - `inventoryFile`: absolute path to a JSON object carrying
@@ -72,6 +114,18 @@ create_agent arguments; see the
 Both commands only prepare arguments; Supervisor/Lead use Paseo to actually
 create the agent.
 
+An optional `handoff.recapInputs` supplies structured assignment/authority,
+decisions, assumptions, unresolved items, owner/dependency pins, report artifacts
+and resources. The packet retains the required free-text `handoff.state` and
+adds a recap alongside the freshly measured candidate. Missing sources and
+candidate mismatches remain visible; legacy free text is not mined for facts.
+Reported checks and settlement stay claims. Preparation never transfers
+ownership, acknowledges receipt or changes an agent's lifecycle.
+
+Native `slp_assignment_offer` / `slp_assignment_accept` are separate desk
+operations. A preparation recap does not substitute for their exact membership
+and revision checks or durable acknowledgment. See [assignment continuity](work-continuity.md).
+
 Three modes support request authoring — all side-effect free:
 
 - `prepare --schema` prints the request contract (required keys per role,
@@ -94,6 +148,18 @@ Three modes support request authoring — all side-effect free:
   writes whichever result a command produced to a file — the response, never
   the request file.
 
+`prepare <request.json|-> --live [--paseo-home <absolute-home>]` is an
+explicit saved-profile preparation for `supervisor` or `lead`. The request
+must omit `binding`, `providers`, `profiles`, `inventoryFile` and `route`.
+The command reads saved profiles from the selected home's `config.json`,
+checks `paseo daemon status --home <home> --json` for that home's running,
+reachable daemon, then lists providers through the reported `--host` endpoint.
+It refuses configured fallback and a changed profile file during observation.
+`--live` can accompany `--check` or `--emit create`; it cannot accompany
+`--schema` and is not accepted by `prepare-handoff`. It prepares arguments
+only and creates no agent. Home resolution follows `--paseo-home`, then the
+managed binding when managed, otherwise `PASEO_HOME` or `~/.paseo`.
+
 A complete request carries: `taskLabel` (or the repo name is used), the role
 (and `disposition` for Peer), the real `repository` path and `workspaceId`,
 an `assignment` naming scope, authority, the report-recipient agent ID and
@@ -106,11 +172,31 @@ topology (which seats, which pool options) fits the assignment — under armed
 Jev routing that reason trail is the decision receipt's distribution, not
 prose.
 
+## Bound seat formation
+
+`slp_seat_create` is a desk MCP tool, not a CLI command. Peer runtime may be
+omitted; server-side selection is described in [operations](operations.md#ordinary-peer-formation-through-the-desk).
+Use `selection: {optionId}` for an independent pick or an existing full runtime
+pin, never both. The spawn kit exposes both optional arguments. A choice response
+is unadmitted, not a successful create. After admission exact replay never calls
+Jev or resumes effects. `prepare`/`--check`/handoff preparation remain offline
+and still require explicit Peer pool pins; the new selector is not run by them.
+
+Placement is a desk argument, not a CLI repository/catalog override. Both
+roles accept caller or existing (workspaceId and/or absolute cwd, reason).
+Existing worktrees share the bound Git-common-dir; foreign/nested repos refuse.
+Source routing/protocol and target execution cwd are pinned separately inside
+the server; CLI prepare still uses its own repository and cannot supply that
+trusted context or route.catalogFile. New worktree: use Paseo create_workspace
+under its host-setup grant, then slp_seat_create placement existing; the desk's
+kind=worktree branch returns a gap before effects. Pending keeps the child ID
+and evidence without runnable delivery; replay never repairs or recreates it.
+
 ## `route-decide`
 
 `route-decide <request.json> [--schema] [--out <path>] [--paseo-home <absolute-home>]`
-is the only path
-that calls Jev — see [Jev-assisted routing](operations.md#jev-assisted-routing-optional)
+is the CLI path
+that calls routing Jev (the admitted slp_seat_create executor also invokes it) — see [Jev-assisted routing](operations.md#jev-assisted-routing-optional)
 for what it is and when it applies. The request carries `repository`, an
 optional `role` (default `peer`) and a Lead-authored `brief` — a nonempty
 string of raw task/assignment text and the only task context Jev sees;
@@ -261,6 +347,7 @@ verdicts:
 
 ```bash
 node "$SLP_RT/bin/slp.mjs" monitor /absolute/request.json
+node bin/slp.mjs monitor --schema
 ```
 
 The request names `agents` (`id`, optional `cwd` — falls back to the state
@@ -286,6 +373,91 @@ and emits everything detectable. Rendered `paseo logs` output is never
 parsed; `get_agent_activity` returns only a curated, `limit`-bounded tail
 (long sessions truncate into overflow files), so a complete structured
 timeline stays a recorded host gap.
+
+## `record-build`
+
+`record-build <request.json|-> [--out <path-outside-repo>]` measures inputs
+and prints one fenced v1 handback record. `record-build --schema` prints the
+strict request contract directly from the source checkout. Example request:
+
+```json
+{
+  "repository": "/absolute/repository",
+  "seat": {"role": "peer", "disposition": "engineer", "agentId": "agent-id"},
+  "verdict": null,
+  "checks": [{"cmd": "npm test", "exit": 0, "outputFile": "/absolute/check-output.txt"}]
+}
+```
+
+`repository`, `seat`, `verdict` and a nonempty `checks` array are required.
+`seat.agentId` is optional (nonblank string or null); role and disposition
+are nonblank strings. `verdict` is null or one of the handback verdicts
+printed by `--schema`. Each check requires a nonblank `cmd`, integer `exit`
+and absolute `outputFile`; unknown request, seat and check keys are refused.
+The command does not execute `cmd` or independently observe its exit code.
+It hashes the exact output bytes and snapshots the repository. Evidence
+inside the real repository becomes a repository-relative `outputRef`;
+external evidence is inline `output` (valid UTF-8, at most 64 KiB). Missing,
+unreadable or non-regular evidence fails rather than producing a null sha.
+Supplying `sha`, `output` or `outputRef` is refused: they are derived.
+
+The generated record passes the shared validator before output. A filename
+request must be a regular file; `-` explicitly selects stdin. `--out` must be
+outside the repository after following symlinks and be a new path or an
+existing regular file; it writes the emitted fence. Failed validation emits
+no record. `slp_handback_submit.recordV1` takes the **bare JSON object inside
+the fence**, not the Markdown fence, a JSON string, or the request object.
+Offline generation does not submit a handback or accept its claims.
+
+## `review-packet`
+
+`review-packet <absolute-repo> --base <git-ref>
+[--since <earlier-candidate-dir|snapshot.json>]
+[--evidence <absolute-file>]... [--out <path-outside-repo>]` emits a
+facts-only `slp-review-packet` JSON object. It contains the current HEAD,
+snapshot hash and file count, the resolved base commit, tracked changes and
+untracked non-ignored files against that base, and insertion/deletion totals.
+`--since` adds an added/removed/modified path comparison against an earlier
+candidate directory or saved `snapshot` JSON. Repeatable `--evidence` adds
+path, SHA-256 and byte count for each file; its contents are never interpreted.
+The packet contains no verdict, writer attribution or review finding.
+
+Unknown bases and missing inputs fail with exit 1 and no packet. Evidence
+must be regular files; `--since` must be a directory or regular snapshot file.
+Tracked special files in the measured tree are refused before snapshotting.
+`--out` must resolve outside the repository, including dangling/chained
+symlink targets, and be a new path or existing regular file. Path checks
+precede writes and do not cover a path changed between check and write.
+Without `--out`, this command is read-only.
+
+## `verify-handback`
+
+```bash
+node bin/slp.mjs verify-handback /absolute/report.md \
+  --repo /absolute/repository \
+  --expect-contract .paseo-slp/workspace-protocol.md=<sha256> \
+  [--expect-file <repo-relative-path>=<sha256>]... \
+  [--expect-runtime <candidate-sha256>] \
+  [--paseo-home <absolute-home>] \
+  [--expect-parent <agent-id>] [--expect-workspace <workspace-id>]
+```
+
+The report path, `--repo` and `--expect-contract` are required. Pin hashes
+are lowercase 64-character SHA-256 values; pin paths are repository-relative.
+The command measures against the caller's `--repo`, never a record-declared
+root. It extracts/validates the handback, captures bounded before/after
+snapshot and Git status observations, hashes the contract and optional file
+pins, and observes the claimed seat in the selected home's daemon files.
+`--expect-runtime` compares this package's measured candidate hash; without
+it runtime comparison is `report-only`. A bare `--paseo-home` resolves the
+normal managed/default home, just as omission does.
+
+Output is a `slp-verify-handback` JSON view with comparisons, gaps,
+limitations and a completeness ledger. A successfully produced view exits 0
+even when claims mismatch or are incomplete: inspect the view. Invalid
+inputs or operational failures exit 1 with `INVALID_REQUEST`, `IO_FAILURE`
+or `CAPABILITY_GAP`. This read-only command never re-runs checks, proves
+writer quiescence or grants acceptance.
 
 ## `notebook`
 
@@ -315,14 +487,39 @@ stdin. `--schema` prints the v1 JSON Schema and takes no report path:
 ```bash
 node "$SLP_RT/bin/slp.mjs" records /absolute/report.md --require handback
 node "$SLP_RT/bin/slp.mjs" records --schema
+node "$SLP_RT/bin/slp.mjs" records --render /absolute/report.md
 ```
 
 `--kind` filters returned records only; errors and warnings still cover the full
 report, and any error keeps the command's exit status non-zero. For `outputRef`,
-the per-check candidate repository takes precedence, then the record candidate;
-`--repo` supplies the fallback root. See
+`--repo` is the verifier's authoritative root and overrides record-declared
+roots. Without it, the per-check candidate repository takes precedence, then
+the record candidate. See
 [handback and settlement records](../src/references/report-records.md) for the
 record contract.
+
+Fences must start at column 1: the opening line is exactly
+three backticks immediately followed by `slp-record`,
+and the closing line is three backticks; either may have trailing whitespace.
+Indented fences, tildes and extra text after the language tag are not
+recognized. The parser splits on LF and removes a trailing CR from each
+line, so CRLF is tolerated; it preserves the original fence bytes for
+rendering. Inside the fence is one JSON object. The **last record of each
+kind in a document is authoritative**: selection uses the last parsed record
+of each recognized kind, even if schema validation fails; earlier
+blocks remain inspectable, and multiple blocks of a kind produce a warning.
+Validation errors from earlier blocks still make the command fail.
+
+A handback may include an optional `slp-report` version 1 for execution,
+review or Lead adjudication. Selecting it requires meaningful purpose-specific
+content, including unfinished work or mandate/findings and unresolved decisions.
+Legacy v1 records remain valid. `--render` emits the structured narrative plus
+the original fenced evidence block without reserializing it. Reported `read`,
+`ran`, candidate and checks remain claims; rendering establishes no execution
+or acceptance. Use structured reports when the current runtime's
+`records --schema` advertises `slp-report`, and rendering when its CLI usage
+advertises `--render`. Older retained candidates may support only the legacy
+v1 envelope; their lack of these optional modes does not invalidate it.
 
 ## `status` / `local-target`
 
@@ -352,25 +549,83 @@ Mutation RPCs (activate/reconcile/deactivate/set-language/set-role-routing)
 stay Human-authority and are not exposed. These probes retire when the host
 ships `paseo plugin invoke` or MCP `invoke_plugin_rpc`.
 
-## `tracker`
+## `instructions`
 
-`tracker <repository> [--paseo-home <absolute-home>]` is the read-only
-beads probe — the command a managed session-entry line names when the
-work tracker is enabled (see
-[Work tracker](operations.md#work-tracker-optional)):
+`instructions <supervisor|lead|peer>` prints the raw role-bundle instruction
+bytes to stdout; role, root and managed/source-preview provenance go to
+stderr. A source render is a preview of this tree. A managed render needs
+its `SLP_*` binding environment and reads current communication-language
+state, as the role wrapper does. The command neither installs a role nor
+proves what a live shim delivered.
+
+## `init`
+
+`init <absolute-repo> [--routing-from <absolute-json>] [--apply]` stages
+`.paseo-slp/workspace-protocol.md` from the package template and a Supervisor
+notebook scaffold. Only an explicit, validated `--routing-from` import adds
+`.paseo-slp/slp-routing.json`; otherwise the user-scope Peer pool remains the
+fallback. Existing target files are preserved. The default response reports
+paths, preservation and proposed byte hashes; `--apply` writes missing files.
+It does not configure the daemon, install skills or launch seats.
+
+## `install` / `upgrade` / `uninstall` / `verify`
 
 ```bash
-node "$SLP_RT/bin/slp.mjs" tracker /absolute/repository [--paseo-home /absolute/paseo-home]
+node bin/slp.mjs install [absolute-dir] [--paseo-home <absolute-home>] [--apply] [--reload]
+node bin/slp.mjs upgrade <absolute-new-dir> --from <previous-installation> [--apply] [--reload]
+node bin/slp.mjs uninstall <absolute-dir> [--apply] [--reload]
+node bin/slp.mjs verify <dir>
 ```
 
-It prints `{tracker, repository, enabled, state, bd, workspace, gaps}`.
-`state` is `ready` (a working `bd` and the repository is a beads
-workspace), `uninitialized` (no beads workspace in the repository) or
-`unavailable` (no working `bd` on PATH); `bd` reports `{path, version}`
-when found and `workspace` reports `{path, prefix, redirectedFrom}`.
-Gaps are data — the command exits 0 even when the state is not `ready`,
-and without `--paseo-home` the enablement setting is not read
-(`enabled: null`). The probe runs `bd version` and `bd where --json`
-with `BD_DISABLE_METRICS=1` forced, a 5 s timeout and a bounded buffer;
-it never installs, initializes or repairs anything — a missing or broken
-tracker is a gap to report, not a fault to fix.
+`install` defaults to `SLP_HOME`, otherwise the platform data directory
+(`$XDG_DATA_HOME/paseo-slp` or `~/.local/share/paseo-slp` on Linux).
+Without `--paseo-home` it materializes package bytes and `installed.json`;
+an intact standalone installation can be updated in place. With
+`--paseo-home` it also binds role providers, saved profiles and the two MCP
+flags in that home's configuration, recording `paseo-binding.json` for
+verification/restoration. It preserves existing preferences and refuses
+conflicting owned entries. This is the CLI installation path; plugin
+activation is a separate workflow.
+
+`upgrade` requires a Paseo-integrated previous installation and a new
+absolute destination outside it. It rebinds the previous home's configuration
+to the new runtime and retains the previous directory for running sessions.
+`uninstall` detects a Paseo binding, verifies owned configuration before
+restoring it and removing the runtime, and refuses extra runtime files or
+modified owned entries. These three commands are dry-run until `--apply`.
+`--reload` requires `--apply` and a Paseo-integrated installation; it calls
+Paseo at the selected home's recorded endpoint. Applied files may still
+require restart or a manual reload, reflected in the result and exit 1.
+
+`verify` is read-only: it compares installed package bytes against
+`installed.json` and checks the optional binding-file hash. It prints the
+manifest on success and exits 1 for a missing receipt, incomplete payload or
+drift. It does not establish provider health or E2E acceptance.
+
+## `desk-recover`
+
+`desk-recover <repository> [--paseo-home <absolute-home>] [--json]` resolves
+the repository's canonical Git common directory to the desk namespace.
+`desk-recover --bridge [--paseo-home <absolute-home>] [--json]` targets the
+bridge sentinel lock instead; a repository and `--bridge` are mutually
+exclusive. This is an operator recovery command: it may remove a lock only
+when the shared recovery algorithm proves its holder dead, appending audit
+evidence before removal. A live holder, uncertain identity or invalid lock
+is preserved; there is no force flag and no process is killed. Unlike setup
+commands it has no `--apply` mode and may mutate desk recovery files on
+invocation. Use it under the current recovery authority.
+
+Text output includes result, PID, nonce, actor/repository keys and recovery
+details. `--json` emits the strict recovery output object on one line. Exit
+0 means `recovered` or `no-lock`, exit 1 means a rejected/failed outcome, and
+exit 2 means a usage error (including a non-repository target).
+
+
+For ordinary SDK formation, a linked Lead with no local routing/protocol uses
+its configured same-Git main checkout as a pinned source, including its own
+Peer delegations. The execution cwd remains the qualified target. A missing
+trustworthy source refuses formation; the CLI itself does not discover host
+placement or accept trusted-context/catalogFile overrides. New-semantic
+seat-pending results name slp_operation_get with the same requestId; receipt
+reads do not resume or create a replacement. Legacy omitted full-pin Peer/Lead
+requests retain their old delivery path.

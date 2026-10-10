@@ -1,25 +1,21 @@
-// Peer-pool-card ownership (wave 11 S3b/D): the card owns the stored
-// snapshot, the editable form, load/prefill/save/reload/import/copy, every
-// seat/setter handler and the seat-editor UI state (open seat, picker,
-// convert dialog, token lookup, refs). The shell supplies the target and
-// its stale-guard predicates (`targetKey`/`isCurrentKey` wrap the
-// shell-owned keyRef mechanism), the RPC callers, read-only views of the
-// shared catalog/feature caches, the scroll-focus helper and the lastError
-// plumbing. `form` and `featureKeys` feed the shell's catalog-demand
-// computation.
+// Peer pool owns its draft, seat editors and CAS save/reload/import/copy.
+// Target async owns snapshot reads and session tickets. Target changes reset
+// this card's draft and transient state. The shell supplies RPC adapters,
+// shared catalog read views, scroll/focus and target-bound lastError plumbing.
 import { useEffect, useRef, useState } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
+import { useTargetSnapshot } from "../target-async.ts";
 import { copyText } from "@getpaseo/plugin/client/react-native";
 import { PEER_SEAT_ARCHETYPES } from "../../shared/archetypes.ts";
-import { FAMILY_LABEL, FAMILY_PICKER_ORDER } from "../../shared/families.ts";
-import type { RoleName } from "../../shared/families.ts";
+import { FAMILY_LABEL, FAMILY_PICKER_ORDER } from "../../shared/runtime/families.ts";
+import type { RoleName } from "../../shared/runtime/families.ts";
 import {
   HOW_TO_READ,
   STANDARD_SEAT_TOKENS,
   SUITABILITY_AXES,
   SUITABILITY_TOKENS,
   tokenDefinition,
-} from "../../shared/routing-vocabulary.ts";
+} from "../../shared/runtime/routing-vocabulary.ts";
 import type {
   CatalogResult,
   FamilyName,
@@ -35,6 +31,7 @@ import {
   applySettingChange,
   buildPeerPool,
   catalogScope,
+  featureKey,
   convertSeatToCustom,
   customSeatCopy,
   customSeatFromArchetype,
@@ -90,7 +87,8 @@ export function usePeerPoolCard({ target, targetKey, isCurrentKey, callGetPeerPo
   // CAS save + the legacy import view); `poolForm` is the editable copy.
   // Saves are whole-file with optimistic concurrency — a sha mismatch
   // refuses the write and the operator reloads.
-  const [poolData, setPoolData] = useState<GetPeerPoolResult | null>(null);
+  const snapshot = useTargetSnapshot(target, targetKey, target => callGetPeerPool({ schemaVersion: 1, target }));
+  const { data: poolData, replace: setPoolData, error: poolReadError, capture } = snapshot;
   const [poolForm, setPoolForm] = useState<PeerPoolForm>(emptyPeerPoolForm);
   const [poolDirty, setPoolDirty] = useState(false);
   // Saving and Reloading are separate pending states (mockup busy-state
@@ -104,7 +102,6 @@ export function usePeerPoolCard({ target, targetKey, isCurrentKey, callGetPeerPo
   // failed" — poolReadError separates the two (§7.4.E) so an unreadable pool
   // is never painted as an empty list, and so Save can require a successful
   // snapshot rather than silently sending expectedSha256:null.
-  const [poolReadError, setPoolReadError] = useState<string | null>(null);
   // Pool-specific errors (CAS conflict, save/reload failure) land in the
   // card's notice area, not only the shared lastError line (§7.4.D).
   const [poolError, setPoolError] = useState<{ message: string; cas: boolean } | null>(null);
@@ -149,7 +146,6 @@ export function usePeerPoolCard({ target, targetKey, isCurrentKey, callGetPeerPo
     setPoolReloading(false);
     setPoolSaved(false);
     setPoolCopied(false);
-    setPoolReadError(null);
     setPoolError(null);
     setPoolReloadConfirm(null);
     setPickerQuery("");
@@ -163,35 +159,6 @@ export function usePeerPoolCard({ target, targetKey, isCurrentKey, callGetPeerPo
     setTokenLookupToken(null);
     setOpenSeat(null);
     setAddSeatOpen(false);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- targetKey captures target
-  }, [targetKey]);
-
-  // Fetch the peer pool once per target — plugin-owned state, independent
-  // of any binding, so it loads with the first status like role routing
-  // does. The response carries the sha256 every save sends back as its CAS
-  // guard. A read failure is recorded distinctly (§7.4.E): the card shows
-  // "Could not read the pool", never an empty seat list or an unlocked
-  // editor.
-  const poolLoadedFor = useRef<string | null>(null);
-  useEffect(() => {
-    if (!target || !targetKey || poolLoadedFor.current === targetKey) return;
-    poolLoadedFor.current = targetKey;
-    let cancelled = false;
-    void (async () => {
-      try {
-        const result = await callGetPeerPool({ schemaVersion: 1, target });
-        if (!cancelled) {
-          setPoolData(result);
-          setPoolReadError(null);
-        }
-      } catch (error) {
-        if (!cancelled) {
-          setPoolData(null);
-          setPoolReadError(errorMessage(error));
-        }
-      }
-    })();
-    return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- targetKey captures target
   }, [targetKey]);
 
@@ -218,7 +185,7 @@ export function usePeerPoolCard({ target, targetKey, isCurrentKey, callGetPeerPo
   // non-empty seat list).
   const featureDefsForSeat = (seat: PeerSeatForm) => {
     const key = seat.family !== "" && seat.model.trim() !== ""
-      ? `${seat.family}|peer|${seat.model.trim()}|${seat.modeId.trim()}`
+      ? featureKey(seat.family, "peer", seat.model.trim(), seat.modeId.trim())
       : null;
     const set = key ? featureSets[key] : undefined;
     return {
@@ -422,7 +389,7 @@ export function usePeerPoolCard({ target, targetKey, isCurrentKey, callGetPeerPo
       if (poolBuild.seatIndex != null) setOpenSeat(poolBuild.seatIndex);
       return;
     }
-    const issueKey = targetKey;
+    const ticket = capture();
     setPoolSaving(true);
     try {
       const result = await callSetPeerPool({
@@ -432,7 +399,7 @@ export function usePeerPoolCard({ target, targetKey, isCurrentKey, callGetPeerPo
         expectedSha256: poolData?.sha256 ?? null,
       });
       // A save issued for home A must never land on home B's view.
-      if (!isCurrentKey(issueKey)) return;
+      if (!ticket.isCurrent()) return;
       setPoolData(current => ({
         schemaVersion: 1,
         pool: result.pool,
@@ -452,7 +419,7 @@ export function usePeerPoolCard({ target, targetKey, isCurrentKey, callGetPeerPo
       // A stale failure must not paint home A's error onto home B's card —
       // lastError is target-bound and stays safe unguarded, but the
       // card-local poolError must check the issue key like the success path.
-      if (isCurrentKey(issueKey)) {
+      if (ticket.isCurrent()) {
         const cas = message.includes("peer pool changed");
         setPoolError({
           message: cas ? "The pool changed since the last read; Reload to fetch the new version." : message,
@@ -462,7 +429,7 @@ export function usePeerPoolCard({ target, targetKey, isCurrentKey, callGetPeerPo
     } finally {
       // A stale op must not clear the busy flag of a newer op in-flight on
       // the displayed target — the target-switch reset releases it instead.
-      if (isCurrentKey(issueKey)) setPoolSaving(false);
+      if (ticket.isCurrent()) setPoolSaving(false);
     }
   };
 
@@ -472,13 +439,12 @@ export function usePeerPoolCard({ target, targetKey, isCurrentKey, callGetPeerPo
   // "Discard changes and Reload" (§7.4.C); a failed refetch keeps the draft.
   const reloadPeerPool = async () => {
     if (!target || !targetKey) return;
-    const issueKey = targetKey;
+    const ticket = capture();
     setPoolReloading(true);
     try {
       const result = await callGetPeerPool({ schemaVersion: 1, target });
-      if (!isCurrentKey(issueKey)) return;
+      if (!ticket.isCurrent()) return;
       setPoolData(result);
-      setPoolReadError(null);
       setPoolError(null);
       setPoolDirty(false);
       setPoolSaved(false);
@@ -488,9 +454,9 @@ export function usePeerPoolCard({ target, targetKey, isCurrentKey, callGetPeerPo
     } catch (error) {
       const message = errorMessage(error);
       update({ lastError: message }, target);
-      if (isCurrentKey(issueKey)) setPoolError({ message, cas: false });
+      if (ticket.isCurrent()) setPoolError({ message, cas: false });
     } finally {
-      if (isCurrentKey(issueKey)) setPoolReloading(false);
+      if (ticket.isCurrent()) setPoolReloading(false);
     }
   };
   const requestReload = (origin: "notice" | "footer") => {
@@ -523,12 +489,12 @@ export function usePeerPoolCard({ target, targetKey, isCurrentKey, callGetPeerPo
   // here too rather than copying JSON that would fail validateCatalog.
   const copyPoolJson = async () => {
     if ("error" in poolBuild) { if (target) update({ lastError: poolBuild.error }, target); return; }
-    const issueKey = targetKey;
+    const ticket = capture();
     try {
       await copyText(JSON.stringify(poolBuild.pool, null, 2));
       // The clipboard write itself is target-agnostic; the "Copied"
       // confirmation is card state and skips like every other stale paint.
-      if (issueKey === null || isCurrentKey(issueKey)) setPoolCopied(true);
+      if (targetKey === null || ticket.isCurrent()) setPoolCopied(true);
     } catch (error) {
       if (target) update({ lastError: errorMessage(error) }, target);
     }
@@ -566,7 +532,7 @@ export function usePeerPoolCard({ target, targetKey, isCurrentKey, callGetPeerPo
     updatePool,
     featureKeys: poolForm.seats.map(seat =>
       seat.family !== "" && seat.model.trim() !== ""
-        ? `${seat.family}|peer|${seat.model.trim()}|${seat.modeId.trim()}`
+        ? featureKey(seat.family, "peer", seat.model.trim(), seat.modeId.trim())
         : null,
     ).filter((key): key is string => key !== null),
     setPoolReloadConfirm,

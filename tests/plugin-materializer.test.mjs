@@ -7,8 +7,9 @@ import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync,
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { hash, identity, json, verifyInstall } from '../src/package.mjs';
+import { hash, identity, json, verifyInstall } from '../plugin/server/runtime/cli/package.ts';
 import { createMaterializer } from '../plugin/server/materializer.ts';
+import { createLauncherBuilder } from '../plugin/server/launchers.ts';
 import { embeddedPayload } from '../plugin/server/generated/runtime-payload.ts';
 import { OperationConflict } from '../plugin/shared/contracts.ts';
 
@@ -90,7 +91,7 @@ test('executable modes survive a restrictive umask', async t => {
 
 test('an existing divergent destination is RUNTIME_INTEGRITY, never repaired or overwritten', async t => {
   for (const tamper of [
-    async destination => writeFileSync(join(destination, 'src/package.mjs'), 'tampered'),
+    async destination => writeFileSync(join(destination, 'plugin/server/runtime/cli/package.ts'), 'tampered'),
     async destination => rmSync(join(destination, 'install.sh')),
     async destination => writeFileSync(join(destination, 'extra.txt'), 'extra'),
     async destination => { rmSync(join(destination, 'package.json')); symlinkSync('/etc/hostname', join(destination, 'package.json')); },
@@ -321,4 +322,123 @@ test('foreign candidates verify by their own record, never the embedded payload'
   const empty = join(fixture(t), 'slp-runtime', 'f'.repeat(64));
   mkdirSync(empty, { recursive: true });
   await conflict(materializer.verifyPublished(empty, 'f'.repeat(64), 'f'.repeat(64)), 'RUNTIME_INTEGRITY');
+});
+
+test('publication: materializer claims the operation directory; launchers re-enter and replace only launch-set', async t => {
+  const stable = fixture(t);
+  const payload = foreignPayload();
+  const publisher = createMaterializer(payload);
+  const op = 'Op-shared_09.1';
+  const staging = join(stable, '.staging', op);
+  const other = join(stable, '.staging', 'op-other');
+  mkdirSync(join(staging, 'launch-set'), { recursive: true });
+  mkdirSync(other);
+  writeFileSync(join(staging, 'marker'), 'operation evidence');
+  writeFileSync(join(staging, 'launch-set', 'leftover'), 'unpublished launch set');
+  writeFileSync(join(other, 'marker'), 'other operation');
+
+  const collision = await conflict(publisher.materialize(stable, op), 'COLLISION');
+  assert.equal(collision.path, staging);
+  assert.equal(collision.message, 'staging directory already exists for this operation');
+  assert.equal(readFileSync(join(staging, 'marker'), 'utf8'), 'operation evidence');
+  assert.equal(readFileSync(join(staging, 'launch-set', 'leftover'), 'utf8'), 'unpublished launch set');
+  assert.equal(existsSync(join(stable, payload.candidate.sha256)), false);
+
+  // Materializer cleanup owns the complete operation subtree, and publication
+  // consumes that same staging path by rename. Other operation evidence stays.
+  await publisher.discardStaging(stable, op);
+  assert.equal(existsSync(staging), false);
+  const candidate = await publisher.materialize(stable, op);
+  assert.equal(existsSync(staging), false);
+  mkdirSync(join(staging, 'launch-set'), { recursive: true });
+  writeFileSync(join(staging, 'marker'), 'operation evidence');
+  writeFileSync(join(staging, 'launch-set', 'leftover'), 'unpublished launch set');
+
+  const builder = createLauncherBuilder();
+  const previous = process.umask(0o077);
+  let set;
+  try {
+    set = await builder.publish({
+      daemonHome: join(stable, '..'),
+      stableRoot: stable,
+      operationId: op,
+      candidate: { sha256: candidate.candidateSha256, runtimePath: candidate.runtimePath },
+      node: { path: process.execPath, version: process.versions.node },
+      binaries: Object.fromEntries(['codex', 'pi', 'devin', 'claude', 'opencode'].map(family => [
+        family, { available: false, path: null, version: null },
+      ])),
+    });
+  } finally {
+    process.umask(previous);
+  }
+  assert.equal(readFileSync(join(staging, 'marker'), 'utf8'), 'operation evidence');
+  assert.equal(readFileSync(join(other, 'marker'), 'utf8'), 'other operation');
+  assert.equal(existsSync(join(staging, 'launch-set')), false);
+  assert.equal(existsSync(join(set.directory, 'leftover')), false);
+  assert.equal(mode(join(set.directory, 'launch.json')), 0o644);
+  assert.equal(set.files.length, 15);
+  for (const file of set.files) assert.equal(mode(file.path), 0o755);
+  assert.equal((await builder.verify(set.directory)).launchSetSha256, set.launchSetSha256);
+  await publisher.verifyPublished(candidate.runtimePath, candidate.candidateSha256, candidate.payloadSha256);
+});
+
+test('publication: safe operation names share refusal rules while domain validation order and diagnostics stay distinct', async t => {
+  const stable = fixture(t);
+  const payload = foreignPayload();
+  const publisher = createMaterializer(payload);
+  const builder = createLauncherBuilder();
+  const request = {
+    daemonHome: join(stable, '..'),
+    stableRoot: stable,
+    candidate: { sha256: payload.candidate.sha256, runtimePath: join(stable, payload.candidate.sha256) },
+    node: { path: process.execPath, version: process.versions.node },
+    binaries: {},
+  };
+  for (const operationId of ['', '.', '..', '../escape', '/absolute', 'op/name', 'op\\name', 'a'.repeat(257)]) {
+    const candidateError = await conflict(publisher.materialize(stable, operationId), 'INVALID_REQUEST');
+    assert.equal(candidateError.message, `invalid operation id: ${JSON.stringify(operationId)}`);
+    const launcherError = await conflict(builder.publish({ ...request, operationId }), 'INVALID_REQUEST');
+    assert.equal(launcherError.message, 'operationId is not a safe staging name');
+    assert.equal(existsSync(stable), false, 'invalid operation names must be refused before creating directories');
+  }
+  const earlier = await conflict(builder.publish({
+    ...request,
+    operationId: '../escape',
+    candidate: { ...request.candidate, sha256: 'not-a-digest' },
+  }), 'INVALID_REQUEST');
+  assert.equal(earlier.message, 'candidate.sha256 is not a sha256 digest');
+  assert.equal(existsSync(stable), false);
+});
+
+test('publication: private-directory creation failures retain domain wording and missing-chain behavior', async t => {
+  const stable = fixture(t);
+  writeFileSync(stable, 'blocking ancestor');
+  const nested = join(stable, 'nested');
+  const payload = foreignPayload();
+  const publisher = createMaterializer(payload);
+  const materializeError = await conflict(publisher.materialize(nested, 'op-mkdir'), 'IO_FAILURE');
+  assert.equal(materializeError.path, nested);
+  assert.match(materializeError.message, /^cannot create stable root: ENOTDIR:/);
+  const launcherError = await conflict(createLauncherBuilder().publish({
+    daemonHome: stable,
+    stableRoot: nested,
+    operationId: 'op-mkdir',
+    candidate: { sha256: payload.candidate.sha256, runtimePath: join(nested, payload.candidate.sha256) },
+    node: { path: process.execPath, version: process.versions.node },
+    binaries: Object.fromEntries(['codex', 'pi', 'devin', 'claude', 'opencode'].map(family => [
+      family, { available: false, path: null, version: null },
+    ])),
+  }), 'IO_FAILURE');
+  assert.equal(launcherError.message, 'cannot create staging root');
+  assert.equal(launcherError.path, join(nested, '.staging'));
+  assert.equal(readFileSync(stable, 'utf8'), 'blocking ancestor');
+
+  const absent = fixture(t);
+  await publisher.discardStaging(absent, 'op-absent');
+  assert.equal(existsSync(absent), false);
+  const setPath = join(absent, 'launchers', 'a'.repeat(64));
+  const missing = await conflict(createLauncherBuilder().verify(setPath), 'RUNTIME_INTEGRITY');
+  assert.equal(missing.path, setPath);
+  assert.equal(missing.message, `launch set path ${setPath} does not exist`);
+  assert.equal(existsSync(absent), false);
 });

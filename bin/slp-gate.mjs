@@ -44,6 +44,7 @@ const STRIPPED_ENV_KEYS = [
   'ESBUILD_BINARY_PATH',
   'NODE_OPTIONS',
   'SLP_SESSION_OPEN_GRANT',
+  'SLP_OPENCODE_V2_ONLY',
 ];
 
 const fail = message => {
@@ -73,6 +74,11 @@ function resolvedBinary() {
 }
 
 function main() {
+  // Retired native launcher marker is recognized only to refuse execution.
+  // Old recorded scripts can be verified, but new managed opens use ACP.
+  if (process.env.SLP_OPENCODE_V2_ONLY === '1') {
+    return fail('native OpenCode transport is unsupported; rebind to the managed ACP wrapper');
+  }
   const args = process.argv.slice(2);
   if (args.length === 1 && args[0] === '--version') {
     const binary = resolvedBinary();

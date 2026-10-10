@@ -4,11 +4,11 @@ import { mkdirSync, mkdtempSync, writeFileSync, rmSync, chmodSync, symlinkSync }
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { install, snapshot, json } from '../src/package.mjs';
-import { launchPlan } from '../src/launch.mjs';
-import { inventory } from '../src/inventory.mjs';
-import { agents } from '../src/agents.mjs';
-import { monitor } from '../src/monitor.mjs';
+import { install, snapshot, json } from '../plugin/server/runtime/cli/package.ts';
+import { launchPlan } from '../plugin/server/runtime/cli/launch.ts';
+import { inventory } from '../plugin/server/runtime/cli/inventory.ts';
+import { agents } from '../plugin/server/runtime/cli/agents.ts';
+import { monitor } from '../plugin/server/runtime/cli/monitor.ts';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 function fixture(t) {

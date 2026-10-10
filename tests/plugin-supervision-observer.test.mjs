@@ -16,11 +16,12 @@ import { capture } from '../plugin/server/supervision/capture.ts';
 import {
   axisGates, buildQuestions, judge, localGate, parseAssessmentResponse, SUPERVISION_QUESTIONS,
 } from '../plugin/server/supervision/assessment.ts';
-import { resolveSupervision, askJevDecision, assertRedacted, JevRequestError } from '../plugin/server/jev.ts';
-import { makeHome } from './helpers/plugin-doubles.mjs';
-import { install, json } from '../src/package.mjs';
-import { readCatalog } from '../src/routing.mjs';
-import { roleDelivery } from '../src/role-bundle.mjs';
+import { createJev, jevConfigPath, jevKeyPath, resolveSupervision, askJevDecision, assertRedacted, JevRequestError } from '../plugin/server/jev.ts';
+import { makeHome, targetOf } from './helpers/plugin-doubles.mjs';
+import { createSupervisionState, supervisionPath } from '../plugin/server/supervision/state.ts';
+import { install, json } from '../plugin/server/runtime/cli/package.ts';
+import { readCatalog } from '../plugin/server/runtime/cli/routing.ts';
+import { roleDelivery } from '../plugin/server/runtime/cli/role-bundle.ts';
 
 const LEAD = '11111111-1111-4111-8111-111111111111';
 const PEER = '22222222-2222-4222-8222-222222222222';
@@ -169,7 +170,7 @@ const BRIEF_GAP = { leadBrief: 'drift', peerHandback: 'satisfied', leadHandling:
 const NO_ACTION = { leadBrief: 'satisfied', peerHandback: 'satisfied', leadHandling: 'no_action_required' };
 const HANDLED_NO_ACTION = () => ({ ...NO_ACTION });
 
-const makeObserver = (t, { home, gate = GATE_OK, ask, agents = {}, localGate: caseGate, sendImpl, deferRetryMs, now } = {}) => {
+const makeObserver = (t, { home, gate = GATE_OK, ask, agents = {}, localGate: caseGate, sendImpl, deferRetryMs, recipientProbeMs, now } = {}) => {
   const stableRoot = join(home, 'slp-runtime');
   const observer = createSupervisionObserver({
     stableRoot,
@@ -179,6 +180,7 @@ const makeObserver = (t, { home, gate = GATE_OK, ask, agents = {}, localGate: ca
     ask: ask ?? (async () => { throw new Error('ask-not-stubbed'); }),
     ...(caseGate === undefined ? {} : { localGate: caseGate }),
     ...(deferRetryMs === undefined ? {} : { deferRetryMs }),
+    ...(recipientProbeMs === undefined ? {} : { recipientProbeMs }),
     ...(now === undefined ? {} : { now }),
   });
   const paseo = makePaseo(agents, { sendImpl });
@@ -2888,4 +2890,163 @@ test('observer: suspension-site × invalidation matrix — unified basis validat
   }
   assert.equal(cells, MATRIX_SITES.length * MATRIX_INVS.length,
     `executed ${cells} cells — expected ${MATRIX_SITES.length}×${MATRIX_INVS.length}`);
+});
+
+test('writer-owned files drive observer reloads: supervision CAS, Jev toggles, provider keys and chmod-only gate changes', async t => {
+  const home = makeHome(t), stableRoot = join(home, 'slp-runtime');
+  const paseo = makePaseo(liveAgents());
+  let networkCalls = 0;
+  const jev = createJev({ fetchImpl: async () => { networkCalls++; throw new Error('no network expected'); } });
+  const state = createSupervisionState({ servedHome: () => ({ daemonHome: home, source: 'env' }) });
+  const observer = createSupervisionObserver({ stableRoot, ask: async () => { networkCalls++; throw new Error('no assessment expected'); } });
+  t.after(() => observer.stop());
+  const request = { schemaVersion: 2, target: targetOf(home) };
+  const cfg = {
+    schemaVersion: 3, confidenceThreshold: 0.9,
+    defaults: { mode: 'off', supervisorAgentId: null, supervisorWorkspaceId: null, pendingDelayMs: 60000 },
+    routes: [route({ pendingDelayMs: 60000 })],
+  };
+  const saved = await state.setSupervision({ ...request, config: cfg, expectedSha256: null }, paseo);
+  // Literal location oracles stay independent of production exports.
+  assert.equal(supervisionPath(stableRoot), join(home, 'slp-runtime', 'state', 'supervision.json'));
+  assert.equal(jevConfigPath(stableRoot), join(home, 'slp-runtime', 'state', 'jev.json'));
+  assert.equal(jevKeyPath(stableRoot, 'openrouter'), join(home, 'slp-runtime', 'state', 'jev-openrouter.key'));
+  observer.onCreated(leadHook(), paseo);
+  await observer.idle();
+  const gate = () => observer.shadow(stableRoot).gates[LEAD];
+  assert.equal(gate(), 'jev-unconfigured', 'observer reads the supervision writer route');
+  let updated = await jev.setJev({ schemaVersion: 1, target: targetOf(home), jev: JEV_CFG, expectedSha256: null });
+  assert.equal(gate(), 'jev-key-missing', 'Jev config writer invalidates gate stamp');
+  await jev.setJevKey({ schemaVersion: 1, target: targetOf(home), key: 'test-observer-key' });
+  assert.equal(gate(), null, 'Jev key writer invalidates stamp');
+  chmodSync(join(home, 'slp-runtime', 'state', 'jev-openrouter.key'), 0o644);
+  assert.equal(gate(), 'jev-key-permissions', 'mode-only change invalidates gate cache');
+  chmodSync(join(home, 'slp-runtime', 'state', 'jev-openrouter.key'), 0o600);
+  assert.equal(gate(), null);
+  updated = await jev.setJev({ schemaVersion: 1, target: targetOf(home), jev: { ...JEV_CFG, enabled: false }, expectedSha256: updated.jev.sha256 });
+  assert.equal(gate(), 'jev-disabled');
+  const native = { ...JEV_CFG, provider: { kind: 'typesafe', baseUrl: 'https://api.typesafe.ai', model: 'jev-1.13.0' } };
+  await jev.setJev({ schemaVersion: 1, target: targetOf(home), jev: native, expectedSha256: updated.jev.sha256 });
+  assert.equal(gate(), 'jev-key-missing', 'provider switch watches the new provider key');
+  await jev.setJevKey({ schemaVersion: 1, target: targetOf(home), key: 'test-typesafe-observer-key' });
+  assert.equal(jevKeyPath(stableRoot, 'typesafe'), join(home, 'slp-runtime', 'state', 'jev-typesafe.key'));
+  assert.equal(gate(), null, 'both provider-key stamp locations are consumed');
+  await state.setSupervision({ ...request, config: { ...cfg, routes: [{ ...cfg.routes[0], mode: 'off' }] }, expectedSha256: saved.sha256 }, paseo);
+  assert.deepEqual(observer.shadow(stableRoot).gates, {}, 'supervision writer removes active route demand');
+  assert.equal(networkCalls, 0, 'observing writer changes never sends credentials or assessment traffic');
+});
+
+// ---------------------------------------------------------------------------
+// D2 — inconclusive assessments and stale notify recipients stay visible
+// ---------------------------------------------------------------------------
+
+const LOW = { leadBrief: 'satisfied', peerHandback: 'satisfied', leadHandling: 'pending', confidence: { leadBrief: 0.4, peerHandback: 0.4, leadHandling: 0.4 } };
+
+test('D2: an inconclusive assessment keeps its reason through a Lead turn-end re-record', async t => {
+  const home = makeHome(t);
+  writeRoutes(home, [route({ pendingDelayMs: 60_000 })]);
+  let release;
+  const held = new Promise(resolve => { release = resolve; });
+  const base = makeAsk([LOW, LOW]);
+  let n = 0;
+  const ask = async (...args) => { if (++n === 2) await held; return base.ask(...args); };
+  const { observer, paseo, stableRoot } = makeObserver(t, { home, agents: liveAgents(), ask });
+  observer.onCreated(peerHook(), paseo);
+  observer.onTurn(peerTurn(), paseo);
+  await observer.idle();
+  const reasonNow = () => observer.shadow(stableRoot).observations.find(row => row.peerId === PEER)?.reason;
+  assert.ok(['assessment-inconclusive', 'handling-pending'].includes(reasonNow()), `reason recorded after the assessment: ${reasonNow()}`);
+  observer.onStart(leadStart('turn-l1'));
+  observer.onTurn(leadEnd([codexSend('c1', PEER, 'ack')]), paseo);
+  await sleep(40);
+  // The re-assessment is still in flight: the row written by the turn-end
+  // itself must not have dropped the reason.
+  assert.ok(['assessment-inconclusive', 'handling-pending'].includes(reasonNow()), `reason survives the turn-end re-record: ${reasonNow()}`);
+  release();
+  await observer.idle();
+});
+
+test('D2: a stale default notify recipient is surfaced on the gate without any send, redirect or delivery change', async t => {
+  const home = makeHome(t);
+  writeRoutes(home, [route({ mode: 'notify', pendingDelayMs: 40, supervisorAgentId: '44444444-4444-4444-8444-444444444444' })]);
+  const agents = liveAgents();
+  const ask = makeAsk([PENDING]);
+  const { observer, paseo, stableRoot } = makeObserver(t, { home, agents, ask: ask.ask });
+  observer.onCreated(peerHook(), paseo);
+  observer.onTurn(peerTurn(), paseo);
+  await settle(observer);
+  const view = observer.shadow(stableRoot);
+  assert.equal(view.gates[LEAD], 'notify-recipient-not-found', 'probe surfaces the unusable recipient');
+  assert.equal(paseo.sent.length, 0, 'probe never sends');
+  assert.ok(paseo.refreshed.includes('44444444-4444-4444-8444-444444444444'), 'the recipient was refreshed');
+  assert.equal(view.observations.find(row => row.peerId === PEER).delivery ?? null, null, 'probe never touches delivery');
+  assert.equal(deliveryRows(home).length, 0, 'no reservation');
+  assert.equal(view.observations.find(row => row.peerId === PEER).findings.length, 0, 'no finding');
+});
+
+test('D2: a notify-… gate reason survives case evaluation; probes are throttled per Lead and recipient', async t => {
+  const home = makeHome(t);
+  writeRoutes(home, [route({ mode: 'notify', pendingDelayMs: 40 })]);
+  const agents = liveAgents({ [SUP]: snap(SUP, 'slp-codex-peer') });
+  const ask = makeAsk([PENDING, PENDING, PENDING]);
+  const { observer, paseo, stableRoot } = makeObserver(t, { home, agents, ask: ask.ask, recipientProbeMs: 400 });
+  observer.onCreated(peerHook(), paseo);
+  observer.onTurn(peerTurn(), paseo);
+  await settle(observer);
+  assert.equal(observer.shadow(stableRoot).gates[LEAD], 'notify-recipient-not-slp-supervisor');
+  const probes = () => paseo.refreshed.filter(id => id === SUP).length;
+  const before = probes();
+  // New evidence re-evaluates the case inside the throttle window: the
+  // gate reason must not be wiped and the recipient not re-probed.
+  observer.onStart(leadStart('turn-l1'));
+  observer.onTurn(leadEnd([codexSend('c1', PEER, 'ack')]), paseo);
+  await observer.idle();
+  assert.equal(observer.shadow(stableRoot).gates[LEAD], 'notify-recipient-not-slp-supervisor', 'evaluation keeps the notify- reason');
+  assert.equal(probes(), before, 'throttled within the window');
+});
+
+test('D2: a notify-… gate reason clears once the recipient is usable again — the throttle window schedules its own re-probe', async t => {
+  const home = makeHome(t);
+  writeRoutes(home, [route({ mode: 'notify', pendingDelayMs: 40 })]);
+  const agents = liveAgents({ [SUP]: snap(SUP, 'slp-codex-peer') });
+  const ask = makeAsk([PENDING]);
+  const { observer, paseo, stableRoot } = makeObserver(t, { home, agents, ask: ask.ask, recipientProbeMs: 150 });
+  observer.onCreated(peerHook(), paseo);
+  observer.onTurn(peerTurn(), paseo);
+  await settle(observer);
+  assert.equal(observer.shadow(stableRoot).gates[LEAD], 'notify-recipient-not-slp-supervisor');
+  agents[SUP] = snap(SUP, 'slp-codex-supervisor');
+  // No further host event: the displayed reason re-probes after the window.
+  const gateNow = () => observer.shadow(stableRoot).gates[LEAD] ?? null;
+  for (let waited = 0; gateNow() !== null && waited < 1500; waited += 10) await sleep(10);
+  assert.equal(gateNow(), null, `a usable recipient clears the gate (SUP refreshes: ${paseo.refreshed.filter(id => id === SUP).length})`);
+  assert.equal(paseo.sent.length, 0, 'probe never sends');
+  assert.equal(deliveryRows(home).length, 0, 'no reservation');
+});
+
+test('D2: a notify-… reason belongs to its recipient — a changed route never carries it to the new recipient, and nothing is sent', async t => {
+  const home = makeHome(t);
+  const NEW_SUP = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'; // no constant or agent in this file uses it — refresh returns null
+  writeRoutes(home, [route({ mode: 'notify', pendingDelayMs: 40 })]);
+  const agents = liveAgents({ [SUP]: snap(SUP, 'slp-codex-peer') });
+  const ask = makeAsk([PENDING]);
+  const { observer, paseo, stableRoot } = makeObserver(t, { home, agents, ask: ask.ask });
+  observer.onCreated(peerHook(), paseo);
+  observer.onTurn(peerTurn(), paseo);
+  await settle(observer);
+  assert.equal(observer.shadow(stableRoot).gates[LEAD], 'notify-recipient-not-slp-supervisor');
+  // pendingDelayMs differs in length: the observer's config cache stamps
+  // `mtimeMs:size`, and two UUIDs alone leave the size unchanged.
+  writeRoutes(home, [route({ mode: 'notify', pendingDelayMs: 4000, supervisorAgentId: NEW_SUP })]);
+  // Stage a — before any event or pass: the view reads the route, so the old
+  // recipient's reason is not shown for the new route.
+  assert.equal(observer.shadow(stableRoot).gates[LEAD] ?? null, null, 'the previous recipient\'s reason is not shown before any pass');
+  // Stage b — a valid pass runs for the new recipient: its own check shows.
+  observer.onCreated(peerHook(PEER2), paseo);
+  observer.onTurn(peerTurn({ peerId: PEER2, turnId: 'turn-p2' }), paseo);
+  await settle(observer);
+  assert.equal(observer.shadow(stableRoot).gates[LEAD], 'notify-recipient-not-found', 'the new recipient\'s own reason (unknown agent)');
+  assert.ok(paseo.refreshed.includes(NEW_SUP), 'the new recipient was probed');
+  assert.equal(paseo.sent.length, 0, 'a changed route never sends — to anyone');
+  assert.equal(deliveryRows(home).length, 0, 'no reservation');
 });

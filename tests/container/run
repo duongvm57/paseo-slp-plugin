@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# Host entrypoint: build the pinned image and run the install acceptance
+# suite in a disposable container. The repository is mounted read-only; the
+# container gets no host home, credentials, or docker socket.
+set -euo pipefail
+
+here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+repo_root=$(cd "$here/../.." && pwd)
+image=paseo-slp-container-harness:node24-paseo0.9.2
+
+command -v docker >/dev/null 2>&1 || { echo "ERROR: docker is required" >&2; exit 1; }
+docker info >/dev/null 2>&1 || { echo "ERROR: docker daemon is unavailable" >&2; exit 1; }
+
+docker build --tag "$image" "$here"
+exec docker run --rm \
+  --cap-drop ALL \
+  --security-opt no-new-privileges \
+  --mount "type=bind,src=$repo_root,dst=/src,readonly" \
+  "$image" accept

@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "privateSetting": "fixture-value-must-survive-install",
+  "agents": {
+    "providers": {
+      "legacy": {
+        "extends": "codex",
+        "label": "Fixture provider (pre-existing)",
+        "command": ["legacy-runtime"]
+      }
+    }
+  },
+  "daemon": {
+    "mcp": { "enabled": false, "injectIntoAgents": false },
+    "agentProfiles": [
+      {
+        "id": "personal-lead",
+        "name": "Fixture Lead",
+        "provider": "legacy",
+        "model": "fixture-model",
+        "modeId": "full-access",
+        "thinkingOptionId": "high",
+        "featureValues": { "fixture_feature": true }
+      }
+    ]
+  }
+}

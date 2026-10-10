@@ -1,0 +1,65 @@
+#!/usr/bin/env bash
+# Host entrypoint for disposable serve mode: build the image and start the
+# daemon + web UI container, published to host loopback only.
+#   ./serve [host-port]     (default 16767 → container 6767)
+# Stop with ./stop (or `docker rm -f paseo-slp-container-serve`).
+set -euo pipefail
+
+here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+repo_root=$(cd "$here/../.." && pwd)
+image=paseo-slp-container-harness:node24-paseo0.9.2
+name=paseo-slp-container-serve
+host_port=${1:-${PASEO_SERVE_PORT:-16767}}
+
+command -v docker >/dev/null 2>&1 || { echo "ERROR: docker is required" >&2; exit 1; }
+docker info >/dev/null 2>&1 || { echo "ERROR: docker daemon is unavailable" >&2; exit 1; }
+case "$host_port" in (*[!0-9]*|'') echo "ERROR: port must be numeric" >&2; exit 2 ;; esac
+
+if docker ps -a --format '{{.Names}}' --filter "name=^${name}$" | grep -q .; then
+  # Only ever recycle our own labeled container — never a foreign one.
+  if [ "$(docker inspect -f '{{index .Config.Labels "slp.mech-docker"}}' "$name" 2>/dev/null)" = "serve" ]; then
+    docker rm -f "$name" >/dev/null
+  else
+    echo "ERROR: container $name exists and is not owned by this harness; refusing to touch it" >&2
+    exit 1
+  fi
+fi
+
+docker build --tag "$image" "$here"
+docker run -d \
+  --name "$name" \
+  --label slp.mech-docker=serve \
+  --cap-drop ALL \
+  --security-opt no-new-privileges \
+  --publish "127.0.0.1:${host_port}:6767" \
+  --mount "type=bind,src=$repo_root,dst=/src,readonly" \
+  "$image" serve >/dev/null
+
+deadline=$((SECONDS + 480))   # daemon start + plugin npm build can take minutes
+while true; do
+  if ! docker ps --format '{{.Names}}' --filter "name=^${name}$" | grep -q .; then
+    echo "--- container exited; logs ---" >&2
+    docker logs "$name" >&2 || true
+    exit 1
+  fi
+  if docker logs "$name" 2>&1 | grep -q CONTAINER_SERVE_READY; then break; fi
+  if docker logs "$name" 2>&1 | grep -q CONTAINER_SERVE_FAIL; then
+    docker logs "$name" 2>&1 | tail -60 >&2
+    exit 1
+  fi
+  if (( SECONDS >= deadline )); then
+    echo "ERROR: timed out waiting for CONTAINER_SERVE_READY" >&2
+    docker logs "$name" 2>&1 | tail -60 >&2
+    exit 1
+  fi
+  sleep 2
+done
+
+cat <<EOF
+CONTAINER_SERVE_READY
+  web UI:   http://127.0.0.1:${host_port}/
+  health:   http://127.0.0.1:${host_port}/api/health
+  daemon:   paseo daemon inside ${name} (fake home only, no auth configured)
+  logs:     docker logs -f ${name}
+  stop:     $(dirname "$0")/stop    (docker rm -f ${name})
+EOF

@@ -1,40 +1,36 @@
-# Anti-pattern investigation reference
+# Investigate workflow failures
 
-Supervisor consults this at workflow audit and on material drift/failure signals;
-Lead consults it for repeated corrections, architecture uncertainty or reasoning
-drift. These are operational hypotheses distilled from operating guide §9, not
-automatic diagnoses or independently validated detectors. Numerical examples and
-response wording are heuristics. Repository thresholds belong to its protocol.
+Use at workflow audit or material drift/failure; Lead also uses it for
+repeated corrections or uncertain architecture/reasoning. These 20 guide §9
+patterns are hypotheses, not validated detectors. Inspect evidence and
+counterevidence, ask an open question and reconcile before intervention.
+Use repository thresholds and authority; numerical examples are heuristics.
+Peer assignments receive relevant guards, not this whole catalog.
 
-Select relevant patterns using observed evidence. Gather counterevidence, ask an
-open question and reconcile the answer. Escalate only within authority. Independence
-means evidence-backed judgment, not performative disagreement. Peers receive relevant
-guards/questions through their assignment rather than this whole audit catalog.
+| §9 / pattern | Inspect | Question and bounded response |
+|---|---|---|
+| 1 Authority-gradient compliance | Preferred verdict in brief; unexamined agreement | What supports/challenges the premise? Restore outcome framing and reopen rights without demanding opposition. |
+| 2 Perfect-plan trap | File/API/lifecycle choices fixed before discovery | Which choices are provisional? Separate real constraints from untested design. |
+| 3 Parachute instead of brakes | Repeated patches and one persistent ownership/failure path | What shared mechanism explains them? Pause incompatible repair and investigate. |
+| 4 Architecture lock-in | Growing exceptions/adapters and migration cost | What would justify replacing the foundation? Compare alternatives and reversal conditions. |
+| 5 Architecture fog | Concrete state owner/transitions versus abstraction callers | What disappears without this layer? Expose ownership before wrappers. |
+| 6 Moving-scope collision | Writer paths/times, owner map and review snapshots | Who owns the scope and frozen candidate? Isolate/serialize and restart stale review. |
+| 7 Self-benchmark/self-acceptance | Metric author, benchmark conditions and independent evidence | What outcome does the metric miss? Use owner criteria and risk-required judgment. |
+| 8 Test-shaped proof | Decided contract, mocks and actual failure/integration path | Which wrong behavior makes the test fail? Supply outcome proof rather than coverage. |
+| 9 Overengineering | Impact/frequency, maintenance and simpler fallback | What cost justifies machinery? Compare cheaper options before expansion. |
+| 10 Polling/loop debt | Unchanged retries/status, wake receipts and prompts | What new evidence warrants another check? Inspect quota/auth/tool/authority, then use events and bounded wakes. In-tree live-turn loops are distinct from outside-tree inspection bounded by declared cadence/logging/settlement. |
+| 11 Ceremony capture | Seat mandates, propositions, cost and changed decisions | Which unresolved proposition needs structure? Reduce topology and bound debate. |
+| 12 Framing capture | Hidden assumptions shared across supposedly different lanes | What lies outside this frame? Let a fresh Architect reconstruct before preferences. |
+| 13 Forked independence | Session context, formation and report leaks | What reasoning was inherited? Restore a neutral independent seat and disclose sealing limits. |
+| 14 Lead attention dilution | Detours, lost decisions and dependencies | Which question needs project context? Use advisory/Supervisor synthesis and concise rulings. |
+| 15 Skill pollution | Loaded tools/skills versus assignment | Which skill fits authority? Macro with Lead, observation with Supervisor, micro with Peer. |
+| 16 Status-as-acceptance | Artifact/diff/checks versus idle/finished claims | What exact candidate proves the verdict? Recover the chain or report missing proof. |
+| 17 Supervisor overreach | Grant, owner map and intervention diffs/messages | Which mandate permits it? Restore Lead decisions or seek bounded recovery authority. |
+| 18 Tests mint contracts | Test history, invented fields/mock shapes and contract source | Where was behavior decided? Reopen API/ownership before pinning it. |
+| 19 Context-branch contamination | New dependency, objective drift and integration gaps | Can a bounded lane return the contract? Split within authority, retaining handback. |
+| 20 Verdict-first supervision | Observation chronology, question bias and counterevidence | What disproves the hypothesis? Start with evidence/open questions before diagnosis. |
 
-| Guide / pattern | Signal and suspected mechanism | Evidence to inspect | Open question and bounded response |
-|---|---|---|---|
-| §9.1 Authority-gradient compliance | Unexamined agreement follows a brief containing the preferred verdict. | Original brief, premise checks, alternatives and counterexamples. | What evidence supports or challenges the premise? Reframe around outcome; allow confirm/partial/challenge/block without demanding opposition. |
-| §9.2 Perfect-plan trap | File/API/lifecycle choices are fixed before exploration; workers inherit untested assumptions. | Plan decisions versus discovered contracts and Peer discretion. | Which choices are provisional? Restore outcome/constraint briefs and reopen rights. |
-| §9.3 Parachute instead of brakes | Repeated symptom patches add complexity while one root mechanism persists. | Sequence of corrections, failures and ownership path. | What shared mechanism explains these failures? Pause incompatible patches and investigate that mechanism. |
-| §9.4 Architecture lock-in | Each feature needs new exceptions protecting the original foundation. | Adapters, migration cost, alternatives and failure semantics. | Under what evidence would this architecture be replaced? Seek independent alternatives and reversal conditions. |
-| §9.5 Architecture fog | Many abstractions conceal state ownership and transitions. | Concrete state owner, lifecycle, failure behavior and abstraction callers. | Which behavior disappears if this layer is removed? Make ownership explicit before adding wrappers. |
-| §9.6 Moving-scope collision | Writers overlap or review observes changing files. | Actual checkout paths, owner map, write times and candidate identities. | Who owns this moving scope and which candidate is frozen? Isolate or serialize writers; restart invalidated review. |
-| §9.7 Self-benchmark/self-acceptance | One author sets metric, implements and declares success with shared blind spots. | Who chose success criteria, benchmark provenance and independent evidence. | What outcome could this benchmark miss? Bind success to owner criteria and independent review where risk requires. |
-| §9.8 Test-shaped proof | Tests match implementation while mocks erase relevant failures. | Decided behavior, mock boundaries, actual integration/failure path. | Under which wrong mechanism would this test fail? Add appropriate outcome evidence rather than coverage for its own sake. |
-| §9.9 Overengineering | Infrastructure cost grows beyond a small edge case's impact. | Frequency, impact, maintenance burden, simpler fallback and reversal cost. | What cost/risk justifies this machinery? Compare simpler options before extending it. |
-| §9.10 Polling/loop debt | Repeated unchanged status or identical retries consume attention; heartbeat becomes a worker. | Timeline deltas, retry prerequisite changes, wake prompts and resource IDs. | What new evidence makes another check useful? Inspect prerequisite/quota/auth/authority, then use event waits and bounded wakes. The rule binds in-tree agents holding a live turn with sleep/status loops; a coordinator or observer outside the tree does periodic external inspection bounded by its declared cadence, logging and settlement instead. |
-| §9.11 Ceremony capture | Seats, votes and reports grow without decision-changing evidence. | Mandates, independent propositions, cost and decisions changed. | Which unresolved proposition needs another seat? Reduce to the smallest useful topology and bounded debate. |
-| §9.12 Framing capture | All alternatives inherit a possibly wrong problem frame. | Neutral problem statement, hidden assumptions and lane briefs. | Could the actual problem require an option outside this framing? Let a fresh Architect reconstruct it before seeing preferences. |
-| §9.13 Forked independence | A reviewer inherits the Lead's framing and is labeled independent. | Session creation/parentage, initial context and report visibility. | What context did this reviewer inherit? Use a fresh neutral session; record leaks into sealed work. |
-| §9.14 Lead attention dilution | Frequent explanatory detours displace coordination. | Conversation trajectory, lost decisions and dependency/owner map. | Which questions require Lead's project context now? Offer advisory/Supervisor synthesis and relay concise owner decisions. |
-| §9.15 Skill pollution | Lead sinks into framework details or Peer starts orchestration. | Loaded skills/tools, assignment and resulting actions. | Which skill belongs to this outcome and authority? Keep macro skills with Lead, observation skills with Supervisor and micro skills with Peer. |
-| §9.16 Status-as-acceptance | Idle/finished/tests-pass is promoted to a verdict without artifact inspection. | Exact candidate, diff, commands/results and acceptance owner. | Which artifact and evidence support this verdict? Recover the evidence chain or report the missing proof. |
-| §9.17 Supervisor overreach | An observer implements, directs Peer or takes a technical verdict without mandate. | Human grant, owner map and intervention messages/diffs. | Which mandate covers this intervention? Return technical decisions to Lead or obtain bounded recovery authority. |
-| §9.18 Tests mint contracts | Red tests invent fields/interfaces/adapters before contract decisions exist. | Contract/decision source, test history, mock shapes and production changes. | Where was this behavior/representation decided? Reopen ownership/API before contract-level tests pin the assumption. |
-| §9.19 Context-branch contamination | Lead absorbs large new domains and loses the original trajectory. | Dependency origin, objective drift and missing integration decisions. | Can this dependency return a bounded contract/result? Separate a lane/Lead within authority and define handback. |
-| §9.20 Verdict-first supervision | A diagnosis precedes evidence and induces confirmation-seeking. | Observation chronology, question wording and counterevidence. | What observations would disprove this hypothesis? Lead with evidence and an open question before recommending correction. |
-
-Record observation, evidence, suspected mechanism, impact, question, response and
-outcome using references/governance.md. Lead reports relevant causal evidence to the
-assigned Supervisor; without one, keep it in the task handback. Only durable patterns
-justify policy changes; keep unresolved hypotheses visible.
+Record evidence, mechanism, impact, question/response and outcome under
+governance.md; Lead reports causal evidence to Supervisor or task handback.
+Only evidenced durable patterns support policy changes. Independence permits
+challenge, not debate theater or a requirement to disagree.

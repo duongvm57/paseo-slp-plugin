@@ -2,7 +2,7 @@
 // history that gates PASS, retries and dependency rows.
 import { existsSync, readFileSync, readdirSync, realpathSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { hash, identity, json, readJson, snapshot } from '../src/package.mjs';
+import { hash, identity, json, readJson, snapshot } from '../plugin/server/runtime/cli/package.ts';
 import { harnessIdentity, loadAttempt, nonempty, now, requireValue, reviewIntegrityVersion } from './runs.mjs';
 import { evidenceIndex, missingEvidence } from './ledger.mjs';
 

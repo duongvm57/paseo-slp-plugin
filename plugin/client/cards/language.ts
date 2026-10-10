@@ -6,6 +6,7 @@
 // written.
 import { useEffect, useState } from "react";
 import type { StatusResult, TargetValue } from "../../shared/contracts.ts";
+import { useTargetLifetime } from "../target-async.ts";
 import { errorMessage } from "../manager-state.ts";
 
 export function useLanguageCard({ target, targetKey, isCurrentKey, statusView, callSetLanguage, refresh, update }: {
@@ -17,6 +18,7 @@ export function useLanguageCard({ target, targetKey, isCurrentKey, statusView, c
   refresh: (target: TargetValue) => void;
   update: (patch: { lastError: string | null }, target: TargetValue) => void;
 }) {
+  const capture = useTargetLifetime(targetKey);
   const [languageOn, setLanguageOn] = useState(false);
   const [languageValue, setLanguageValue] = useState("");
   const [languageDirty, setLanguageDirty] = useState(false);
@@ -42,7 +44,7 @@ export function useLanguageCard({ target, targetKey, isCurrentKey, statusView, c
   // the Apply press so an empty value is never written.
   const applyLanguage = async (value: string | null) => {
     if (!target || !targetKey) return;
-    const issueKey = targetKey;
+    const ticket = capture();
     setLanguageBusy(true);
     try {
       await callSetLanguage({ schemaVersion: 1, target, value });
@@ -50,13 +52,13 @@ export function useLanguageCard({ target, targetKey, isCurrentKey, statusView, c
       // apply issued on the previous target must not clear the displayed
       // target's dirty flag — the prefill effect would then overwrite its
       // edits. refresh() itself is target-bound and safe either way.
-      if (!isCurrentKey(issueKey)) return;
+      if (!ticket.isCurrent()) return;
       setLanguageDirty(false);
       void refresh(target);
     } catch (error) {
       update({ lastError: errorMessage(error) }, target);
     } finally {
-      if (isCurrentKey(issueKey)) setLanguageBusy(false);
+      if (ticket.isCurrent()) setLanguageBusy(false);
     }
   };
 

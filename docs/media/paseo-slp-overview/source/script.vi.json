@@ -1,0 +1,346 @@
+{
+  "title": "Paseo SLP — một brief trở thành thao tác có kiểm soát như thế nào",
+  "language": "vi",
+  "basis": {
+    "workingSource": "8365ce9551b6861d76a93095079977163311ace1",
+    "plugin": "0.5.0",
+    "sdk": "0.10.0",
+    "guide": "docs/plugin-explained.html",
+    "guideSha256": "a86ab998b719e742d47beff123df2fd6d9e14d72a8a5b83d57e3b5051444cac3",
+    "note": "Hoạt hình minh họa working source. Không phải cảnh quay daemon đang chạy và không phải bằng chứng E2E."
+  },
+  "labels": {
+    "honest": "hoạt hình minh họa · không phải cảnh quay thật"
+  },
+  "pronunciation": {
+    "seat-pending": "seat pending"
+  },
+  "scenes": [
+    {
+      "id": "title",
+      "chapter": "Tổng quan",
+      "title": "Một brief trở thành thao tác có kiểm soát như thế nào",
+      "cues": [
+        {
+          "text": "Paseo SLP tổ chức các coding agent thành Supervisor, Lead và các Peer độc lập."
+        },
+        {
+          "text": "Đây là cách một brief trở thành thao tác có kiểm soát, và nơi phán đoán của con người vẫn quan trọng."
+        }
+      ]
+    },
+    {
+      "id": "owners",
+      "chapter": "Ai sở hữu gì",
+      "title": "Ba bên cùng chia nhau mỗi thao tác",
+      "cues": [
+        {
+          "text": "Ba bên cùng chia nhau công việc."
+        },
+        {
+          "text": "Paseo chạy session, workspace và quan hệ cha con của agent."
+        },
+        {
+          "text": "Plugin thêm role policy, cùng một runtime kiểm tra dữ kiện đã ghi."
+        },
+        {
+          "text": "Human giữ mục tiêu, thẩm quyền và quyền nghiệm thu cuối cùng."
+        },
+        {
+          "text": "Và plugin không phải bộ lập lịch agent."
+        }
+      ]
+    },
+    {
+      "id": "policy",
+      "chapter": "Policy và enforcement",
+      "title": "Role policy được đọc. Enforcement được kiểm tra.",
+      "cues": [
+        {
+          "text": "Role policy là thứ mỗi seat đọc, xếp lớp từ quy tắc chung đến một assignment."
+        },
+        {
+          "text": "Lớp dưới chỉ thu hẹp, không bao giờ mở rộng."
+        },
+        {
+          "text": "Enforcement là code, kiểm tra membership, quyền sở hữu và revision trên lệnh desk được bảo vệ."
+        },
+        {
+          "text": "Policy dẫn dắt phán đoán. Enforcement canh giữ dữ kiện đã ghi."
+        }
+      ]
+    },
+    {
+      "id": "install",
+      "chapter": "Cài đặt, kích hoạt, bind",
+      "title": "Checkout, runtime đã phát hành và session là ba thứ khác nhau",
+      "cues": [
+        {
+          "text": "SLP Manager kích hoạt một runtime đã phát hành."
+        },
+        {
+          "text": "Byte đã xác minh nằm trong thư mục runtime cố định, cùng launcher và profile."
+        },
+        {
+          "text": "Binding ghim runtime, Node, transport và daemon home."
+        },
+        {
+          "text": "Khi khởi chạy, hook hoặc wrapper nạp role trước khi provider bắt đầu."
+        },
+        {
+          "text": "Rebind chỉ đổi các lần khởi chạy sau; session đang chạy giữ byte cũ."
+        }
+      ]
+    },
+    {
+      "id": "desk",
+      "chapter": "Membership và desk",
+      "title": "Tiêu đề chỉ để hiển thị. Membership là danh tính.",
+      "cues": [
+        {
+          "text": "Session chỉ thao tác trên desk qua membership đã bind."
+        },
+        {
+          "text": "Membership ghi chính xác agent, họ runtime, vai trò, thư mục và thế hệ binding."
+        },
+        {
+          "text": "Mọi lệnh desk đi qua bridge: danh tính mới, capability, schema chặt chẽ."
+        },
+        {
+          "text": "Desk là ledger chỉ ghi thêm, nối chuỗi hash, dùng chung cho các worktree liên quan."
+        },
+        {
+          "text": "Nó bảo vệ lệnh desk. Nó không phải sandbox cho shell."
+        }
+      ]
+    },
+    {
+      "id": "review",
+      "chapter": "Sở hữu và review",
+      "title": "Một người ghi mỗi scope. Review được chọn, rồi ghim.",
+      "cues": [
+        {
+          "text": "Mỗi scope đang thay đổi có một người ghi."
+        },
+        {
+          "text": "Review được chọn: bắt buộc, không cần, hoặc miễn kèm con trỏ thẩm quyền."
+        },
+        {
+          "text": "Một vòng review ghim candidate, scope, brief và mandate trung lập."
+        },
+        {
+          "text": "Đổi một thứ, review trở thành cũ."
+        },
+        {
+          "text": "Owner và người ghi không thể tự xả cổng độc lập của mình."
+        }
+      ]
+    },
+    {
+      "id": "dispatch",
+      "chapter": "Dispatch có quản lý",
+      "title": "Worker chỉ nhận việc sau khi bind",
+      "cues": [
+        {
+          "text": "Dispatch có quản lý là một chuỗi bước được ghi lại."
+        },
+        {
+          "text": "Giữ chỗ attempt, rồi tạo worker không kèm prompt công việc."
+        },
+        {
+          "text": "Xác minh runtime, nhãn, agent cha, workspace và thư mục đã quan sát được."
+        },
+        {
+          "text": "Bind membership, claim scope, rồi mới gửi công việc."
+        },
+        {
+          "text": "Đăng ký muộn thì send trả về seat-pending và không gửi gì."
+        },
+        {
+          "text": "Receipt tạo agent bị mất vẫn là bất định, không bị thay thế mù quáng."
+        }
+      ]
+    },
+    {
+      "id": "dependencies",
+      "chapter": "Phụ thuộc giữa task",
+      "title": "Tiền đề đã xong chưa chắc đã dùng được",
+      "cues": [
+        {
+          "text": "Tiền đề đã xong chưa chắc đã dùng được."
+        },
+        {
+          "text": "Sẵn sàng cần kết quả đủ điều kiện, và tính khả dụng đo trong base thật của bên dùng."
+        },
+        {
+          "text": "B và C đã land và đủ điều kiện, nhưng base của D chỉ có B. Nên D vẫn bị chặn."
+        },
+        {
+          "text": "Mở lại A làm mất hiệu lực trạng thái sẵn sàng; lịch sử vẫn giữ những gì đã dùng."
+        }
+      ]
+    },
+    {
+      "id": "effects",
+      "chapter": "Ranh giới ledger / hiệu ứng",
+      "title": "Một hiệu ứng đã issue, được ghi ở cả hai phía",
+      "cues": [
+        {
+          "text": "Transaction của ledger không thể biến hiệu ứng trên host thành nguyên tử."
+        },
+        {
+          "text": "Nên mỗi hiệu ứng được tách: intent, issue có khóa, lệnh SDK hoặc Git có giới hạn, rồi observe."
+        },
+        {
+          "text": "Mất receipt thì hiệu ứng ở trạng thái bất định."
+        },
+        {
+          "text": "Replay chính xác trả về kết quả đã ghi; reconcile đo lại danh tính gốc."
+        },
+        {
+          "text": "Yêu cầu mới không phải là phục hồi. Không có cơ chế tự động thử lại."
+        }
+      ]
+    },
+    {
+      "id": "integrate",
+      "chapter": "Tích hợp",
+      "title": "Tích hợp delta, giữ nguyên công việc không liên quan",
+      "cues": [
+        {
+          "text": "Tích hợp đo riêng base của worker, kết quả của nó và target thật."
+        },
+        {
+          "text": "So sánh ba chiều giữ thay đổi không liên quan và giữ lại xung đột."
+        },
+        {
+          "text": "Stage dựng candidate bên ngoài target; check chạy các recipe do owner ghim."
+        },
+        {
+          "text": "Land kiểm lại, ghi kế hoạch phục hồi, sao lưu, áp dụng và đo kết quả."
+        },
+        {
+          "text": "Nó không bao giờ commit, push hay deploy."
+        }
+      ]
+    },
+    {
+      "id": "cleanup",
+      "chapter": "Dọn dẹp",
+      "title": "Dọn dẹp cũng là quy trình có cổng bằng chứng",
+      "cues": [
+        {
+          "text": "Dọn dẹp cũng phải có bằng chứng."
+        },
+        {
+          "text": "Trước hết, một account ghim bằng chứng gốc và danh mục tài nguyên."
+        },
+        {
+          "text": "Stage được xóa theo giấy phép riêng, rồi mới đến bản sao lưu."
+        },
+        {
+          "text": "Mỗi thứ có tổng cộng hai lượt. Hết lượt thì nghĩa vụ được giữ lại, không lặp mãi."
+        }
+      ]
+    },
+    {
+      "id": "limits",
+      "chapter": "Ranh giới trung thực",
+      "title": "Những gì cơ chế này không chứng minh",
+      "cues": [
+        {
+          "text": "Một số giới hạn luôn được nói rõ."
+        },
+        {
+          "text": "Stop chặn hiệu ứng mới, nhưng không chứng minh lượt đang chạy đã bị hủy."
+        },
+        {
+          "text": "Archive không chứng minh tiến trình đã dừng hẳn."
+        },
+        {
+          "text": "Tham chiếu grant không xác thực grant của Human."
+        },
+        {
+          "text": "Hướng dẫn ngôn ngữ, quota fallback, Jev routing và supervision đều là tùy chọn, không phải bộ lập lịch tự động."
+        }
+      ]
+    },
+    {
+      "id": "value",
+      "chapter": "Vì sao hữu ích",
+      "title": "Công việc bền vững, kiểm tra được, với phán đoán thật",
+      "cues": [
+        {
+          "text": "Công việc, quyền sở hữu, review và hiệu ứng tồn tại qua gián đoạn, và xem được trong Read SLP work."
+        },
+        {
+          "text": "Phán đoán của Human và nghiệm thu dự án vẫn là quyết định thật."
+        },
+        {
+          "text": "Chi tiết và source pin: mở docs/plugin-explained.html.",
+          "say": "Chi tiết và source pin nằm trong hướng dẫn plugin explained, trong thư mục docs."
+        }
+      ]
+    }
+  ],
+  "voices": {
+    "elevenlabs": {
+      "provider": "ElevenLabs",
+      "model": "eleven_v3",
+      "voiceName": "Bella",
+      "voiceId": "hpp4J3VqNfWAUOO0d1Us",
+      "languageCode": "vi",
+      "outputFormat": "mp3_44100_128",
+      "settings": {
+        "stability": 0.5,
+        "similarity_boost": 0.75,
+        "speed": 0.95
+      },
+      "license": "ElevenLabs free tier: non-commercial use with attribution to elevenlabs.io",
+      "backend": "elevenlabs",
+      "labels": {
+        "credit": "Giọng đọc: Bella · ElevenLabs eleven_v3 · elevenlabs.io",
+        "titleCredit": "giọng thuyết minh tạo bằng elevenlabs.io",
+        "poster": "Xem video tổng quan {dur}  ·  thuyết minh + phụ đề tiếng Việt  ·  giọng: elevenlabs.io",
+        "mp4Title": "Tổng quan Paseo SLP (tiếng Việt) — giọng đọc: elevenlabs.io"
+      }
+    },
+    "omnivoice": {
+      "backend": "command",
+      "provider": "OmniVoice (k2-fsa), local",
+      "model": "k2-fsa/OmniVoice",
+      "voiceName": "synthetic male narrator (OmniVoice voice design → clone prompt)",
+      "languageCode": "vi",
+      "settings": {
+        "dtype": "bfloat16",
+        "numStep": 32,
+        "speed": 0.95,
+        "seedBase": 20261005,
+        "device": "cpu"
+      },
+      "outputFormat": "wav",
+      "cueGap": 0.38,
+      "labels": {
+        "credit": "Giọng đọc: OmniVoice (k2-fsa, CC BY-NC) · giọng nam tổng hợp · tạo cục bộ",
+        "titleCredit": "giọng thuyết minh tạo cục bộ bằng OmniVoice",
+        "poster": "Xem video tổng quan {dur}  ·  thuyết minh + phụ đề tiếng Việt",
+        "mp4Title": "Tổng quan Paseo SLP (tiếng Việt)"
+      },
+      "instruct": "male, middle-aged, very low pitch",
+      "reference": {
+        "kind": "own OmniVoice voice-design sample",
+        "seed": 20261005,
+        "numStep": 32,
+        "text": "Xin chào. Video này giới thiệu ngắn gọn cách Paseo SLP tổ chức công việc của các agent.",
+        "wavSha256": "8bc09842322d043f82ebc53ec0ca53f39308b9e853b4c5c02df4d3c8e393e53e"
+      },
+      "note": "Synthetic male voice from OmniVoice voice design; no cloning of any real or third-party voice.",
+      "license": "OmniVoice code Apache-2.0; pre-trained model CC BY-NC (k2-fsa/OmniVoice model card). Audio tokenizer: Boson Higgs Audio 2 Community License — Built with Higgs Materials licensed from Boson AI USA, Inc., Copyright Boson AI USA, Inc., All Rights Reserved and Meta Llama 3 licensed under the Meta Llama 3 Community License, Copyright Meta Platforms, Inc., All Rights Reserved.",
+      "seedOverrides": {
+        "limits-02": 11
+      },
+      "seedOverridesNote": "limits-02 default take was 2.55 s (likely dropped words); seeds 11/23/37 gave 3.03–3.11 s; 11 chosen."
+    }
+  },
+  "defaultVoice": "omnivoice"
+}

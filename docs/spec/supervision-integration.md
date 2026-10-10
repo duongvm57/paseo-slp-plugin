@@ -42,7 +42,7 @@ Supervisor, who decides within its own assignment.
 
 | Upstream behavior | SLP behavior and reason |
 | --- | --- |
-| Fixed providers `codex-lead`/`codex-peer`/`codex-supervisor` ([`server/config.ts`](https://github.com/hoangnb24/paseo-supervision/blob/1bad19b8ee6c58482494f56a3d8c6edb4f969ee1/server/config.ts)). | Roles derive from [`plugin/shared/families.ts`](../../plugin/shared/families.ts) — the twelve exact `slp-<family>-<role>` ids. Providers outside the registry are never auto-classified. |
+| Fixed providers `codex-lead`/`codex-peer`/`codex-supervisor` ([`server/config.ts`](https://github.com/hoangnb24/paseo-supervision/blob/1bad19b8ee6c58482494f56a3d8c6edb4f969ee1/server/config.ts)). | Roles derive from [`plugin/shared/runtime/families.ts`](../../plugin/shared/runtime/families.ts) — the twelve exact `slp-<family>-<role>` ids. Providers outside the registry are never auto-classified. |
 | Every discovered Lead routes to one UI-selected Supervisor. | Same outcome, opt-in: **daemon defaults** apply to every discovered SLP Lead without an explicit route; explicit per-Lead routes override (an explicit `off` wins). Defaults are off until the Human selects a mode. Rooms never mix: each case is judged against its own Lead's communication. |
 | Semantic three-question rubric ([`server/jev.ts`](https://github.com/hoangnb24/paseo-supervision/blob/1bad19b8ee6c58482494f56a3d8c6edb4f969ee1/server/jev.ts)). | Restored as rubric 2 with SLP terms, plus `no_action_required` and code-offered link questions (below). |
 | All-axis veto: any unknown axis makes the whole decision unknown. | Not copied. Findings are independent per axis; an unknown axis never erases another axis's supported finding. |
@@ -81,7 +81,7 @@ flowchart LR
 | `plugin/client/supervision-controls.ts` | The recipient-workspace bell. |
 
 No observer code lives in the immutable `bin/`/`src/` runtime payload.
-[`src/monitor.mjs`](../../src/monitor.mjs) stays a separate on-demand tool.
+[`plugin/server/runtime/cli/monitor.ts`](../../plugin/server/runtime/cli/monitor.ts) stays a separate on-demand tool.
 
 ### Host capability gaps and host facts
 
@@ -201,7 +201,7 @@ The store is `<daemonHome>/slp-runtime/state/supervision.json`, schema 3:
      transport anywhere in the text — the role line, either half of the
      role-prefix terminal line, the recovery and snapshot lines, the
      onboarding locator, the managed-runtime helper block, the
-     communication-language line, the work-tracker line, the carrier block
+     communication-language line, the carrier block
      or a launch binding (pinned to the renderer sources by a test) — exactly one recognized
      wrapper for the captured actor's role, or `role-prefix-unrecognized`; a
      Devin message with no trace at all is captured verbatim as a plain
@@ -427,6 +427,27 @@ pass after each drain:
   (mode, recipient, source) and archive state must be unchanged; otherwise
   the dispatch is canceled and never redirected. An unavailable recipient
   blocks delivery with a visible reason (`notify-recipient-…`).
+- **Recipient probe (display only).** While a notify route has an open
+  case past its pending-delay checkpoint, a non-null unblocked recipient
+  and no eligible finding, the dispatch pass refreshes the recipient at most once per Lead and recipient
+  every 5 min (bounded, abortable) and runs the same predicate: unusable →
+  gate reason `notify-<reason>` (refresh failure
+  `notify-recipient-refresh-failed`); usable → a `notify-` reason is
+  cleared. The result is revalidated after the await like a dispatch. The
+  probe never sends, reserves an attempt, changes the case's delivery,
+  creates a finding or changes the recipient. `notify-…` reasons are bound
+  to the recipient they were recorded for — the gate view shows one only while the Lead's route still notifies that same recipient (a pure read, independent of any pass): they survive case evaluation and
+  clear on a successful check, or at once (dispatch pass, evaluation or
+  retention sweep) when the route names another recipient or stops
+  notifying — never carried to the new recipient. While a reason is
+  displayed, the scheduler re-probes after the throttle window without
+  needing another host event. Limit: only open cases are probed, so a
+  Lead with no open case past its checkpoint is not checked; and a
+  recipient that goes bad before any case reaches a checkpoint shows
+  nothing until then. An assessment that stays inconclusive (confidence below
+  the threshold or `unknown`) keeps `assessment-inconclusive` /
+  `handling-pending` as the case reason across Lead turn-end and gate-down
+  re-records; it remains neither a finding nor acceptance.
 - **Deferral.** A `running` Supervisor is not prompted (the host would
   interrupt its turn); the dispatch re-checks with backoff (30 s doubling to
   10 min) until the recipient is idle or the case closes. A refresh failure

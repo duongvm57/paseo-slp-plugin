@@ -34,7 +34,7 @@ import { ProviderOverrideSchema } from '@getpaseo/protocol/provider-config';
 import { PinnedPersistedConfigSchema } from '../../plugin/server/config-transaction.ts';
 import { OperationConflict } from '../../plugin/shared/contracts.ts';
 
-export const FAMILIES = ['codex', 'pi', 'devin', 'claude'];
+export const FAMILIES = ['codex', 'pi', 'devin', 'claude', 'opencode'];
 export const ROLES = ['supervisor', 'lead', 'peer'];
 export const OWNED_IDS = FAMILIES.flatMap(f => ROLES.map(r => `slp-${f}-${r}`)).sort();
 export const sha256 = data => createHash('sha256').update(data).digest('hex');

@@ -5,13 +5,23 @@
     "module": "ESNext",
     "moduleResolution": "Bundler",
     "target": "ES2022",
-    "lib": ["ES2022"],
+    "lib": [
+      "ES2022"
+    ],
     "jsx": "react-jsx",
     "allowImportingTsExtensions": true,
     "verbatimModuleSyntax": true,
     "erasableSyntaxOnly": true,
     "skipLibCheck": true,
-    "types": ["node"]
+    "types": [
+      "node"
+    ],
+    "allowJs": true,
+    "checkJs": true
   },
-  "include": ["plugin/**/*.ts", "plugin/**/*.tsx"]
+  "include": [
+    "plugin/**/*.ts",
+    "plugin/**/*.tsx",
+    "plugin/**/*.mjs"
+  ]
 }

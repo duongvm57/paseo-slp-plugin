@@ -9,7 +9,7 @@ import { begin, collect, collectCoordinator, collectResources, fixture, review, 
 import { scenarios } from '../e2e/scenarios.mjs';
 import { evidenceKinds, satisfiesEvidence } from '../e2e/evidence.mjs';
 import { criterionIds as criteria } from '../e2e/criteria.mjs';
-import { hash } from '../src/package.mjs';
+import { hash } from '../plugin/server/runtime/cli/package.ts';
 import { cli, config, temporary, setup, coordinatorTranscript, resourceSettlement, checksReceipt, interventionsReceipt, kindPayload, collectAll, reviewInput, fakeReview } from './helpers.mjs';
 
 test('coordinator path and hash references cannot substitute for frozen transcript bytes', t => {

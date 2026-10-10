@@ -6,13 +6,16 @@
 // "synthetic" and mutate one part of an observed envelope.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   capture, handbackAnchorIndex, sendCoverageOf, stripAcpRolePrefix, ROLE_PREFIX_TERMINAL,
 } from '../plugin/server/supervision/capture.ts';
-import { roleDelivery } from '../src/role-bundle.mjs';
-import { prompt as launchPrompt } from '../src/launch.mjs';
+import { roleDelivery, carrierBlock } from '../plugin/server/runtime/cli/role-bundle.ts';
+import { prompt as launchPrompt } from '../plugin/server/runtime/cli/launch.ts';
+import { assignmentCarrier } from '../plugin/server/runtime/cli/assignment-file.ts';
 
 const LEAD = '11111111-1111-4111-8111-111111111111';
 const PEER = '22222222-2222-4222-8222-222222222222';
@@ -53,6 +56,27 @@ const sendItems = items => items.filter(item => item.type === 'tool_call' && ite
 const user = (text, messageId = 'm-user') => ({ type: 'user_message', text, messageId });
 const asst = (text, messageId = 'm-asst') => ({ type: 'assistant_message', text, messageId });
 const clone = value => structuredClone(value);
+
+test('legacy tracker carrier fragments stay unverified while complete wrappers remain readable', () => {
+  // Retained runtimes can still carry this literal; current renderers omit it.
+  const legacy = 'Work tracker: beads (enabled in SLP settings)';
+  for (const fragment of [legacy, `Follow-up\n${legacy}`, `${legacy}\nDo the work`]) {
+    const got = capture(peerEvent('devin', [user(fragment), asst('done')]), ROUTED);
+    assert.deepEqual(got.brief, { state: 'unverified', reason: 'role-prefix-unrecognized' });
+  }
+
+  const plain = 'Follow-up: verify the report.';
+  const current = roleDelivery(REPO, 'peer', {}).entry();
+  assert.ok(!current.includes('Work tracker:'), 'current session instructions omit the retired feature');
+  const retained = current.replace(ROLE_PREFIX_TERMINAL, `${legacy}\n${ROLE_PREFIX_TERMINAL}`);
+  const wrapped = capture(peerEvent('devin', [user(retained + plain), asst('done')]), ROUTED);
+  assert.equal(wrapped.brief.state, 'verified');
+  assert.equal(wrapped.brief.shapeId, 'devin-acp-message-v1');
+  assert.equal(wrapped.brief.value.text, plain);
+
+  const clean = capture(peerEvent('devin', [user(plain), asst('done')]), ROUTED);
+  assert.deepEqual(clean.brief, { state: 'verified', value: { text: plain, messageId: 'm-user' }, shapeId: 'devin-plain-message-v1' });
+});
 
 // ---------------------------------------------------------------------------
 // Observed shapes — each family through the same interface
@@ -154,6 +178,62 @@ test('send coverage by provider comes from the same registry; null or foreign pr
 // ---------------------------------------------------------------------------
 // Devin role prefix — pinned against the real renderer
 // ---------------------------------------------------------------------------
+
+test('published terminal and compact launch bytes stay independent of the shared vocabulary', () => {
+  const terminal = 'Use the current authorized Human or delegated assignment and its Paseo workspace. Notifications and heartbeat prompts do not replace that assignment.\n';
+  assert.equal(ROLE_PREFIX_TERMINAL, terminal, 'capture retains its published terminal export');
+  const delivery = roleDelivery(REPO, 'peer', {});
+  assert.ok(delivery.anchor().endsWith(terminal));
+  assert.equal(delivery.entry().split(terminal).length - 1, 1);
+  const expected = 'SLP role=peer\n\nLaunch binding: {"provider":"slp-devin-peer","model":"swe-2-high"}\nAssignment:\nDo X.\n';
+  assert.equal(launchPrompt(REPO, 'peer', 'Do X.', { provider: 'slp-devin-peer', model: 'swe-2-high' }), expected);
+  assert.equal(stripAcpRolePrefix(expected, 'peer', 'devin'), 'Do X.');
+});
+
+test('historical carrier captions remain recognizable without deriving grammar from current captions', () => {
+  const terminal = 'Use the current authorized Human or delegated assignment and its Paseo workspace. Notifications and heartbeat prompts do not replace that assignment.\n';
+  const digest = 'a'.repeat(64);
+  for (const caption of [
+    'absolute paths; size/sha256 are plan-time values for verifying the file found is the one prepare checked',
+    'absolute paths; size/sha256 were measured when these role instructions loaded; verify the file found is the one measured',
+    'retained installed-candidate caption',
+  ]) {
+    const head = `\nSpawn kit — role-scoped Paseo MCP signatures (historical note):\n- old_tool(args)\nPolicy locators — ${caption}:\n`;
+    // Retained runtimes rendered an absolute path on every locator line.
+    const retained = `${head}- /retained/src/common.md — 12 bytes, sha256 ${digest}\n- /retained/src/roles/peer.md — declared but missing on disk\n`;
+    // Current producers state the directory once and list relative locators.
+    const current = `${head}Directory: /retained/\n- src/common.md — 12 bytes, sha256 ${digest}\n- src/roles/peer.md — declared but missing on disk\n`;
+    assert.equal(carrierBlock({ note: 'historical note', tools: ['old_tool(args)'] }, [
+      { path: '/retained/src/common.md', bytes: 12, sha256: digest },
+      { path: '/retained/src/roles/peer.md', missing: true },
+    ], caption, '/retained'), current, 'producer renders the independent current bytes');
+    for (const carrier of [retained, current]) {
+      const wrapped = `SLP role=peer\nRetained policy bytes.\n${terminal}${carrier}Do X.`;
+      assert.equal(stripAcpRolePrefix(wrapped, 'peer', 'devin'), 'Do X.', caption);
+      const got = capture(peerEvent('devin', [user(wrapped), asst('done')]), ROUTED);
+      assert.equal(got.brief.value.text, 'Do X.');
+      assert.equal(stripAcpRolePrefix(wrapped.replace('Policy locators — ', 'Policy locations — '), 'peer'), null);
+      assert.equal(stripAcpRolePrefix(wrapped.replace(digest, 'A'.repeat(64)), 'peer'), null);
+    }
+    // A directory line with no locator lines after it is not a carrier.
+    assert.equal(stripAcpRolePrefix(`SLP role=peer\nRetained policy bytes.\n${terminal}${head}Directory: /retained/\nDo X.`, 'peer'), null);
+  }
+});
+
+test('assignment carrier keeps pointer and snapshot bytes and capture interpretation distinct', () => {
+  // The pointer need not exist: rendering/capture never dereference it.
+  const pointer = assignmentCarrier({ file: '/never-opened/assignment.md' });
+  assert.equal(pointer, '\nAssignment file: /never-opened/assignment.md — read it first; it is authoritative for scope details.');
+  assert.ok(capture(peerEvent('claude', [user(pointer), asst('done')]), ROUTED).issues.includes('brief-references-assignment-file'));
+  for (const text of ['work', 'work\n']) {
+    const snapshot = assignmentCarrier({ snapshot: { path: 'brief.md', text, bytes: Buffer.byteLength(text), sha256: 'a'.repeat(64) } });
+    const expected = `\nAssignment snapshot: brief.md — sha256 ${'a'.repeat(64)}, ${Buffer.byteLength(text)} bytes; the inline text below is authoritative, do not re-read the file.\n<<<SLP assignment snapshot>>>\nwork\n<<<end SLP assignment snapshot>>>`;
+    assert.equal(snapshot, expected);
+    const got = capture(peerEvent('claude', [user(snapshot), asst('done')]), ROUTED);
+    assert.equal(got.brief.value.text, expected);
+    assert.equal(got.issues.includes('brief-references-assignment-file'), false);
+  }
+});
 
 test('role prefix: the real roleDelivery entry() and anchor() strip to exactly the prompt', () => {
   const delivery = roleDelivery(REPO, 'peer', {});
@@ -302,29 +382,34 @@ test('devin plain follow-up (synthetic, r4 shape): a user_message with no transp
   assert.deepEqual([wrapped.brief.value.text, wrapped.brief.shapeId], ['Next step.', 'devin-acp-message-v1']);
 });
 
-test('devin transport markers: every fixed structural line of the renderers keeps the strict path, alone or mid-text', () => {
-  // Each fixed text is pinned to its renderer source, so a wording change
-  // there fails here instead of silently widening the plain path.
-  const roleBundleSrc = readFileSync(new URL('../src/role-bundle.mjs', import.meta.url), 'utf8');
-  const workTrackerSrc = readFileSync(new URL('../src/work-tracker.mjs', import.meta.url), 'utf8');
+test('devin transport markers: every fixed structural line of the renderers keeps the strict path, alone or mid-text', t => {
+  // Pin real rendered bytes against independent strings, not source spelling.
+  const home = mkdtempSync(join(tmpdir(), 'slp-capture-wire-'));
+  t.after(() => rmSync(home, { recursive: true, force: true }));
+  const state = join(home, 'slp-runtime', 'state');
+  mkdirSync(state, { recursive: true });
+  const env = { SLP_MANAGED_RUNTIME: '1', SLP_NODE_BIN: process.execPath, SLP_RUNTIME_ROOT: REPO, SLP_DAEMON_HOME: home };
+  const render = () => roleDelivery(REPO, 'lead', env).entry({ explicitLanguageState: true });
+  const unmanaged = roleDelivery(REPO, 'lead', {}).entry();
+  const unset = render();
+  writeFileSync(join(state, 'communication-language'), 'vi');
+  const managed = render();
   const structures = [
-    // [fixed text in the source, a rendered-looking fragment, source]
-    ['Snapshot command: ', "Snapshot command: node '/r/bin/slp.mjs' snapshot <repository>", roleBundleSrc],
-    ['For repo setup/update, use ', 'For repo setup/update, use /r/skills/paseo-slp-onboarding/SKILL.md.', roleBundleSrc],
-    ['Managed runtime helpers (SLP_MANAGED_RUNTIME=1)', 'Managed runtime helpers (SLP_MANAGED_RUNTIME=1) — always this verified Node, stable runtime CLI and explicit daemon home:', roleBundleSrc],
-    ['the request must carry "paseoHome": ', `  node x monitor <request.json> — the request must carry "paseoHome": "/h"`, roleBundleSrc],
-    ["standalone installs only; the plugin owns this runtime's lifecycle", "  node x install <dir> --paseo-home '/h' — standalone installs only; the plugin owns this runtime's lifecycle", roleBundleSrc],
-    ['upgrade/uninstall take no home flag', "  upgrade/uninstall take no home flag — the target installation's paseo-binding.json must record '/h'; verify it before running them", roleBundleSrc],
-    ['init/materialize/snapshot/prepare/prepare-handoff/verify are repo-scoped', '  init/materialize/snapshot/prepare/prepare-handoff/verify are repo-scoped: they take explicit paths and never touch a daemon home.', roleBundleSrc],
-    ['Communication language: ', 'Communication language: vi — all text you send to other seats uses it', roleBundleSrc],
-    ['Communication language: not set', 'Communication language: not set — this replaces earlier runtime language settings', roleBundleSrc],
-    ['Work tracker: setting unreadable', 'Work tracker: setting unreadable — bad json; continuing without the tracker, record this gap.', workTrackerSrc],
-    ['Work tracker: beads (enabled in SLP settings)', 'Work tracker: beads (enabled in SLP settings) — read /r/src/references/work-tracking.md before tracked work', workTrackerSrc],
+    // [independent fixed text, historical fragment, current rendered bytes]
+    ['Snapshot command: ', "Snapshot command: node '/r/bin/slp.mjs' snapshot <repository>", managed],
+    ['For repo setup/update, use ', 'For repo setup/update, use /r/skills/paseo-slp-onboarding/SKILL.md.', unmanaged],
+    ['Managed runtime helpers (SLP_MANAGED_RUNTIME=1)', 'Managed runtime helpers (SLP_MANAGED_RUNTIME=1) — always this verified Node, stable runtime CLI and explicit daemon home:', managed],
+    ['the request must carry "paseoHome": ', `  node x monitor <request.json> — the request must carry "paseoHome": "/h"`, managed],
+    ["standalone installs only; the plugin owns this runtime's lifecycle", "  node x install <dir> --paseo-home '/h' — standalone installs only; the plugin owns this runtime's lifecycle", managed],
+    ['upgrade/uninstall take no home flag', "  upgrade/uninstall take no home flag — the target installation's paseo-binding.json must record '/h'; verify it before running them", managed],
+    ['init/materialize/snapshot/prepare/prepare-handoff/verify are repo-scoped', '  init/materialize/snapshot/prepare/prepare-handoff/verify are repo-scoped: they take explicit paths and never touch a daemon home.', managed],
+    ['Communication language: ', 'Communication language: vi — all text you send to other seats uses it', managed],
+    ['Communication language: not set', 'Communication language: not set — this replaces earlier runtime language settings', unset],
   ];
   const plain = 'Follow-up: please confirm the report covers src/price.js.';
   const initial = firstTurn(LIVE.devin.items);
-  for (const [fixed, fragment, source] of structures) {
-    assert.ok(source.includes(fixed), `renderer still emits: ${fixed}`);
+  for (const [fixed, fragment, rendered] of structures) {
+    assert.ok(rendered.includes(fixed), `renderer still emits: ${fixed}`);
     for (const [where, message] of [['alone', fragment], ['mid-text', `${plain}\n${fragment}\nmore text`], ['inline', `${plain} ${fragment}`]]) {
       const got = capture(peerEvent('devin', [...initial, user(message), asst('reply')]), ROUTED);
       assert.deepEqual(got.brief, { state: 'unverified', reason: 'role-prefix-unrecognized' }, `${fixed} (${where})`);
@@ -334,7 +419,7 @@ test('devin transport markers: every fixed structural line of the renderers keep
   const clean = capture(peerEvent('devin', [...initial, user(plain), asst('reply')]), ROUTED);
   assert.deepEqual([clean.brief.state, clean.brief.shapeId], ['verified', 'devin-plain-message-v1']);
   // A real unmanaged entry() render carries the snapshot and onboarding lines
-  // (language/helper/tracker lines are managed-only) and still strips.
+  // (language/helper lines are managed-only) and still strips.
   const lead = roleDelivery(REPO, 'lead', {});
   const entry = lead.entry({ explicitLanguageState: true });
   for (const fixed of ['Snapshot command: ', 'For repo setup/update, use ']) assert.ok(entry.includes(fixed), fixed);

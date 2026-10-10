@@ -6,7 +6,7 @@ import { initialize, begin, collect, collectCoordinator, collectResources, seal,
 import { scenarios } from '../e2e/scenarios.mjs';
 import { evidenceKinds } from '../e2e/evidence.mjs';
 import { criterionIds as criteria } from '../e2e/criteria.mjs';
-import { hash } from '../src/package.mjs';
+import { hash } from '../plugin/server/runtime/cli/package.ts';
 
 export const cli = join(sourceRoot, 'e2e', 'cli.mjs');
 export const config = {

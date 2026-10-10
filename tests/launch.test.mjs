@@ -6,11 +6,12 @@ import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { basename, dirname, join } from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { install, json, hash } from '../src/package.mjs';
-import { launchPlan, handoffPlan, launchCheck, requestSchema } from '../src/launch.mjs';
-import { readAssignmentSnapshot } from '../src/assignment-file.mjs';
-import { readCatalog } from '../src/routing.mjs';
-import { spawnKit } from '../src/spawn-kit.mjs';
+import { install, json, hash } from '../plugin/server/runtime/cli/package.ts';
+import { launchPlan, handoffPlan, launchCheck, requestSchema } from '../plugin/server/runtime/cli/launch.ts';
+import { readAssignmentSnapshot } from '../plugin/server/runtime/cli/assignment-file.ts';
+import { readCatalog } from '../plugin/server/runtime/cli/routing.ts';
+import { spawnKit } from '../plugin/server/runtime/cli/spawn-kit.ts';
+import { buildHandoffRecap } from '../plugin/server/runtime/handoff-recap.ts';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 function fixture(t) {
@@ -109,26 +110,26 @@ test('prepare on a non-installed root names the root and the installed CLI, neve
 
 test('spawnKit carries role-scoped approximate MCP tool signatures', t => {
   const { dir, installed } = fixture(t);
-  const orchestrating = ['create_agent', 'send_agent_prompt', 'create_workspace', 'list_workspaces',
+  const orchestrating = ['slp_seat_create', 'slp_seat_create', 'slp_task_deliver', 'slp_task_get', 'slp_operation_get', 'create_agent', 'send_agent_prompt', 'create_workspace', 'list_workspaces',
     'list_providers', 'list_profiles', 'list_agents', 'get_agent_status', 'get_agent_activity',
     'create_heartbeat', 'delete_heartbeat', 'cancel_agent'];
   for (const role of ['supervisor', 'lead']) {
     const plan = launchPlan(installed, { ...request, repository: dir, role, binding: piBinding });
-    assert.match(plan.spawnKit.note, /approximate; verify against live mcp_list_tools/);
+    assert.match(plan.spawnKit.note, /approximate; consult the specific live schema for unfamiliar parameters or a mismatch/);
     assert.deepEqual(plan.spawnKit.tools.map(tool => tool.split('(')[0]), orchestrating);
-    assert.match(plan.spawnKit.tools[0], /labels\?: object/);
+    assert.match(plan.spawnKit.tools[5], /labels\?: object/);
     for (const tool of plan.spawnKit.tools) assert.match(tool, /^[a-z_]+\([^)]*\)$/);
     // The carrier: create_agent transmits only initialPrompt, so the kit must
     // reach the child there, not just at plan level.
     for (const tool of plan.spawnKit.tools) assert.ok(plan.create.initialPrompt.includes(`- ${tool}`));
-    assert.match(plan.create.initialPrompt, /approximate; verify against live mcp_list_tools/);
+    assert.match(plan.create.initialPrompt, /approximate; consult the specific live schema for unfamiliar parameters or a mismatch/);
   }
   const peer = launchPlan(installed, { ...request, repository: dir, role: 'peer', providers, route: catalogFixture(dir) });
-  assert.deepEqual(peer.spawnKit.tools.map(tool => tool.split('(')[0]), ['send_agent_prompt', 'get_agent_status']);
+  assert.deepEqual(peer.spawnKit.tools.map(tool => tool.split('(')[0]), ['slp_status', 'slp_handback_submit', 'slp_task_hold', 'slp_task_get', 'send_agent_prompt', 'get_agent_status']);
   // The Peer route resolves a verified slp-*-peer wrapper, which injects the
   // carrier at session entry — the prompt omits it, the plan fields stay.
   assert.ok(!peer.create.initialPrompt.includes('Policy locators —'));
-  assert.equal(peer.spawnKit.tools.length, 2);
+  assert.equal(peer.spawnKit.tools.length, 6);
   assert.throws(() => spawnKit('human'), /Unknown role/);
 });
 
@@ -318,7 +319,7 @@ test('the prompt carrier is dropped only when the target wrapper provably inject
   const live = launchPlan(installed, { ...request, repository: dir, role: 'lead', binding: wrapped, providers: leadProviders });
   assert.ok(!live.create.initialPrompt.includes('Policy locators —'));
   assert.ok(!live.create.initialPrompt.includes('Spawn kit —'));
-  assert.equal(live.spawnKit.tools.length, 12);
+  assert.equal(live.spawnKit.tools.length, 17);
   assert.ok(live.orientation.policyBytes.length > 0);
   // The same wrapper without a live inventory observation keeps the fallback.
   const blind = launchPlan(installed, { ...request, repository: dir, role: 'lead', binding: wrapped });
@@ -403,21 +404,23 @@ test('orientation carries mechanical locators only', t => {
   // docs/contract.md is a source-checkout document outside the install unit;
   // the locator set derives from the install receipt and never declares it.
   assert.equal(byPath[join(installed, 'docs/contract.md')], undefined);
-  for (const rel of ['src/common.md', 'src/roles/lead.md', 'src/delegation.md',
-    'src/references/delegation-formation.md', 'src/references/delegation-execution.md',
-    'src/references/anti-patterns.md', 'src/references/governance.md', 'src/references/monitoring.md',
-    'src/references/orchestration.md', 'src/references/provider-routing.md', 'src/references/report-records.md',
-    'src/references/review-gates.md',
-    'src/references/work-tracking.md', 'src/references/jev-routing.md']) {
+  const receipt = JSON.parse(readFileSync(join(installed, 'installed.json'), 'utf8'));
+  const expectedPolicy = ['src/common.md', 'src/roles/lead.md', 'src/delegation.md',
+    ...receipt.candidate.files.map(entry => entry.path).filter(path => path.startsWith('src/references/'))];
+  for (const rel of expectedPolicy) {
     const entry = byPath[join(installed, rel)];
     const bytes = readFileSync(join(installed, rel));
     assert.deepEqual(entry, { path: join(installed, rel), bytes: bytes.length, sha256: hash(bytes) });
   }
-  assert.equal(lead.orientation.policyBytes.length, 14);
+  assert.equal(lead.orientation.policyBytes.length, expectedPolicy.length);
   // Carrier: locators must survive into initialPrompt on the fallback path
   // (stock piBinding is not an injecting wrapper, so the carrier stays).
-  assert.ok(lead.create.initialPrompt.includes(`- ${join(installed, 'src/common.md')} — `));
-  assert.ok(lead.create.initialPrompt.includes(`${join(installed, 'src/common.md')} — ${readFileSync(join(installed, 'src/common.md')).length} bytes, sha256 ${hash(readFileSync(join(installed, 'src/common.md')))}`));
+  const locatorBlock = lead.create.initialPrompt.split('Policy locators — ')[1];
+  assert.equal(locatorBlock.split(installed).length - 1, 1, 'runtime directory is stated once in the carrier');
+  assert.ok(locatorBlock.includes(`\nDirectory: ${installed}/\n`));
+  const commonBytes = readFileSync(join(installed, 'src/common.md'));
+  assert.ok(locatorBlock.includes(`\n- src/common.md — ${commonBytes.length} bytes, sha256 ${hash(commonBytes)}\n`), 'relative line with full sha256');
+  assert.equal(locatorBlock.split('\n- ').length - 1, expectedPolicy.length);
   assert.ok(!lead.create.initialPrompt.includes('docs/contract.md'));
   // A Peer bundle omits delegation.md and passes the routed catalog hash through.
   const route = catalogFixture(dir);
@@ -517,6 +520,13 @@ test('requestSchema describes the planner contract and its examples plan once pl
   assert.equal(handoffSchema.handoff.previousOwner.settled, 'required true');
 });
 
+test('prepare-handoff schema describes explicit recap inputs without requiring them', () => {
+  const schema = requestSchema(true).handoff.recapInputs;
+  assert.equal(schema.optional, true);
+  assert.match(schema.description, /does not read arbitrary host state or source files/u);
+  assert.match(schema.reportArtifacts, /candidate, checks and findings remain claims/u);
+});
+
 test('handoff plans carry modeId, spawnKit and orientation alongside the packet', t => {
   const { dir, installed } = fixture(t);
   const handoff = { previousAgentId: 'old-lead', reason: 'quota', authority: 'Human requests replacement',
@@ -525,9 +535,14 @@ test('handoff plans carry modeId, spawnKit and orientation alongside the packet'
   assert.equal(plan.modeId, null);
   assert.equal(plan.modeIdSource, 'none');
   assert.deepEqual(plan.warnings, [NO_MODE_WARNING]);
-  assert.equal(plan.spawnKit.tools.length, 12);
+  assert.equal(plan.spawnKit.tools.length, 17);
   assert.equal(plan.orientation.installedRoot, installed);
   assert.equal(plan.handoff.previousAgentId, 'old-lead');
+  assert.equal(plan.handoff.state, 'paused on snapshot', 'legacy free text remains intact');
+  assert.equal(plan.handoff.recap.transfer.settlement, 'unverified');
+  assert.equal(plan.handoff.recap.transfer.recipientAcknowledgment, 'not-observed');
+  assert.ok(plan.handoff.recap.gaps.includes('assignment-source-missing'));
+  assert.match(plan.create.initialPrompt, /Structured handoff context is incomplete/u);
   // Handed-off seats receive the carrier inside the prompt too.
   assert.ok(plan.create.initialPrompt.includes('- create_agent(title: string'));
   assert.match(plan.create.initialPrompt, /Provider handoff evidence:/);
@@ -539,9 +554,115 @@ test('handoff plans carry modeId, spawnKit and orientation alongside the packet'
   assert.ok(snapshotPlan.create.initialPrompt.includes('Assignment snapshot: .local-checks/'));
   assert.ok(snapshotPlan.create.initialPrompt.includes('handoff snapshot body'));
   assert.ok(!snapshotPlan.create.initialPrompt.includes(`Assignment file: ${assignmentFile} — read it first`));
+
+  const legacyRecap = handoffPlan(installed, { ...request, role: 'lead', binding: piBinding, handoff: {
+    ...handoff,
+    recapInputs: { reportArtifacts: [{ sourceRef: 'legacy.md#record-1', record: {
+      version: 1, kind: 'handback', seat: { role: 'peer', disposition: 'engineer' }, verdict: null,
+      candidate: { repository: request.repository, head: 'c'.repeat(40) },
+      checks: [{ cmd: 'node --test old.test.mjs', exit: 0, sha: null }],
+    } }] },
+  } });
+  assert.equal(legacyRecap.handoff.recap.candidate.claims[0].checks[0].cmd, 'node --test old.test.mjs');
+  assert.ok(legacyRecap.handoff.recap.gaps.includes('report-artifact-report-missing:legacy.md#record-1'));
+  assert.match(legacyRecap.create.initialPrompt, /Structured handoff context is incomplete/u);
 });
 
-test('prepare paths are tracker-agnostic: off renders identical, on adds one line (T3)', t => {
+test('recap treats a valid legacy handback without report as evidence claims plus an explicit gap', () => {
+  const record = {
+    version: 1, kind: 'handback', seat: { role: 'peer', disposition: 'engineer' }, verdict: null,
+    candidate: { repository: '/repo', snapshotSha256: 'c'.repeat(64) },
+    checks: [{ cmd: 'node --test legacy.test.mjs', exit: 0, sha: null }],
+  };
+  const recap = buildHandoffRecap({ reportArtifacts: [{ sourceRef: 'legacy.md#record-1', record }] }, {
+    repository: '/repo', head: 'a'.repeat(40), sha256: 'b'.repeat(64), incomplete: [], nestedIncomplete: [],
+  });
+
+  assert.ok(recap.gaps.includes('report-artifact-report-missing:legacy.md#record-1'));
+  assert.equal(recap.candidate.claims[0].candidate.snapshotSha256, 'c'.repeat(64));
+  assert.equal(recap.candidate.claims[0].checks[0].cmd, 'node --test legacy.test.mjs');
+  assert.deepEqual(recap.candidate.claims[0].findings, []);
+  assert.equal(recap.candidate.claims[0].reportedOnly, true);
+  assert.equal(recap.candidate.comparison, 'mismatch');
+  assert.equal(recap.contextStatus, 'partial');
+});
+
+test('handoff recap keeps source artifacts, candidate measurements and report claims distinct', () => {
+  const finding = {
+    id: 'finding-1', state: 'hypothesis', obligation: 'The candidate requires a Lead ruling.',
+    evidence: [{ summary: 'The pinned candidate differs.', source: 'review.md', basis: 'observed', ref: 'review.md#finding-1' }],
+    remedy: 'Reconcile the pin before transfer.',
+  };
+  const record = {
+    version: 1, kind: 'handback', seat: { role: 'peer', disposition: 'reviewer' }, verdict: 'FINDINGS',
+    candidate: { repository: '/repo', head: 'c'.repeat(40) },
+    checks: [{ cmd: 'node --test', exit: 0, sha: null }],
+    report: {
+      format: 'slp-report', version: 1, purpose: 'execution',
+      assignment: {
+        id: 'asg-1', revision: 'rev-2', scopeRevision: 'scope-1', sourceRef: 'assignment.json#current',
+        objective: 'Prepare a bounded replacement handoff.', acceptance: ['Keep claims distinct from measurements.'],
+        authority: [{ claim: 'Human authorized a new session.', sourceRef: 'assignment.json#authority' }],
+        scope: { owned: ['handoff'], excluded: ['host lifecycle'] },
+      },
+      assumptions: ['Owner pins are read-only context.'], unknowns: [], selfReport: { read: [], ran: [] },
+      execution: { result: 'Handoff context recorded.', completed: ['report'], unfinished: [] },
+      review: null, adjudication: null, findings: [finding], owners: [], dependencies: [],
+      nextAction: { state: 'ready', action: 'Lead verifies settlement.', ownerId: 'lead-1' }, resources: [],
+    },
+  };
+  const recap = buildHandoffRecap({
+    assignment: {
+      id: 'asg-current', revision: 'rev-4', sourceRef: 'assignment.json#current', objective: 'Transfer bounded work.',
+      authority: [{ claim: 'Human grant', sourceRef: 'assignment.json#authority' }],
+    },
+    decisions: [{ proposition: 'Keep old parentage.', ruling: 'Preserve.', reason: 'Host owns lifecycle.', sourceRef: 'decision.json#1' }],
+    assumptions: [{ statement: 'No host mutation is planned.', sourceRef: 'assignment.json#assumptions' }],
+    unresolved: [{ proposition: 'Confirm old-owner settlement.', reason: 'Needs host/task evidence.', ownerId: 'lead-1', sourceRef: 'status.json#old-owner' }],
+    ownerPins: [{ surface: 'report runtime', ownerId: 'peer-2', state: 'active', basis: 'assignment', sourceRef: 'assignment.json#owners' }],
+    dependencies: [{ need: 'Lead verifies old-owner settlement.', state: 'open', ownerId: 'lead-1', sourceRef: 'decision.json#dependency' }],
+    nextAction: { state: 'blocked', action: 'Wait for settlement evidence.', ownerId: 'lead-1' },
+    resources: [{ kind: 'workspace', id: 'wks-1', ownerId: 'lead-1', state: 'retained', sourceRef: 'status.json#workspace' }],
+    reportArtifacts: [{ sourceRef: 'handback.md#record-1', record }],
+  }, {
+    repository: '/repo', head: 'a'.repeat(40), sha256: 'b'.repeat(64), incomplete: ['submodule'], nestedIncomplete: [],
+  });
+
+  assert.equal(recap.assignment.id, 'asg-current');
+  assert.equal(recap.decisions[0].proposition, 'Keep old parentage.');
+  assert.equal(recap.assumptions[0].statement, 'No host mutation is planned.');
+  assert.equal(recap.owners[0].ownerId, 'peer-2');
+  assert.equal(recap.dependencies[0].state, 'open');
+  assert.equal(recap.candidate.measurement.head, 'a'.repeat(40));
+  assert.equal(recap.candidate.claims[0].candidate.head, 'c'.repeat(40));
+  assert.equal(recap.candidate.claims[0].checks[0].cmd, 'node --test');
+  assert.equal(recap.candidate.comparison, 'mismatch');
+  assert.deepEqual(recap.candidate.incomplete, ['submodule']);
+  assert.equal(recap.findings[0].id, 'finding-1');
+  assert.equal(recap.nextAction.state, 'blocked');
+  assert.equal(recap.resources[0].ownerId, 'lead-1');
+  assert.ok(recap.gaps.includes('candidate-claim-mismatch:handback.md#record-1'));
+  assert.ok(recap.gaps.includes('report-assignment-stale:handback.md#record-1'));
+  assert.ok(recap.gaps.includes('check-evidence-incomplete:handback.md#record-1'));
+  assert.ok(recap.gaps.includes('candidate-measurement-incomplete'));
+  assert.equal(recap.transfer.settlement, 'unverified');
+  assert.equal(recap.transfer.recipientAcknowledgment, 'not-observed');
+});
+
+test('handoff recap makes omitted groups and whitespace-only source claims visible', () => {
+  const recap = buildHandoffRecap({
+    assignment: { id: 'asg-1', revision: 'rev-1', sourceRef: 'assignment.json', authority: [{ claim: 'Human grant', sourceRef: 'assignment.json#authority' }] },
+    decisions: [{ proposition: ' ', ruling: 'Keep.', reason: 'Reviewed.', sourceRef: 'decision.json#1' }],
+    assumptions: [], unresolved: [], ownerPins: [], dependencies: [],
+    nextAction: { state: 'none', action: null, ownerId: null }, resources: [], reportArtifacts: [],
+  }, { repository: '/repo', head: 'a'.repeat(40), sha256: 'b'.repeat(64), incomplete: [], nestedIncomplete: [] });
+
+  assert.equal(recap.contextStatus, 'partial');
+  assert.ok(recap.gaps.includes('decisions-row-invalid:0:proposition'));
+  assert.deepEqual(recap.gaps.filter(gap => gap.endsWith('-source-missing')), []);
+});
+
+test('prepare paths ignore a legacy tracker artifact: no prompt line and byte-identical plans', t => {
   const { dir, installed } = fixture(t);
   // The prepare CLI must run from an installed root — source checkouts refuse.
   const slp = join(installed, 'bin/slp.mjs');
@@ -555,9 +676,9 @@ test('prepare paths are tracker-agnostic: off renders identical, on adds one lin
     SLP_RUNTIME_ROOT: installed, SLP_DAEMON_HOME: home,
   };
   // A stock provider inlines the full role instructions into the prompt —
-  // the only prepare path where session-entry helpers (language, tracker)
-  // can appear. slp-* wrappers render the short role tag instead and inject
-  // the bundle through the hook, which is a different entry surface.
+  // the only prepare path where session-entry helpers can appear. slp-*
+  // wrappers render the short role tag instead and inject the bundle through
+  // the hook, which is a different entry surface.
   const request = { repository: dir, workspaceId: 'wks-t3', assignment: 'x', role: 'lead',
     binding: { provider: 'pi', model: 'm' } };
   const reqFile = join(dir, 'req.json');
@@ -568,43 +689,37 @@ test('prepare paths are tracker-agnostic: off renders identical, on adds one lin
   // handoffPacket snapshots the repository — point it at a real git root.
   writeFileSync(handoffFile, json({ ...request, repository: root, handoff }));
   const run = (args, env) => spawnSync(process.execPath, [slp, ...args], { env, encoding: 'utf8' });
-  const trackerLine = /Work tracker:[^\n]*\n/;
 
   for (const [command, file] of [['prepare', reqFile], ['prepare-handoff', handoffFile]]) {
-    // Unmanaged seat env: the setting file is never consulted.
+    // A legacy artifact the retired adapter once read — enabled or corrupt —
+    // must not add a tracker line or change any plan byte, managed or not.
     rmSync(setting, { force: true });
-    const unmanagedOff = run([command, file], baseEnv);
-    writeFileSync(setting, json({ schemaVersion: 1, tracker: 'beads', enabled: true }));
-    const unmanagedOn = run([command, file], baseEnv);
-    assert.equal(unmanagedOn.stdout, unmanagedOff.stdout, `${command}: unmanaged output must not change`);
-    assert.ok(!unmanagedOff.stdout.includes('Work tracker:'));
-    // Managed seat env: enabled adds exactly the tracker line inside the
-    // rendered instructions; every other plan byte is identical.
-    rmSync(setting, { force: true });
-    const off = run([command, file], managed);
-    writeFileSync(setting, json({ schemaVersion: 1, tracker: 'beads', enabled: true }));
-    const on = run([command, file], managed);
-    assert.equal(off.status, 0, off.stderr);
-    assert.equal(on.status, 0, on.stderr);
-    const offPlan = JSON.parse(off.stdout);
-    const onPlan = JSON.parse(on.stdout);
-    assert.match(onPlan.create.initialPrompt, trackerLine);
-    assert.ok(!offPlan.create.initialPrompt.includes('Work tracker:'));
-    const stripped = onPlan.create.initialPrompt.replace(trackerLine, '');
-    assert.deepEqual({ ...onPlan, create: { ...onPlan.create, initialPrompt: stripped } }, offPlan,
-      `${command}: enabled adds only the tracker line`);
-    // Explicit disabled is byte-identical to absent.
-    writeFileSync(setting, json({ schemaVersion: 1, tracker: 'beads', enabled: false }));
-    assert.equal(run([command, file], managed).stdout, off.stdout, `${command}: explicit off == absent`);
+    const absent = run([command, file], managed);
+    const absentUnmanaged = run([command, file], baseEnv);
+    assert.equal(absent.status, 0, absent.stderr);
+    assert.ok(!JSON.parse(absent.stdout).create.initialPrompt.includes('Work tracker:'));
+    for (const artifact of [json({ schemaVersion: 1, tracker: 'beads', enabled: true }), '{corrupt']) {
+      writeFileSync(setting, artifact);
+      const withArtifact = run([command, file], managed);
+      assert.equal(withArtifact.status, 0, withArtifact.stderr);
+      assert.equal(withArtifact.stdout, absent.stdout, `${command}: legacy artifact leaves every plan byte identical`);
+      const unmanaged = run([command, file], baseEnv);
+      assert.equal(unmanaged.stdout, absentUnmanaged.stdout, `${command}: unmanaged output ignores the artifact`);
+      assert.ok(!unmanaged.stdout.includes('Work tracker:'));
+    }
   }
   // prepare --check emits the stage report — never role instructions — so the
-  // bytes are identical whether the tracker is on or off.
+  // artifact is equally inert there.
   rmSync(setting, { force: true });
   const checkOff = run(['prepare', '--check', reqFile], managed);
   writeFileSync(setting, json({ schemaVersion: 1, tracker: 'beads', enabled: true }));
   const checkOn = run(['prepare', '--check', reqFile], managed);
-  assert.equal(checkOn.stdout, checkOff.stdout, 'prepare --check output is identical on/off');
+  assert.equal(checkOn.stdout, checkOff.stdout, 'prepare --check output is identical with or without the artifact');
   assert.equal(checkOn.status, checkOff.status);
+  // The probe entrypoint is retired with the adapter: `slp tracker` is no
+  // longer a command and fails like any other unknown invocation.
+  const retired = run(['tracker', dir, '--paseo-home', home], managed);
+  assert.notEqual(retired.status, 0);
 });
 
 test('handoff packet surfaces unproven submodule scope as an evidence gap, not a refusal', t => {

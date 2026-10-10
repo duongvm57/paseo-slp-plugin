@@ -1,5 +1,5 @@
-// tests/jev.test.mjs — Jev transport (src/jev.mjs), routing consumer
-// (src/jev-routing.mjs), the prepare receipt gate (src/routing.mjs) and the
+// tests/jev.test.mjs — Jev transport (plugin/server/runtime/cli/jev.ts), routing consumer
+// (plugin/server/runtime/cli/jev-routing.ts), the prepare receipt gate (plugin/server/runtime/cli/routing.ts) and the
 // hasKey-only status surface. Every network interaction is mocked through the
 // injected fetchImpl seam — no real OpenRouter/TypeSafe calls, ever.
 import test from 'node:test';
@@ -8,13 +8,13 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync, chmodSync, existsSync, l
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { install, json, hash } from '../src/package.mjs';
-import { launchPlan, launchCheck } from '../src/launch.mjs';
-import { readCatalog, catalogBinding, optionExclusions, ROUTE_DECLINE_CANDIDATE, ROUTE_DECISION_QUESTION } from '../src/routing.mjs';
-import { routeDecide } from '../src/jev-routing.mjs';
-import { readJevConfig, readJevKey, resolveJev, verifyReceipt, assertRedacted, askJev, askChoice, askScore, askNoul, JevError, canonicalJson } from '../src/jev.mjs';
+import { install, json, hash } from '../plugin/server/runtime/cli/package.ts';
+import { launchPlan, launchCheck } from '../plugin/server/runtime/cli/launch.ts';
+import { readCatalog, catalogBinding, optionExclusions, ROUTE_DECLINE_CANDIDATE, ROUTE_DECISION_QUESTION } from '../plugin/server/runtime/cli/routing.ts';
+import { routeDecide } from '../plugin/server/runtime/cli/jev-routing.ts';
+import { readJevConfig, readJevKey, resolveJev, verifyReceipt, assertRedacted, askJev, askChoice, askScore, askNoul, JevError, canonicalJson } from '../plugin/server/runtime/cli/jev.ts';
 import { fakeOrKey, fakeTsKey, fakeAwsKey, fakePem } from './fake-secrets.mjs';
-import { runtimeStatus } from '../src/runtime-state.mjs';
+import { runtimeStatus } from '../plugin/server/runtime/cli/runtime-state.ts';
 
 const SYNTH_KEY = fakeOrKey('synthetic-test-key-000');
 
@@ -752,7 +752,7 @@ test('prepare --check runs the same receipt stages offline — no network anywhe
 // ---------------------------------------------------------------------------
 
 test('optionExclusions names closed-vocabulary tokens; catalogBinding echoes them', t => {
-  const { repo } = fixture(t);
+  const { repo, home } = fixture(t);
   const catalog = testCatalog();
   const [code, , paused, off, lead] = catalog.options;
   assert.deepEqual(optionExclusions(code, 'peer'), []);
@@ -762,9 +762,9 @@ test('optionExclusions names closed-vocabulary tokens; catalogBinding echoes the
   assert.deepEqual(optionExclusions({ ...off, availability: 'quota-exhausted', roles: ['lead'] }, 'peer'), ['disabled', 'availability:quota-exhausted', 'role-not-listed']);
   catalogFixture(repo);
   const sha256 = readCatalog(repo).sha256;
-  assert.throws(() => catalogBinding(repo, 'peer', providers, { optionId: 'off-seat', catalogSha256: sha256 }), /excluded for peer: disabled/);
-  assert.throws(() => catalogBinding(repo, 'peer', providers, { optionId: 'paused-seat', catalogSha256: sha256 }), /excluded for peer: availability:paused/);
-  assert.throws(() => catalogBinding(repo, 'peer', providers, { optionId: 'lead-only', catalogSha256: sha256 }), /excluded for peer: role-not-listed/);
+  assert.throws(() => catalogBinding(repo, 'peer', providers, { optionId: 'off-seat', catalogSha256: sha256 }, home), /excluded for peer: disabled/);
+  assert.throws(() => catalogBinding(repo, 'peer', providers, { optionId: 'paused-seat', catalogSha256: sha256 }, home), /excluded for peer: availability:paused/);
+  assert.throws(() => catalogBinding(repo, 'peer', providers, { optionId: 'lead-only', catalogSha256: sha256 }, home), /excluded for peer: role-not-listed/);
 });
 
 // ---------------------------------------------------------------------------

@@ -10,9 +10,10 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, w
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { install, json, hash } from '../src/package.mjs';
-import { roleBundle, policyLocators } from '../src/role-bundle.mjs';
-import { verifyProvider } from '../src/binding.mjs';
+import { install, json, hash } from '../plugin/server/runtime/cli/package.ts';
+import { roleBundle, policyLocators } from '../plugin/server/runtime/cli/role-bundle.ts';
+import { liveInventory } from '../plugin/server/runtime/cli/inventory.ts';
+import { verifyProvider } from '../plugin/server/runtime/cli/binding.ts';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 
@@ -87,15 +88,15 @@ test('managed bundle renders verified Node, the stable runtime CLI and explicit 
   // Commands that accept --paseo-home render it explicitly.
   for (const line of [
     'routes <repository>', 'inventory', 'agents', 'notebook <repository>',
-    'install <dir>',
   ]) {
     assert.ok(bundle.instructions.includes(`${cli} ${line} --paseo-home ${home}`), line);
   }
   // monitor takes no flag — the home goes inside the request payload.
   assert.ok(bundle.instructions.includes(`${cli} monitor <request.json>`) &&
     bundle.instructions.includes(`"paseoHome": "/home/daemon/.paseo"`));
-  // upgrade/uninstall resolve the home from the target's paseo-binding.json.
-  assert.ok(bundle.instructions.includes(`paseo-binding.json must record ${home}`));
+  // Peer entry omits standalone installation lifecycle helpers.
+  assert.ok(!bundle.instructions.includes(`${cli} install <dir>`));
+  assert.ok(!bundle.instructions.includes('upgrade/uninstall'));
   // init/materialize are repo-scoped and never touch a daemon home.
   assert.ok(bundle.instructions.includes('init/materialize/snapshot/prepare/prepare-handoff/verify are repo-scoped'));
   // Policy text must not embed this checkout's path or RPC calls.
@@ -155,8 +156,10 @@ test('role instructions carry the spawn kit and policy locators at session entry
   install(root, installed);
   // Unmanaged render: locators resolve under the installation itself.
   const lead = roleBundle(installed, 'lead', {});
-  assert.match(lead.instructions, /\nSpawn kit — role-scoped Paseo MCP signatures \(approximate; verify against live mcp_list_tools\):\n/);
+  assert.match(lead.instructions, /\nSpawn kit — role-scoped Paseo MCP signatures \(approximate; consult the specific live schema for unfamiliar parameters or a mismatch;[^\n]+\):\n/);
   assert.ok(lead.instructions.includes('- create_agent(title: string'));
+  assert.match(lead.instructions, /new worktree: use Paseo create_workspace under its host-setup grant, then slp_seat_create placement existing/);
+  assert.match(lead.instructions, /pending: slp_operation_get with the same requestId, keep the ID, never recreate/);
   // The locator set derives from the install receipt: docs/contract.md lives
   // outside the install unit and is never declared.
   assert.ok(!lead.instructions.includes('docs/contract.md'));
@@ -164,16 +167,23 @@ test('role instructions carry the spawn kit and policy locators at session entry
   // instead of vanishing from the list.
   rmSync(join(installed, 'src/references/review-gates.md'));
   const missing = roleBundle(installed, 'lead', {});
-  assert.ok(missing.instructions.includes(`- ${join(installed, 'src/references/review-gates.md')} — declared but missing on disk`));
+  assert.ok(missing.instructions.includes('\n- src/references/review-gates.md — declared but missing on disk\n'));
   const common = readFileSync(join(installed, 'src/common.md'));
-  assert.ok(lead.instructions.includes(`- ${join(installed, 'src/common.md')} — ${common.length} bytes, sha256 ${hash(common)}`));
+  assert.ok(lead.instructions.includes(`\n- src/common.md — ${common.length} bytes, sha256 ${hash(common)}\n`));
+  // The runtime directory is stated once; locator lines carry no absolute prefix.
+  assert.equal(lead.instructions.split(`\nDirectory: ${installed}/\n`).length - 1, 1);
+  assert.equal(lead.instructions.split('Policy locators — ')[1].split(installed).length - 1, 1);
+  assert.ok(!lead.instructions.split('Policy locators — ')[1].includes(`- ${installed}`));
   // Session-entry caption: measured at load, never plan-time/prepare wording.
-  assert.match(lead.instructions, /Policy locators — absolute paths; size\/sha256 were measured when these role instructions loaded/);
+  assert.match(lead.instructions, /Policy locators — relative to Directory; size\/sha256 measured at load;/);
   assert.ok(!/plan-time|prepare checked/.test(lead.instructions));
-  // Locators sort by absolute path — the list carries no bundle-order hint.
-  const locatorPaths = lead.instructions.split('\n')
-    .filter(line => line.startsWith(`- ${installed}/`))
+  // Locators sort by path — the list carries no bundle-order hint — and
+  // directory + relative path reconstructs the absolute locator.
+  const locatorPaths = lead.instructions.split('Policy locators — ')[1].split('\n').slice(2)
+    .filter(line => /^- src\/.+ — /.test(line))
     .map(line => line.slice(2).split(' — ')[0]);
+  assert.ok(locatorPaths.length > 3);
+  assert.deepEqual(locatorPaths, policyLocators(installed, 'lead').map(entry => entry.path.slice(installed.length + 1)));
   assert.deepEqual(locatorPaths, [...locatorPaths].sort());
   // Managed render derives locators from SLP_RUNTIME_ROOT, not the checkout.
   const managed = roleBundle(installed, 'peer', {
@@ -184,8 +194,8 @@ test('role instructions carry the spawn kit and policy locators at session entry
   assert.ok(managed.instructions.includes('- send_agent_prompt(agentId: string'));
   assert.ok(managed.instructions.includes('- get_agent_status(agentId: string)'));
   assert.ok(!managed.instructions.includes('- create_agent('));
-  assert.ok(!managed.instructions.includes(`- ${join(installed, 'src/delegation.md')}`));
-  assert.ok(managed.instructions.includes(`- ${join(installed, 'src/roles/peer.md')} — `));
+  assert.ok(!managed.instructions.includes('\n- src/delegation.md — '));
+  assert.ok(managed.instructions.includes('\n- src/roles/peer.md — '));
   // Opt-out: prompt() appends the carrier itself, so the inline copy skips it.
   const bare = roleBundle(installed, 'lead', {}, { carrier: false });
   assert.ok(!bare.instructions.includes('Spawn kit —'));
@@ -220,7 +230,7 @@ test('policyLocators validates role, tolerates absent optional paths and refuses
   assert.throws(() => policyLocators(installed, 'lead'), /is a symlink/);
 });
 
-test('Peer carrier locators are allowlisted and include work-tracking only when managed session entry enables beads', t => {
+test('Peer carrier locators are allowlisted to the required bundle; a legacy tracker artifact adds nothing', t => {
   const dir = fixture(t), installed = join(dir, 'release');
   install(root, installed);
   const home = join(dir, 'paseo');
@@ -228,33 +238,44 @@ test('Peer carrier locators are allowlisted and include work-tracking only when 
   mkdirSync(state, { recursive: true });
   const env = managedEnv(home, { SLP_RUNTIME_ROOT: installed });
   const paths = instructions => instructions.split('\n')
-    .filter(line => line.startsWith(`- ${installed}/`))
-    .map(line => line.slice(2).split(' — ')[0]);
+    .filter(line => /^- src\/.+ — /.test(line))
+    .map(line => join(installed, line.slice(2).split(' — ')[0]));
+  const peerLocators = [join(installed, 'src/common.md'), join(installed, 'src/roles/peer.md')].sort();
 
-  writeFileSync(join(state, 'work-tracker.json'), json({ schemaVersion: 1, tracker: 'beads', enabled: false }));
   const off = roleBundle(installed, 'peer', env);
-  assert.deepEqual(paths(off.instructions), [join(installed, 'src/common.md'), join(installed, 'src/roles/peer.md')].sort());
-  assert.ok(!off.instructions.includes('Work tracker: beads (enabled in SLP settings)'));
+  assert.deepEqual(paths(off.instructions), peerLocators);
+  assert.ok(!off.instructions.includes('Work tracker:'));
   for (const reference of ['governance.md', 'monitoring.md', 'orchestration.md', 'provider-routing.md', 'jev-routing.md']) {
     assert.ok(!paths(off.instructions).some(path => path.endsWith(`/references/${reference}`)), `${reference} is not a Peer locator`);
   }
 
+  // A legacy tracker artifact is inert: enabled or corrupt, it can add no
+  // prompt line and no locator — the render is byte-identical to absent.
   writeFileSync(join(state, 'work-tracker.json'), json({ schemaVersion: 1, tracker: 'beads', enabled: true }));
   const on = roleBundle(installed, 'peer', env);
-  assert.deepEqual(paths(on.instructions), [join(installed, 'src/common.md'), join(installed, 'src/roles/peer.md'), join(installed, 'src/references/work-tracking.md')].sort());
-  assert.ok(on.instructions.includes('Work tracker: beads (enabled in SLP settings)'));
-  assert.ok(on.instructions.includes(`${join(installed, 'src/references/work-tracking.md')} — `));
+  assert.equal(on.instructions, off.instructions);
+  assert.deepEqual(paths(on.instructions), peerLocators);
+  writeFileSync(join(state, 'work-tracker.json'), '{corrupt');
+  assert.equal(roleBundle(installed, 'peer', env).instructions, off.instructions);
 
+  const receipt = JSON.parse(readFileSync(join(installed, 'installed.json'), 'utf8'));
+  const references = receipt.candidate.files.map(entry => entry.path)
+    .filter(path => path.startsWith('src/references/'));
   for (const role of ['supervisor', 'lead']) {
     const entries = policyLocators(installed, role, env);
-    assert.equal(entries.length, 3 + 11, `${role} retains its required bundle and all eleven references`);
+    const expected = ['src/common.md', `src/roles/${role}.md`, 'src/delegation.md', ...references]
+      .map(path => join(installed, path)).sort();
+    assert.deepEqual(entries.map(entry => entry.path).sort(), expected,
+      `${role} retains its required bundle and every receipt-declared reference`);
     assert.ok(entries.some(entry => entry.path === join(installed, 'src/references/jev-routing.md')));
+    assert.ok(entries.some(entry => entry.path === join(installed, 'src/references/task-execution.md')));
   }
 
-  rmSync(join(installed, 'src/references/work-tracking.md'));
-  const missing = policyLocators(installed, 'peer', env);
-  assert.deepEqual(missing.find(entry => entry.path === join(installed, 'src/references/work-tracking.md')),
-    { path: join(installed, 'src/references/work-tracking.md'), missing: true });
+  // A receipt-declared reference deleted from disk still reports missing.
+  rmSync(join(installed, 'src/references/jev-routing.md'));
+  const missing = policyLocators(installed, 'lead', env);
+  assert.deepEqual(missing.find(entry => entry.path === join(installed, 'src/references/jev-routing.md')),
+    { path: join(installed, 'src/references/jev-routing.md'), missing: true });
 });
 
 test('instructions <role> prints the exact bundle bytes on stdout and metadata on stderr', t => {
@@ -288,58 +309,37 @@ test('instructions <role> prints the exact bundle bytes on stdout and metadata o
   assert.match(bad.stderr, /Unknown role/);
 });
 
-test('managed bundles carry the review-gate invariant and Lead trigger; Peer carries neither', t => {
-  const dir = fixture(t), installed = join(dir, 'release');
+test('managed bundles disclose guarded and ordinary paths while preserving role separation', t => {
+  const installed = join(fixture(t), 'release');
   install(root, installed);
-  const env = {
-    SLP_MANAGED_RUNTIME: '1', SLP_NODE_BIN: '/n/bin/node',
-    SLP_RUNTIME_ROOT: installed, SLP_DAEMON_HOME: '/h',
-  };
-  for (const role of ['supervisor', 'lead']) {
-    const instructions = roleBundle(installed, role, env).instructions;
-    for (const reference of ['delegation-formation.md', 'delegation-execution.md']) {
-      const body = readFileSync(join(installed, 'src/references', reference), 'utf8');
-      assert.ok(instructions.includes(`references/${reference}`), 'procedure has an entry pointer');
-      assert.ok(!instructions.includes(body), 'conditional procedure is not always-loaded');
-      assert.ok(policyLocators(installed, role).some(entry => entry.path.endsWith(`/references/${reference}`) && entry.sha256 === hash(Buffer.from(body))), 'installed procedure remains integrity-addressable');
+  const env = { SLP_MANAGED_RUNTIME: '1', SLP_NODE_BIN: '/n/bin/node', SLP_RUNTIME_ROOT: installed, SLP_DAEMON_HOME: '/h' };
+  for (const role of ['supervisor', 'lead', 'peer']) {
+    const bundle = roleBundle(installed, role, env).instructions;
+    assert.match(bundle, /Review selection never waives\s+a Human, assignment or protocol obligation/);
+    assert.match(bundle, /parent\/report recipient must match your paseo\.parent-agent-id\s+label/);
+    assert.match(bundle, /recipient distinct from your\s+parent/);
+    assert.match(bundle, /A Lead writer\s+never stands in for required independent review/);
+    assert.match(bundle, /policy delivered in your bundle needs no re-read or hash check unless lost to compaction/);
+    if (role === 'peer') {
+      assert.match(bundle, /Reviewer\/Auditor stays independent of writer and accepting owner/);
+      assert.ok(!bundle.includes(readFileSync(join(installed, 'src/delegation.md'), 'utf8')));
+      continue;
     }
-    assert.match(instructions, /does not license merging\s+the axes into one seat/, role);
-    assert.match(instructions, /cannot carry a new\s+delegation/, role);
-    assert.match(instructions, /New-team delegation/, role);
-    assert.match(instructions, /Observe-existing-work/, role);
-    assert.match(instructions, /formation record/, role);
-    assert.match(instructions, /not evidence of parentage/, role);
-    assert.match(instructions, /not filesystem\s+isolation/, role);
+    for (const ref of ['delegation-execution.md', 'task-execution.md']) {
+      const body = readFileSync(join(installed, `src/references/${ref}`), 'utf8');
+      assert.ok(bundle.includes(`references/${ref}`));
+      assert.ok(!bundle.includes(body));
+      assert.ok(policyLocators(installed, role).some(entry => entry.path.endsWith(`/references/${ref}`) && entry.sha256 === hash(Buffer.from(body))));
+    }
+    assert.match(bundle, /ordinary\/Lean creation or observation/);
+    assert.match(bundle, /consume admission receipts for reservations, seat pins and effects/);
+    assert.match(bundle, /Check desk binding first \(slp_status if available\); use bound slp_seat_create\s+for Lead\/Peer, including existing worktrees/);
+    assert.match(bundle, /create_agent remains compatibility\/recovery/);
+    assert.match(bundle, /slp_seat_create creates a Paseo agent through the desk that the Human can\s+inspect and chat with/);
+    assert.match(bundle, /repository rules, protocol clauses or Human instructions\s+forbidding desk creation or requiring another formation path exclusively override this default/);
   }
-  const leadBundle = roleBundle(installed, 'lead', env).instructions;
-  const supervisorBundle = roleBundle(installed, 'supervisor', env).instructions;
-  assert.match(leadBundle, /When the assignment or protocol\s+requires independent review/);
-  assert.ok(!/When the assignment or protocol\s+requires independent review/.test(supervisorBundle));
-  assert.match(supervisorBundle, /standalone session never makes\s+it your child/);
-  assert.match(leadBundle, /does not adopt it/);
-  // The same formation pins must reach the managed path: continuation row and
-  // both defect triggers.
-  for (const bundle of [leadBundle, supervisorBundle]) {
-    assert.match(bundle, /Continuation: same team and ownership/, 'decision table: continuation row');
-    assert.match(bundle, /send_agent_prompt to a\s+parentless or differently parented/, 'B21 formation-defect trigger');
-    assert.match(bundle, /second workspace\s+for the same team with no isolation reason/, 'B22 placement-defect trigger');
-  }
-  const peer = roleBundle(installed, 'peer', env).instructions;
-  assert.ok(!/does not license merging/.test(peer));
-  assert.ok(!/When the assignment or protocol\s+requires independent review/.test(peer));
-  assert.ok(!/cannot carry a new\s+delegation/.test(peer));
-  assert.ok(!/New-team delegation|Observe-existing-work|formation record/.test(peer), 'Peer gets no formation doctrine');
-  assert.ok(!/not evidence of parentage|not filesystem\s+isolation/.test(peer));
-  // The inbound-route self-check is a Peer-visible self-check (common.md), not
-  // formation doctrine.
-  assert.match(peer, /paseo\.parent-agent-id label must match/);
-  assert.match(peer, /distinct from your\s+parent/, 'observe-existing carve-out survives');
-  assert.match(peer, /not a hard block/, 'unexposed label is a recorded gap');
-  assert.match(peer, /names no agent\s+recipient/, 'no-named-recipient case is classified');
-  for (const bundle of [leadBundle, supervisorBundle]) {
-    assert.match(bundle, /distinct from your\s+parent/, 'observe-existing carve-out on orchestrating roles');
-  }
-  assert.ok(!peer.includes(readFileSync(join(installed, 'src/references/orchestration.md'), 'utf8')));
+  assert.match(roleBundle(installed, 'lead', env).instructions, /When the assignment or protocol\s+requires independent review/);
+  assert.ok(!/When the assignment or protocol\s+requires independent review/.test(roleBundle(installed, 'supervisor', env).instructions));
 });
 
 // --- inventory: managed vs unmanaged ---------------------------------------
@@ -362,7 +362,7 @@ test('managed inventory reads the exact home, never the CLI, and labels provider
   assert.ok(out.providers.every(p => p.provenance === 'configured'));
   // The fake CLI listing was never invoked.
   assert.ok(!out.providers.some(p => p.id === 'LIVE-MARKER'));
-  // Static config entries are rejected as launch evidence (src/binding.mjs).
+  // Static config entries are rejected as launch evidence (plugin/server/runtime/cli/binding.ts).
   assert.throws(
     () => verifyProvider(out.providers, 'slp-codex-lead', () => 'codex'),
     /configured inventory is not live evidence/,
@@ -503,8 +503,8 @@ test('unmanaged inventory keeps its existing shape — no provenance markers', t
 });
 
 test('ACP delivery keeps verified core while refreshing language and restoring carriers', async t => {
-  const { roleDelivery } = await import('../src/role-bundle.mjs');
-  const { acpRolePrompt } = await import('../src/role-transport.mjs');
+  const { roleDelivery } = await import('../plugin/server/runtime/cli/role-bundle.ts');
+  const { acpRolePrompt } = await import('../plugin/server/runtime/cli/role-transport.ts');
   const dir = fixture(t), installed = join(dir, 'release'), home = join(dir, 'daemon');
   install(root, installed);
   const state = join(home, 'slp-runtime/state/communication-language');
@@ -527,8 +527,14 @@ test('ACP delivery keeps verified core while refreshing language and restoring c
     assert.ok(!next.includes('Spawn kit —') && !next.includes('Policy locators —'));
     assert.match(next, /Policy recovery command: .* instructions /);
     assert.match(next, /Human stop/);
-    assert.match(next, /missing evidence is a gap/);
-    if (role !== 'peer') assert.match(next, /does not license merging/);
+    assert.match(next, /Missing task evidence is a gap/);
+    assert.match(next, /Review selection never waives\s+a Human, assignment or protocol obligation/);
+    assert.equal(/Lead's explicit review selection precedes the candidate round/.test(next), role !== 'peer');
+    assert.equal(/Unavailable\s+required reviewers or adverse findings never relax the gate/.test(next), role !== 'peer');
+    assert.equal(/record\s+selection\/reason before the candidate round/.test(next), role === 'lead');
+    assert.equal(/Before each review\s+selection or revision, including not-required, reviewer choice, re-review or\s+acceptance, read applicable gate rules/.test(next), role === 'lead');
+    assert.equal(/Reviewer\/Auditor stays independent of writer and accepting owner/.test(next), role === 'peer');
+    assert.doesNotMatch(next, /does not license merging\s+the axes into one seat|parallel seats on split axes/);
     assert.match(send('b')[0].text, /Spawn kit —/, 'new session gets its own carrier');
     for (const method of ['session/load', 'session/resume', 'session/fork']) {
       const lifecycle = { method, params: { sessionId: 'a' } };
@@ -559,22 +565,63 @@ test('ACP delivery keeps verified core while refreshing language and restoring c
 test('tiny policy keeps protocol-owned ceremony separate from required gates and runtime freshness', t => {
   const dir = fixture(t), installed = join(dir, 'release');
   install(root, installed);
-  const lead = roleBundle(installed, 'lead', {}).instructions;
-  const protocol = readFileSync(join(installed, 'src/templates/workspace-protocol.md'), 'utf8');
-  const orchestration = readFileSync(join(installed, 'src/references/orchestration.md'), 'utf8');
-  assert.match(lead, /assign one Peer Engineer/);
-  assert.match(lead, /repository protocol's tiny procedure/);
-  assert.match(lead, /raise the class before the affected work/);
-  assert.match(lead, /required independent review\s+gate .* still applies/);
-  assert.match(lead, /absent\ntiny procedure grants no ceremony exemption/);
-  assert.match(lead, /full relevant text already in context/);
-  assert.match(lead, /not runtime\nstate/);
-  assert.match(lead, /first required full workspace-protocol read remains\nmandatory/);
-  assert.match(protocol, /1\. Lead supplies one short inline brief/);
-  assert.match(protocol, /2\. Delegate to one Peer Engineer/);
-  assert.match(protocol, /3\. Engineer runs the inner loop/);
-  assert.match(protocol, /4\. Lead inspects the artifact/);
-  assert.match(protocol, /does not\s+silently inherit\s+these exemptions/);
-  assert.match(orchestration, /One Peer Engineer under Lead/);
-  assert.ok(!orchestration.includes('Lead directly if protocol'));
+  const lead = roleBundle(installed, 'lead', {}).instructions.replace(/\s+/gu, ' ');
+  const protocol = readFileSync(join(installed, 'src/templates/workspace-protocol.md'), 'utf8').replace(/\s+/gu, ' ');
+  const orchestration = readFileSync(join(installed, 'src/references/orchestration.md'), 'utf8').replace(/\s+/gu, ' ');
+  assert.match(lead, /Peer writing is the managed-implementation default/);
+  assert.match(lead, /direct Lead write requires an explicit Human assignment or current effective protocol grant for clear, reversible work, bounded scope, one writer and exact candidate proof/);
+  assert.match(lead, /Lead writer never stands in for required independent review/);
+  assert.match(lead, /Supervisor\/Lead use saved profiles/);
+  assert.match(lead, /Tiny classification reduces ceremony, never authority, ownership, parentage or required review/);
+  assert.match(lead, /Tiny labels and missing\/stale protocols grant no exception/);
+  assert.match(lead, /Reuse full relevant references\/ or protocol text only when known unchanged/);
+  assert.match(lead, /Runtime checks still need fresh catalog hash, eligibility, provider availability and Jev receipts/);
+  assert.match(lead, /first required full workspace-protocol read remains mandatory/);
+  assert.match(protocol, /Lean: short inline brief\/formation/);
+  assert.match(protocol, /Peer is default; direct Lead writes need the grant below/);
+  assert.match(protocol, /Independent review triggers across methods/);
+  assert.match(protocol, /one authorized writer's edit\/check loop/);
+  assert.match(protocol, /paused stable candidate, actual proof and in-session handback/);
+  assert.match(protocol, /Lead inspection\/Gate\/verdict/);
+  assert.match(protocol, /Direct Lead write grant.*None by default; Human may specify clear reversible scope, proof\/review bounds/);
+  assert.match(orchestration, /One Peer Engineer per dependency slice; direct Lead writes require delegation's explicit grant/);
+});
+
+test('live preparation inventories only the verified home and preserves the saved bundle', () => {
+  const home = '/fixture/paseo';
+  const config = json({ daemon: { agentProfiles: [{ id: 'slp-lead', provider: 'slp-codex-lead', model: 'gpt-test', modeId: 'full-access', thinkingOptionId: 'high', featureValues: { fast: false } }] } });
+  const calls = [];
+  const exec = args => {
+    calls.push(args);
+    return json(args[0] === 'daemon'
+      ? { home, localDaemon: 'running', connectedDaemon: 'reachable', serverId: 'fixture-server', listen: '127.0.0.1:6767' }
+      : [{ provider: 'slp-codex-lead', enabled: 'Enabled', status: 'available' }]);
+  };
+  const out = liveInventory(home, { exec, read: () => config });
+  assert.deepEqual(calls, [
+    ['daemon', 'status', '--home', home, '--json'],
+    ['provider', 'ls', '--host', '127.0.0.1:6767', '--json'],
+  ]);
+  assert.deepEqual(out.profiles[0], JSON.parse(config).daemon.agentProfiles[0]);
+  assert.deepEqual(out.providers, [{ id: 'slp-codex-lead', enabled: true, status: 'available' }]);
+  verifyProvider(out.providers, 'slp-codex-lead', () => 'codex');
+  assert.equal(out.hostId, 'fixture-server');
+});
+
+test('live preparation refuses foreign/unreachable hosts and changed profiles without fallback', () => {
+  const home = '/fixture/paseo';
+  const config = json({ daemon: { agentProfiles: [] } });
+  for (const status of [
+    { home: '/foreign', localDaemon: 'running', connectedDaemon: 'reachable', serverId: 's', listen: '127.0.0.1:1' },
+    { home, localDaemon: 'running', connectedDaemon: 'unreachable', serverId: 's', listen: '127.0.0.1:1' },
+  ]) {
+    let calls = 0;
+    assert.throws(() => liveInventory(home, { read: () => config, exec: () => { calls++; return json(status); } }), /mapping is unverified/);
+    assert.equal(calls, 1);
+  }
+  let reads = 0;
+  assert.throws(() => liveInventory(home, {
+    read: () => reads++ === 0 ? config : config + ' ',
+    exec: args => json(args[0] === 'daemon' ? { home, localDaemon: 'running', connectedDaemon: 'reachable', serverId: 's', listen: '127.0.0.1:1' } : []),
+  }), /profiles changed/);
 });

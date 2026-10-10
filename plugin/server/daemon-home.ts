@@ -83,3 +83,16 @@ export function detectDaemonHome(): { daemonHome: string; source: "env" | "defau
   const expanded = raw === "~" ? homedir() : raw.startsWith("~/") ? join(homedir(), raw.slice(2)) : raw;
   return { daemonHome: resolve(expanded), source: "env" };
 }
+
+/** The single receipt↔target predicate shared by the manager's
+ *  `resolveReceipt` and the enforcement read view: a receipt is the caller's
+ *  evidence only when it names the same hostId and the same canonical
+ *  (realpath) home it was written against. Both callers pass an
+ *  already-canonicalized home — receipts store `ctx.canonicalHome` verbatim,
+ *  so the match is strict. */
+export function receiptMatchesTarget(
+  receipt: { hostId: string; daemonHome: string },
+  caller: { hostId: string; canonicalHome: string },
+): boolean {
+  return receipt.hostId === caller.hostId && receipt.daemonHome === caller.canonicalHome;
+}

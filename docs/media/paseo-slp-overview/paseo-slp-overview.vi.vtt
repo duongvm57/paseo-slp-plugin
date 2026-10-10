@@ -1,0 +1,235 @@
+WEBVTT
+
+NOTE Paseo SLP — một brief trở thành thao tác có kiểm soát như thế nào. Hoạt hình minh họa working source. Không phải cảnh quay daemon đang chạy và không phải bằng chứng E2E. Giọng đọc: OmniVoice (k2-fsa, CC BY-NC) · giọng nam tổng hợp · tạo cục bộ
+
+1
+00:00:01.600 --> 00:00:06.320
+Paseo SLP tổ chức các coding agent thành Supervisor, Lead và các Peer độc lập.
+
+2
+00:00:06.450 --> 00:00:12.390
+Đây là cách một brief trở thành thao tác có kiểm soát, và nơi phán đoán của con người vẫn quan trọng.
+
+3
+00:00:14.040 --> 00:00:16.090
+Ba bên cùng chia nhau công việc.
+
+4
+00:00:16.220 --> 00:00:19.840
+Paseo chạy session, workspace và quan hệ cha con của agent.
+
+5
+00:00:19.970 --> 00:00:23.930
+Plugin thêm role policy, cùng một runtime kiểm tra dữ kiện đã ghi.
+
+6
+00:00:24.060 --> 00:00:27.760
+Human giữ mục tiêu, thẩm quyền và quyền nghiệm thu cuối cùng.
+
+7
+00:00:27.890 --> 00:00:30.240
+Và plugin không phải bộ lập lịch agent.
+
+8
+00:00:31.890 --> 00:00:36.550
+Role policy là thứ mỗi seat đọc, xếp lớp từ quy tắc chung đến một assignment.
+
+9
+00:00:36.680 --> 00:00:39.190
+Lớp dưới chỉ thu hẹp, không bao giờ mở rộng.
+
+10
+00:00:39.320 --> 00:00:45.030
+Enforcement là code, kiểm tra membership, quyền sở hữu và revision trên lệnh desk được bảo vệ.
+
+11
+00:00:45.160 --> 00:00:48.970
+Policy dẫn dắt phán đoán. Enforcement canh giữ dữ kiện đã ghi.
+
+12
+00:00:50.620 --> 00:00:53.520
+SLP Manager kích hoạt một runtime đã phát hành.
+
+13
+00:00:53.650 --> 00:00:58.390
+Byte đã xác minh nằm trong thư mục runtime cố định, cùng launcher và profile.
+
+14
+00:00:58.520 --> 00:01:01.830
+Binding ghim runtime, Node, transport và daemon home.
+
+15
+00:01:01.960 --> 00:01:06.180
+Khi khởi chạy, hook hoặc wrapper nạp role trước khi provider bắt đầu.
+
+16
+00:01:06.310 --> 00:01:10.400
+Rebind chỉ đổi các lần khởi chạy sau; session đang chạy giữ byte cũ.
+
+17
+00:01:12.050 --> 00:01:15.390
+Session chỉ thao tác trên desk qua membership đã bind.
+
+18
+00:01:15.520 --> 00:01:20.420
+Membership ghi chính xác agent, họ runtime, vai trò, thư mục và thế hệ binding.
+
+19
+00:01:20.550 --> 00:01:24.950
+Mọi lệnh desk đi qua bridge: danh tính mới, capability, schema chặt chẽ.
+
+20
+00:01:25.080 --> 00:01:30.130
+Desk là ledger chỉ ghi thêm, nối chuỗi hash, dùng chung cho các worktree liên quan.
+
+21
+00:01:30.260 --> 00:01:33.460
+Nó bảo vệ lệnh desk. Nó không phải sandbox cho shell.
+
+22
+00:01:35.100 --> 00:01:37.550
+Mỗi scope đang thay đổi có một người ghi.
+
+23
+00:01:37.680 --> 00:01:41.980
+Review được chọn: bắt buộc, không cần, hoặc miễn kèm con trỏ thẩm quyền.
+
+24
+00:01:42.110 --> 00:01:46.150
+Một vòng review ghim candidate, scope, brief và mandate trung lập.
+
+25
+00:01:46.280 --> 00:01:48.310
+Đổi một thứ, review trở thành cũ.
+
+26
+00:01:48.440 --> 00:01:51.840
+Owner và người ghi không thể tự xả cổng độc lập của mình.
+
+27
+00:01:53.490 --> 00:01:56.360
+Dispatch có quản lý là một chuỗi bước được ghi lại.
+
+28
+00:01:56.490 --> 00:02:00.090
+Giữ chỗ attempt, rồi tạo worker không kèm prompt công việc.
+
+29
+00:02:00.220 --> 00:02:04.640
+Xác minh runtime, nhãn, agent cha, workspace và thư mục đã quan sát được.
+
+30
+00:02:04.770 --> 00:02:07.900
+Bind membership, claim scope, rồi mới gửi công việc.
+
+31
+00:02:08.030 --> 00:02:11.520
+Đăng ký muộn thì send trả về seat-pending và không gửi gì.
+
+32
+00:02:11.650 --> 00:02:15.800
+Receipt tạo agent bị mất vẫn là bất định, không bị thay thế mù quáng.
+
+33
+00:02:17.450 --> 00:02:19.730
+Tiền đề đã xong chưa chắc đã dùng được.
+
+34
+00:02:19.860 --> 00:02:24.750
+Sẵn sàng cần kết quả đủ điều kiện, và tính khả dụng đo trong base thật của bên dùng.
+
+35
+00:02:24.880 --> 00:02:29.160
+B và C đã land và đủ điều kiện, nhưng base của D chỉ có B. Nên D vẫn bị chặn.
+
+36
+00:02:29.290 --> 00:02:33.970
+Mở lại A làm mất hiệu lực trạng thái sẵn sàng; lịch sử vẫn giữ những gì đã dùng.
+
+37
+00:02:35.620 --> 00:02:39.740
+Transaction của ledger không thể biến hiệu ứng trên host thành nguyên tử.
+
+38
+00:02:39.870 --> 00:02:45.480
+Nên mỗi hiệu ứng được tách: intent, issue có khóa, lệnh SDK hoặc Git có giới hạn, rồi observe.
+
+39
+00:02:45.610 --> 00:02:48.370
+Mất receipt thì hiệu ứng ở trạng thái bất định.
+
+40
+00:02:48.500 --> 00:02:52.700
+Replay chính xác trả về kết quả đã ghi; reconcile đo lại danh tính gốc.
+
+41
+00:02:52.830 --> 00:02:56.770
+Yêu cầu mới không phải là phục hồi. Không có cơ chế tự động thử lại.
+
+42
+00:02:58.420 --> 00:03:02.230
+Tích hợp đo riêng base của worker, kết quả của nó và target thật.
+
+43
+00:03:02.360 --> 00:03:06.250
+So sánh ba chiều giữ thay đổi không liên quan và giữ lại xung đột.
+
+44
+00:03:06.380 --> 00:03:11.070
+Stage dựng candidate bên ngoài target; check chạy các recipe do owner ghim.
+
+45
+00:03:11.200 --> 00:03:15.190
+Land kiểm lại, ghi kế hoạch phục hồi, sao lưu, áp dụng và đo kết quả.
+
+46
+00:03:15.320 --> 00:03:17.810
+Nó không bao giờ commit, push hay deploy.
+
+47
+00:03:19.460 --> 00:03:21.510
+Dọn dẹp cũng phải có bằng chứng.
+
+48
+00:03:21.640 --> 00:03:25.600
+Trước hết, một account ghim bằng chứng gốc và danh mục tài nguyên.
+
+49
+00:03:25.730 --> 00:03:29.340
+Stage được xóa theo giấy phép riêng, rồi mới đến bản sao lưu.
+
+50
+00:03:29.470 --> 00:03:34.180
+Mỗi thứ có tổng cộng hai lượt. Hết lượt thì nghĩa vụ được giữ lại, không lặp mãi.
+
+51
+00:03:35.830 --> 00:03:37.860
+Một số giới hạn luôn được nói rõ.
+
+52
+00:03:37.990 --> 00:03:42.300
+Stop chặn hiệu ứng mới, nhưng không chứng minh lượt đang chạy đã bị hủy.
+
+53
+00:03:42.430 --> 00:03:45.370
+Archive không chứng minh tiến trình đã dừng hẳn.
+
+54
+00:03:45.500 --> 00:03:48.560
+Tham chiếu grant không xác thực grant của Human.
+
+55
+00:03:48.690 --> 00:03:55.350
+Hướng dẫn ngôn ngữ, quota fallback, Jev routing và supervision đều là tùy chọn, không phải bộ lập lịch tự động.
+
+56
+00:03:57.000 --> 00:04:02.840
+Công việc, quyền sở hữu, review và hiệu ứng tồn tại qua gián đoạn, và xem được trong Read SLP work.
+
+57
+00:04:02.970 --> 00:04:06.690
+Phán đoán của Human và nghiệm thu dự án vẫn là quyết định thật.
+
+58
+00:04:06.820 --> 00:04:11.760
+Chi tiết và source pin: mở docs/plugin-explained.html.

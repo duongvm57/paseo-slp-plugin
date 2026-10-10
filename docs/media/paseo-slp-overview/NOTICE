@@ -1,0 +1,19 @@
+Paseo SLP video overview — third-party notices
+
+The narration in the Vietnamese and English videos was generated locally with OmniVoice
+(https://github.com/k2-fsa/OmniVoice, source 08be0b4ccbac3e13e374e86fbfead4b4cac343e2,
+model k2-fsa/OmniVoice revision c5fdb5ccb189668d56333f77ba2629f4cd7535f4).
+
+- OmniVoice code: Apache License 2.0.
+- OmniVoice pre-trained model: CC BY-NC (per the model card). The generated narration is used for
+  non-commercial, educational documentation with attribution.
+- OmniVoice audio tokenizer (Boson Higgs Audio 2):
+  Built with Higgs Materials licensed from Boson AI USA, Inc., Copyright Boson AI USA, Inc.,
+  All Rights Reserved and Meta Llama 3 licensed under the Meta Llama 3 Community License,
+  Copyright Meta Platforms, Inc., All Rights Reserved.
+  Boson Higgs Audio 2 is licensed under the Boson Community License, Copyright © Boson AI USA, Inc.
+  All Rights Reserved.
+
+The narrator is a synthetic voice created with OmniVoice voice design. No real person's voice was
+cloned. This repository does not redistribute any model weights. The repository's own MIT licence
+covers the source files in this directory (scripts, stage, build tooling, captions and posters).

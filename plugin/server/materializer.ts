@@ -9,16 +9,26 @@ import * as fsp from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import { OperationConflict } from "../shared/contracts.ts";
 import type { EmbeddedPayload, Materializer, MaterializeResult } from "../shared/contracts.ts";
+import {
+  PRIVATE_DIR_MODE,
+  PrivateDirectoryCreationError,
+  ensurePrivateDirectory as ensurePublicationDirectory,
+  fsyncDirectory,
+  inspectDirectoryChain,
+  isSafeStagingOperationId,
+  lstatOrNull,
+  openExclusiveFile,
+  publicationStagingPaths,
+} from "./publication-files.ts";
 
 const sha256hex = (bytes: Buffer | string): string =>
   createHash("sha256").update(bytes).digest("hex");
-// The §5 candidate identity serializer (same shape as src/package.mjs `json`;
+// The §5 candidate identity serializer (same shape as plugin/server/runtime/cli/package.ts `json`;
 // the plugin boundary forbids importing it). Distinct from the §7 canonical
 // receipt JSON.
 const prettyJson = (value: unknown): string => JSON.stringify(value, null, 2) + "\n";
 
 const SHA256_RE = /^[0-9a-f]{64}$/;
-const OPERATION_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,255}$/;
 
 interface DecodedFile {
   path: string;
@@ -87,18 +97,6 @@ const validatePayload = (payload: EmbeddedPayload): DecodedFile[] => {
     throw integrity("embedded payloadSha256 mismatch");
   }
   return decoded;
-};
-
-const lstatOrNull = async (path: string) => {
-  try { return await fsp.lstat(path); } catch (error) {
-    if (error && (error as NodeJS.ErrnoException).code === "ENOENT") return null;
-    throw error;
-  }
-};
-
-const fsyncDirectory = async (path: string): Promise<void> => {
-  const handle = await fsp.open(path, "r");
-  try { await handle.sync(); } finally { await handle.close(); }
 };
 
 /** Per-file expectation. mode:null means "no recorded mode — require only
@@ -280,23 +278,19 @@ const verifyForeignCandidateTree = async (
 };
 
 const validOperationId = (operationId: string): void => {
-  if (!OPERATION_ID_RE.test(operationId) || operationId === "." || operationId === "..") {
+  if (!isSafeStagingOperationId(operationId)) {
     throw new OperationConflict("INVALID_REQUEST", `invalid operation id: ${JSON.stringify(operationId)}`);
   }
 };
 
-/** Create `directory` privately (0700) if absent; a concurrent creator's
- * EEXIST is fine, but whatever exists must be a real directory. */
+/** Materializer diagnostics retain the underlying mkdir failure. */
 const ensurePrivateDirectory = async (directory: string, what: string): Promise<void> => {
-  try { await fsp.mkdir(directory, { mode: 0o700 }); }
+  try { await ensurePublicationDirectory(directory, what); }
   catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
-      throw ioFailure(error, `cannot create ${what}`, directory);
+    if (error instanceof PrivateDirectoryCreationError) {
+      throw ioFailure(error.cause, `cannot create ${what}`, directory);
     }
-  }
-  const stat = await lstatOrNull(directory);
-  if (!stat || stat.isSymbolicLink() || !stat.isDirectory()) {
-    throw integrity(`${what} is not a real directory`, directory);
+    throw error;
   }
 };
 
@@ -308,12 +302,10 @@ const ensureStableRoot = async (stableRoot: string): Promise<string> => {
 };
 
 /** `<stable>/.staging` exists and is a real private directory. */
-const ensureStagingRoot = async (stable: string): Promise<string> => {
-  const stagingRoot = join(stable, ".staging");
+const ensureStagingRoot = async (stable: string, stagingRoot: string): Promise<void> => {
   const existed = await lstatOrNull(stagingRoot);
   await ensurePrivateDirectory(stagingRoot, "staging root");
   if (!existed) await fsyncDirectory(stable).catch(() => {});
-  return stagingRoot;
 };
 
 /** mkdir for every missing parent component of `target` under `staging`;
@@ -333,7 +325,7 @@ const ensureParents = async (staging: string, target: string): Promise<void> => 
     current = dirname(current);
   }
   for (const directory of created) {
-    try { await fsp.mkdir(directory, { mode: 0o700 }); }
+    try { await fsp.mkdir(directory, { mode: PRIVATE_DIR_MODE }); }
     catch (error) {
       if ((error as NodeJS.ErrnoException).code === "EEXIST") {
         const stat = await lstatOrNull(directory);
@@ -387,13 +379,11 @@ export function createMaterializer(payload: EmbeddedPayload): Materializer {
     // from the canonical root through .staging down to <operationId> must be a
     // real directory. A symlink (or other non-directory) at any level means
     // the path no longer names our staging — delete nothing, leave it all.
-    const staging = join(root, ".staging", operationId);
-    for (const level of [join(root, ".staging"), staging]) {
-      const stat = await lstatOrNull(level);
-      if (!stat) return;
-      if (stat.isSymbolicLink() || !stat.isDirectory()) {
-        throw integrity("refusing to discard staging through a non-directory chain entry", level);
-      }
+    const { root: stagingRoot, operation: staging } = publicationStagingPaths(root, operationId);
+    const refusal = await inspectDirectoryChain([stagingRoot, staging]);
+    if (refusal?.kind === "missing") return;
+    if (refusal) {
+      throw integrity("refusing to discard staging through a non-directory chain entry", refusal.path);
     }
     try { await fsp.rm(staging, { recursive: true }); }
     catch (error) { throw ioFailure(error, "cannot discard staging", staging); }
@@ -414,9 +404,9 @@ export function createMaterializer(payload: EmbeddedPayload): Materializer {
     }
 
     // Step 3: exclusive private staging on the same filesystem.
-    const stagingRoot = await ensureStagingRoot(stable);
-    const staging = join(stagingRoot, operationId);
-    try { await fsp.mkdir(staging, { mode: 0o700 }); }
+    const { root: stagingRoot, operation: staging } = publicationStagingPaths(stable, operationId);
+    await ensureStagingRoot(stable, stagingRoot);
+    try { await fsp.mkdir(staging, { mode: PRIVATE_DIR_MODE }); }
     catch (error) {
       if ((error as NodeJS.ErrnoException).code === "EEXIST") {
         throw new OperationConflict("COLLISION", "staging directory already exists for this operation", { path: staging });
@@ -431,7 +421,7 @@ export function createMaterializer(payload: EmbeddedPayload): Materializer {
         await ensureParents(staging, target);
         for (let dir = dirname(target); dir !== staging; dir = dirname(dir)) directories.add(dir);
         let handle;
-        try { handle = await fsp.open(target, "wx", 0o600); }
+        try { handle = await openExclusiveFile(target); }
         catch (error) { throw ioFailure(error, "cannot exclusively create staged file", target); }
         try {
           await handle.writeFile(file.bytes);
@@ -466,7 +456,7 @@ export function createMaterializer(payload: EmbeddedPayload): Materializer {
         files: modeRecords(payload),
       });
       let receiptHandle;
-      try { receiptHandle = await fsp.open(receipt, "wx", 0o600); }
+      try { receiptHandle = await openExclusiveFile(receipt); }
       catch (error) { throw ioFailure(error, "cannot write installed.json", receipt); }
       try {
         await receiptHandle.writeFile(receiptBytes);

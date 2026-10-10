@@ -4,14 +4,14 @@ import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync, chmodSync,
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { identity, install, readJson, json, hash, verifyInstall } from '../src/package.mjs';
-import { installPaseo, upgradePaseo, initWorkspace } from '../src/paseo-install.mjs';
-import { resolveProfile } from '../src/profiles.mjs';
-import { launchPlan, handoffPlan } from '../src/launch.mjs';
-import { roleInstructions, roleBundle, roleDelivery } from '../src/role-bundle.mjs';
+import { identity, install, readJson, json, hash, verifyInstall } from '../plugin/server/runtime/cli/package.ts';
+import { installPaseo, upgradePaseo, initWorkspace } from '../plugin/server/runtime/cli/paseo-install.ts';
+import { resolveProfile } from '../plugin/server/runtime/cli/profiles.ts';
+import { launchPlan, handoffPlan } from '../plugin/server/runtime/cli/launch.ts';
+import { roleInstructions, roleBundle, roleDelivery } from '../plugin/server/runtime/cli/role-bundle.ts';
 
-import { piRoleArgs, acpRolePrompt, claudeRolePrompt } from '../src/role-transport.mjs';
-import { readCatalog, emptyCatalog, validateCatalog } from '../src/routing.mjs';
+import { piRoleArgs, acpRolePrompt, claudeRolePrompt } from '../plugin/server/runtime/cli/role-transport.ts';
+import { readCatalog, emptyCatalog, validateCatalog } from '../plugin/server/runtime/cli/routing.ts';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 function fixture(t) {
@@ -231,7 +231,7 @@ test('installer registers both role transports and preserves user provider switc
   installPaseo(root, installed, home, true);
   const path = join(home, 'config.json');
   const config = readJson(path);
-  assert.equal(Object.keys(config.agents.providers).length, 12);
+  assert.equal(Object.keys(config.agents.providers).length, 15);
   assert.equal(config.daemon.agentProfiles.length, 2);
   assert.equal(config.agents.providers['slp-pi-peer'].extends, 'pi');
   assert.equal(config.agents.providers['slp-pi-lead'].command[1], join(installed, 'bin/pi-role.mjs'));

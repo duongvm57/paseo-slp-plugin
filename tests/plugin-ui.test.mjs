@@ -61,7 +61,7 @@ import {
   pickSnapshotEntry,
   snapshotEntryCatalog,
 } from '../plugin/shared/snapshot-catalog.ts';
-import { validateCatalog } from '../src/routing.mjs';
+import { validateCatalog } from '../plugin/server/runtime/cli/routing.ts';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 
@@ -102,7 +102,7 @@ const statusView = (over = {}) => ({
     nodePath: '/usr/bin/node',
     baseline: 'fresh',
   },
-  families: ['codex', 'pi', 'devin', 'claude'].map(name => family(name)),
+  families: ['codex', 'pi', 'devin', 'claude', 'opencode'].map(name => family(name)),
   operation: null,
   conflicts: [],
   verifiedAt: '2026-09-18T00:00:10Z',
@@ -1163,22 +1163,6 @@ test('the Jev card offers both provider kinds with per-kind model/baseUrl/key su
   assert.ok(jevModule.includes('"Base URL (custom)"'), 'custom baseUrl marker missing');
 });
 
-// T4 pin (Spec F3): a corrupt/foreign work-tracker.json must surface on the
-// card — the server view carries `error` and the card renders it as a
-// visible `setting error:` line in the loaded branch, not just loadError.
-test('the work-tracker card surfaces a setting error on the loaded view (T4)', () => {
-  const card = readFileSync(join(root, 'plugin/client/cards/work-tracker.tsx'), 'utf8');
-  // The error branch renders inside the loaded view, styled as danger.
-  assert.ok(card.includes('view.error !== null'), 'card must branch on view.error');
-  assert.ok(card.includes('setting error: {view.error}'), 'card must render the setting error text');
-  const branch = card.indexOf('view.error !== null');
-  const danger = card.indexOf('colors.statusDanger', branch);
-  assert.ok(danger !== -1 && danger - branch < 300, 'setting error must render in the danger tone');
-  // Server side: the view contract carries `error` and the RPC populates it.
-  const contracts = readFileSync(join(root, 'plugin/shared/contracts.ts'), 'utf8');
-  assert.ok(contracts.includes('error: z.string().nullable()'), 'WorkTrackerView must expose error');
-});
-
 test('featureDefsForSeat is declared before poolBuild calls it eagerly', () => {
   // Regression: poolBuild runs during render and invokes the lambda per seat
   // — a const declared below it is a TDZ crash on any non-empty seat list
@@ -1473,173 +1457,8 @@ test('custom controls carry RN accessibility props and stale mockup strings stay
   }
 });
 
-test('target-scoped Jev reads refuse to paint a stale response over the displayed view', () => {
-  // Regression (gate F1/F-NEW): switching targets while a Jev RPC is in
-  // flight must not let the old target's response seed the new target's
-  // fields — the same issueKey discipline the pool ops use, on EVERY
-  // Jev write-site: loadJev (load/Retry), saveJev (set-jev response),
-  // saveJevKey (post-write refresh) and runJevTest (success AND error).
-  // The Jev card module owns the handlers (wave 11 S3b/D); the stale-guard
-  // mechanism is still the shell's — the card receives it as `sameTarget`,
-  // which the shell wires to keyRef === targetKey.
-  const source = readFileSync(join(root, 'plugin/client/ManagerSurface.tsx'), 'utf8');
-  const jevModule = readFileSync(join(root, 'plugin/client/cards/jev.tsx'), 'utf8');
-  assert.ok(
-    source.includes('keyRef.current === targetKey(forTarget)'),
-    'the shell must wire sameTarget to the keyRef/targetKey guard',
-  );
-  const loadJev = jevModule.slice(jevModule.indexOf('const loadJev'), jevModule.indexOf('useEffect(() => {', jevModule.indexOf('const loadJev')));
-  assert.equal(
-    occurrences(loadJev, '!sameTarget(forTarget)'),
-    2,
-    'loadJev must gate the success AND error writes on the displayed key',
-  );
-  const saveJev = jevModule.slice(jevModule.indexOf('const save ='), jevModule.indexOf('const saveKey'));
-  assert.ok(
-    saveJev.includes('!sameTarget(target)'),
-    'saveJev must gate its response writes on the displayed key',
-  );
-  const saveJevKey = jevModule.slice(jevModule.indexOf('const saveKey'), jevModule.indexOf('const runTest'));
-  assert.ok(
-    saveJevKey.includes('!sameTarget(target)'),
-    'the key-save getJev refresh must be stale-guarded too',
-  );
-  // The key-input/test clears must sit AFTER the guard — a stale resolution
-  // may not touch the new target's pending state.
-  const guardIdx = saveJevKey.indexOf('!sameTarget(target)');
-  assert.ok(
-    guardIdx !== -1 && saveJevKey.indexOf('setJevKeyInput("")') > guardIdx,
-    'saveJevKey clears must come after the stale-write guard',
-  );
-  const runJevTest = jevModule.slice(jevModule.indexOf('const runTest'), jevModule.indexOf('const setKind'));
-  assert.equal(
-    occurrences(runJevTest, '!sameTarget(target)'),
-    2,
-    'runJevTest must gate the success AND error result writes',
-  );
-  // Stale ops must not clear a newer op's busy flag — each finally only
-  // releases it when the response still belongs to the displayed target.
-  for (const flag of ['setJevBusy(false)', 'setJevKeyBusy(false)', 'setJevTestBusy(false)']) {
-    const fn = flag === 'setJevBusy(false)' ? saveJev : flag === 'setJevKeyBusy(false)' ? saveJevKey : runJevTest;
-    assert.ok(
-      fn.includes(`sameTarget(target)) ${flag}`),
-      `${flag} must be conditioned on the displayed key`,
-    );
-  }
-  // And the target-switch reset drops the Jev draft + pending flags — a
-  // skipped stale clear can never leak busy state onto the new target.
-  const resetBlock = jevModule.slice(
-    jevModule.indexOf('// Target switch drops the draft'),
-    jevModule.indexOf('// Prefill the toggles'),
-  );
-  for (const reset of ['setJevDirty(false)', 'setJevBusy(false)', 'setJevKeyBusy(false)', 'setJevTestBusy(false)']) {
-    assert.ok(resetBlock.includes(reset), `target-switch reset must drop ${reset}`);
-  }
-});
-
-test('every card async completion, error and finally path is stale-guarded', () => {
-  // Regression (wave 11 stale-write fix): a target switch mid-operation must
-  // not let the old target's resolution write into the new target's card —
-  // and a stale finally must not clear a newer in-flight op's busy flag.
-  // Routing/language reuse the pool's isCurrentKey issue-key predicate; the
-  // switch-side flag reset releases whatever the skipped finally abandoned.
-  const source = readFileSync(join(root, 'plugin/client/ManagerSurface.tsx'), 'utf8');
-  const routingModule = readFileSync(join(root, 'plugin/client/cards/routing.tsx'), 'utf8');
-  const languageModule = readFileSync(join(root, 'plugin/client/cards/language.ts'), 'utf8');
-  const poolModule = readFileSync(join(root, 'plugin/client/cards/peer-pool.tsx'), 'utf8');
-
-  // The shell wires the same keyRef guard to every card hook.
-  assert.ok(
-    source.includes('keyRef.current === issueKey'),
-    'the shell must wire isCurrentKey to the keyRef guard',
-  );
-  for (const call of ['useLanguageCard({', 'useRoutingCard({', 'usePeerPoolCard({']) {
-    const callSite = source.slice(source.indexOf(call), source.indexOf('});', source.indexOf(call)));
-    assert.ok(callSite.includes('isCurrentKey'), `${call} must receive the stale-guard predicate`);
-  }
-
-  // Routing save: the completion writes (stored value, dirty clear, Saved
-  // badge) sit AFTER the guard; the busy clear in finally is conditional.
-  const routingSave = routingModule.slice(
-    routingModule.indexOf('const save ='),
-    routingModule.indexOf('return {', routingModule.indexOf('const save =')),
-  );
-  const rGuard = routingSave.indexOf('!isCurrentKey(issueKey)');
-  assert.ok(rGuard !== -1, 'routing save must guard its completion writes');
-  assert.ok(
-    routingSave.indexOf('setRouting(result.routing)') > rGuard &&
-    routingSave.indexOf('setRoutingDirty(false)') > rGuard &&
-    routingSave.indexOf('setRoutingSaved(true)') > rGuard,
-    'routing save writes must come after the stale guard',
-  );
-  assert.ok(
-    routingSave.includes('if (isCurrentKey(issueKey)) setRoutingBusy(false)'),
-    'routing save finally must not clear a newer op\'s busy flag',
-  );
-
-  // Language apply: the dirty clear sits AFTER the guard; the busy clear in
-  // finally is conditional. refresh()/update() stay unguarded — both are
-  // bound to the issuing target by applyPatch.
-  const applyLanguage = languageModule.slice(
-    languageModule.indexOf('const applyLanguage'),
-    languageModule.indexOf('const onToggle'),
-  );
-  const lGuard = applyLanguage.indexOf('!isCurrentKey(issueKey)');
-  assert.ok(lGuard !== -1, 'language apply must guard its completion writes');
-  assert.ok(
-    applyLanguage.indexOf('setLanguageDirty(false)') > lGuard,
-    'language apply must not clear the displayed target\'s dirty flag on stale',
-  );
-  assert.ok(
-    applyLanguage.includes('if (isCurrentKey(issueKey)) setLanguageBusy(false)'),
-    'language apply finally must not clear a newer op\'s busy flag',
-  );
-
-  // Pool catch paths paint card-local poolError only when the key still
-  // matches, and each finally busy-clear is conditional.
-  const savePeerPool = poolModule.slice(
-    poolModule.indexOf('const savePeerPool'),
-    poolModule.indexOf('const reloadPeerPool'),
-  );
-  assert.ok(
-    savePeerPool.includes('if (isCurrentKey(issueKey))') &&
-    savePeerPool.indexOf('setPoolError({') > savePeerPool.lastIndexOf('if (isCurrentKey(issueKey)) {'),
-    'pool save catch must gate setPoolError on the displayed key',
-  );
-  assert.ok(
-    savePeerPool.includes('if (isCurrentKey(issueKey)) setPoolSaving(false)'),
-    'pool save finally must not clear a newer op\'s busy flag',
-  );
-  const reloadPeerPool = poolModule.slice(
-    poolModule.indexOf('const reloadPeerPool'),
-    poolModule.indexOf('const requestReload'),
-  );
-  assert.ok(
-    reloadPeerPool.includes('if (isCurrentKey(issueKey)) setPoolError({ message, cas: false })'),
-    'pool reload catch must gate setPoolError on the displayed key',
-  );
-  assert.ok(
-    reloadPeerPool.includes('if (isCurrentKey(issueKey)) setPoolReloading(false)'),
-    'pool reload finally must not clear a newer op\'s busy flag',
-  );
-  const copyPoolJson = poolModule.slice(
-    poolModule.indexOf('const copyPoolJson'),
-    poolModule.indexOf('return {', poolModule.indexOf('const copyPoolJson')),
-  );
-  assert.ok(
-    copyPoolJson.includes('isCurrentKey(issueKey)) setPoolCopied(true)'),
-    'the copy confirmation must be stale-guarded',
-  );
-
-  // The guarded-finally discipline needs the switch to release abandoned
-  // flags — routing and language each reset their transient flags on
-  // targetKey change (the pool card already resets everything there).
-  for (const [mod, flag] of [[routingModule, 'setRoutingBusy(false)'], [languageModule, 'setLanguageBusy(false)']]) {
-    const fxEnds = [...mod.matchAll(/\[targetKey\]\);/g)].map(m => m.index);
-    const hasReset = fxEnds.some(pos => mod.slice(Math.max(0, pos - 400), pos).includes(flag));
-    assert.ok(hasReset, `target-switch reset must release ${flag}`);
-  }
-});
+// Async lifecycle regressions are exercised through real React hooks in
+// tests/client-target-async.test.mjs, including replay and wrong-target writes.
 
 // ---------------------------------------------------------------------------
 // Visual-system wave — the reviewed mockup's look (nav strip, routing
@@ -1647,17 +1466,18 @@ test('every card async completion, error and finally path is stale-guarded', () 
 // hover/focus/pressed/disabled states) ported onto host theme slots.
 // ---------------------------------------------------------------------------
 
-test('the in-surface tab strip switches the five routing sections in order', () => {
+test('the in-surface tab strip switches the four routing sections in order', () => {
   const source = readFileSync(join(root, 'plugin/client/ManagerSurface.tsx'), 'utf8');
-  // Five items in the fixed section order — Supervision is not a tab; its
+  // Four items in the fixed section order — Supervision is not a tab; its
   // card mounts inside the Jev section it depends on.
   const nav = source.slice(source.indexOf('MANAGER_SECTIONS = ['), source.indexOf('] as const'));
-  for (const label of ['"Role profiles"', '"Peer pool"', '"Communication language"', '"Work tracker"', '"Jev"']) {
+  for (const label of ['"Role profiles"', '"Peer pool"', '"Communication language"', '"Jev"']) {
     assert.ok(nav.includes(`label: ${label}`), `nav item missing: ${label}`);
   }
   assert.ok(!nav.includes('id: "supervision"'), 'supervision must not be a nav tab');
-  const order = ['profiles', 'pool', 'language', 'tracker', 'jev'].map(id => nav.indexOf(`id: "${id}"`));
-  assert.deepEqual([...order].sort((a, b) => a - b), order, 'nav order must be profiles → pool → language → tracker → jev');
+  assert.ok(!nav.includes('id: "tracker"'), 'the retired tracker keeps no nav tab');
+  const order = ['profiles', 'pool', 'language', 'jev'].map(id => nav.indexOf(`id: "${id}"`));
+  assert.deepEqual([...order].sort((a, b) => a - b), order, 'nav order must be profiles → pool → language → jev');
   // Tab semantics: a press activates the section — no scrolling to it.
   assert.ok(source.includes('accessibilityLabel="Manager sections"'), 'tab strip a11y label missing');
   assert.ok(source.includes('role="tablist"'), 'tab strip must use a tablist container role');
@@ -1666,7 +1486,7 @@ test('the in-surface tab strip switches the five routing sections in order', () 
   assert.ok(source.includes('setActiveSection(section.id)'), 'tab press must switch the active section');
   // Inactive sections stay mounted under display:none — drafts and
   // card-local state survive a tab switch, but nothing lays out.
-  for (const id of ['profiles', 'pool', 'language', 'tracker', 'jev']) {
+  for (const id of ['profiles', 'pool', 'language', 'jev']) {
     assert.ok(source.includes(`sectionShown("${id}")`), `section ${id} must gate layout on the active tab`);
   }
   assert.ok(!source.includes('sectionShown("supervision")'), 'supervision keeps no separate section gate');
@@ -1883,22 +1703,7 @@ test('catalog input accepts a role and the client caches by family|role', () => 
   assert.equal(CatalogInput.parse({ schemaVersion: 1, family: 'devin' }).role, undefined);
   assert.throws(() => CatalogInput.parse({ schemaVersion: 1, family: 'devin', role: 'manager' }));
 
-  const source = readFileSync(join(root, 'plugin/client/ManagerSurface.tsx'), 'utf8');
-  // The scope/key formats are the shell-card seam contract — they live in
-  // manager-state.ts (catalogScope/featureKey) since wave 11 S3b/D.
-  const managerState = readFileSync(join(root, 'plugin/client/manager-state.ts'), 'utf8');
-  assert.ok(managerState.includes('`${family}|${role}`'), 'catalog scope key missing');
-  // Every catalog request carries its role scope.
-  assert.ok(occurrences(source, 'schemaVersion: 1, family, role') >= 2, 'catalog requests must send role');
-  // Feature cache keys are family|role|model|modeId.
-  assert.ok(managerState.includes('`${family}|${role}|${model}|'), 'feature key missing the role segment');
-  const poolCard = readFileSync(join(root, 'plugin/client/cards/peer-pool.tsx'), 'utf8');
-  assert.ok(poolCard.includes('`${seat.family}|peer|'), 'seat feature key missing the peer segment');
-  // No bare-family catalog lookups remain.
-  assert.ok(!/catalogs\[form\.family\]/.test(source), 'bare-family role-card lookup remains');
-  assert.ok(!/catalogs\[seat\.family\]/.test(source), 'bare-family seat lookup remains');
-  // An Unset role has family "" — the scope list must drop it before keys
-  // are built, or "|role" scopes would fire catalog RPCs zod rejects.
-  assert.ok(/neededScopes[\s\S]*?\.filter\([\s\S]*?scope\.family !== ""\)/.test(source),
-    'empty-family scopes must be filtered before scope keys are built');
+  // Cache role scoping and demand/retry behavior are covered by the real
+  // cache hook in tests/client-catalog-demand.test.mjs.
+
 });
