@@ -6,6 +6,7 @@
 // would shorten it.
 import type { CatalogRequest } from "../shared/contracts.ts";
 import { ownedProviderId } from "../shared/runtime/families.ts";
+import { modelConstraintForFamily } from "../shared/runtime/model-constraints.ts";
 import { pickSnapshotEntry, snapshotEntryCatalog } from "../shared/snapshot-catalog.ts";
 import type { ProviderSnapshotEntryLike } from "../shared/snapshot-catalog.ts";
 
@@ -96,6 +97,19 @@ const joinErrors = (errors: string[]) => [...new Set(errors)].join("; ");
 // listModes path verbatim. A provider that cannot answer reports in `error`
 // rather than rejecting; the picker degrades to free text.
 export async function loadCatalog(input: CatalogRequest, paseo: ProviderCatalogApi) {
+  const catalog = await loadHostCatalog(input, paseo);
+  const modelConstraint = modelConstraintForFamily(input.family);
+  const prefix = input.modelPrefix;
+  return {
+    ...catalog,
+    ...(prefix !== undefined
+      ? { models: catalog.models.filter(model => model.id.startsWith(prefix)) }
+      : {}),
+    ...(modelConstraint ? { modelConstraint } : {}),
+  };
+}
+
+async function loadHostCatalog(input: CatalogRequest, paseo: ProviderCatalogApi) {
   const provider = input.family;
   // Entry selection parity with the host agent profile: the managed
   // provider id for the request's role, then the base family entry.

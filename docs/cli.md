@@ -45,6 +45,41 @@ response file, `monitor` writes a checkpoint when `stateFile` is supplied, and
 workspace setup commands are dry-run until `--apply`. Setup context is in
 [operations.md](operations.md#repository-setup).
 
+## Provider model discovery (plugin RPC)
+
+The Manager plugin exposes `catalog`; the offline `slp.mjs` CLI has no
+`call catalog` command. Consumers invoking that RPC can send:
+
+```json
+{"schemaVersion":1,"family":"devin","role":"peer","modelPrefix":"swe-2"}
+```
+
+`modelPrefix` is an optional, case-sensitive literal model-id prefix of 1–256
+characters. It reduces the response's `models` list in host order, retaining
+labels, `thinkingOptions` (including option metadata/default markers) and
+`defaultThinkingOptionId`. Omit it for the full inventory. No match returns
+`models: []`; modes, features and errors stay intact. The separate `model`
+field still selects the feature draft, regardless of the prefix.
+
+Devin responses include advisory `modelConstraint.pattern` (`^swe-2($|-)`)
+and `modelConstraint.description`, so a consumer can check the package's
+necessary model restriction before writing a profile or enabling a pool
+option. Other families currently omit it. A model matching this pattern is
+not proof of availability, transport eligibility or write acceptance. For
+example, the literal prefix `swe-2` also matches `swe-20`; check the constraint
+as well. Write guards remain authoritative.
+
+For compact presentation of an RPC response already saved as `catalog.json`,
+this recipe keeps the discovery hint and thinking metadata:
+
+```bash
+jq '{modelConstraint, error, models: [.models[] | {id, label, thinkingOptions, defaultThinkingOptionId}]}' catalog.json
+```
+
+This is response-file processing, not a new CLI flag. The
+[catalog contract](contract.md#provider-catalog-discovery) defines the wire
+behavior for both snapshot and legacy hosts.
+
 ## `prepare` / `prepare-handoff`
 
 The optional offline path: `prepare` accepts role, repository, workspaceId

@@ -4,6 +4,8 @@ import type { Binding, Provider } from './types.ts';
 // This module owns every rule a Binding must satisfy, whatever produced it.
 // Shared family data is dependency-free; binding validation stays at this adapter.
 import { PROVIDER_EXTENDS } from "../../../shared/runtime/families.ts";
+import { swe2ModelPattern } from "../../../shared/runtime/model-constraints.ts";
+export { swe2ModelPattern } from "../../../shared/runtime/model-constraints.ts";
 
 export const settingIdPattern = /^[a-zA-Z0-9._-]+$/;
 export const unsafeModelPattern = /[\s\x00-\x1f\x7f]/;
@@ -17,7 +19,6 @@ export const transportOf = (family: string) => providerTransports[family as keyo
 
 // Devin bindings run swe-2 models only (host policy for this provider family).
 export const devinProviderPattern = /^(devin|slp-devin-[a-z-]+)$/;
-export const swe2ModelPattern = /^swe-2($|-)/;
 
 // Route keys a caller may never use to override a chosen runtime bundle.
 export const runtimeSettingKeys = ['provider', 'model', 'modeId', 'thinkingOptionId', 'features'];
