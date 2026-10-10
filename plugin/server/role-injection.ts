@@ -17,8 +17,9 @@
 //                        gap the grant stays the empty sentinel and the
 //                        gate fails closed.
 //
-// slp-devin-* and non-slp providers pass through untouched — devin keeps the
-// shim+wrapper transport (the 0.8.0 ACP adapter drops systemPrompt anyway).
+// slp-devin-* and slp-opencode-* use shim+ACP wrappers: agent.create keeps
+// config intact; role bytes are injected at the subprocess protocol boundary.
+// Managed OpenCode also requires the per-open grant before its child starts.
 //
 // The role bundle is dynamically imported from the binding's materialized
 // candidate (<stableRoot>/<candidateSha256>/plugin/server/runtime/cli/role-bundle.ts) — never from
@@ -40,7 +41,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { pathToFileURL } from "node:url";
 import type { PluginBeforeRequests } from "@getpaseo/plugin/server";
-import { familyFromProviderId, HOOK_PROVIDER_ID_RE, ROLES, WRAPPER_PROVIDER_ID_RE, type FamilyId } from "../shared/runtime/families.ts";
+import { familyFromProviderId, HOOK_PROVIDER_ID_RE, GRANT_PROVIDER_ID_RE, ROLES, WRAPPER_PROVIDER_ID_RE, type FamilyId } from "../shared/runtime/families.ts";
 import { candidateModulePath } from "./candidate-module.ts";
 import { DESK_HANDLE_KEY, DESK_TASK_CREATE_TICKET_KEY, type DeskSeatTaskCreateTicketContext } from "./desk-seat.ts";
 
@@ -115,20 +116,20 @@ export interface RoleInjectionDeps {
 }
 
 // The id classes derive from the family registry (shared/runtime/families.ts): hook
-// transport = thin alias + gate launcher; wrapper transport = devin's shim.
+// transport = thin alias + gate launcher; wrapper transport = shim + ACP.
 const HOOK_FAMILY_PROVIDER = HOOK_PROVIDER_ID_RE;
-const DEVIN_PROVIDER = WRAPPER_PROVIDER_ID_RE;
+const WRAPPER_PROVIDER = WRAPPER_PROVIDER_ID_RE;
 const VALID_ROLES = new Set<string>(ROLES);
 
 /** Resolve the role a provider id carries, or null for pass-through
- *  providers (non-slp and the devin wrapper path). Every other slp-* id must
+ *  providers (non-slp and the ACP wrapper path). Every other slp-* id must
  *  resolve — through the owned suffix or the `slp_role` feature marker (the
  *  4-provider variant seam) — or the create fails closed: an slp-* provider
  *  we cannot map would otherwise spawn a silently unroled managed seat. */
 function roleForCreate(provider: string, featureValues: Record<string, unknown> | undefined): string | null {
   const owned = HOOK_FAMILY_PROVIDER.exec(provider);
   if (owned !== null) return owned[2];
-  if (!provider.startsWith("slp-") || DEVIN_PROVIDER.test(provider)) return null;
+  if (!provider.startsWith("slp-") || WRAPPER_PROVIDER.test(provider)) return null;
   const marker = featureValues?.["slp_role"];
   if (typeof marker === "string" && VALID_ROLES.has(marker)) return marker;
   throw new Error(
@@ -260,11 +261,11 @@ export function createRoleInjection(deps: RoleInjectionDeps) {
         throw new Error("task create ticket is unsupported for this native provider");
       }
       if (typeof provider !== "string" || !provider.startsWith("slp-")) return;
-      // R2 (C10) — the devin wrapper path now grafts ONLY the desk handle
+      // R2 (C10) — the ACP wrapper path grafts ONLY the desk handle
       // into request.env: no config change, no binding, no role bytes. A
       // failed or absent mint returns the request untouched, exactly as
       // before P2-c.
-      const wrapper = DEVIN_PROVIDER.exec(provider);
+      const wrapper = WRAPPER_PROVIDER.exec(provider);
       if (wrapper !== null) {
         const handle = await mintFor({
           provider,
@@ -344,7 +345,7 @@ export function createRoleInjection(deps: RoleInjectionDeps) {
     sessionOpen(input: { request: SessionOpenRequest }) {
       const request = input.request;
       const overlay = () => {
-        const owned = HOOK_FAMILY_PROVIDER.exec(request.provider);
+        const owned = GRANT_PROVIDER_ID_RE.exec(request.provider);
         if (owned === null) return;
         return {
           ...request,

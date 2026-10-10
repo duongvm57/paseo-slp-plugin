@@ -8,7 +8,7 @@ import { createDeskOperations, type OperationIdentity } from "./desk-operation.t
 import { verifySeat } from "./desk-seat-observation.ts";
 import { createTaskBoundedHost } from "./desk-task-host.ts";
 import type { TaskHostApi } from "./desk-task-execution-host.ts";
-import type { TaskRuntimeApi } from "./desk-task-runtime.ts";
+import { observeTaskProviders, type TaskRuntimeApi } from "./desk-task-runtime.ts";
 import { WIRE_LIMITS, type DeskRejectionValue } from "../shared/enforcement.ts";
 import type { DeskSeatCreateInputValue } from "../shared/delegation.ts";
 import type { MembershipValue } from "./desk-store.ts";
@@ -26,7 +26,7 @@ type Plan = {
 };
 type FormationRequest = {
   repository: string; workspaceId: string; role: string; assignment: string; taskLabel: string;
-  paseoHome: string; providers: { id: string; enabled: boolean; status: string }[];
+  paseoHome: string; providers: { id: string; enabled: boolean; status: string; extends?: string }[];
   profiles?: unknown[]; route?: unknown;
 };
 type FormationModule = {
@@ -84,13 +84,14 @@ export function createFormationPlanner(deps: {
     const host = deps.host();
     if (host === null) throw new FormationPlanningError("CAPABILITY_GAP", "connected host unavailable");
     try {
-      const observed = await createTaskBoundedHost(host).providers.snapshot({ cwd: context?.target?.cwd ?? row.createCwd });
+      const observed = await observeTaskProviders(createTaskBoundedHost(host), context?.target?.cwd ?? row.createCwd);
       if (observed.error) throw new Error("provider snapshot failed");
       return observed;
     } catch { throw new FormationPlanningError("CAPABILITY_GAP", "connected provider snapshot failed"); }
   };
   const providerInventory = (observed: Awaited<ReturnType<typeof observeProviders>>) => observed.entries.map(entry => ({
     id: entry.provider, enabled: entry.enabled === true, status: entry.status === "ready" && !entry.error ? "available" : "unavailable",
+    ...(entry.extends !== undefined ? { extends: entry.extends } : {}),
   }));
   const requireSelection = (launch: FormationModule) => {
     if (typeof launch.preflightPeerChoice !== "function" || typeof launch.selectPeerSeat !== "function"

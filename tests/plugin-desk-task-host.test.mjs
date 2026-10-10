@@ -91,3 +91,13 @@ test('host rejection is preserved without converting it to an absence or retry',
   await assert.rejects(host.agents.ref('fixture-agent').send('work', { messageId: 'same-id' }), error => error === rejection);
   assert.equal(calls, 1);
 });
+
+test('live config transport reads retain request identity and remain bounded read-only observations',async()=>{
+ const f=fixture();let calls=0;
+ f.api.config={get:async requestId=>{calls++;return {requestId,config:{providers:{}}};}};
+ const host=createTaskBoundedHost(f.api,{readMs:10});
+ assert.deepEqual(await host.config.get('transport-read'),{requestId:'transport-read',config:{providers:{}}});
+ f.api.config.get=()=>{calls++;return new Promise(()=>{});};
+ await assert.rejects(host.config.get(),error=>error instanceof TaskHostWaitExpired && error.operation==='config.get' && error.effectMayContinue===false);
+ assert.equal(calls,2);assert.deepEqual(f.calls,[]);
+});

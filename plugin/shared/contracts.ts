@@ -10,7 +10,7 @@
 import { z } from "zod";
 import { defineRpc } from "@getpaseo/plugin";
 import { JEV_TRANSPORTS } from "./runtime/jev-transport.ts";
-import { FAMILY_IDS, OWNED_PROVIDER_ID_RE, PROVIDER_EXTENDS_IDS, ROLES } from "./runtime/families.ts";
+import { FAMILY_IDS, OWNED_PROVIDER_ID_RE, PROVIDER_EXTENDS_IDS, ROLES, persistedProviderIds, persistedFamilyIds } from "./runtime/families.ts";
 
 /** The serialized-RPC byte contract: every request and response envelope
  *  stays inside this many UTF-8 bytes. Defined once here — producers bound
@@ -206,7 +206,7 @@ export const GetRoleRoutingInput = z.object({
 export const GetRoleRoutingOutput = z.object({
   schemaVersion: z.literal(1),
   /** The stored routing, or null when no routing file exists (activation
-   *  then keeps the v1 all-twelve provider generation). */
+   *  then keeps the v1 all-family provider generation). */
   routing: RoleRouting.nullable(),
 }).strict();
 /** Plugin-owned state mutation, same shape as set-language: writes
@@ -617,15 +617,25 @@ export const OwnedProvider = z.object({
     disabledTools: z.array(z.string()).optional(),
   }).strict().optional(),
 }).strict();
+// Persisted observations retain the already-recorded native OpenCode field.
+// Current authored providers still use OwnedProvider/current emission values;
+// this decoder does not normalize native records into ACP or widen ID domains.
+export const PersistedProvider = OwnedProvider.extend({
+  extends: z.enum([...PROVIDER_EXTENDS_IDS, "opencode"]),
+});
 export const OwnedProfileSlot = z.object({
   index: z.number().int().nonnegative(), value: Profile,
 }).strict();
 export const Projection = z.object({
-  providers: z.record(ProviderId, Presence(OwnedProvider)),
+  providers: z.record(ProviderId, Presence(PersistedProvider)),
   profilesPresent: z.boolean(),
   profiles: z.array(OwnedProfileSlot).max(2),
   injectIntoAgents: Presence(z.boolean()),
-}).strict();
+}).strict().superRefine((projection, ctx) => {
+  if (persistedProviderIds(Object.keys(projection.providers)) === null) {
+    ctx.addIssue({ code: "custom", path: ["providers"], message: "projection requires exact legacy12 or current15 provider keys" });
+  }
+});
 export const Snapshot = z.object({
   rawConfigSha256: Sha,
   owned: Projection,
@@ -650,13 +660,15 @@ export const Binding = z.object({
   launchSetSha256: Sha,
   launchManifestSha256: Sha,
   // Legacy bindings record all twelve shim launchers; Phase 2 bindings
-  // record all twelve launchers too — nine gate launchers plus the three
+  // current bindings record fifteen — twelve gates plus the three
   // devin shim launchers (the transitional devin-only layout also
   // validates). The launch manifest's launcherFamilies/gateFamilies fields
   // carry the per-file kind.
   launcherFiles: z.array(LauncherFile).min(1),
   node: z.object({ path: AbsolutePath, version: z.string().min(1) }).strict(),
-  binaries: z.object(familyKeyed(Binary)).strict(),
+  // No defaults: absence belongs to the historical domain and must stay
+  // absent when old fields and their digests are verified.
+  binaries: z.object({ ...familyKeyed(Binary), opencode: Binary.optional() }).strict(),
   baseline: z.enum(["fresh", "adopted-observed"]),
   beforeActivation: Snapshot,
   mcpBefore: z.object({ enabled: FlagBefore, injectIntoAgents: FlagBefore }).strict(),
@@ -664,7 +676,23 @@ export const Binding = z.object({
   postPatchPersistedShapeSha256: Sha,
   activatedAt: Time,
   verifiedAt: Time,
-}).strict();
+}).strict().superRefine((binding, ctx) => {
+  const families = persistedFamilyIds(Object.keys(binding.binaries));
+  const ids = persistedProviderIds(Object.keys(binding.owned.providers));
+  if (families === null || ids === null || ids.length !== families.length * ROLES.length) {
+    ctx.addIssue({ code: "custom", path: ["binaries"], message: "binding binary/owned domains must both be exact legacy4/12 or current5/15" });
+  }
+  if (ids !== null && Object.keys(binding.beforeActivation.owned.providers).length > ids.length) {
+    ctx.addIssue({ code: "custom", path: ["beforeActivation"], message: "a historical binding cannot have a newer baseline vocabulary" });
+  }
+  const names = binding.launcherFiles.map(file => file.path.split(/[\\/]/).at(-1)!);
+  if (new Set(names).size !== names.length || names.some(name => {
+    const match = OWNED_PROVIDER_ID_RE.exec(name);
+    return match === null || !families?.includes(match[1] as FamilyName);
+  })) {
+    ctx.addIssue({ code: "custom", path: ["launcherFiles"], message: "launcher IDs must be unique owned IDs in the binding's recorded family domain" });
+  }
+});
 export const Plan = z.object({
   before: Snapshot,
   afterOwned: Projection,
@@ -673,7 +701,16 @@ export const Plan = z.object({
   previousBinding: Binding.nullable(),
   nextBinding: Binding.nullable(),
   restoreInjectionTo: z.boolean().nullable(),
-}).strict();
+}).strict().superRefine((plan, ctx) => {
+  if (Object.keys(plan.before.owned.providers).length !== Object.keys(plan.afterOwned.providers).length) {
+    ctx.addIssue({ code: "custom", path: ["afterOwned"], message: "plan endpoints require one exact legacy12 or current15 domain" });
+  }
+  const size = Object.keys(plan.afterOwned.providers).length;
+  if ((plan.nextBinding !== null && Object.keys(plan.nextBinding.owned.providers).length !== size)
+    || (plan.previousBinding !== null && Object.keys(plan.previousBinding.owned.providers).length > size)) {
+    ctx.addIssue({ code: "custom", path: ["nextBinding"], message: "plan binding vocabularies must match the intended endpoint and cannot reverse history" });
+  }
+});
 export const Intent = z.object({
   operationId: Id,
   requestSha256: Sha,

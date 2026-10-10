@@ -101,7 +101,7 @@ function bindingFixture(stableRoot, overrides = {}) {
     runtimePath: overrides.runtimePath ?? join(stableRoot, candidateSha256),
     launchSetSha256,
     launchManifestSha256: sha('f'),
-    launcherFiles: [{ path: join(stableRoot, 'launchers', launchSetSha256, 'slp-x'), sha256: sha('7'), mode: 0o755 }],
+    launcherFiles: [{ path: join(stableRoot, 'launchers', launchSetSha256, 'slp-codex-peer'), sha256: sha('7'), mode: 0o755 }],
     node: { path: process.execPath, version: 'v24.0.0' },
     binaries: Object.fromEntries(FAMILY_IDS.map(id => [id, { available: false, path: null, version: null }])),
     baseline: 'fresh',

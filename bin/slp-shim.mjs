@@ -31,7 +31,7 @@ const RUNTIME_CONTROL_ENV_KEYS = [
 // NODE_OPTIONS is cleared as well: it would inject flags into the frozen
 // helper Node commands rendered through SLP_NODE_BIN.
 const STRIPPED_ENV_KEYS = [...RUNTIME_CONTROL_ENV_KEYS, 'NODE_OPTIONS'];
-const FAMILIES = ['codex', 'pi', 'devin', 'claude'];
+const FAMILIES = ['codex', 'pi', 'devin', 'claude', 'opencode'];
 const ROLES = ['supervisor', 'lead', 'peer'];
 
 
@@ -59,9 +59,10 @@ function loadManifest(path, expectedSha256) {
   if (typeof manifest.candidate?.sha256 !== 'string' || !/^[0-9a-f]{64}$/.test(manifest.candidate.sha256)) throw bad('candidate.sha256 is malformed');
   if (typeof manifest.candidate?.path !== 'string' || !isAbsolute(manifest.candidate.path)) throw bad('candidate.path is not absolute');
   if (typeof manifest.node?.path !== 'string' || !isAbsolute(manifest.node.path)) throw bad('node.path is not absolute');
-  if (!Array.isArray(manifest.families) || !FAMILIES.every(f => manifest.families.includes(f))) throw bad('families is malformed');
-  if (!Array.isArray(manifest.roles) || !ROLES.every(r => manifest.roles.includes(r))) throw bad('roles is malformed');
+  if (!Array.isArray(manifest.families) || manifest.families.length !== FAMILIES.length || !FAMILIES.every(f => manifest.families.includes(f))) throw bad('families is malformed');
+  if (!Array.isArray(manifest.roles) || manifest.roles.length !== ROLES.length || !ROLES.every(r => manifest.roles.includes(r))) throw bad('roles is malformed');
   if (manifest.binaries === null || typeof manifest.binaries !== 'object') throw bad('binaries is missing');
+  if (Object.keys(manifest.binaries).length !== FAMILIES.length || !FAMILIES.every(f => Object.hasOwn(manifest.binaries, f))) throw bad('binaries domain is malformed');
   return manifest;
 }
 
@@ -96,11 +97,14 @@ function runVersionProbe(binaryPath) {
 // the existing family wrapper with process.argv = [node, wrapper, role, args].
 // Its interception, passthrough, stdio, signal and exit-code behavior is
 // unchanged. PASEO_AGENT_ID passes through as context only — it never selects
-// a binding, and an inherited SLP_SESSION_OPEN_GRANT is always reset to the
-// empty no-grant sentinel.
+// a binding, and only OpenCode retains a session-open grant until its wrapper consumes
+// and strips it; the other wrapper paths reset the sentinel.
 async function enterWrapper(manifest, family, role, nativeArgs) {
   for (const key of STRIPPED_ENV_KEYS) delete process.env[key];
-  process.env.SLP_SESSION_OPEN_GRANT = '';
+  if (family !== 'opencode') process.env.SLP_SESSION_OPEN_GRANT = '';
+  if (family === 'opencode' && process.env.PASEO_AGENT_ID && !process.env.SLP_SESSION_OPEN_GRANT) {
+    throw new Error('managed OpenCode session launched without live SLP hook grant');
+  }
   process.env[`SLP_${family.toUpperCase()}_BIN`] = manifest.binaries[family].path;
   process.env.SLP_RUNTIME_ROOT = manifest.candidate.path;
   process.env.SLP_NODE_BIN = manifest.node.path;

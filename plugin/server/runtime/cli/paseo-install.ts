@@ -26,10 +26,56 @@ import { homedir } from 'node:os';
 import { isDeepStrictEqual } from 'node:util';
 import { json, readJson, hash, identity, install, verifyInstall, files, stageInstall, swapIn, verifyReplaceable } from './package.ts';
 import { roles, profileRoles, families, profileId, providerId, peerPaseoToolsPolicy } from './profiles.ts';
-import { transportOf } from './binding.ts';
+import { STANDALONE_PROVIDER_EXTENDS, persistedProviderIds, familyFromProviderId, type FamilyId } from '../../../shared/runtime/families.ts';
 import { validateCatalog, routingPath, probeUserPool, catalogPoolDrift } from './routing.ts';
 import { configFile, writeConfig, mcpFlags, requireMcp, verifyOwnedProviders, verifyOwnedProfiles,
   providers as hostProviders, agentProfiles as hostAgentProfiles } from './host-config.ts';
+
+// Standalone receipts keep their own original bytes/hash. Decode only the
+// standalone domains before any host rebind/removal uses them. Codex3 is
+// a distinct older standalone format; it is never a plugin-journal domain.
+function readPaseoBinding(destination: string): PaseoBinding {
+  const value = readJson(join(destination, 'paseo-binding.json'));
+  const record = (v: unknown): v is Record<string, unknown> => v !== null && typeof v === 'object' && !Array.isArray(v);
+  if (!record(value) || Object.keys(value).some(key => !['configPath', 'providers', 'profiles', 'mcpBefore', 'retiredProfiles'].includes(key))
+    || typeof value.configPath !== 'string' || !isAbsolute(value.configPath)
+    || !record(value.providers)
+    || !Array.isArray(value.profiles) || !record(value.mcpBefore)
+    || Object.keys(value.mcpBefore).length !== 2 || !mcpFlags.every(key => Object.hasOwn(value.mcpBefore as object, key))
+    || Object.values(value.mcpBefore).some(v => v !== null && typeof v !== 'boolean')
+    || (value.retiredProfiles !== undefined && !Array.isArray(value.retiredProfiles))) {
+    throw new Error('Invalid standalone binding structure; preserve installation');
+  }
+  const providerKeys = Object.keys(value.providers);
+  const historicalProfiles = value.profiles;
+  const codexIds = roles.map(role => providerId(role, 'codex'));
+  const codex3 = providerKeys.length === 3 && codexIds.every(id => Object.hasOwn(value.providers as object, id));
+  if (persistedProviderIds(providerKeys) === null && !codex3) throw new Error('Invalid standalone binding: exact Codex3, legacy12 or current15 provider domain required; preserve installation');
+  if (codex3 && (historicalProfiles.length !== 3 || new Set(historicalProfiles.map(p => record(p) ? p.id : null)).size !== 3
+    || !roles.every(role => historicalProfiles.some(p => record(p) && p.id === profileId(role) && p.provider === providerId(role, 'codex'))))) {
+    throw new Error('Invalid standalone Codex3 profiles: exact historical supervisor/lead/peer rows required; preserve installation');
+  }
+  for (const [id, provider] of Object.entries(value.providers)) {
+    const family = familyFromProviderId(id)!;
+    if (!record(provider) || provider.extends !== STANDALONE_PROVIDER_EXTENDS[family]
+      || Object.keys(provider).some(key => !['extends', 'label', 'command', 'paseoTools'].includes(key))
+      || typeof provider.label !== 'string' || !Array.isArray(provider.command)
+      || provider.command.length !== 3 || !provider.command.slice(0, 2).every(v => typeof v === 'string' && isAbsolute(v))
+      || provider.command[1] !== join(destination, `bin/${family}-role.mjs`) || provider.command[2] !== id.split('-').at(-1)) {
+      throw new Error(`Invalid standalone provider ${id}; preserve installation`);
+    }
+    if (provider.paseoTools !== undefined && (!record(provider.paseoTools)
+      || Object.keys(provider.paseoTools).some(key => !['enabled', 'disabledTools'].includes(key))
+      || (provider.paseoTools.enabled !== undefined && typeof provider.paseoTools.enabled !== 'boolean')
+      || (provider.paseoTools.disabledTools !== undefined && (!Array.isArray(provider.paseoTools.disabledTools) || provider.paseoTools.disabledTools.some(v => typeof v !== 'string'))))) {
+      throw new Error(`Invalid standalone provider tool policy ${id}; preserve installation`);
+    }
+  }
+  for (const profile of [...value.profiles, ...(value.retiredProfiles as unknown[] | undefined ?? [])]) {
+    if (!record(profile) || typeof profile.id !== 'string' || typeof profile.provider !== 'string') throw new Error('Invalid standalone profile; preserve installation');
+  }
+  return value as unknown as PaseoBinding;
+}
 
 // Platform data dir: %LOCALAPPDATA% on Windows, ~/Library/Application Support
 // on macOS, $XDG_DATA_HOME (~/.local/share) elsewhere.
@@ -56,7 +102,7 @@ export function configurationPlan(destination: string, config: HostConfig) {
       throw new Error(`SLP entry already exists: ${role}; uninstall its owning installation first`);
     }
     providers[id] = {
-      extends: transportOf(family), label: `SLP ${family} ${role}`,
+      extends: STANDALONE_PROVIDER_EXTENDS[family as FamilyId], label: `SLP ${family} ${role}`,
       command: [process.execPath, join(destination, `bin/${family}-role.mjs`), role],
       ...(role === 'peer' ? { paseoTools: { disabledTools: [...peerPaseoToolsPolicy.disabledTools] } } : {}),
     };
@@ -114,7 +160,7 @@ export function installPaseo(source: string, destination: string, home: string, 
     if (!existsSync(join(destination, 'installed.json')))
       throw new Error(`Not an installed SLP directory (missing installed.json): ${destination} — install the runtime there first`);
     const manifest = verifyInstall(destination);
-    const binding = (readJson(join(destination, 'paseo-binding.json')) as PaseoBinding);
+    const binding = readPaseoBinding(destination);
     if (binding.configPath !== file.path) throw new Error('Installation belongs to a different Paseo home');
     verifyOwnedProviders(file.config, binding.providers);
     const saved = verifyOwnedProfiles(file.config, binding.profiles, 'bound');
@@ -175,7 +221,7 @@ function updatePaseo(source: string, destination: string, file: ReturnType<typeo
 export function uninstallPaseo(destination: string, apply = false) {
   verifyInstall(destination);
   const bindingPath = join(destination, 'paseo-binding.json');
-  const binding = (readJson(bindingPath) as PaseoBinding);
+  const binding = readPaseoBinding(destination);
   const file = configFile(resolve(binding.configPath, '..'));
   const next = structuredClone(file.config);
   verifyOwnedProviders(next, binding.providers);
@@ -206,7 +252,7 @@ export function upgradePaseo(source: string, destination: string, previous: stri
   if (existsSync(destination)) throw new Error('Upgrade requires a new destination');
   const priorManifest = verifyInstall(previous);
   if (!priorManifest.paseoBindingSha256) throw new Error('Upgrade requires a Paseo-integrated previous installation');
-  const prior = (readJson(join(previous, 'paseo-binding.json')) as PaseoBinding);
+  const prior = readPaseoBinding(previous);
   const home = resolve(prior.configPath, '..');
   const homeWithinInstall = relative(destination, home);
   if (!homeWithinInstall || (!homeWithinInstall.startsWith('..') && !isAbsolute(homeWithinInstall))) throw new Error('Paseo home must be outside the installation directory');

@@ -7,7 +7,7 @@ The [README](../README.md) is the short tour; command details live in
 
 ## Requirements
 
-- Paseo `>=0.8.0` with `pluginsEnabled: true` in the daemon's
+- Paseo `>=0.10.3` with `pluginsEnabled: true` in the daemon's
   `config.json`.
 - A POSIX daemon host (Linux/macOS) with Node 22.x from 22.18, or Node 23.6+
   (the plugin resolves a stable ordinary Node —
@@ -64,16 +64,16 @@ Activation:
 
 - Materializes the embedded payload to
   `<paseo-home>/slp-runtime/<candidate-sha256>/` — immutable per release.
-- Resolves stable Node plus the four provider-family executables (real
+- Resolves stable Node plus the five provider-family executables (real
   `--version` probes; unresolved families fail closed).
 - Writes launch shims under `slp-runtime/launchers/<launchset-sha256>/` —
   the stable paths the providers reference, so runtime swaps never break
   running sessions.
-- Patches `config.json` with up to twelve providers
-  `slp-{codex,pi,devin,claude}-{supervisor,lead,peer}`, the two saved
+- Patches `config.json` with up to fifteen providers
+  `slp-{codex,pi,devin,claude,opencode}-{supervisor,lead,peer}`, the two saved
   profiles **SLP Supervisor** and **SLP Lead**, and enables MCP injection.
   Saved role routing generates only the chosen Supervisor/Lead providers
-  and all four Peer providers; absent routing keeps all twelve.
+  and all five Peer providers; absent routing keeps all fifteen.
 - Records a receipt in `slp-runtime/state/receipt.json` — the journal of
   every operation, used for drift detection and recovery.
 
@@ -200,7 +200,7 @@ stable across candidates. Rebinding is idempotent: a repeat activation is a
 executables (paths, versions and availability) are unchanged.
 
 Family binaries follow verified stable CLI aliases from the daemon's PATH.
-Codex, Pi, Devin and Claude updates behind those aliases reach future managed
+Codex, Pi, Devin, Claude and OpenCode updates behind those aliases reach future managed
 launches without changing SLP's provider entries. The model picker refreshes
 the host's provider catalog when it loads or opens. An older SLP binding that
 stored a versioned binary path needs one reactivation to move onto the alias;

@@ -2,7 +2,7 @@
 // resolver probes (ordinary Node vs Electron, poisoned env/PATH, explicit
 // refusal, missing families), launch-set publish/verify integrity, shell
 // quoting, argv0-only --version, runtime tampering, grant/PASEO_AGENT_ID
-// non-selection, byte-exact role injection for all four families, and
+// non-selection, byte-exact role injection for all five families, and
 // exit/signal/backpressure behavior through the real shim subprocess.
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -31,7 +31,7 @@ import { roleInstructions, roleDelivery } from '../plugin/server/runtime/cli/rol
 import { acpRolePrompt, claudeRolePrompt, injectRole, piRoleArgs } from '../plugin/server/runtime/cli/role-transport.ts';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
-const FAMILIES = ['codex', 'pi', 'devin', 'claude'];
+const FAMILIES = ['codex', 'pi', 'devin', 'claude', 'opencode'];
 const ROLES = ['supervisor', 'lead', 'peer'];
 const sq = value => `'${String(value).replaceAll("'", "'\\''")}'`;
 
@@ -407,7 +407,7 @@ test('resolver: Codex standalone releases follow the verified current handle on 
   });
 });
 
-test('resolver: stable PATH aliases follow updates for all four families', async t => {
+test('resolver: stable PATH aliases follow updates for all five families', async t => {
   const { request } = resolveDeps(t);
   const dir = tmp(t);
   const node = join(dir, 'node');
@@ -424,13 +424,13 @@ test('resolver: stable PATH aliases follow updates for all four families', async
     mkExe(newPath);
     const alias = join(bin, family);
     symlinkSync(oldPath, alias);
-    handlers[alias] = () => versionOut(`${family} ${realpathSync(alias) === oldPath ? 'v1' : 'v2'}`);
+    handlers[alias] = () => versionOut(`${family} ${realpathSync(alias) === oldPath ? '2.0.24' : '2.0.25'}`);
   }
   const resolver = createExecutableResolver({ run: fakeRun(handlers).run, env: { PATH: bin } });
   const before = await resolver.resolve({ ...request, nodePath: node });
   for (const family of FAMILIES) {
     assert.deepEqual(before.binaries[family], {
-      available: true, path: join(bin, family), version: `${family} v1`,
+      available: true, path: join(bin, family), version: `${family} 2.0.24`,
     });
     rmSync(join(bin, family));
     symlinkSync(join(dir, family, 'v2', family), join(bin, family));
@@ -438,7 +438,7 @@ test('resolver: stable PATH aliases follow updates for all four families', async
   const after = await resolver.resolve({ ...request, nodePath: node, prior: before });
   for (const family of FAMILIES) {
     assert.deepEqual(after.binaries[family], {
-      available: true, path: join(bin, family), version: `${family} v2`,
+      available: true, path: join(bin, family), version: `${family} 2.0.25`,
     });
   }
 });
@@ -573,7 +573,7 @@ for a in "$@"; do
   if [ "$a" = "hold" ]; then exec sleep 60; fi
   if [ "$a" = "exit3" ]; then exit 3; fi
 done
-if [ "$1" = "--version" ]; then printf '${family} 9.9.9-fake\\n'; exit 0; fi
+if [ "$1" = "--version" ]; then printf '${family} ${family === 'opencode' ? '2.0.24' : '9.9.9-fake'}\\n'; exit 0; fi
 cat
 `);
   chmodSync(path, 0o755);
@@ -591,20 +591,59 @@ const readEnv = path =>
     return [l.slice(0, i), l.slice(i + 1)];
   }));
 
-test('launchers: publish writes manifest + 12 quoted launchers (9 gate + 3 shim), verify round-trips', async t => {
+test('launchers: legacy4 manifest bytes verify unchanged; mixed, partial and unknown domains fail closed', async t => {
+  const f = await fixtureRuntime(t);
+  const manifest = JSON.parse(readFileSync(f.manifestPath, 'utf8'));
+  manifest.families = ['codex', 'pi', 'devin', 'claude'];
+  manifest.launcherFamilies = [...manifest.families];
+  manifest.gateFamilies = ['codex', 'pi', 'claude'];
+  delete manifest.binaries.opencode;
+  const bytes = JSON.stringify(manifest, null, 2) + '\n';
+  const digest = createHash('sha256').update(bytes).digest('hex');
+  const directory = join(f.stableRoot, 'launchers', digest); mkdirSync(directory);
+  writeFileSync(join(directory, 'launch.json'), bytes, { mode: 0o644 });
+  for (const family of manifest.families) for (const role of ROLES) {
+    const name = `slp-${family}-${role}`;
+    const original = readFileSync(join(f.set.directory, name), 'utf8');
+    const legacyBytes = original.replaceAll(f.set.directory, directory).replaceAll(f.set.launchManifestSha256, digest);
+    writeFileSync(join(directory, name), legacyBytes, { mode: 0o755 });
+  }
+  const before = readFileSync(join(directory, 'launch.json'));
+  const verified = await f.launchers.verify(directory);
+  assert.equal(verified.launchSetSha256, digest); assert.equal(verified.files.length, 12);
+  assert.deepEqual(readFileSync(join(directory, 'launch.json')), before);
+  for (const mutate of [
+    m => { m.binaries.opencode = { available: false, path: null, version: null }; },
+    m => { m.families.pop(); },
+    m => { m.families[0] = 'unknown'; },
+    m => { m.launcherFamilies.push('opencode'); },
+    m => { m.gateFamilies.push('opencode'); },
+    m => { m.binaries.codex.available = 'yes'; },
+  ]) {
+    const bad = structuredClone(manifest); mutate(bad);
+    const encoded = JSON.stringify(bad, null, 2) + '\n'; const sha = createHash('sha256').update(encoded).digest('hex');
+    const path = join(f.stableRoot, 'launchers', sha); mkdirSync(path); writeFileSync(join(path, 'launch.json'), encoded, { mode: 0o600 });
+    await assert.rejects(f.launchers.verify(path), error => error.code === 'RUNTIME_INTEGRITY');
+    assert.equal(readFileSync(join(path, 'launch.json'), 'utf8'), encoded);
+  }
+  const binaries = structuredClone(f.binaries); delete binaries.opencode;
+  await assert.rejects(f.launchers.publish({ daemonHome: f.home, stableRoot: f.stableRoot, operationId: 'bad-legacy-publish', candidate: { sha256: f.sha, runtimePath: f.candidate }, node: f.node, binaries }), /missing a binaries.opencode resolution/);
+});
+
+test('launchers: publish writes manifest + 15 quoted launchers (12 gate + 3 shim), verify round-trips', async t => {
   const f = await fixtureRuntime(t);
   assert.equal(basename(f.set.directory), f.set.launchSetSha256);
   assert.equal(f.set.launchManifestSha256, f.set.launchSetSha256);
   const manifest = JSON.parse(readFileSync(f.manifestPath).toString('utf8'));
   assert.equal(manifest.schemaVersion, 1);
-  // The manifest keeps the full four-family resolution record — the shipped
+  // The manifest keeps the full five-family resolution record — the shipped
   // devin shim validates the complete sets — and records which families are
   // gate execs vs shim launchers.
   assert.deepEqual(manifest.families.sort(), [...FAMILIES].sort());
   assert.deepEqual(manifest.launcherFamilies.sort(), [...FAMILIES].sort());
   assert.deepEqual(manifest.gateFamilies.sort(), ['claude', 'codex', 'pi']);
   const names = readdirSync(f.set.directory).sort();
-  assert.equal(names.length, 13);
+  assert.equal(names.length, 16);
   assert.deepEqual(
     f.set.files.map(file => basename(file.path)).sort(),
     FAMILIES.flatMap(family => ROLES.map(role => `slp-${family}-${role}`)).sort(),
@@ -933,7 +972,7 @@ test('gate launcher: env-free argv0 --version reaches the real family binary; gr
       env: { PATH: '/usr/bin:/bin' }, // no provider env at all
     });
     assert.equal(probe.status, 0, `${family} probe stderr: ${probe.stderr}`);
-    assert.equal(probe.stdout, `${family} 9.9.9-fake\n`, `${family} probe reports the family binary`);
+    assert.equal(probe.stdout, `${family} ${family === 'opencode' ? '2.0.24' : '9.9.9-fake'}\n`, `${family} probe reports the family binary`);
     const capability = spawnSync(join(f.set.directory, `slp-${family}-peer`), ['chat'], {
       encoding: 'utf8',
       env: { PATH: '/usr/bin:/bin' },

@@ -60,7 +60,9 @@ export function verifyProvider(inventory: Provider[] | undefined, id: string, fa
   const extraKeys = Object.keys(observed).filter(key => !providerRecordAllowedKeys.includes(key));
   if (extraKeys.length) throw new Error(`Unverified provider ${label}: unexpected field(s) ${extraKeys.map(key => `'${key}'`).join(', ')} — the provider object must be verbatim from list_providers; do not add, remove or edit fields`);
   const family = familyFor(observed.id);
-  if (observed.extends != null && observed.extends !== transportOf(family)) throw new Error(`Unverified provider family ${label}: the entry's 'extends' (${observed.extends}) does not match the '${family}' transport '${transportOf(family)}' — the provider object must be verbatim from list_providers; do not add, remove or edit fields`);
+  // OpenCode must prove the ACP adapter explicitly; a missing extends is
+  // native/default host selection, outside the supported managed boundary.
+  if ((family === "opencode" && observed.extends !== "acp") || (observed.extends != null && observed.extends !== transportOf(family))) throw new Error(`Unverified provider family ${label}: the entry's 'extends' (${observed.extends}) does not match the '${family}' transport '${transportOf(family)}' — the provider object must be verbatim from list_providers; do not add, remove or edit fields`);
   return { observed, family };
 }
 

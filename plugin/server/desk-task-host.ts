@@ -48,6 +48,7 @@ export function createTaskBoundedHost(
     timeline: { refetch: options => call("timeline", false, () => agent.timeline.refetch(options)) },
   });
   return {
+    ...(api.config ? { config: { get: (requestId?: string) => call("config.get", false, () => api.config!.get(requestId)) } } : {}),
     providers: { snapshot: options => call("providers.snapshot", false, () => api.providers.snapshot(options)) },
     agents: {
       ref: id => handle(api.agents.ref(id)),

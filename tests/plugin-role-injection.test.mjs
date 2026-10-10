@@ -24,11 +24,12 @@ import { roleBundle } from '../plugin/server/runtime/cli/role-bundle.ts';
 const root = fileURLToPath(new URL('..', import.meta.url));
 const GATE = join(root, 'bin', 'slp-gate.mjs');
 const HOOK_FAMILIES = ['codex', 'pi', 'claude'];
-const ALL_FAMILIES = [...HOOK_FAMILIES, 'devin'];
+const ALL_FAMILIES = [...HOOK_FAMILIES, 'devin', 'opencode'];
 const ROLES = ['supervisor', 'lead', 'peer'];
 const HOOK_IDS = HOOK_FAMILIES.flatMap(f => ROLES.map(r => `slp-${f}-${r}`));
 const DEVIN_IDS = ROLES.map(r => `slp-devin-${r}`);
-const OWNED_IDS = [...HOOK_IDS, ...DEVIN_IDS].sort();
+const WRAPPER_IDS = [...DEVIN_IDS, ...ROLES.map(r => `slp-opencode-${r}`)];
+const OWNED_IDS = [...HOOK_IDS, ...WRAPPER_IDS].sort();
 
 function tmp(t, prefix = 'roleinj-') {
   mkdirSync(join(root, '.local-checks'), { recursive: true });
@@ -101,7 +102,7 @@ function makeInjection(t, overrides = {}) {
 // agent.create — role resolution and injection
 // ---------------------------------------------------------------------------
 
-test('agent.create: all nine hook-family ids inject; devin ids graft only the desk handle (R2, C10)', async t => {
+test('agent.create: hook-family ids inject; ACP wrapper ids graft only the desk handle (R2, C10)', async t => {
   const mintInputs = [];
   const { injection } = makeInjection(t, {
     deps: {
@@ -113,7 +114,7 @@ test('agent.create: all nine hook-family ids inject; devin ids graft only the de
   });
   for (const id of OWNED_IDS) {
     const out = await injection.agentCreate(createReq(id));
-    if (DEVIN_IDS.includes(id)) {
+    if (WRAPPER_IDS.includes(id)) {
       // C10: the devin wrapper path returns the request with ONLY
       // env.SLP_DESK_HANDLE added — config is never touched.
       assert.ok(out?.config, `${id} returns the request`);
@@ -536,7 +537,7 @@ test('session_open: every hook id gets a fresh non-empty grant; others pass thro
       assert.equal(out.agentId, 'agent-1');
     }
   }
-  assert.equal(seen.size, 36, 'every open gets a distinct grant token');
+  assert.equal(seen.size, 48, 'every open gets a distinct grant token');
   for (const provider of ['codex', 'custom-tool', 'slp-devin-peer']) {
     assert.equal(injection.sessionOpen(openReq(provider)), undefined);
   }
@@ -710,7 +711,7 @@ test('thin aliases: every entry gets a single-element launcher argv0; hook env a
   );
   const resolution = { node: { path: '/opt/node/bin/node', version: '24.0.0' }, binaries };
   const entries = desiredProviderEntries(launchSet, resolution, f.candidate, f.home, null);
-  assert.equal(Object.keys(entries).length, 12);
+  assert.equal(Object.keys(entries).length, 15);
   for (const id of OWNED_IDS) {
     const family = id.split('-')[1];
     const entry = entries[id];
@@ -729,7 +730,7 @@ test('thin aliases: every entry gets a single-element launcher argv0; hook env a
     // One label template for every transport: `SLP <Family> <Role>` with
     // FAMILY_LABEL as the single display-name source.
     assert.equal(entry.label, `SLP ${FAMILY_LABEL[family]} ${roleDisplay}`);
-    if (family === 'devin') {
+    if (['devin', 'opencode'].includes(family)) {
       assert.equal(entry.extends, 'acp');
       assert.equal(entry.env.SLP_FAMILY_BIN, undefined);
       continue;
@@ -768,7 +769,7 @@ test('parity: hook systemPrompt and devin wrapper inject the identical bundle fo
     // on first and re-armed prompts — delivery.entry() under the frozen managed
     // env; recurring prompts get the shorter delivery.anchor().
     const wrapperBytes = wrapperModule.roleBundle(f.candidate, role, managedEnv(f)).instructions;
-    if (DEVIN_IDS.includes(id)) {
+    if (WRAPPER_IDS.includes(id)) {
       // The devin path is the wrapper itself — nothing to compare, just
       // assert its own render is what the parity contract defines.
       assert.ok(wrapperBytes.startsWith(`SLP role=${role}`));

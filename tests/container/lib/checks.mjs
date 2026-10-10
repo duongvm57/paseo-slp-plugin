@@ -31,11 +31,11 @@ eq(lstatSync(join(DEST, 'paseo-binding.json')).mode & 0o777, 0o600, 'paseo-bindi
 eq(binding.configPath, join(HOME_DIR, 'config.json'), 'binding configPath names the fake home config');
 
 const roles = ['supervisor', 'lead', 'peer'];
-const families = ['codex', 'pi', 'devin', 'claude'];
-const transports = { codex: 'codex', pi: 'pi', devin: 'acp', claude: 'claude' };
+const families = ['codex', 'pi', 'devin', 'claude', 'opencode'];
+const transports = { codex: 'codex', pi: 'pi', devin: 'acp', claude: 'claude', opencode: 'acp' };
 const expectedIds = roles.flatMap(role => families.map(family => `slp-${family}-${role}`));
 
-eq(Object.keys(binding.providers ?? {}).sort(), [...expectedIds].sort(), 'binding records exactly 12 slp-* providers');
+eq(Object.keys(binding.providers ?? {}).sort(), [...expectedIds].sort(), 'binding records exactly 15 slp-* providers');
 eq((binding.profiles ?? []).map(p => p.id).sort(), ['slp-lead', 'slp-supervisor'], 'binding records the two role profiles');
 eq(binding.mcpBefore, { enabled: false, injectIntoAgents: false }, 'mcpBefore restores fixture values');
 

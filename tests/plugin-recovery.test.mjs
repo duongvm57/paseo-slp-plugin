@@ -130,7 +130,7 @@ test('patch applied then settle-write killed → foreign pending at patch-dispat
   assert.equal(stuck.patchAttempts.length, 1);
   assert.equal(stuck.patchAttempts[0].result, 'pending');
   assert.equal(daemon.patchCalls.length, 1);
-  assert.equal(Object.keys(slpProvidersOf(readConfigJson(home))).length, 12, 'the patch was really applied');
+  assert.equal(Object.keys(slpProvidersOf(readConfigJson(home))).length, 15, 'the patch was really applied');
 
   const managerB = createManager(makeDeps({ payload: deps.payload, execOpts: { binaries } }));
   const status = await managerB.status(statusInput(home), daemon);
@@ -159,7 +159,7 @@ test('crash after verified (attempt returned, commit never wrote) → complete f
   assert.equal(stuck.phase, 'verified');
   assert.equal(stuck.outcome, 'pending');
   assert.equal(stuck.patchAttempts[0].result, 'returned');
-  assert.equal(Object.keys(slpProvidersOf(readConfigJson(home))).length, 12);
+  assert.equal(Object.keys(slpProvidersOf(readConfigJson(home))).length, 15);
 
   const managerB = createManager(makeDeps({ payload: deps.payload, execOpts: { binaries } }));
   const recId = randomUUID();
@@ -178,7 +178,7 @@ test('restore-before on an applied activation → inverse patch once, providers 
   const opId = randomUUID();
   await managerA.activate(activateInput(home, deps.payload, opId), daemon);
   await waitRecovery(managerA, home, daemon);
-  assert.equal(Object.keys(slpProvidersOf(readConfigJson(home))).length, 12);
+  assert.equal(Object.keys(slpProvidersOf(readConfigJson(home))).length, 15);
 
   const managerB = createManager(makeDeps({ payload: deps.payload, execOpts: { binaries } }));
   const recId = randomUUID();
@@ -244,7 +244,7 @@ test('journal write failure after a successful patch → op lands recovery-requi
   const done = await waitTerminal(managerA, home, opId, daemon);
   assert.equal(done.operation.outcome, 'recovery-required');
   assert.equal(done.state, 'RECOVERY_REQUIRED');
-  assert.equal(Object.keys(slpProvidersOf(readConfigJson(home))).length, 12, 'patch was applied');
+  assert.equal(Object.keys(slpProvidersOf(readConfigJson(home))).length, 15, 'patch was applied');
   assert.ok(opCodes(home, opId).includes('PATCH_OUTCOME_UNKNOWN'), 'attempt stayed pending → outcome unknown');
 
   // Same-boot reconcile is blocked on the unknown attempt.
@@ -314,7 +314,7 @@ test('deactivate crash after its patch applied → restore-before reinstates the
   assert.equal(done.operation.outcome, 'succeeded');
   assert.equal(done.state, 'ACTIVE', 'restore-before reinstates the binding');
   const config = readConfigJson(home);
-  assert.equal(Object.keys(slpProvidersOf(config)).length, 12);
+  assert.equal(Object.keys(slpProvidersOf(config)).length, 15);
   assert.equal(config.daemon.mcp.injectIntoAgents, true);
   assert.equal(readReceipt(home).binding.bindingSha256, bindingSha);
 });
@@ -359,7 +359,7 @@ test('deactivate crash before dispatch (entries intact) → complete redispatche
   assert.equal(stuck.phase, 'prepared');
   assert.equal(stuck.patchAttempts.length, 0);
   assert.equal(daemon.patchCalls.length, 1, 'only the activate patch ran');
-  assert.equal(Object.keys(slpProvidersOf(readConfigJson(home))).length, 12, 'providers still present');
+  assert.equal(Object.keys(slpProvidersOf(readConfigJson(home))).length, 15, 'providers still present');
 
   const managerB = createManager(makeDeps({ payload: deps.payload, execOpts: { binaries } }));
   const recId = randomUUID();
@@ -379,7 +379,7 @@ test('divergent disk/live state → reconcile refuses to patch and stays RECOVER
   const opId = randomUUID();
   await managerA.activate(activateInput(home, deps.payload, opId), daemon);
   await waitRecovery(managerA, home, daemon);
-  assert.equal(Object.keys(slpProvidersOf(readConfigJson(home))).length, 12);
+  assert.equal(Object.keys(slpProvidersOf(readConfigJson(home))).length, 15);
 
   // Live view diverges from disk: drop one owned provider from get() responses.
   const divergent = {
@@ -639,7 +639,7 @@ test('reconcile-of-reconcile: a dead restore-before still drives the chain to th
   const receipt = readReceipt(home);
   assert.equal(receipt.state, 'ACTIVE', 'the restore-before chain must reinstate the binding');
   assert.ok(receipt.binding);
-  assert.equal(Object.keys(slpProvidersOf(readConfigJson(home))).length, 12, 'inverse patch restored providers');
+  assert.equal(Object.keys(slpProvidersOf(readConfigJson(home))).length, 15, 'inverse patch restored providers');
   assert.equal(receipt.operations.find(o => o.operationId === deactId).outcome, 'failed');
   assert.equal(receipt.operations.find(o => o.operationId === r1).outcome, 'succeeded');
 });
@@ -1303,7 +1303,7 @@ test('recovery removal refuses when live metadataGeneration references owned pro
   assert.equal(done.operation.outcome, 'failed');
   assert.ok(opCodes(home, rec).includes('RAW_LIVE_DIVERGENCE'), `expected RAW_LIVE_DIVERGENCE, got ${opCodes(home, rec)}`);
   assert.equal(daemon.patchCalls.length, 1, 'no removal patch may dispatch against live-only references');
-  assert.equal(Object.keys(slpProvidersOf(readConfigJson(home))).length, 12, 'providers untouched');
+  assert.equal(Object.keys(slpProvidersOf(readConfigJson(home))).length, 15, 'providers untouched');
 });
 
 test('inspect publishes the profile refresh only after every invariant passes', async t => {
@@ -1565,7 +1565,7 @@ test('V2: deactivation recovery revalidates the endpoint runtime before dispatch
   assert.equal(done.state, 'RECOVERY_REQUIRED');
   assert.ok(opCodes(home, rec).includes('RUNTIME_INTEGRITY'), `expected RUNTIME_INTEGRITY, got ${opCodes(home, rec)}`);
   assert.equal(daemon.patchCalls.length, 1, 'no removal patch may dispatch against a corrupt endpoint');
-  assert.equal(Object.keys(slpProvidersOf(readConfigJson(home))).length, 12, 'providers untouched');
+  assert.equal(Object.keys(slpProvidersOf(readConfigJson(home))).length, 15, 'providers untouched');
 });
 
 test('V2: activation recovery re-verifies the runtime after the patch before publishing ACTIVE', async t => {
@@ -1662,7 +1662,7 @@ test('V4: the 64 KiB fallback preserves state, operation, binding identity and c
   const binDir = join(home, 'bin');
   mkdirSync(binDir);
   const binaries = {};
-  for (const family of ['codex', 'pi', 'devin', 'claude']) {
+  for (const family of ['codex', 'pi', 'devin', 'claude', 'opencode']) {
     const p = join(binDir, `${family}-bin`);
     writeFileSync(p, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
     binaries[family] = p;
@@ -1774,7 +1774,7 @@ test('W2: restore-before of a partial adoption guards only the providers the inv
   assert.equal(adopt.accepted, true, `adoption refused: ${adopt.conflicts.map(c => c.code)}`);
   await waitRecovery(managerB, home, daemonB);
   assert.equal(opOf(home, adoptId).outcome, 'recovery-required');
-  assert.equal(Object.keys(slpProvidersOf(readConfigJson(home))).length, 12, 'forward patch applied');
+  assert.equal(Object.keys(slpProvidersOf(readConfigJson(home))).length, 15, 'forward patch applied');
 
   // Boot 3: restore-before. The inverse removes the 11 adopted providers
   // and KEEPS slp-codex-lead — a reference to a kept provider is legitimate
@@ -1803,7 +1803,7 @@ test('W3: the 64 KiB fallback sheds oversized conflict diagnostics while preserv
   const binDir = join(home, 'bin');
   mkdirSync(binDir);
   const binaries = {};
-  for (const family of ['codex', 'pi', 'devin', 'claude']) {
+  for (const family of ['codex', 'pi', 'devin', 'claude', 'opencode']) {
     const p = join(binDir, `${family}-bin`);
     writeFileSync(p, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
     binaries[family] = p;
@@ -1811,7 +1811,7 @@ test('W3: the 64 KiB fallback sheds oversized conflict diagnostics while preserv
   const nodePath = join(binDir, 'node');
   writeFileSync(nodePath, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
   const versions = Object.fromEntries(
-    ['codex', 'pi', 'devin', 'claude'].map(f => [f, ''.repeat(256)]),
+    ['codex', 'pi', 'devin', 'claude', 'opencode'].map(f => [f, ''.repeat(256)]),
   );
 
   const daemon = await makeDaemon(t, home);

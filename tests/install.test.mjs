@@ -294,6 +294,73 @@ function fakeSource(dir, marker) {
   return source;
 }
 
+test('standalone legacy12 upgrade preserves retained bytes, original baseline and settings while registering current15', t => {
+  const { dir, home, destination } = fixture(t);
+  config(home, { version: 1, agents: { providers: { personal: { extends: 'codex', command: ['/bin/true'], label: 'Keep' } } }, daemon: { mcp: { enabled: false, injectIntoAgents: false } } });
+  installPaseo(fakeSource(dir, 'historical'), destination, home, true);
+  const receiptFile = join(destination, 'paseo-binding.json');
+  const historical = readJson(receiptFile); const raw = readJson(join(home, 'config.json'));
+  for (const role of ['supervisor', 'lead', 'peer']) {
+    delete historical.providers[`slp-opencode-${role}`]; delete raw.agents.providers[`slp-opencode-${role}`];
+  }
+  writeFileSync(receiptFile, json(historical));
+  const manifestPath = join(destination, 'installed.json'); const manifest = readJson(manifestPath);
+  manifest.paseoBindingSha256 = hash(readFileSync(receiptFile)); writeFileSync(manifestPath, json(manifest));
+  const selected = raw.daemon.agentProfiles.find(p => p.id === 'slp-lead');
+  Object.assign(selected, { provider: 'slp-pi-lead', model: 'provider/nested/model', modeId: 'full-access', thinkingOptionId: 'high', featureValues: { enabled: false } });
+  config(home, raw);
+  const oldReceiptBytes = readFileSync(receiptFile); const oldManifestBytes = readFileSync(manifestPath);
+  const target = join(dir, 'current');
+  const source = fakeSource(dir, 'current');
+  assert.equal(upgradePaseo(source, target, destination).applied, false);
+  assert.deepEqual(readFileSync(receiptFile), oldReceiptBytes); assert.deepEqual(readFileSync(manifestPath), oldManifestBytes);
+  upgradePaseo(source, target, destination, true);
+  const next = readJson(join(target, 'paseo-binding.json'));
+  assert.equal(Object.keys(next.providers).length, 15); assert.deepEqual(next.mcpBefore, historical.mcpBefore);
+  assert.deepEqual(next.profiles.find(p => p.id === 'slp-lead'), selected);
+  assert.deepEqual(readFileSync(receiptFile), oldReceiptBytes); assert.deepEqual(readFileSync(manifestPath), oldManifestBytes);
+  assert.deepEqual(readJson(join(home, 'config.json')).agents.providers.personal, raw.agents.providers.personal);
+  assert.equal(next.providers['slp-opencode-peer'].extends, 'acp');
+});
+
+test('standalone binding rejects partial/unknown domains before upgrade and preserves evidence and host bytes', t => {
+  const { dir, home, destination } = fixture(t);
+  installPaseo(fakeSource(dir, 'legacy-invalid'), destination, home, true);
+  const receiptFile = join(destination, 'paseo-binding.json'); const manifestFile = join(destination, 'installed.json');
+  const original = readJson(receiptFile); const rawBefore = readFileSync(join(home, 'config.json'));
+  for (const mutate of [r => delete r.providers['slp-pi-peer'], r => { r.providers['slp-future-peer'] = r.providers['slp-pi-peer']; }]) {
+    const bad = structuredClone(original); mutate(bad); const bytes = json(bad); writeFileSync(receiptFile, bytes);
+    const manifest = readJson(manifestFile); manifest.paseoBindingSha256 = hash(bytes); writeFileSync(manifestFile, json(manifest));
+    assert.throws(() => upgradePaseo(fakeSource(dir, `new-${Object.keys(bad.providers).length}`), join(dir, `invalid-${Object.keys(bad.providers).length}`), destination, true), /exact Codex3, legacy12 or current15/);
+    assert.deepEqual(readFileSync(join(home, 'config.json')), rawBefore); assert.equal(readFileSync(receiptFile, 'utf8'), bytes);
+  }
+});
+
+test('standalone Codex3 verifies raw binding hash before decoding and refuses malformed historical profiles without writes', t => {
+  const { dir, home, destination } = fixture(t);
+  installPaseo(fakeSource(dir, 'codex3-integrity'), destination, home, true);
+  const receiptFile = join(destination, 'paseo-binding.json'); const manifestFile = join(destination, 'installed.json');
+  const old = readJson(receiptFile);
+  old.providers = Object.fromEntries(Object.entries(old.providers).filter(([id]) => id.startsWith('slp-codex-')));
+  old.profiles.push({ id: 'slp-peer', provider: 'slp-codex-peer', notes: 'Retired preference' });
+  const hostBefore = readFileSync(join(home, 'config.json')); const originalManifest = readJson(manifestFile);
+  const source = fakeSource(dir, 'codex3-next');
+  const validBytes = json(old);
+  writeFileSync(receiptFile, validBytes);
+  writeFileSync(manifestFile, json({ ...originalManifest, paseoBindingSha256: hash(validBytes) }));
+  // A digest mismatch must win over even the malformed historical shape.
+  const malformed = structuredClone(old); malformed.profiles.pop(); const bytes = json(malformed); writeFileSync(receiptFile, bytes);
+  assert.throws(() => upgradePaseo(source, join(dir, 'tampered'), destination, true), /binding|integrity|hash|Modified/i);
+  assert.equal(readFileSync(receiptFile, 'utf8'), bytes); assert.deepEqual(readFileSync(join(home, 'config.json')), hostBefore);
+  for (const mutate of [r => r.profiles.pop(), r => { r.profiles[2].provider = 'slp-pi-peer'; }, r => { r.providers['slp-codex-peer'].command[2] = 'lead'; }]) {
+    const bad = structuredClone(old); mutate(bad); const raw = json(bad);
+    writeFileSync(receiptFile, raw); writeFileSync(manifestFile, json({ ...originalManifest, paseoBindingSha256: hash(raw) }));
+    const manifestBytes = readFileSync(manifestFile);
+    assert.throws(() => upgradePaseo(source, join(dir, 'malformed'), destination, true), /Invalid standalone/);
+    assert.equal(readFileSync(receiptFile, 'utf8'), raw); assert.deepEqual(readFileSync(manifestFile), manifestBytes); assert.deepEqual(readFileSync(join(home, 'config.json')), hostBefore);
+  }
+});
+
 test('update and upgrade preserve the original MCP baseline and accumulate exact retired profile rows', t => {
   for (const operation of ['update', 'upgrade']) {
     const { dir, home, destination } = fixture(t);
@@ -420,7 +487,7 @@ test('an intact installation updates in place, preserving tuned settings', t => 
   assert.equal(readFileSync(join(destination, 'src/roles.md'), 'utf8'), 'v2');
   assert.equal(existsSync(join(destination, 'plugin/server/runtime/cli/monitor.ts')), false);
   const cfg = readJson(join(home, 'config.json'));
-  assert.equal(Object.keys(cfg.agents.providers).filter(id => id.startsWith('slp-')).length, 12);
+  assert.equal(Object.keys(cfg.agents.providers).filter(id => id.startsWith('slp-')).length, 15);
   assert.equal(cfg.daemon.agentProfiles[0].modeId, 'full-access');
   assert.equal(readJson(join(destination, 'paseo-binding.json')).configPath, join(home, 'config.json'));
   assert.equal(installPaseo(source2, destination, home, true).alreadyInstalled, true);

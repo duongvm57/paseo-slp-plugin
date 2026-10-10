@@ -64,7 +64,7 @@ The design rationale is in [docs/architecture.md](docs/architecture.md).
 
 | It does                                                                                     | It refuses                                                                        | It never                                                         |
 | ------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
-| Registers up to 12 `slp-<family>-<role>` providers and the **SLP Supervisor** / **SLP Lead** profiles | To overwrite a provider or profile it does not own (`COLLISION`)             | Creates an agent on install or activation                        |
+| Registers up to 15 `slp-<family>-<role>` providers and the **SLP Supervisor** / **SLP Lead** profiles | To overwrite a provider or profile it does not own (`COLLISION`)             | Creates an agent on install or activation                        |
 | Loads each seat's role instructions at session entry, separate from the task prompt         | To guess when the config drifted outside its journal (`RECOVERY_REQUIRED`)        | Runs a scheduler or agent database; Paseo stays the control plane |
 | Keeps a Peer pool that the Lead picks each Peer's runtime from                               | A Peer binding outside the pool during `prepare`                                 | Writes your repository's routing catalog                          |
 | Validates launch arguments offline (`prepare`), with named failures                          | Unverified or incompatible provider inventory supplied to `prepare`              | Runs a monitoring daemon; `monitor` is a scan you invoke          |
@@ -73,7 +73,7 @@ The design rationale is in [docs/architecture.md](docs/architecture.md).
 | Supports planned owner handoff and a read-only workspace work panel                         | An acknowledgment that does not match a usable offer and current revision pins  | Transfers authority through a chat message or a resource account  |
 | Offers opt-in Jev routing and communication supervision                                    | A Jev routing receipt that fails offline verification (hash, model, catalog)     | Enables external services without your configuration              |
 
-Saved role choices narrow the Supervisor/Lead providers; all four Peer providers remain
+Saved role choices narrow the Supervisor/Lead providers; all five Peer providers remain
 pool-driven. Provider entries for unavailable CLIs are disabled. Pool checks apply to
 `prepare` and native task dispatch. Role rules guide agents, while managed launch and desk checks cover their own
 interfaces; repository and shell permissions still come from Paseo and the provider.
@@ -87,8 +87,9 @@ interfaces; repository and shell permissions still come from Paseo and the provi
 | **Lead**       | Framing, routing, dependencies, integration, the project verdict                       | Pre-solves hard work and hands Peers a typing job        | The **SLP Lead** profile                |
 | **Peer**       | One bounded outcome, as an Engineer, Architect, Reviewer or Scout                      | Spawns other agents                                     | An option in the Peer pool, per task    |
 
-Seats run on **Codex, Pi, Devin or Claude Code**, mixed freely: two Peers in the same team can use
-different providers, models and effort levels.
+Seats run on **Codex, Pi, Devin, Claude Code or OpenCode**, mixed freely: two Peers in the same team can use
+different providers, models and effort levels. [OpenCode](docs/opencode.md) uses ACP stdio for
+managed and standalone seats; native OpenCode and V1 are unsupported.
 
 Peer Engineer is the default implementation writer. An explicit Human assignment or effective
 workspace protocol can grant a bounded Lead write for clear, reversible work. One writer,
@@ -98,10 +99,10 @@ candidate proof and required independent review still apply; a tiny task grants 
 
 You need:
 
-- Paseo `>=0.8.0`, with `pluginsEnabled: true` and an effective `mcp.enabled: true`
+- Paseo `>=0.10.3`, with `pluginsEnabled: true` and an effective `mcp.enabled: true`
 - a POSIX daemon host (Linux/macOS), with Node.js 22.x from 22.18, or Node.js 23.6+
   (native TypeScript stripping)
-- the CLI of each provider family you use (Codex, Pi, Devin, Claude), signed in on the daemon host;
+- the CLI of each provider family you use (Codex, Pi, Devin, Claude, OpenCode), signed in on the daemon host;
   Pi needs repeatable `--append-system-prompt` support
 
 Enable the installed family you want to use in Paseo's agent settings before the first activation.

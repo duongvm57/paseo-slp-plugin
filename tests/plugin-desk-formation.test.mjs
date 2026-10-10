@@ -263,8 +263,12 @@ import { selectionFixture } from './helpers/seat-selection-fixture.mjs';
 import { pathToFileURL } from 'node:url';
 import { routeDecide } from '../plugin/server/runtime/cli/jev-routing.ts';
 
-async function realPeerFixture(t, mode, count = 2) {
+async function realPeerFixture(t, mode, count = 2, family = 'codex') {
  const f=selectionFixture(t,{mode,count});
+ if(family==='opencode'){
+  for(const option of f.options)Object.assign(option,{provider:'opencode',model:'provider/nested/model',modeId:'build'});
+  f.savePool();
+ }
  execFileSync('git',['init','-q',f.repository]);
  const candidate=join(f.dir,'candidate');install(fileURLToPath(new URL('..',import.meta.url)),candidate);
  const row=memberRow('peer-parent',{}, {agentId:'parent',role:'lead',createCwd:f.repository,workspaceId:'workspace'});
@@ -278,9 +282,10 @@ async function realPeerFixture(t, mode, count = 2) {
    features:Object.entries(options.config.featureValues).map(([id,value])=>({id,value}))};
   return {id:'child'};
  };
- const host={providers:{snapshot:async()=>({entries:[{provider:'slp-codex-peer',enabled:true,status:'ready',modes:[{id:'full-access'}]}]})},
+ const host={providers:{snapshot:async()=>({entries:[{provider:'slp-'+family+'-peer',enabled:true,status:'ready',modes:[{id:family==='opencode'?'build':'full-access'}]}]})},
   agents:{ref:()=>({refresh:async()=>({agent:snapshot,project:null}),send:async()=>{effects.push({kind:'send'});},timeline:{refetch:async()=>({entries:[]})}})},workspaces:{ref:id=>({id,
    refresh:async()=>({id,workspaceDirectory:f.repository,status:'done',archivingAt:null}),agents:{create}})}};
+ if(family==='opencode')host.config={get:async()=>({config:{providers:{'slp-opencode-peer':{extends:'acp'}}}})};
  const loaded=[];
  const planner=createFormationPlanner({runtimePath:candidate,daemonHome:f.home,host:()=>host,
   importModule:async spec=>{
@@ -299,6 +304,60 @@ async function realPeerFixture(t, mode, count = 2) {
  return {...f,row,candidate,host,effects,loaded,planner,formationDeps:deps,input,decisions:()=>decisions,
   run:request=>runSeatCreate(row,request??input,deps)};
 }
+
+for(const shape of ['automatic','selection','runtime'])test('production OpenCode ACP formation '+shape+' obtains live transport and preserves replay',async t=>{
+ const f=await realPeerFixture(t,'off',1,'opencode');
+ const input={...f.input,...(shape==='selection'?{selection:{optionId:'first'}}:shape==='runtime'?{runtime:{optionId:'first',catalogSha256:f.sha()}}:{})};
+ const out=await f.run(input);
+ assert.equal(out.result.state,'awaiting-caller-delivery',JSON.stringify(out));
+ assert.equal(out.result.runtime.provider,'slp-opencode-peer/provider/nested/model');
+ assert.equal(out.result.runtime.modeId,'build');assert.equal(out.result.runtime.thinkingOptionId,'high');
+ assert.deepEqual(out.result.runtime.features,{fast_mode:true});
+ assert.equal(out.phases.length,shape==='runtime'?5:6);assert.equal(f.effects.length,1);
+ f.host.config.get=async()=>assert.fail('replay must not read transport');
+ f.host.providers.snapshot=async()=>assert.fail('replay must not reread providers');
+ const replay=await f.run(input);assert.equal(replay.receiptSha256,out.receiptSha256);assert.equal(f.effects.length,1);
+});
+
+test('production OpenCode saved Lead planning obtains the same live ACP evidence',async t=>{
+ const f=fixture(t),candidate=join(f.root,'candidate');install(fileURLToPath(new URL('..',import.meta.url)),candidate);
+ writeFileSync(join(f.root,'config.json'),JSON.stringify({daemon:{agentProfiles:[{id:'slp-lead',provider:'slp-opencode-lead',model:'provider/nested/model',modeId:'build',thinkingOptionId:'high',featureValues:{effort:'high'}}]}}));
+ f.host.providers.snapshot=async()=>({entries:[{provider:'slp-opencode-lead',enabled:true,status:'ready',modes:[{id:'build'}]}]});
+ f.host.config={get:async()=>({config:{providers:{'slp-opencode-lead':{extends:'acp'}}}})};
+ const planner=createFormationPlanner({runtimePath:candidate,daemonHome:f.root,host:()=>f.host});
+ const plan=await planner(f.row,f.input);
+ assert.equal(plan.create.provider,'slp-opencode-lead/provider/nested/model');
+ assert.deepEqual(plan.create.settings,{modeId:'build',thinkingOptionId:'high',features:{effort:'high'}});
+});
+
+for(const transport of ['opencode','missing','wrong-id','unavailable-api','read-failure','drift'])test('production OpenCode transport '+transport+' refuses before create without alias inference',async t=>{
+ const f=await realPeerFixture(t,'off',1,'opencode');let reads=0;
+ f.host.config.get=async()=>{
+  reads++;if(transport==='read-failure')throw new Error('private config error must not escape');
+  return {config:{providers:transport==='missing'?{}:{[transport==='wrong-id'?'slp-opencode-lead':'slp-opencode-peer']:{extends:transport==='opencode'||transport==='drift'&&reads>1?'opencode':'acp'}}}};
+ };
+ if(transport==='unavailable-api')delete f.host.config;
+ const out=await f.run();assert.equal(out.ok===false||out.result?.ok===false,true,JSON.stringify(out));
+ assert.equal(f.effects.length,0);assert.equal(JSON.stringify(out).includes('private config error'),false);
+});
+
+test('published OpenCode ACP snapshot evidence is preserved without a config-read dependency',async t=>{
+ const f=await realPeerFixture(t,'off',1,'opencode');delete f.host.config;
+ const snapshot=f.host.providers.snapshot;
+ f.host.providers.snapshot=async(...args)=>{const out=await snapshot(...args);out.entries[0].extends='acp';return out;};
+ const out=await f.run();assert.equal(out.result.state,'awaiting-caller-delivery',JSON.stringify(out));
+});
+
+test('OpenCode transport changes after child creation retain identity and withhold delivery',async t=>{
+ const f=await realPeerFixture(t,'off',1,'opencode'),ref=f.host.workspaces.ref;
+ f.host.workspaces.ref=id=>{const handle=ref(id);return {...handle,agents:{create:async options=>{
+  const child=await handle.agents.create(options);
+  f.host.config.get=async()=>({config:{providers:{'slp-opencode-peer':{extends:'opencode'}}}});
+  return child;
+ }}};};
+ const out=await f.run();assert.equal(out.result.code,'ROUTE_DRIFT',JSON.stringify(out));
+ assert.equal(out.result.agentId,'child');assert.equal(f.effects.length,1);assert.equal(Object.hasOwn(out.result,'delivery'),false);
+});
 
 for(const mode of ['unconfigured','off','shadow','armed','error']){
  for(const shape of ['runtime','selection','none']){

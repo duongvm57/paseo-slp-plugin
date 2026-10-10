@@ -307,7 +307,7 @@ test('an activated binding reads back through both the plugin status RPC and the
   assert.equal(status.state, 'ACTIVE');
   assert.equal(status.checks.targetMatch, true);
   assert.equal(status.receipt.binding.candidateSha256, deps.payload.candidate.sha256);
-  assert.equal(status.receipt.binding.launcherCount, 12);
+  assert.equal(status.receipt.binding.launcherCount, 15);
   assert.ok(status.checks.launchers.every(file => file.ok), 'recorded launcher bytes re-hash from disk');
   assert.deepEqual(status.checks.configDrift.missingProviders, []);
   assert.deepEqual(status.checks.configDrift.missingProfiles, []);

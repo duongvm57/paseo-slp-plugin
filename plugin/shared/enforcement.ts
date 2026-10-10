@@ -1,4 +1,5 @@
 import { DESK_REJECTION_LIMITS, DESK_RECOVERY_LIMITS, DESK_RECOVERY_RESULTS } from "./runtime/desk-contract.ts";
+import { FAMILY_IDS } from "./runtime/families.ts";
 // Shared enforcement wire/view contracts for the mechanize-enforcement desk
 // (P0). Same boundary rules as contracts.ts: shared/ modules may import only
 // zod, react-family specifiers and @getpaseo/plugin — no node builtins. This
@@ -98,14 +99,14 @@ export const WIRE_LIMITS = {
   /** Per-pair omission count ceiling — finite so a count can never be a
    *  float or an escape past the capacity contract. */
   completenessCount: Number.MAX_SAFE_INTEGER,
-  /** Exact P0+P2-d inventory: 15 host-wide rows + 6 rows × 4 families.
+  /** Exact P0+P2-d inventory: 15 host-wide rows + 6 rows per family.
    *  Growth without a pin raise is producer-invalid, never a row-limit
    *  shed. */
-  capabilities: 39,
+  capabilities: 15 + 6 * FAMILY_IDS.length,
   /** Exact P0+P2-d inventory: the mandatory `providerTools-projection`
    *  row + the P2-d `invoke-plugin-rpc-mcp` operator-transport gap +
-   *  4 probe gaps × 4 families. */
-  gaps: 18,
+   *  4 probe gaps per family. */
+  gaps: 2 + 4 * FAMILY_IDS.length,
   /** P2-e membership projection — the cap is the largest of {64, 32, 16}
    *  whose worst-case enforcement-status output stays under MAX_RPC_BYTES
    *  (measured by the capacity fixture, §4.4); rows beyond it shed

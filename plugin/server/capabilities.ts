@@ -370,6 +370,10 @@ function hostRecords(now: string, observed: CapabilityHostObservation): Capabili
 }
 
 export interface FamilyFacts {
+  /** Overrides for facts measured against a newer installed build; omitted
+   *  families keep their historical source pins. These are static evidence. */
+  contractRef?: string;
+  resumeRef?: string;
   /** Registry contract flag for exact MCP preapproval (provider-registry.ts). */
   exactPreapproval: boolean;
   /** Source ref backing this family's stdio MCP launch path. */
@@ -385,6 +389,15 @@ export interface FamilyFacts {
 // a registry family landing ahead of its curation must not crash the audit —
 // auditCapabilities fails closed with a typed gap per fact-dependent row.
 const FAMILY_FACTS: Partial<Record<FamilyId, FamilyFacts>> = {
+  opencode: {
+    exactPreapproval: false,
+    contractRef: "@getpaseo/server@0.10.3:dist/server/server/agent/provider-registry.js#PROVIDER_CONTRACTS.acp",
+    mcpLaunchRef: "@getpaseo/server@0.10.3:dist/server/server/agent/providers/acp-agent.js#acpMcpServers",
+    mcpLaunchEvidence: "generic ACP carries stdio command/args/env in session/new when OpenCode advertises MCP support; live child-env delivery unproven",
+    resumeRef: "@getpaseo/server@0.10.3:dist/server/server/agent/providers/acp-agent.js#resumeSession",
+    resumeEvidence: "generic ACP restores config and sends cwd+mcpServers on load/resume; the wrapper rearms entry delivery",
+    resumeLimitation: "ACP capability supportsMcpServers gates MCP; exact MCP preapproval and actual model delivery on ACP are not proven",
+  },
   codex: {
     exactPreapproval: true,
     mcpLaunchRef: src("packages/server/src/server/agent/providers/codex/codex-app-server-agent.ts"),
@@ -514,7 +527,7 @@ function familyRecords(
       probeId: null,
       status: facts.exactPreapproval ? "supported" : "unsupported",
       source: "paseo-src",
-      sourceRef: REGISTRY_SRC,
+      sourceRef: facts.contractRef ?? REGISTRY_SRC,
       evidenceKind: STATIC,
       evidenceRef: facts.exactPreapproval
         ? `PROVIDER_CONTRACTS.${family}.supportsExactMcpPreapproval === true`
@@ -568,7 +581,7 @@ function familyRecords(
       probeId: "d",
       status: "unknown",
       source: "paseo-src",
-      sourceRef: MANAGER_SRC,
+      sourceRef: facts.resumeRef ?? MANAGER_SRC,
       evidenceKind: STATIC,
       evidenceRef: facts.resumeEvidence,
       observedAt: null,
