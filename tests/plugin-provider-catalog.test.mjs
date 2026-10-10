@@ -7,7 +7,9 @@ import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
 import ts from 'typescript';
-import { CatalogFeature, CatalogInput, CatalogOutput } from '../plugin/shared/contracts.ts';
+import { CatalogFeature, CatalogInput, CatalogOutput, PeerPoolOption } from '../plugin/shared/contracts.ts';
+import { bindingCheck } from '../plugin/server/runtime/cli/binding.ts';
+import { validateCatalog } from '../plugin/server/runtime/cli/routing.ts';
 import * as hostDescriptors from './helpers/provider-descriptors.mts';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
@@ -37,6 +39,88 @@ const fakePaseo = (over = {}) => {
 };
 
 const snapshotEntries = entries => async () => { return { entries, error: null }; };
+
+for (const path of ['snapshot', 'legacy', 'loading']) {
+  test(`${path}: public discovery constraint agrees with enabled pool and binding guards`, async () => {
+    const loadCatalog = await freshCatalog();
+    const ids = ['swe-2', 'swe-2-max', 'swe-20', 'grok-4-7-medium', 'fusion-swe-2', 'SWE-2'];
+    const models = ids.map(id => ({ id, label: id }));
+    const { paseo } = fakePaseo({
+      ...(path !== 'legacy' ? { snapshot: snapshotEntries([
+        { provider: 'slp-devin-peer', status: path === 'loading' ? 'loading' : 'ready', models, modes: [] },
+      ]) } : {}),
+      listModels: async () => ({ models }),
+    });
+    const out = CatalogOutput.parse(await loadCatalog(baseInput, paseo));
+    assert.deepEqual(out.models.map(m => m.id), ids, 'discovery preserves host inventory by default');
+    assert.equal(out.modelConstraint?.pattern, '^swe-2($|-)');
+    assert.match(out.modelConstraint.description, /swe-2/);
+    const accepts = new RegExp(out.modelConstraint.pattern);
+    for (const model of ids) {
+      const option = { id: 'custom-seat', provider: 'devin', model, roles: ['peer'], enabled: true,
+        availability: 'ready', suitableFor: [], avoidFor: [], notes: 'Discovery consumer' };
+      const expected = accepts.test(model);
+      assert.equal(PeerPoolOption.safeParse(option).success, expected, model);
+      const candidate = { version: 1, policy: 'Human chooses', options: [option] };
+      if (expected) {
+        assert.doesNotThrow(() => validateCatalog(candidate), model);
+        assert.doesNotThrow(() => bindingCheck({ provider: 'slp-devin-peer', model }), model);
+      } else {
+        assert.throws(() => validateCatalog(candidate), /swe-2/, model);
+        assert.throws(() => bindingCheck({ provider: 'slp-devin-peer', model }), /swe-2/, model);
+      }
+    }
+  });
+
+  test(`${path}: modelPrefix reduces a large catalog without losing thinking metadata or host order`, async () => {
+    const loadCatalog = await freshCatalog();
+    const models = Array.from({ length: 160 }, (_, i) => ({
+      id: i % 20 === 0 ? `swe-2-${160 - i}` : `fusion-${i}`,
+      label: `Host model ${i}`,
+      thinkingOptions: [{ id: 'high', label: 'High', isDefault: true, metadata: { rank: i } }],
+      defaultThinkingOptionId: 'high',
+    }));
+    const { paseo, calls } = fakePaseo({
+      ...(path !== 'legacy' ? { snapshot: snapshotEntries([
+        { provider: 'slp-devin-peer', status: path === 'loading' ? 'loading' : 'ready', models, modes: [] },
+      ]) } : {}),
+      listModels: async () => ({ models }),
+    });
+    const full = CatalogOutput.parse(await loadCatalog(baseInput, paseo));
+    const request = CatalogInput.parse({ ...baseInput, modelPrefix: 'swe-2-', model: 'fusion-1' });
+    const filtered = CatalogOutput.parse(await loadCatalog(request, paseo));
+    assert.equal(full.models.length, 160);
+    assert.equal(filtered.models.length, 8);
+    assert.deepEqual(filtered, { ...full, models: full.models.filter(m => m.id.startsWith('swe-2-')) });
+    assert.ok(JSON.stringify(filtered).length < JSON.stringify(full).length / 10, 'payload shrinks over 90%');
+    assert.equal(calls.listFeatures.at(-1).provider,
+      `${path === 'legacy' ? 'devin' : 'slp-devin-peer'}/fusion-1`, 'filter does not change the feature draft');
+    assert.deepEqual(CatalogOutput.parse(await loadCatalog({ ...baseInput, modelPrefix: 'absent-' }, paseo)).models, []);
+    assert.equal(models.length, 160, 'host inventory is not mutated');
+  });
+}
+
+test('constraint follows requested family even when the host entry is missing', async () => {
+  const loadCatalog = await freshCatalog();
+  const { paseo } = fakePaseo({ snapshot: snapshotEntries([]) });
+  const missing = CatalogOutput.parse(await loadCatalog(baseInput, paseo));
+  assert.equal(missing.modelConstraint?.pattern, '^swe-2($|-)');
+  assert.match(missing.error, /not found/);
+  const codex = CatalogOutput.parse(await loadCatalog({ schemaVersion: 1, family: 'codex' }, paseo));
+  assert.equal(Object.hasOwn(codex, 'modelConstraint'), false);
+});
+
+test('catalog filter and plugin-owned constraint envelopes validate known fields strictly', () => {
+  assert.equal(CatalogInput.parse({ ...baseInput, modelPrefix: 'swe-2' }).modelPrefix, 'swe-2');
+  for (const modelPrefix of ['', true, 1, null, 'x'.repeat(257)]) {
+    assert.equal(CatalogInput.safeParse({ ...baseInput, modelPrefix }).success, false);
+  }
+  const out = { schemaVersion: 1, models: [], modes: [], features: [], error: null };
+  for (const modelConstraint of [
+    { pattern: 1, description: 'invalid' },
+    { pattern: '^swe-2($|-)', description: 'known', futurePluginKey: true },
+  ]) assert.equal(CatalogOutput.safeParse({ ...out, modelConstraint }).success, false);
+});
 
 test('snapshot path: managed-id entry wins, resolvedProvider recorded, models filtered', async () => {
   const loadCatalog = await freshCatalog();

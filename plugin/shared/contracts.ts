@@ -10,6 +10,7 @@
 import { z } from "zod";
 import { defineRpc } from "@getpaseo/plugin";
 import { JEV_TRANSPORTS } from "./runtime/jev-transport.ts";
+import { swe2ModelPattern } from "./runtime/model-constraints.ts";
 import { FAMILY_IDS, OWNED_PROVIDER_ID_RE, PROVIDER_EXTENDS_IDS, ROLES, persistedProviderIds, persistedFamilyIds } from "./runtime/families.ts";
 
 /** The serialized-RPC byte contract: every request and response envelope
@@ -230,13 +231,12 @@ export const SetRoleRoutingOutput = z.object({
  *  keeps the full file vocabulary so a stored pool round-trips verbatim.
  *  Passthrough, not strict — the package validator tolerates extra option
  *  keys (a legacy file may still carry `priority`), so the wire does too. */
-// These three patterns mirror settingIdPattern / unsafeModelPattern /
-// swe2ModelPattern in plugin/server/runtime/cli/binding.ts — the shared boundary cannot import the
-// package, so the parity test in tests/plugin-routing.test.mjs pins this
+// These two patterns mirror settingIdPattern / unsafeModelPattern in
+// plugin/server/runtime/cli/binding.ts; the family model pattern is shared.
+// The parity test in tests/plugin-routing.test.mjs pins this
 // schema to the same accept/reject verdicts as validateCatalog.
 const POOL_SETTING_ID = /^[a-zA-Z0-9._-]+$/;
 const POOL_UNSAFE_MODEL = /[\s\x00-\x1f\x7f]/;
-const POOL_SWE2_MODEL = /^swe-2($|-)/;
 const poolNonempty = (s: string) => s.trim().length > 0;
 
 /** The Jev decline sentinel (plugin/server/runtime/cli/routing.ts ROUTE_DECLINE_CANDIDATE) — a
@@ -269,7 +269,7 @@ export const PeerPoolOption = z.object({
   if (option.enabled === true && !option.model) {
     ctx.addIssue({ code: "custom", path: ["model"], message: "enabled options require a model" });
   }
-  if (option.provider === "devin" && option.enabled === true && !POOL_SWE2_MODEL.test(option.model)) {
+  if (option.provider === "devin" && option.enabled === true && !swe2ModelPattern.test(option.model)) {
     ctx.addIssue({ code: "custom", path: ["model"], message: "devin options require a swe-2 model" });
   }
 });
@@ -485,6 +485,9 @@ export const CatalogInput = z.object({
   cwd: AbsolutePath.optional(),
   model: z.string().min(1).optional(),
   modeId: z.string().min(1).optional(),
+  // Case-sensitive model id prefix. Presentation only; does not change the
+  // feature draft, provider selection or any write-time validation.
+  modelPrefix: z.string().min(1).max(256).optional(),
 }).strict();
 // Host-owned descriptors may gain fields independently of this plugin.
 // Strip unknown descriptor keys; the plugin-owned RPC envelopes stay strict.
@@ -549,6 +552,12 @@ export const CatalogOutput = z.object({
    *  the managed `slp-<family>-<role>` id, or the base family on fallback.
    *  Absent on the legacy listModels/listModes path (pre-snapshot daemons). */
   resolvedProvider: z.string().min(1).optional(),
+  /** Necessary package model restriction for the requested family, when
+   *  one exists. Matching is advisory, never sufficient for admission. */
+  modelConstraint: z.object({
+    pattern: z.string().min(1),
+    description: z.string().min(1),
+  }).strict().optional(),
 }).strict();
 export const activate = defineRpc({ name: "activate", input: ActivateInput, output: StartOutput });
 export const reconcile = defineRpc({ name: "reconcile", input: ReconcileInput, output: StartOutput });

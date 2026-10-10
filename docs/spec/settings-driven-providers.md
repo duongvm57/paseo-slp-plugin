@@ -414,6 +414,17 @@ review; registry derivation does not authorize normalization of old records.
   `listModels`/`listModes`/`listFeatures` path verbatim. The
   ManagerSurface cache keys follow the same scope: catalogs under
   `family|role`, feature defs under `family|role|model|modeId`.
+  The current public catalog additionally accepts optional `modelPrefix`
+  (case-sensitive literal model-id prefix, 1–256 characters), applied after
+  host resolution on all paths, preserving order and full thinking/default
+  metadata. With no prefix, the model list is unchanged. Devin responses
+  expose optional `modelConstraint: {pattern, description}` with regex source
+  `^swe-2($|-)`, including on discovery errors; other families currently omit
+  it. The shared runtime model constraint supplies both this hint and the
+  pool/binding guards. Catalog remains advisory: a host-listed or matching
+  model does not grant admission and writes still validate. These plugin-owned
+  fields are strictly checked; extensible host descriptors still strip unknown
+  fields. See [consumer recipes](../cli.md#provider-model-discovery-plugin-rpc).
 - **Provider label unification** — generated provider entries now emit
   one label template for every transport: `SLP <Family> <Role>`
   (`SLP Codex Peer`, `SLP Pi Peer`, `SLP Claude Code Peer`,

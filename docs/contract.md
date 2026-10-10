@@ -30,7 +30,8 @@ and dependency locks are supporting artifacts, not additional runtime owners.
 | plugin/server/journal.ts | Private receipt read/CAS/durable replacement, strict receipt refinements and operation lookup; sidecar state stays outside immutable candidates. |
 | plugin/server/config-view.ts, plugin/server/config-transaction.ts | Raw/live configuration observations, canonical hashes, owned-slot projections and pinned persisted-schema planning for activation, reconciliation and semantic restoration. |
 | plugin/server/state-store.ts | Atomic private language/routing/Peer-pool state, CAS and legacy-pool import. Exports its own state locations; host configuration remains outside this writer. |
-| plugin/server/provider-catalog.ts | Fresh host provider/model/mode/feature observations and bounded catalog projection; provider presence does not establish health. |
+| plugin/server/provider-catalog.ts | Fresh host provider/model/mode/feature observations and bounded catalog projection, optional modelPrefix filtering with host order/thinking metadata preserved, and advisory family model constraints; provider presence or a matching model does not establish health or admission. |
+| plugin/shared/runtime/model-constraints.ts | Pure family model restrictions shared by public discovery, the Peer pool wire schema and runtime binding/routing guards. The Devin swe-2 pattern has one source; no provider alias or host inventory determines eligibility. |
 | plugin/server/materializer.ts | Immutable payload stage/verify/fsync/rename and retained-candidate receipt anchoring. Owns candidate integrity and publication decisions. |
 | plugin/server/launchers.ts | Immutable launcher publication and verification, node/family binding, gate-vs-shim manifests and path ancestry. Owns launch-set integrity and collision decisions. |
 | plugin/server/publication-files.ts | Shared asynchronous private-directory, exclusive-write, staging-path and durability mechanics for candidate/launcher publication; domain verification and recovery stay with their callers. |
@@ -152,6 +153,27 @@ outside immutable candidates and plugin settings; its payload manifest
 additionally verifies file modes. The shell installer and installed CLI share
 the standalone installation code. The plugin uses the documented config.patch
 transaction and stable executable shims.
+
+## Provider catalog discovery
+
+The public `catalog` RPC is read-only and advisory. Its optional `modelPrefix`
+request field filters model ids by a case-sensitive literal prefix (1–256
+characters), preserving host order and each retained model's thinking options
+and declared default. Omission keeps the complete existing model list; an
+unmatched prefix returns an empty list. Modes, features, errors and provider
+resolution are unaffected, including when `model` selects a feature draft
+outside the filtered list.
+
+For Devin, the response also carries `modelConstraint: {pattern, description}`,
+with JavaScript regex source `^swe-2($|-)`. This necessary package restriction
+comes from the same pattern as the enabled Peer pool and runtime binding
+guards, and is available even when host discovery reports an error. Other
+families currently omit this hint. Host inventory remains visible by default,
+including models outside the constraint; neither inclusion nor a pattern match
+grants admission. Actual write-time validation, transport verification and
+Human authority remain in force. Host descriptors validate known fields and
+strip future additions; plugin request/response envelopes and the constraint
+object remain strict. See [CLI discovery recipes](cli.md#provider-model-discovery-plugin-rpc).
 
 ## Installation and restoration
 
