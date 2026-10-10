@@ -47,6 +47,9 @@ jobs:
         with:
           node-version: 22
 
+      - name: Install payload generator dependencies
+        run: npm ci --include=dev
+
       - name: Regenerate plugin payload
         run: |
           npm run generate:plugin-payload
