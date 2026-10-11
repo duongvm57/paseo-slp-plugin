@@ -134,6 +134,21 @@ test('v2 pools can replace a dirty draft with defaults; saved empty pools never 
  assert.equal(f.state.pool.poolForm.seats.length,0);assert.equal(f.state.pool.poolDefaultsDraft,false);
 });
 
+test('removing then adding a custom preset with the same ID does not inherit the removed stored entry',async t=>{
+ const old={...oldPool(),version:2,quotaFallback:{enabled:false,optionId:null}};
+ old.options[0]={...old.options[0],id:'preset-2',displayName:'Removed preset',description:'Old guidance',effortPolicy:{kind:'select'},runtimeRule:'none'};
+ const f=await setup(t,old);
+ await act(async()=>f.state.pool.removeSeat(0)());
+ await f.press('Add preset');
+ assert.equal(f.state.pool.poolForm.seats[0].id,'preset-2');
+ const built=f.state.pool.poolBuild.pool.options[0];
+ assert.deepEqual(built.roles,['peer']);assert.equal(built.availability,'ready');assert.equal(built.extension,undefined);
+ assert.equal(built.provider,'');assert.equal(built.model,'');assert.equal(built.notes,'');
+ assert.equal(f.write.calls.length,0);
+ await f.press('Save pool');assert.equal(f.write.calls[0].input.expectedSha256,SHA);
+ assert.equal(f.write.calls[0].input.pool.options[0].extension,undefined);
+});
+
 test('replacement confirmations clear on edits, reload and target changes; failed reads keep replacement locked',async t=>{
  const f=await setup(t,oldPool());await f.press('Use 5 default presets');
  await act(async()=>f.state.pool.updatePool(form=>({...form,policy:'Edited policy'})));

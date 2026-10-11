@@ -990,7 +990,7 @@ export function freshPresetPoolForm(): PeerPoolForm {
 }
 export function newCustomPreset(existing: readonly string[]): PeerSeatForm {
   const option = { ...starterPeerOptions()[0], id: suggestCustomSeatId("preset", existing), displayName: "New preset", description: "", templateOrigin: null, runtimeRule: "none" as const };
-  return peerSeatForm(option as PeerPoolOptionValue, true);
+  return { ...peerSeatForm(option as PeerPoolOptionValue, true), storedId: "" };
 }
 /** Explicit migration draft only. Keep identities/settings and private notes;
  * legacy suitability remains visible until the Human reviews the description. */

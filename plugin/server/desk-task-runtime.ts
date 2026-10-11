@@ -76,7 +76,19 @@ export async function observeTaskProviders(host: TaskRuntimeApi, cwd: string) {
   }
 }
 
+/** Model metadata is an additive installed-candidate ABI, not a host capability.
+ * Older v1 consumers reject unknown provider keys even for saved Lead profiles. */
+export function taskProviderInventory(observed: Awaited<ReturnType<typeof observeTaskProviders>>, supportsPresets: boolean) {
+  return observed.entries.map(entry => ({
+    id: entry.provider, enabled: entry.enabled === true,
+    status: entry.status === "ready" && !entry.error ? "available" : "unavailable",
+    ...(entry.extends !== undefined ? { extends: entry.extends } : {}),
+    ...(supportsPresets && entry.models !== undefined ? { models: entry.models } : {}),
+  }));
+}
+
 type LaunchModule = {
+  FORMATION_CAPABILITIES?: { peerPresets?: number };
   resolveBinding(role: string, request: {
     repository: string;
     assignment: string;
@@ -135,12 +147,7 @@ export function createTaskRuntimeResolver(deps: {
         // SDK snapshots use `provider`, while the installed launch ABI uses
         // `id`. Only a ready, enabled observation grants usable inventory;
         // unknown/loading/error remains unavailable. No config fallback.
-        providers: observed.entries.map(entry => ({
-          id: entry.provider, enabled: entry.enabled === true,
-          status: entry.status === "ready" && !entry.error ? "available" : "unavailable",
-          ...(entry.extends !== undefined ? { extends: entry.extends } : {}),
-          ...(entry.models !== undefined ? { models: entry.models } : {}),
-        })),
+        providers: taskProviderInventory(observed, module.FORMATION_CAPABILITIES?.peerPresets === 2),
       }, disposition);
       const binding = resolved.binding;
       if (!binding?.provider || !binding.model) return reject("CAPABILITY_GAP", "the bound resolver returned no complete provider/model bundle");

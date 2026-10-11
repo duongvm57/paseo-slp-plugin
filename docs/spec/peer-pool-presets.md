@@ -17,6 +17,10 @@ This adds no repository ceremony, authority, tracker or review gate.
 
 Readers accept version 1 and version 2. Existing v1 catalogs retain their
 reserved archetype/token semantics, fixed thinking settings and receipts.
+The Manager sends provider model metadata only to an installed candidate that
+advertises `FORMATION_CAPABILITIES.peerPresets === 2`, across formation,
+selection, revalidation and task dispatch. New Manager code therefore retains
+the older candidate's strict provider ABI while v1 remains active.
 Loading a Manager or upgrading the plugin never rewrites a pool. A missing
 pool seeds five parked entries in the draft only. A saved empty pool stays
 empty. Saving is explicit and CAS-guarded. Before writing v2, the server verifies the
@@ -44,6 +48,8 @@ Both editors offer **Use 5 default presets**. An explicit confirmation replaces
 the current draft entries with the five parked starters and clears the quota
 fallback; it preserves the pool policy and pool-level passthrough fields. New
 rows never inherit settings or extensions from saved entries with matching IDs.
+The same isolation applies to newly added custom rows when an unsaved removal
+allows their generated ID to reuse an old stored identity.
 The Human can copy the saved pool backup before replacement, configure models,
 enable the desired presets and Save through the existing CAS/runtime guard.
 Opening or cancelling the preview never writes. Target changes and successful

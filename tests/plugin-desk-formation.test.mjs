@@ -455,6 +455,35 @@ test('missing bound candidate selector fails automatically but preserves explici
  const req={...f.input,runtime:{optionId:'first',catalogSha256:f.sha()}};
  assert.equal((await f.run(req)).result.state,'awaiting-caller-delivery');
 });
+test('new Manager Lead formation preserves the v1 launch provider ABI with a fresh model catalog',async t=>{
+ const f=fixture(t),runtimePath=join(f.root,'candidate');install(fileURLToPath(new URL('..',import.meta.url)),runtimePath);
+ writeFileSync(join(f.root,'config.json'),JSON.stringify({daemon:{agentProfiles:[{id:'slp-lead',provider:'slp-codex-lead',model:'model/variant',modeId:'full-access',thinkingOptionId:'high',featureValues:{fast_mode:true}}]}}));
+ f.host.providers.snapshot=async()=>({entries:[{provider:'slp-codex-lead',enabled:true,status:'ready',modes:[{id:'full-access'}],models:[{id:'model/variant'}]}]});
+ const planner=createFormationPlanner({runtimePath,daemonHome:f.root,host:()=>f.host,
+  importModule:async spec=>{const module=await import(spec);return {launchPlan:(...args)=>{
+   if(args[1].providers.some(p=>Object.hasOwn(p,'models')))throw new Error('Unknown legacy provider field: models');
+   return module.launchPlan(...args);
+  }};}});
+ const plan=await planner(f.row,f.input);assert.equal(plan.create.provider,'slp-codex-lead/model/variant');
+});
+
+test('new Manager automatic v1 Peer selection and revalidation preserve the legacy provider ABI',async t=>{
+ const f=await realPeerFixture(t,'off',1);
+ f.host.providers.snapshot=async()=>({entries:[{provider:'slp-codex-peer',enabled:true,status:'ready',modes:[{id:'full-access'}],models:[{id:'model/variant'}]}]});
+ const legacy=createFormationPlanner({runtimePath:f.candidate,daemonHome:f.home,host:()=>f.host,
+  importModule:async spec=>{const module=await import(spec);
+   const verify=providers=>{if(providers?.some(p=>Object.hasOwn(p,'models')))throw new Error('Unknown legacy provider field: models');};
+   return {...module,FORMATION_CAPABILITIES:{existingPlacement:1},
+    launchPlan:(root,request,...rest)=>{verify(request.providers);return module.launchPlan(root,request,...rest);},
+    preflightPeerChoice:(request,providers)=>{verify(providers);return module.preflightPeerChoice(request,providers);},
+    selectPeerSeat:(request,deps)=>{verify(deps.providers);return module.selectPeerSeat(request,{...deps,decide:f.decide});},
+    revalidatePeerSelection:(request,selected,providers)=>{verify(providers);return module.revalidatePeerSelection(request,selected,providers);}};
+  }});
+ Object.assign(f.formationDeps,{plan:legacy,preflightPeer:legacy.preflightPeer,selectPeer:legacy.selectPeer});
+ const out=await f.run();assert.equal(out.result.state,'awaiting-caller-delivery',JSON.stringify(out));
+ assert.equal(f.effects.filter(e=>e.kind==='create').length,1);
+});
+
 test('armed explicit runtime without decision gives ordinary recovery without creating or re-deciding',async t=>{
  const f=await realPeerFixture(t,'armed');
  const req={...f.input,runtime:{optionId:'first',catalogSha256:f.sha()}};
