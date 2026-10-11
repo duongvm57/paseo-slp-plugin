@@ -1,3 +1,5 @@
+import { decidePresetRoute } from "./preset-routing.ts";
+import type { Provider } from "./types.ts";
 import type { CatalogOption } from './routing.ts';
 import type { JevQuestion, JevOptions } from './jev.ts';
 // plugin/server/runtime/cli/jev-routing.ts — first Jev consumer: seat-selection routing decisions.
@@ -56,7 +58,7 @@ const describeOption = (option: CatalogOption) =>
 // (receipt emitted, context.armed=false, Lead still chooses; prepare records
 // both picks). Armed requires capabilities.routing=true and makes the receipt
 // binding at plan time.
-export async function routeDecide(request: { repository: string; role?: string; brief: unknown; paseoHome?: string }, { home, fetchImpl, now }: JevOptions & { home?: string } = {}) {
+export async function routeDecide(request: { repository: string; role?: string; brief: unknown; paseoHome?: string; providers?: Provider[]; routingContext?: unknown }, { home, fetchImpl, now }: JevOptions & { home?: string } = {}) {
   if (!record(request)) throw jevError('jev-request-invalid', 'route-decide request must be a JSON object');
   const repository = request.repository;
   let repoStat;
@@ -85,6 +87,8 @@ export async function routeDecide(request: { repository: string; role?: string; 
   const daemonHome = home ?? request.paseoHome ?? paseoHome();
   const { provider, key, armed } = resolveJev(daemonHome, 'routing', { allowShadow: true });
   const catalog = readCatalog(repository, daemonHome);
+
+  if (catalog.version === 2) return decidePresetRoute(catalog, { role, brief, providers: request.providers, routingContext: request.routingContext, paseoHome: daemonHome }, { fetchImpl, now });
 
   const eligible = eligibleOptions(catalog, role);
   if (eligible.length === 0) {
@@ -173,8 +177,11 @@ export function routeDecideSchema() {
       repository: 'required — absolute path to the work repository; its .paseo-slp/slp-routing.json (or the user-scope pool) supplies the candidate set',
       brief: 'required — a nonempty STRING of raw task/assignment text: task description, risk/effort signals, constraints, dependencies. Structured forms (object/array, e.g. a signals field) are refused — inline the facts as prose so suitability classification stays Jev’s, not the caller’s. Verbatim axis:value tokens inside the text ship as unverified mentions and are flagged in warnings.',
       role: 'optional — supervisor | lead | peer; default peer',
+      providers: 'v2 only — fresh provider/model observations, including models[].thinkingOptions; same inventory as route-choices/prepare',
+      routingContext: 'v2 only — {crossProvider?,reference?:{agentId?,provider,model}} observed from the relevant reference seat',
       paseoHome: 'optional — absolute daemon home for the user-scope pool and jev.json (the --paseo-home flag or PASEO_HOME also resolves it)',
     },
+    v2Output: 'Also thinkingOptionId, selectionSha256 and routingContext: retain all three alongside optionId/catalogSha256/decision for prepare. Use route-choices without Jev when off; shadow keeps the independent chosen pair.',
     output: '{ schemaVersion, optionId, catalogSha256, declined, role, tokenConflicts, warnings, poolDrift, decision } — decision is the consistency receipt (an offline-verifiable artifact, not a cryptographic signature); feed optionId/catalogSha256/decision into route.* of a prepare request. declined=true is a successful run whose answer is "no suitable option" (exit 1).',
     notes: [
       'Never assignmentFile bytes — pass a Lead-authored task text; eligibility is computed deterministically and Jev only sees {task, role, vocabulary, options}.',

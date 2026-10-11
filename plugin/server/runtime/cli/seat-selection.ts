@@ -1,3 +1,5 @@
+import { presetChoiceSet, boundedPresetChoices } from "./preset-routing.ts";
+import type { PresetRoutingContext } from "./preset-routing.ts";
 // Ordinary formation selection. Only the admitted executor calls selectPeerSeat;
 // CLI prepare/launchPlan revalidate receipts offline and never call this function.
 import type { Provider, Route } from "./types.ts";
@@ -9,11 +11,12 @@ import { seatTokenConflict } from "../../../shared/runtime/routing-vocabulary.ts
 
 export type PeerSelectionRequest = {
   repository: string; assignment: string; paseoHome: string;
-  selection?: { optionId: string };
+  selection?: { optionId: string; thinkingOptionId?: string | null };
+  routingContext?: PresetRoutingContext;
 };
 export type PeerSelectionMode = "unconfigured" | "off" | "shadow" | "armed";
 export type SelectedPeer = {
-  route: { optionId: string; catalogSha256: string; decision?: unknown };
+  route: { optionId: string; catalogSha256: string; decision?: unknown; thinkingOptionId?: string | null; selectionSha256?: string; routingContext?: PresetRoutingContext };
   source: { repository: string; catalogFile: string; scope: string };
   mode: PeerSelectionMode; modeSha256: string;
   origin: "unique" | "lead" | "jev";
@@ -36,7 +39,8 @@ function readInputs(request: PeerSelectionRequest) {
   const mode: PeerSelectionMode = config === null ? "unconfigured" : !config.enabled ? "off"
     : config.capabilities.routing === true ? "armed" : "shadow";
   const catalog = readCatalog(request.repository, request.paseoHome);
-  const usable = eligibleOptions(catalog, "peer").filter(option => !seatTokenConflict(option));
+  if (catalog.version === 1 && (Object.keys(request.routingContext ?? {}).length || request.selection && Object.hasOwn(request.selection, "thinkingOptionId"))) throw new SeatSelectionError("INVALID_RECORD", "v1 pools keep fixed settings; explicitly convert to v2 before using effort selection or reference constraints");
+  const usable = eligibleOptions(catalog, "peer").filter(option => catalog.version === 2 || !seatTokenConflict(option));
   if (usable.length === 0) throw new SeatSelectionError("INVALID_RECORD", "no eligible Peer option");
   if (request.selection && !usable.some(option => option.id === request.selection!.optionId)) {
     throw new SeatSelectionError("INVALID_RECORD", "selection is not an eligible Peer option");
@@ -52,7 +56,8 @@ function requireSameInputs(request: PeerSelectionRequest, selected: SelectedPeer
   }
 }
 /** Pure local discovery; no decision, no intent or native resource is admitted. */
-export async function preflightPeerChoice(request: PeerSelectionRequest) {
+export async function preflightPeerChoice(request: PeerSelectionRequest, providers?: Provider[]) {
+  if (readCatalog(request.repository, request.paseoHome).version === 2) return preflightPresetChoice(request, providers);
   const seen = readInputs(request);
   const needsChoice = request.selection === undefined && (seen.mode === "shadow"
     || ((seen.mode === "off" || seen.mode === "unconfigured") && seen.usable.length > 1));
@@ -74,12 +79,14 @@ export async function preflightPeerChoice(request: PeerSelectionRequest) {
 /** Verify the fixed selection against fresh local inputs/live provider facts. */
 export function revalidatePeerSelection(request: PeerSelectionRequest, selected: SelectedPeer, providers: Provider[]) {
   requireSameInputs(request, selected);
+  if (selected.route.selectionSha256 && canonicalJson(request.routingContext ?? {}) !== canonicalJson(selected.route.routingContext ?? {})) throw new SeatSelectionError("ROUTE_DRIFT", "Reference runtime or routing requirements changed");
   return catalogBinding(request.repository, "peer", providers, selected.route as Route, request.paseoHome);
 }
 export async function selectPeerSeat(request: PeerSelectionRequest, deps: {
   providers: Provider[]; phase: (name: string, value: unknown) => void;
   decide?: typeof routeDecide;
 }): Promise<SelectedPeer> {
+  if (readCatalog(request.repository, request.paseoHome).version === 2) return selectPresetPeer(request, deps);
   const seen = readInputs(request);
   let optionId = request.selection?.optionId;
   if (seen.mode === "shadow" && optionId === undefined) {
@@ -142,3 +149,62 @@ export async function selectPeerSeat(request: PeerSelectionRequest, deps: {
   }
   return selected;
 }
+
+function presetSet(request: PeerSelectionRequest, providers: Provider[] | undefined) {
+  return boundedPresetChoices(presetChoiceSet(readCatalog(request.repository, request.paseoHome), 'peer', providers, request.routingContext));
+}
+function independentPresetPair(request: PeerSelectionRequest, choices: ReturnType<typeof presetSet>['choices']) {
+  if (!request.selection) return undefined;
+  const matches = choices.filter(c => c.optionId === request.selection!.optionId
+    && (!Object.hasOwn(request.selection!, 'thinkingOptionId') || c.thinkingOptionId === request.selection!.thinkingOptionId));
+  if (matches.length !== 1) throw new SeatSelectionError('INVALID_RECORD', 'Select one eligible preset + effort pair, including thinkingOptionId', 'selection-required');
+  return matches[0];
+}
+function preflightPresetChoice(request: PeerSelectionRequest, providers: Provider[] | undefined) {
+  const seen = readInputs(request), set = presetSet(request, providers);
+  const independent = independentPresetPair(request, set.choices);
+  if (independent || (seen.mode !== 'shadow' && ((seen.mode === 'armed') || set.choices.length === 1))) return null;
+  return { ok: true as const, state: 'selection-required' as const, operationAdmitted: false,
+    mode: seen.mode, source: seen.source, catalogSha256: seen.catalog.sha256,
+    selectionSha256: set.selectionSha256, choices: set.choices, excluded: set.excluded, omittedCount: 0 };
+}
+async function selectPresetPeer(request: PeerSelectionRequest, deps: Parameters<typeof selectPeerSeat>[1]): Promise<SelectedPeer> {
+  const seen = readInputs(request), set = presetSet(request, deps.providers);
+  let chosen = independentPresetPair(request, set.choices);
+  if (seen.mode === 'shadow' && !chosen) throw new SeatSelectionError('INVALID_RECORD', 'Shadow requires an independent preset + effort pair', 'selection-required');
+  if ((seen.mode === 'off' || seen.mode === 'unconfigured') && !chosen) {
+    if (set.choices.length !== 1) throw new SeatSelectionError('INVALID_RECORD', 'Multiple preset + effort pairs require selection', 'selection-required');
+    chosen = set.choices[0];
+  }
+  const provisional = { source: seen.source, mode: seen.mode, modeSha256: seen.modeSha256 };
+  let decision: unknown, decisionResult: SelectedPeer['decisionResult'];
+  if (seen.mode === 'armed' || seen.mode === 'shadow') {
+    deps.phase('route-issued', { ...provisional, catalogSha256: seen.catalog.sha256, selectionSha256: set.selectionSha256 });
+    const answer = await (deps.decide ?? routeDecide)({ repository: request.repository, role: 'peer', brief: request.assignment,
+      paseoHome: request.paseoHome, providers: deps.providers, routingContext: set.context });
+    if (!('candidateId' in answer)) throw new SeatSelectionError('ROUTE_DRIFT', 'v2 routing requires a preset-pair decision');
+    verifyReceipt(answer.decision);
+    const key = (answer.decision.answers[ROUTE_DECISION_QUESTION] as { choice?: unknown })?.choice;
+    const pair = set.choices.find(c => c.candidateId === key);
+    if (answer.catalogSha256 !== seen.catalog.sha256 || answer.selectionSha256 !== set.selectionSha256 || answer.role !== 'peer'
+      || answer.decision.context.armed !== (seen.mode === 'armed') || answer.candidateId !== key
+      || answer.declined !== (key === ROUTE_DECLINE_CANDIDATE) || answer.optionId !== (pair?.optionId ?? null)
+      || answer.thinkingOptionId !== (pair?.thinkingOptionId ?? null)) throw new SeatSelectionError('ROUTE_DRIFT', 'Preset decision envelope differs from its receipt/inputs');
+    const { decision: receipt, ...rest } = answer; decision = receipt; decisionResult = rest;
+    if (seen.mode === 'armed') {
+      if (answer.declined) { if (Buffer.byteLength(JSON.stringify(answer)) > MAX_SELECTION_BYTES) throw new SeatSelectionError('REQUEST_TOO_LARGE', 'Preset decline receipt exceeds its byte budget'); deps.phase('route-declined', answer); throw new SeatSelectionError('INVALID_RECORD', 'Jev declined Peer routing', 'declined'); }
+      if (chosen && chosen.candidateId !== pair?.candidateId) { if (Buffer.byteLength(JSON.stringify(answer)) > MAX_SELECTION_BYTES) throw new SeatSelectionError('REQUEST_TOO_LARGE', 'Preset mismatch receipt exceeds its byte budget'); deps.phase('route-mismatch', { ...answer, selection: request.selection }); throw new SeatSelectionError('ROUTE_DRIFT', 'Independent preset + effort differs from armed Jev', 'selection-mismatch'); }
+      chosen = pair;
+    }
+  }
+  if (!chosen) throw new SeatSelectionError('INVALID_RECORD', 'No selected preset + effort');
+  const selected: SelectedPeer = { ...provisional,
+    route: { optionId: chosen.optionId, thinkingOptionId: chosen.thinkingOptionId, catalogSha256: seen.catalog.sha256,
+      selectionSha256: set.selectionSha256, routingContext: set.context, ...(decision !== undefined ? { decision } : {}) },
+    origin: seen.mode === 'armed' ? 'jev' : request.selection ? 'lead' : 'unique', ...(decisionResult ? { decisionResult } : {}) };
+  revalidatePeerSelection(request, selected, deps.providers);
+  if (Buffer.byteLength(JSON.stringify(selected)) > MAX_SELECTION_BYTES) throw new SeatSelectionError('REQUEST_TOO_LARGE', 'Preset selection receipt exceeds its byte budget');
+  return selected;
+}
+
+export const peerSelectionNeedsCapabilities = (request: PeerSelectionRequest) => readCatalog(request.repository, request.paseoHome).version === 2;

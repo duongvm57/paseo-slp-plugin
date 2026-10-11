@@ -2587,6 +2587,9 @@ export const DeskTaskRuntimePin = z
     optionId: DeskEntityId,
     catalogSha256: Sha,
     decision: z.unknown().optional(),
+    thinkingOptionId: z.string().regex(/^[a-zA-Z0-9._-]+$/).nullable().optional(),
+    selectionSha256: Sha.optional(),
+    routingContext: z.object({ crossProvider: z.boolean().optional(), reference: z.object({ agentId: DeskTaskAgentId.optional(), provider: z.string().min(1).max(512), model: z.string().min(1).max(512) }).strict().optional() }).strict().optional(),
     quotaFallbackFrom: DeskEntityId.optional(),
   })
   .strict();

@@ -1,3 +1,5 @@
+import { PresetPoolCard } from "./preset-pool.tsx";
+import { freshPresetPoolForm, presetMigrationForm } from "../manager-state.ts";
 // Peer pool owns its draft, seat editors and CAS save/reload/import/copy.
 // Target async owns snapshot reads and session tickets. Target changes reset
 // this card's draft and transient state. The shell supplies RPC adapters,
@@ -169,7 +171,7 @@ export function usePeerPoolCard({ target, targetKey, isCurrentKey, callGetPeerPo
   // error line names what the file held).
   useEffect(() => {
     if (poolDirty) return;
-    const next = poolData?.pool ? peerPoolForm(poolData.pool) : emptyPeerPoolForm();
+    const next = poolData?.pool ? peerPoolForm(poolData.pool) : poolData && !poolData.error ? freshPresetPoolForm() : emptyPeerPoolForm();
     setPoolForm(current => (samePeerPoolForm(current, next) ? current : next));
   }, [poolData, poolDirty]);
 
@@ -200,6 +202,7 @@ export function usePeerPoolCard({ target, targetKey, isCurrentKey, callGetPeerPo
     poolForm,
     seat => featureDefsForSeat(seat).defs,
     storedSeatOptions,
+    poolData?.pool,
   );
   const poolDiffers = peerPoolDiffers(poolBuild, poolData?.pool ?? null);
   // §7.4.E — the editor stays locked until the first successful snapshot:
@@ -235,9 +238,10 @@ export function usePeerPoolCard({ target, targetKey, isCurrentKey, callGetPeerPo
       ...form,
       seats: form.seats.map((seat, i) =>
         i === index
-          ? (field === "model" || field === "modeId"
+          ? { ...(field === "model" || field === "modeId"
             ? applySettingChange(seat, field, value, seat.family !== "" ? catalogs[catalogScope(seat.family, "peer")] : undefined)
-            : { ...seat, [field]: value })
+            : { ...seat, [field]: value }),
+            ...(seat.preset && field === "model" && value !== seat.model ? { modelProvider: "", allowedEfforts: undefined } : {}) }
           : seat,
       ),
     }));
@@ -264,6 +268,7 @@ export function usePeerPoolCard({ target, targetKey, isCurrentKey, callGetPeerPo
           ? seat
           : {
               ...seat,
+              ...(seat.preset && family !== seat.family ? { modelProvider: "", allowedEfforts: undefined } : {}),
               ...(family === ""
                 ? { family: "" as const, model: "", modeId: "", thinkingOptionId: "", features: "", feature: {} }
                 : applyFamilyChange(seat, family, catalogs[catalogScope(family, "peer")])),
@@ -503,6 +508,14 @@ export function usePeerPoolCard({ target, targetKey, isCurrentKey, callGetPeerPo
   };
 
   return {
+    copyStoredV1: async () => {
+      if (poolData?.pool?.version !== 1) return;
+      const ticket = capture();
+      try { await copyText(JSON.stringify(poolData.pool, null, 2)); if (ticket.isCurrent()) setPoolCopied(true); }
+      catch (error) { if (target && ticket.isCurrent()) update({ lastError: errorMessage(error) }, target); }
+    },
+    previewPresetMigration: () => { if (!poolDirty && poolData?.pool?.version === 1) { updatePool(() => presetMigrationForm(poolData.pool!)); setOpenSeat(0); } },
+    cancelPresetMigration: () => { if (poolData?.pool?.version === 1) { setPoolForm(peerPoolForm(poolData.pool)); setPoolDirty(false); setOpenSeat(null); } },
     fresh: snapshot.fresh,
     poolData,
     poolForm,
@@ -592,6 +605,7 @@ export function PeerPoolCard({ colors, target, compact, statusView, jev, pool, a
   retryFeatureSet: (key: string) => Promise<unknown>;
   scrollFocusNode: (node: unknown, focus?: boolean) => void;
 }) {
+  if (pool.poolForm.version === 2) return <PresetPoolCard colors={colors} pool={pool} availableFamilies={availableFamilies} catalogs={catalogs} retryCatalog={retryCatalog} retryFeatureSet={retryFeatureSet} />;
   const {
     poolData,
     poolForm,
@@ -668,6 +682,10 @@ export function PeerPoolCard({ colors, target, compact, statusView, jev, pool, a
             )
           }
         >
+          {poolData?.pool?.version === 1 ? <View style={styles.field}>
+            <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>Legacy v1 pool: runtime and routing remain unchanged. Migration is optional; old plugin versions cannot read a saved v2 pool.</Text>
+            <Button colors={colors} label="Preview preset migration" onPress={pool.previewPresetMigration} disabled={poolLocked || poolDirty} />
+          </View> : null}
           {poolData !== null && !pool.fresh ? <Text style={[styles.mutedSmall, { color: poolReadError ? colors.statusWarning : colors.foregroundMuted }]}>
             {poolReadError ? `Pool refresh unavailable: ${poolReadError}. Showing the previous read; Reload to retry.` : "Refreshing pool…"}
           </Text> : null}

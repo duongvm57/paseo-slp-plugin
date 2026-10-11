@@ -26,3 +26,11 @@ resolves fresh runtime itself; do not duplicate its provider/settings guards.
 A configured inventory or enabled option alone proves no health/quota.
 Report local validation/empty/ineligible/unavailable separately. Setup does
 not create agents, authenticate grants or establish live E2E acceptance.
+
+For a new pool, Manager offers five parked starter presets: Fast, Balanced,
+Advanced, Frontier and Cross-provider. Human chooses models, edits English
+starter descriptions or adds arbitrary presets. Effort can be Lead/Jev-selected
+within supported values or Human-fixed. Cross-provider has an explicit rule
+relative to a named reference seat; declare model vendors when host metadata
+cannot supply them. Existing v1 pools stay unchanged. Preview and review a v2
+conversion explicitly; retain the original v1 JSON for a possible downgrade.

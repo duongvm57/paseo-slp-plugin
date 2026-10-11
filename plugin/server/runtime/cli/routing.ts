@@ -1,5 +1,9 @@
+import { presetOptionError } from "../../../shared/runtime/peer-presets.ts";
+import type { PresetFields } from "../../../shared/runtime/peer-presets.ts";
+import { PRESET_ROUTING_VERSION } from "../../../shared/runtime/peer-presets.ts";
+import { presetChoiceSet, boundedPresetChoices, bindPresetCatalog } from "./preset-routing.ts";
 import type { Provider, Route } from './types.ts';
-export interface CatalogOption extends Record<string, unknown> {
+export interface CatalogOption extends PresetFields, Record<string, unknown> {
   id: string;
   provider: string;
   model: string;
@@ -71,7 +75,7 @@ const statuses = ['ready', 'quota-exhausted', 'paused', 'unknown'];
 export const emptyCatalog = (): Catalog => ({ version: 1, policy: 'Human maintains model suitability and quota. Lead chooses within the current assignment budget.', quotaFallback: { enabled: false, optionId: null }, options: [] });
 
 export function validateCatalog(catalog: unknown): Catalog {
-  if (!record(catalog) || catalog.version !== 1 || !nonempty(catalog.policy) || !Array.isArray(catalog.options)) throw new Error('Routing catalog requires version=1, policy and options[]');
+  if (!record(catalog) || ![1, 2].includes(catalog.version as number) || !nonempty(catalog.policy) || !Array.isArray(catalog.options)) throw new Error('Routing catalog requires version=1 or 2, policy and options[]');
   const ids = new Set();
   for (const option of catalog.options as unknown[]) {
     if (!record(option) || !nonempty(option.id) || !/^[a-z][a-z0-9-]*$/.test(option.id) || ids.has(option.id)) throw new Error('Invalid or duplicate routing option id');
@@ -92,7 +96,12 @@ export function validateCatalog(catalog: unknown): Catalog {
     for (const key of ['suitableFor', 'avoidFor'] as const) {
       if (!Array.isArray(option[key]) || option[key].some(value => !nonempty(value))) throw new Error(`Routing option ${option.id}: ${key} must be a string list`);
     }
-    if (!nonempty(option.notes)) throw new Error(`Routing option ${option.id}: suitability notes required`);
+    if (catalog.version === 1 && !nonempty(option.notes)) throw new Error(`Routing option ${option.id}: suitability notes required`);
+    if (catalog.version === 2) {
+      if (typeof option.notes !== 'string') throw new Error('Preset private notes must be text');
+      const error = presetOptionError(option);
+      if (error) throw new Error(`Routing option ${option.id}: ${error}`);
+    }
   }
   if (catalog.quotaFallback != null) {
     // Legacy migration (wave 6): the ordered optionIds list predates the
@@ -226,7 +235,7 @@ export function readCatalog(repository: string, home = paseoHome()): ResolvedCat
   // every read so the routing/prepare path surfaces it before that seat is
   // used as a standard seat. It is a content error, not a schema rejection:
   // validateCatalog stays shape-only so custom seats keep free strings.
-  const tokenConflicts = catalogTokenConflicts(catalog);
+  const tokenConflicts = catalog.version === 1 ? catalogTokenConflicts(catalog) : [];
   const sha256 = hash(bytes);
   const userPool = scope === 'repository' ? probeUserPool(home) : null;
   const result: ResolvedCatalog = { ...catalog, path, scope, sha256, tokenConflicts };
@@ -271,6 +280,8 @@ export function catalogBinding(repository: string, role: string, providers: Prov
   if (Object.hasOwn(route, 'catalogFile')) throw new Error('Routing is repository-scoped; use repository/.paseo-slp/slp-routing.json, not route.catalogFile');
   const catalog = readCatalog(repository, home);
   if (route.catalogSha256 !== catalog.sha256) throw new Error('Routing catalog changed or hash missing; read routes again before selecting');
+  if (catalog.version === 2) return bindPresetCatalog(catalog, role, providers, route, home ?? paseoHome());
+  if (route.selectionSha256 !== undefined || route.routingContext !== undefined) throw new Error("Preset selection pins require a v2 pool; v1 routing remains unchanged");
   const decision = route.decision as import('./jev.ts').VerifiedJevReceipt | null | undefined;
   const jevConfig = readJevConfig(home ?? paseoHome());
   const jevMode = jevConfig !== null && jevConfig.enabled === true && jevConfig.capabilities.routing === true;
@@ -343,4 +354,26 @@ export function catalogBinding(repository: string, role: string, providers: Prov
     routing: { catalogFile: catalog.path, catalogScope: catalog.scope, catalogSha256: catalog.sha256, optionId: option.id, jev, ...(route.quotaFallbackFrom ? { quotaFallbackFrom: route.quotaFallbackFrom } : {}), ...(catalog.poolDrift ? { poolDrift: catalog.poolDrift } : {}) },
     warnings,
   };
+}
+
+/** Read-only v2 compatibility discovery. Supplied inventory is an observation,
+ * not a provider override; prepare rechecks its hash and the live capabilities. */
+export function routeChoices(request: { repository: string; role?: string; paseoHome?: string; providers?: Provider[]; routingContext?: unknown }) {
+  if (!record(request)) throw new Error('route-choices requires a request object');
+  const role = request.role ?? 'peer';
+  if (!roles.includes(role)) throw new Error('Invalid routing role');
+  const catalog = readCatalog(request.repository, request.paseoHome);
+  if (catalog.version !== 2) throw new Error('route-choices is for v2 presets; use routes for legacy v1 pools');
+  const set = boundedPresetChoices(presetChoiceSet(catalog, role, request.providers, request.routingContext));
+  return { schemaVersion: 2, semantics: PRESET_ROUTING_VERSION, role,
+    source: { repository: request.repository, catalogFile: catalog.path, scope: catalog.scope },
+    catalogSha256: catalog.sha256, selectionSha256: set.selectionSha256,
+    routingContext: set.context, choices: set.choices, excluded: set.excluded, omittedCount: 0 };
+}
+export function routeChoicesSchema() {
+  return { description: 'Read-only v2 preset + effort discovery; no Jev call or operation admission',
+    request: { repository: 'absolute repository', role: 'optional, default peer', paseoHome: 'optional absolute home',
+      providers: 'fresh provider observations with id/enabled/status and per-model models[].thinkingOptions/defaultThinkingOptionId; use the same observations for prepare',
+      routingContext: 'optional {crossProvider?:boolean, reference?:{agentId?:string,provider:string,model:string}} from the explicitly relevant reference seat observation' },
+    output: 'catalogSha256, selectionSha256, routingContext, choices including optionId/thinkingOptionId, and exclusions; copy the chosen pair and pins into route.* for prepare' };
 }

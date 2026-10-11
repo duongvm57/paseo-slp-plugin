@@ -1,3 +1,5 @@
+import type { PresetFields } from "./runtime/peer-presets.ts";
+import { presetOptionError } from "./runtime/peer-presets.ts";
 // Shared contracts for the paseo-slp manager plugin (Option A v1).
 // Normative sources: docs/spec/paseo-plugin-implementation.md §3 (wire RPCs) and
 // §7 (receipt/operation-intent journal schema). The seam interfaces at the
@@ -273,11 +275,24 @@ export const PeerPoolOption = z.object({
     ctx.addIssue({ code: "custom", path: ["model"], message: "devin options require a swe-2 model" });
   }
 });
+export const PresetPoolOption = PeerPoolOption.safeExtend({
+  notes: z.string(), displayName: z.string(), description: z.string(),
+  selectionHints: z.string().optional(), modelProvider: z.string().optional(),
+  templateOrigin: z.string().nullable().optional(),
+  runtimeRule: z.enum(["none", "different-model-provider"]),
+  effortPolicy: z.discriminatedUnion("kind", [
+    z.object({ kind: z.literal("fixed"), thinkingOptionId: z.string().regex(POOL_SETTING_ID).nullable() }).strict(),
+    z.object({ kind: z.literal("select"), allowed: z.array(z.string().regex(POOL_SETTING_ID)).optional() }).strict(),
+  ]),
+}).superRefine((option, ctx) => {
+  const error = presetOptionError(option);
+  if (error) ctx.addIssue({ code: "custom", message: error });
+});
 /** Plugin-owned mutable state at slp-runtime/state/peer-pool.json — the
  *  user-scope Peer pool, whole-file-overwrite under sha256 CAS. quotaFallback
  *  is strict because the package validator is strict there (unknown keys
  *  fail); the top-level object stays passthrough like the option schema. */
-export const PeerPool = z.object({
+const PeerPoolBase = z.object({
   version: z.literal(1),
   policy: z.string().refine(poolNonempty),
   quotaFallback: z.preprocess((value, ctx) => {
@@ -301,7 +316,8 @@ export const PeerPool = z.object({
     optionId: z.string().nullable(),
   }).strict().nullish()),
   options: z.array(PeerPoolOption),
-}).passthrough().superRefine((pool, ctx) => {
+}).passthrough();
+const poolReferences = (pool: { options: { id: string }[]; quotaFallback?: { enabled: boolean; optionId: string | null } | null }, ctx: z.RefinementCtx) => {
   const ids = new Set<string>();
   pool.options.forEach((option, index) => {
     if (ids.has(option.id)) {
@@ -318,7 +334,11 @@ export const PeerPool = z.object({
       ctx.addIssue({ code: "custom", path: ["quotaFallback", "optionId"], message: "enabled quotaFallback needs a designated pool option" });
     }
   }
-});
+};
+export const PeerPool = z.discriminatedUnion("version", [
+  PeerPoolBase.superRefine(poolReferences),
+  PeerPoolBase.extend({ version: z.literal(2), options: z.array(PresetPoolOption) }).superRefine(poolReferences),
+]);
 export const GetPeerPoolInput = z.object({
   schemaVersion: z.literal(1),
   target: Target,
@@ -797,7 +817,7 @@ export type GetRoleRoutingRequest = z.infer<typeof GetRoleRoutingInput>;
 export type GetRoleRoutingResult = z.infer<typeof GetRoleRoutingOutput>;
 export type SetRoleRoutingRequest = z.infer<typeof SetRoleRoutingInput>;
 export type SetRoleRoutingResult = z.infer<typeof SetRoleRoutingOutput>;
-export type PeerPoolOptionValue = z.infer<typeof PeerPoolOption>;
+export type PeerPoolOptionValue = z.infer<typeof PeerPoolOption> & PresetFields;
 export type PeerPoolValue = z.infer<typeof PeerPool>;
 export type GetPeerPoolRequest = z.infer<typeof GetPeerPoolInput>;
 export type GetPeerPoolResult = z.infer<typeof GetPeerPoolOutput>;
