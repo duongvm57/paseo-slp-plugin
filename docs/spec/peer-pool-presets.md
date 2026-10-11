@@ -35,6 +35,21 @@ inventing model capability. Enabled entries need a nonempty description.
 No default entries are inserted into an existing pool. A v1 binary cannot
 read v2; restoration uses the original v1 backup and a fresh CAS write.
 
+The Manager recognizes a saved v1 pool and recommends upgrading to v2. V1
+is deprecated, with removal planned for a future release; no removal release
+is set yet. The notice remains visible during a conversion preview and goes
+away only after a successful v2 save. V1 still reads and runs unchanged.
+
+Both editors offer **Use 5 default presets**. An explicit confirmation replaces
+the current draft entries with the five parked starters and clears the quota
+fallback; it preserves the pool policy and pool-level passthrough fields. New
+rows never inherit settings or extensions from saved entries with matching IDs.
+The Human can copy the saved pool backup before replacement, configure models,
+enable the desired presets and Save through the existing CAS/runtime guard.
+Opening or cancelling the preview never writes. Target changes and successful
+reloads clear the replacement confirmation. This is a pool-editor action;
+protocol text cannot provide a target-bound editable preview or enforce Save.
+
 ## Entry fields
 
 Alongside the existing id/provider/model/settings/eligibility fields, v2 has:

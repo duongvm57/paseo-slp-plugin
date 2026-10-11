@@ -11,6 +11,28 @@ import { Badge, Button, Card, CheckRow, ChipSelect, Collapse, Field, OptionPicke
 import type { Colors } from '../ui-kit.tsx';
 import type { PeerPoolCardState } from './peer-pool.tsx';
 
+export function LegacyPeerPoolNotice({ colors }: { colors: Colors }) {
+  return <View style={[styles.noticeBox, { borderColor: colors.statusWarning }]}>
+    <Text style={{ color: colors.foreground }}>Legacy Peer pool — upgrade recommended</Text>
+    <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>Your saved pool uses v1. V1 pools are deprecated; support is planned to end in a future release, with no removal release set yet. Switch to v2 presets to prepare. Your existing pool keeps running until you Save.</Text>
+  </View>;
+}
+
+export function DefaultPresetControls({ colors, pool }: { colors: Colors; pool: PeerPoolCardState }) {
+  return <View style={styles.field}>
+    <Button colors={colors} label="Use 5 default presets" onPress={pool.requestDefaultPresets} disabled={pool.poolLocked} />
+    {pool.poolDefaultsConfirm ? <View style={[styles.noticeBox, { borderColor: colors.statusWarning }]}>
+      <Text style={{ color: colors.foreground }}>Replace the current draft with Fast, Balanced, Advanced, Frontier and Cross-provider?</Text>
+      <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>This replaces all draft entries and clears the quota fallback. The 5 presets start disabled with no models assigned. Your pool policy stays unchanged; the saved pool changes only when you Save.</Text>
+      {pool.poolData?.pool ? <Button colors={colors} label="Copy saved pool backup" onPress={() => { void pool.copyStoredPool(); }} disabled={pool.poolBusy} /> : null}
+      <View style={styles.chipRow}>
+        <Button colors={colors} label="Keep current draft" onPress={pool.cancelDefaultPresets} disabled={pool.poolBusy} />
+        <Button colors={colors} label="Replace draft with 5 presets" onPress={pool.useDefaultPresets} disabled={pool.poolLocked} />
+      </View>
+    </View> : null}
+  </View>;
+}
+
 export function PresetPoolCard({ colors, pool, availableFamilies, catalogs, retryCatalog, retryFeatureSet }: {
   colors: Colors; pool: PeerPoolCardState; availableFamilies: readonly FamilyName[];
   catalogs: Partial<Record<string, CatalogResult>>;
@@ -27,12 +49,15 @@ export function PresetPoolCard({ colors, pool, availableFamilies, catalogs, retr
     {pool.poolReadError || pool.poolData?.error ? <Text style={{ color: colors.statusWarning }}>{pool.poolReadError ?? pool.poolData?.error}</Text> : null}
     {pool.poolData !== null && !pool.fresh ? <Text style={{ color: colors.foregroundMuted }}>Refreshing pool; previous data is read-only.</Text> : null}
     {pool.poolError ? <Text accessibilityLiveRegion="polite" style={{ color: colors.statusWarning }}>{pool.poolError.message}</Text> : null}
+    {migration ? <LegacyPeerPoolNotice colors={colors} /> : null}
     {migration ? <View style={[styles.noticeBox, { borderColor: colors.statusWarning }]}>
       <Text style={{ color: colors.foreground }}>Migration preview — the saved v1 pool still runs unchanged until Save.</Text>
-      <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>Save verifies that the active SLP runtime can read v2; update SLP runtime first if it is still v1-only. Review every description and runtime rule. Effort stays Fixed, and IDs, settings, fallback and private notes are preserved. Older plugin versions cannot read v2; copy the original v1 JSON before converting if you may downgrade.</Text>
+      <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>Save verifies that the active SLP runtime can read v2; update SLP runtime first if it is still v1-only. {pool.poolDefaultsDraft ? 'The 5 defaults replace your existing entries when saved. Configure the presets you want to use.' : 'Review every description and runtime rule. Effort stays Fixed, and IDs, settings, fallback and private notes are preserved.'} Older plugin versions cannot read v2; copy the original v1 JSON before converting if you may downgrade.</Text>
       <Button colors={colors} label="Copy original v1 backup" onPress={() => { void pool.copyStoredV1(); }} disabled={pool.poolBusy} />
       <Button colors={colors} label="Cancel migration preview" onPress={pool.cancelPresetMigration} disabled={pool.poolBusy} />
     </View> : null}
+    <DefaultPresetControls colors={colors} pool={pool} />
+    {pool.poolDefaultsDraft ? <Text style={{ color: colors.foreground }}>5 default presets are ready to configure. Choose a provider and model, then enable the presets you want before saving.</Text> : null}
     {pool.canImportLegacy ? <Button colors={colors} label="Import legacy pool instead" onPress={pool.importLegacyPool} disabled={disabled} /> : null}
     <Field colors={colors} label="Pool policy" value={pool.poolForm.policy} onChangeText={policy => pool.updatePool(form => ({ ...form, policy }))} disabled={disabled} multiline />
     {pool.poolForm.seats.length === 0 ? <Text style={{ color: colors.foregroundMuted }}>No presets. An empty saved pool intentionally blocks Peer formation.</Text> : null}

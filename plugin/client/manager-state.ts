@@ -983,9 +983,10 @@ export const RETAINED_RUNTIME_NOTICE =
 export const DISABLE_REMOVE_NOTICE =
   "Disabling or removing this plugin is not SLP deactivation. Raw removal leaves verified stable transports operational and correctly roled, with ownership recoverable by reinstalling the same plugin ID and reconciling its retained receipt. Deactivate before removing the manager when detachment is intended.";
 
-/** Only a missing pool gets defaults; a saved empty pool stays empty. */
+/** Defaults seed a missing pool, or an explicitly requested replacement draft.
+ * New rows must not inherit stored settings from entries with the same IDs. */
 export function freshPresetPoolForm(): PeerPoolForm {
-  return { ...emptyPeerPoolForm(), version: 2, seats: starterPeerOptions().map(option => peerSeatForm(option as PeerPoolOptionValue, true)) };
+  return { ...emptyPeerPoolForm(), version: 2, seats: starterPeerOptions().map(option => ({ ...peerSeatForm(option as PeerPoolOptionValue, true), storedId: "" })) };
 }
 export function newCustomPreset(existing: readonly string[]): PeerSeatForm {
   const option = { ...starterPeerOptions()[0], id: suggestCustomSeatId("preset", existing), displayName: "New preset", description: "", templateOrigin: null, runtimeRule: "none" as const };

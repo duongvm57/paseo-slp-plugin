@@ -1,4 +1,4 @@
-import { PresetPoolCard } from "./preset-pool.tsx";
+import { DefaultPresetControls, LegacyPeerPoolNotice, PresetPoolCard } from "./preset-pool.tsx";
 import { freshPresetPoolForm, presetMigrationForm } from "../manager-state.ts";
 // Peer pool owns its draft, seat editors and CAS save/reload/import/copy.
 // Target async owns snapshot reads and session tickets. Target changes reset
@@ -114,6 +114,8 @@ export function usePeerPoolCard({ target, targetKey, isCurrentKey, callGetPeerPo
   // The confirmation renders AT the control that invoked it (CAS locality):
   // "notice" beside the conflict notice's Reload, "footer" beside the card's.
   const [poolReloadConfirm, setPoolReloadConfirm] = useState<"notice" | "footer" | null>(null);
+  const [poolDefaultsConfirm, setPoolDefaultsConfirm] = useState(false);
+  const [poolDefaultsDraft, setPoolDefaultsDraft] = useState(false);
   // §7.4.D convert-to-custom editor state, and the "Standard set selected —
   // not yet saved" marker after a conflict is resolved toward the standard set.
   const [convertSeatIndex, setConvertSeatIndex] = useState<number | null>(null);
@@ -151,6 +153,8 @@ export function usePeerPoolCard({ target, targetKey, isCurrentKey, callGetPeerPo
     setPoolCopied(false);
     setPoolError(null);
     setPoolReloadConfirm(null);
+    setPoolDefaultsConfirm(false);
+    setPoolDefaultsDraft(false);
     setPickerQuery("");
     seatRowRefs.current.clear();
     lookupRefs.current.clear();
@@ -224,6 +228,7 @@ export function usePeerPoolCard({ target, targetKey, isCurrentKey, callGetPeerPo
   // Every pool edit goes through updatePool — it marks the form dirty and
   // clears the one-shot save/copy confirmations.
   const updatePool = (mutate: (form: PeerPoolForm) => PeerPoolForm) => {
+    setPoolDefaultsConfirm(false);
     setPoolDirty(true);
     setPoolSaved(false);
     setPoolCopied(false);
@@ -420,6 +425,8 @@ export function usePeerPoolCard({ target, targetKey, isCurrentKey, callGetPeerPo
       }));
       setPoolDirty(false);
       setPoolSaved(true);
+      setPoolDefaultsDraft(false);
+      setPoolDefaultsConfirm(false);
       setPoolError(null);
       setStandardAppliedId(null);
       setConvertSeatIndex(null);
@@ -458,6 +465,8 @@ export function usePeerPoolCard({ target, targetKey, isCurrentKey, callGetPeerPo
       setPoolDirty(false);
       setPoolSaved(false);
       setPoolCopied(false);
+      setPoolDefaultsDraft(false);
+      setPoolDefaultsConfirm(false);
       setStandardAppliedId(null);
       setConvertSeatIndex(null);
     } else {
@@ -507,15 +516,31 @@ export function usePeerPoolCard({ target, targetKey, isCurrentKey, callGetPeerPo
     }
   };
 
+  const copyStoredPool = async () => {
+    if (!poolData?.pool) return;
+    const ticket = capture();
+    try { await copyText(JSON.stringify(poolData.pool, null, 2)); if (ticket.isCurrent()) setPoolCopied(true); }
+    catch (error) { if (target && ticket.isCurrent()) update({ lastError: errorMessage(error) }, target); }
+  };
+
   return {
-    copyStoredV1: async () => {
-      if (poolData?.pool?.version !== 1) return;
-      const ticket = capture();
-      try { await copyText(JSON.stringify(poolData.pool, null, 2)); if (ticket.isCurrent()) setPoolCopied(true); }
-      catch (error) { if (target && ticket.isCurrent()) update({ lastError: errorMessage(error) }, target); }
+    copyStoredV1: copyStoredPool,
+    copyStoredPool,
+    poolDefaultsConfirm,
+    poolDefaultsDraft,
+    requestDefaultPresets: () => { if (!poolLocked) setPoolDefaultsConfirm(true); },
+    cancelDefaultPresets: () => setPoolDefaultsConfirm(false),
+    useDefaultPresets: () => {
+      if (poolLocked || !poolDefaultsConfirm) return;
+      // Replacement owns only entries and their fallback reference. Keep the
+      // Human's pool policy and pool-level passthrough through the same build.
+      updatePool(form => ({ ...form, version: 2, seats: freshPresetPoolForm().seats,
+        quotaFallbackEnabled: false, quotaFallbackId: "" }));
+      setPoolDefaultsDraft(true);
+      setOpenSeat(0);
     },
-    previewPresetMigration: () => { if (!poolDirty && poolData?.pool?.version === 1) { updatePool(() => presetMigrationForm(poolData.pool!)); setOpenSeat(0); } },
-    cancelPresetMigration: () => { if (poolData?.pool?.version === 1) { setPoolForm(peerPoolForm(poolData.pool)); setPoolDirty(false); setOpenSeat(null); } },
+    previewPresetMigration: () => { if (!poolLocked && !poolDirty && poolData?.pool?.version === 1) { updatePool(() => presetMigrationForm(poolData.pool!)); setPoolDefaultsDraft(false); setOpenSeat(0); } },
+    cancelPresetMigration: () => { if (!poolLocked && poolData?.pool?.version === 1) { setPoolForm(peerPoolForm(poolData.pool)); setPoolDirty(false); setPoolDefaultsConfirm(false); setPoolDefaultsDraft(false); setOpenSeat(null); } },
     fresh: snapshot.fresh,
     poolData,
     poolForm,
@@ -683,8 +708,10 @@ export function PeerPoolCard({ colors, target, compact, statusView, jev, pool, a
           }
         >
           {poolData?.pool?.version === 1 ? <View style={styles.field}>
-            <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>Legacy v1 pool: runtime and routing remain unchanged. Migration is optional; old plugin versions cannot read a saved v2 pool.</Text>
+            <LegacyPeerPoolNotice colors={colors} />
             <Button colors={colors} label="Preview preset migration" onPress={pool.previewPresetMigration} disabled={poolLocked || poolDirty} />
+            <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>Keep your existing entries and models, or start again with the 5 default presets.</Text>
+            <DefaultPresetControls colors={colors} pool={pool} />
           </View> : null}
           {poolData !== null && !pool.fresh ? <Text style={[styles.mutedSmall, { color: poolReadError ? colors.statusWarning : colors.foregroundMuted }]}>
             {poolReadError ? `Pool refresh unavailable: ${poolReadError}. Showing the previous read; Reload to retry.` : "Refreshing pool…"}
