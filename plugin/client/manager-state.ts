@@ -1,3 +1,5 @@
+import { starterPeerOptions, presetOptionError } from "../shared/runtime/peer-presets.ts";
+import type { PresetRuntimeRule } from "../shared/runtime/peer-presets.ts";
 // Pure view-state helpers for the SLP manager surface (spec §3, §9–§11).
 // No react/host imports: this module is unit-tested directly under node, and
 // the client bundle check proves it pulls in no server-only or node code.
@@ -566,6 +568,10 @@ export const PEER_SEAT_ID = /^[a-z][a-z0-9-]*$/;
  *  never remounts the editor (the row is the same draft seat), and it is
  *  never written to the pool or compared for dirt. */
 export interface PeerSeatForm {
+  preset?: boolean;
+  displayName?: string; description?: string; modelProvider?: string; selectionHints?: string;
+  effortKind?: "select" | "fixed"; allowedEfforts?: string[]; runtimeRule?: PresetRuntimeRule;
+  templateOrigin?: string | null;
   uid: string;
   id: string;
   storedId?: string;
@@ -583,6 +589,7 @@ export interface PeerSeatForm {
 }
 
 export interface PeerPoolForm {
+  version?: 1 | 2;
   policy: string;
   seats: PeerSeatForm[];
   quotaFallbackEnabled: boolean;
@@ -604,18 +611,19 @@ const newSeatUid = (): string => `draft-seat-${++seatUidCounter}`;
 /** Stored option → form seat (the Load path). Stored `features` seed both
  *  the raw-JSON base and the per-definition controls — same prefill the role
  *  form gives stored featureValues. */
-export function peerSeatForm(option: PeerPoolOptionValue): PeerSeatForm {
+export function peerSeatForm(option: PeerPoolOptionValue, preset = false): PeerSeatForm {
   const feature: Record<string, string> = {};
   for (const [featureId, value] of Object.entries(option.features ?? {})) {
     feature[featureId] = String(value ?? "");
   }
   return {
+    ...(preset ? { preset: true, displayName: option.displayName ?? option.id, description: option.description ?? "", modelProvider: option.modelProvider ?? "", selectionHints: option.selectionHints ?? "", effortKind: option.effortPolicy?.kind ?? "fixed", allowedEfforts: option.effortPolicy?.kind === "select" ? option.effortPolicy.allowed : undefined, runtimeRule: option.runtimeRule ?? "none", templateOrigin: option.templateOrigin } : {}),
     uid: newSeatUid(),
     id: option.id,
     family: option.provider === "" ? "" : option.provider,
     model: option.model,
     modeId: option.modeId ?? "",
-    thinkingOptionId: option.thinkingOptionId ?? "",
+    thinkingOptionId: preset && option.effortPolicy?.kind === "fixed" ? option.effortPolicy.thinkingOptionId ?? "" : option.thinkingOptionId ?? "",
     enabled: option.enabled,
     features: option.features ? JSON.stringify(option.features) : "",
     feature,
@@ -624,7 +632,7 @@ export function peerSeatForm(option: PeerPoolOptionValue): PeerSeatForm {
     notes: option.notes,
     // A stored seat on a reserved standard id is package-managed (possibly in
     // Token conflict); every other stored id is a custom seat.
-    custom: !isStandardSeatId(option.id),
+    custom: preset || !isStandardSeatId(option.id),
     storedId: option.id,
   };
 }
@@ -645,7 +653,8 @@ export function peerPoolForm(pool: PeerPoolValue | null): PeerPoolForm {
   if (pool === null) return emptyPeerPoolForm();
   return {
     policy: pool.policy,
-    seats: pool.options.map(peerSeatForm),
+    ...(pool.version === 2 ? { version: 2 as const } : {}),
+    seats: pool.options.map(option => peerSeatForm(option, pool.version === 2)),
     quotaFallbackEnabled: pool.quotaFallback?.enabled === true,
     quotaFallbackId: pool.quotaFallback?.optionId ?? "",
   };
@@ -753,7 +762,7 @@ export const legacyImportAllowed = (
   data: { legacy: PeerPoolValue | null; pool: PeerPoolValue | null } | null,
   form: PeerPoolForm,
   dirty: boolean,
-): boolean => data?.legacy != null && data.pool === null && form.seats.length === 0 && !dirty;
+): boolean => data?.legacy != null && data.pool === null && (form.seats.length === 0 || form.version === 2) && !dirty;
 
 export type PeerSeatBuild = { option: PeerPoolOptionValue } | { error: string };
 
@@ -781,10 +790,10 @@ export function buildPeerSeat(
   if (id === ROUTE_DECLINE_OPTION_ID) {
     return { error: `${label}: "${id}" is reserved for the Jev decline sentinel — no seat may take it` };
   }
-  if (isStandardSeatId(id) && form.custom === true) {
+  if (!form.preset && isStandardSeatId(id) && form.custom === true) {
     return { error: `${label}: "${id}" is a reserved standard-seat id — pick a custom id such as "${suggestCustomSeatId(id, [])}"` };
   }
-  if (seatManagement(form) === "package-managed") {
+  if (!form.preset && seatManagement(form) === "package-managed") {
     const conflict = seatTokenConflict({ id, suitableFor: lineList(form.suitableFor), avoidFor: lineList(form.avoidFor) });
     if (conflict) {
       return { error: `${label}: Token conflict — the draft tokens differ from the package standard set; open the seat and use "Apply the standard set" or "Convert this seat to a custom seat"` };
@@ -793,13 +802,13 @@ export function buildPeerSeat(
   if (form.enabled && form.family === "") return { error: `${label}: an enabled seat needs a provider family` };
   if (form.enabled && form.model.trim() === "") return { error: `${label}: an enabled seat needs a model` };
   const option: Record<string, unknown> = { ...(stored ?? {}) };
-  delete option.priority;
+  if (!form.preset) delete option.priority;
   option.id = id;
   option.provider = form.family;
-  option.roles = ["peer"];
+  option.roles = form.preset ? stored?.roles ?? ["peer"] : ["peer"];
   option.model = form.model.trim();
   option.enabled = form.enabled;
-  option.availability = "ready";
+  option.availability = form.preset ? stored?.availability ?? "ready" : "ready";
   const modeId = form.modeId.trim();
   if (modeId) option.modeId = modeId;
   else delete option.modeId;
@@ -831,8 +840,17 @@ export function buildPeerSeat(
   option.suitableFor = lineList(form.suitableFor);
   option.avoidFor = lineList(form.avoidFor);
   const notes = form.notes.trim();
-  if (!notes) return { error: `${label}: notes are required (local only — Jev never sees them)` };
-  option.notes = notes;
+  if (!form.preset && !notes) return { error: `${label}: notes are required (local only — Jev never sees them)` };
+  option.notes = form.preset ? form.notes : notes;
+  if (form.preset) {
+    option.displayName = form.displayName ?? ""; option.description = form.description ?? "";
+    option.modelProvider = form.modelProvider ?? ""; option.selectionHints = form.selectionHints ?? "";
+    option.templateOrigin = form.templateOrigin ?? null; option.runtimeRule = form.runtimeRule ?? "none";
+    option.effortPolicy = form.effortKind === "select" ? { kind: "select", ...(form.allowedEfforts !== undefined ? { allowed: form.allowedEfforts } : {}) }
+      : { kind: "fixed", thinkingOptionId: thinkingOptionId || null };
+    if (form.effortKind === "select") delete option.thinkingOptionId;
+    const error = presetOptionError(option); if (error) return { error: `${label}: ${error}` };
+  }
   return { option: option as PeerPoolOptionValue };
 }
 
@@ -847,6 +865,7 @@ export function buildPeerPool(
   form: PeerPoolForm,
   defsFor: (seat: PeerSeatForm) => CatalogResult["features"],
   storedOptions?: ReadonlyMap<string, PeerPoolOptionValue>,
+  storedPool?: PeerPoolValue | null,
 ): PeerPoolBuild {
   const policy = form.policy.trim();
   if (!policy) return { error: "pool policy is required" };
@@ -871,7 +890,8 @@ export function buildPeerPool(
   }
   return {
     pool: {
-      version: 1,
+      ...(form.version === 2 ? storedPool ?? {} : {}),
+      version: form.version ?? 1,
       policy,
       quotaFallback: { enabled: form.quotaFallbackEnabled, optionId: fallbackId === "" ? null : fallbackId },
       options,
@@ -962,3 +982,21 @@ export const RETAINED_RUNTIME_NOTICE =
 
 export const DISABLE_REMOVE_NOTICE =
   "Disabling or removing this plugin is not SLP deactivation. Raw removal leaves verified stable transports operational and correctly roled, with ownership recoverable by reinstalling the same plugin ID and reconciling its retained receipt. Deactivate before removing the manager when detachment is intended.";
+
+/** Defaults seed a missing pool, or an explicitly requested replacement draft.
+ * New rows must not inherit stored settings from entries with the same IDs. */
+export function freshPresetPoolForm(): PeerPoolForm {
+  return { ...emptyPeerPoolForm(), version: 2, seats: starterPeerOptions().map(option => ({ ...peerSeatForm(option as PeerPoolOptionValue, true), storedId: "" })) };
+}
+export function newCustomPreset(existing: readonly string[]): PeerSeatForm {
+  const option = { ...starterPeerOptions()[0], id: suggestCustomSeatId("preset", existing), displayName: "New preset", description: "", templateOrigin: null, runtimeRule: "none" as const };
+  return { ...peerSeatForm(option as PeerPoolOptionValue, true), storedId: "" };
+}
+/** Explicit migration draft only. Keep identities/settings and private notes;
+ * legacy suitability remains visible until the Human reviews the description. */
+export function presetMigrationForm(pool: PeerPoolValue): PeerPoolForm {
+  return { ...peerPoolForm(pool), version: 2, seats: pool.options.map(option => ({ ...peerSeatForm(option), preset: true, custom: true,
+    displayName: option.id, description: [option.suitableFor.length ? `Use for: ${option.suitableFor.join('; ')}` : '', option.avoidFor.length ? `Prefer another model when: ${option.avoidFor.join('; ')}` : ''].filter(Boolean).join('\n'),
+    modelProvider: '', selectionHints: '', effortKind: 'fixed', runtimeRule: 'none', templateOrigin: null,
+  })) };
+}

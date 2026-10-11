@@ -20,3 +20,4 @@ export { contributeSupervisionControls, notifySupervisionChanged } from "../../p
 
 export { OwnerLink } from "../../plugin/client/owner-link.tsx";
 export { ChipSelect, styles as controlStyles } from "../../plugin/client/ui-kit.tsx";
+export { PeerPoolCard } from "../../plugin/client/cards/peer-pool.tsx";

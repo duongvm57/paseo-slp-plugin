@@ -1,5 +1,8 @@
 # Routing criteria — the package's default set
 
+This document remains the contract for **version 1 pools**. Version 2 uses
+[open Peer presets](peer-pool-presets.md); upgrading does not convert existing pools.
+
 This document settles the vocabulary and the `suitableFor` / `avoidFor` assignments for the 12 archetypes shipped in the plugin. For these standard seats, the package owns the definitions, the tokens and the explanations; the user only picks `provider`, `model`, `modeId`, `thinkingOptionId` from the live catalog and then enables the seats they want to use. Tokens are displayed but cannot be edited on the form. The user can still create custom seats with free suitability; the boundary between the two seat kinds and the cost of that choice are in §7.
 
 This is a contract for implementation, not a claim that the current code already does everything below. This editing pass only updates this document. The word "default" below means a package decision, effective without waiting for the user to fill anything in; the least certain decisions and the evidence that could change them are in §10.

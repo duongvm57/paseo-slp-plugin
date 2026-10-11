@@ -1,3 +1,6 @@
+import type { Provider } from "./runtime/cli/types.ts";
+import type { PresetRoutingContext } from "./runtime/cli/preset-routing.ts";
+import { reobservePeerReference, type ReferenceHost } from "./peer-reference.ts";
 // Resolve a task's Peer runtime through the verified installed candidate.
 // Pool precedence, eligibility and Jev receipts remain owned by its launch
 // module. This adapter supplies fresh connected-host provider observations.
@@ -11,6 +14,9 @@ export type TaskRuntimeSelection = {
   catalogSha256: string;
   decision?: unknown;
   quotaFallbackFrom?: string;
+  thinkingOptionId?: string | null;
+  selectionSha256?: string;
+  routingContext?: PresetRoutingContext;
 };
 
 export type TaskRuntimeBinding = {
@@ -23,10 +29,10 @@ export type TaskRuntimeBinding = {
   warnings: string[];
 };
 
-export type TaskRuntimeApi = {
+export type TaskRuntimeApi = ReferenceHost & {
   providers: {
     snapshot(options?: { cwd?: string }): Promise<{
-      entries: { provider: string; enabled?: boolean; status: string; error?: string | null; modes?: { id: string }[]; extends?: string }[];
+      entries: { provider: string; enabled?: boolean; status: string; error?: string | null; modes?: { id: string }[]; extends?: string; models?: Provider["models"] }[];
       error?: string | null;
     }>;
   };
@@ -70,7 +76,19 @@ export async function observeTaskProviders(host: TaskRuntimeApi, cwd: string) {
   }
 }
 
+/** Model metadata is an additive installed-candidate ABI, not a host capability.
+ * Older v1 consumers reject unknown provider keys even for saved Lead profiles. */
+export function taskProviderInventory(observed: Awaited<ReturnType<typeof observeTaskProviders>>, supportsPresets: boolean) {
+  return observed.entries.map(entry => ({
+    id: entry.provider, enabled: entry.enabled === true,
+    status: entry.status === "ready" && !entry.error ? "available" : "unavailable",
+    ...(entry.extends !== undefined ? { extends: entry.extends } : {}),
+    ...(supportsPresets && entry.models !== undefined ? { models: entry.models } : {}),
+  }));
+}
+
 type LaunchModule = {
+  FORMATION_CAPABILITIES?: { peerPresets?: number };
   resolveBinding(role: string, request: {
     repository: string;
     assignment: string;
@@ -117,6 +135,7 @@ export function createTaskRuntimeResolver(deps: {
     }
     if (observed.error) return reject("CAPABILITY_GAP", `provider snapshot failed: ${observed.error}`);
     try {
+      await reobservePeerReference(host, selection.routingContext);
       const specifier = pathToFileURL(candidateModulePath(deps.runtimePath, "launch")).href;
       const module = await (deps.importModule ?? (specifier => import(specifier)))(specifier);
       if (typeof module.resolveBinding !== "function") {
@@ -128,11 +147,7 @@ export function createTaskRuntimeResolver(deps: {
         // SDK snapshots use `provider`, while the installed launch ABI uses
         // `id`. Only a ready, enabled observation grants usable inventory;
         // unknown/loading/error remains unavailable. No config fallback.
-        providers: observed.entries.map(entry => ({
-          id: entry.provider, enabled: entry.enabled === true,
-          status: entry.status === "ready" && !entry.error ? "available" : "unavailable",
-          ...(entry.extends !== undefined ? { extends: entry.extends } : {}),
-        })),
+        providers: taskProviderInventory(observed, module.FORMATION_CAPABILITIES?.peerPresets === 2),
       }, disposition);
       const binding = resolved.binding;
       if (!binding?.provider || !binding.model) return reject("CAPABILITY_GAP", "the bound resolver returned no complete provider/model bundle");

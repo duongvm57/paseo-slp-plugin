@@ -1,3 +1,4 @@
+import { routeChoices, routeChoicesSchema } from "./routing.ts";
 interface CommandSpec {
   usage: string;
   flags?: string[];
@@ -78,6 +79,7 @@ const commands: Record<string, CommandSpec> = {
   'prepare-handoff': { flags: ['--check', '--emit', '--schema', '--out'], target: 'request.json', usage: 'prepare-handoff <request.json|-> [--check | --emit create | --schema] [--out <path>]' },
   materialize: { flags: ['--from', '--apply', '--include', '--paseo-home'], target: 'repository', usage: 'materialize <repository> --from <source-repository> [--include <repo-path>]... [--paseo-home <absolute-home>] [--apply]' },
   monitor: { flags: ['--schema'], target: 'request.json', usage: 'monitor <request.json|-> [--schema]' },
+  'route-choices': { flags: ['--paseo-home', '--schema', '--out'], target: 'request.json', usage: 'route-choices <request.json|-> [--schema] [--out <path>] [--paseo-home <absolute-home>]' },
   'route-decide': { flags: ['--paseo-home', '--schema', '--out'], target: 'request.json', usage: 'route-decide <request.json|-> [--schema] [--out <path>] [--paseo-home <absolute-home>]' },
   notebook: { flags: ['--paseo-home'], target: 'repository', usage: 'notebook <repository> [--paseo-home <absolute-home>]' },
   records: { flags: ['--kind', '--require', '--repo', '--schema', '--render'], target: 'path|-', usage: 'records <path|-> [--kind handback|settlement] [--require handback|settlement] [--repo <absolute-path>] [--schema] | records --render <file|-> [--repo <absolute-path>]' },
@@ -299,6 +301,12 @@ try {
       result = await routeDecide(readRequest(target!) as Parameters<typeof routeDecide>[0], { home: options['--paseo-home'] });
       if ((result as Awaited<ReturnType<typeof routeDecide>>).declined) process.exitCode = 1;
     }
+  }
+  else if (command === 'route-choices') {
+    if (options['--schema']) {
+      if (target) throw new Error('route-choices --schema takes no request file');
+      result = routeChoicesSchema();
+    } else result = routeChoices({ ...readRequest(target!) as Parameters<typeof routeChoices>[0], ...(options['--paseo-home'] ? { paseoHome: options['--paseo-home'] } : {}) });
   }
   else if (command === 'routes') {
     const home = resolveHome(options['--paseo-home']);

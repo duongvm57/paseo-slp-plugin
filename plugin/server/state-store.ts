@@ -1,3 +1,4 @@
+import { guardPresetWrite } from "./peer-pool-compatibility.ts";
 // Plugin-owned state files under <stableRoot>/state — readers, the file
 // names, and the atomic 0600 write (a uuid-named temp sibling + rename, so
 // a crash never leaves a half-written file for the next reader). Shared by
@@ -141,6 +142,7 @@ export function readPeerPoolFile(file: string, softErrors: boolean): PeerPoolFil
 // ---------------------------------------------------------------------------
 
 export interface StateStoreDeps {
+  guardPresetWrite?: typeof guardPresetWrite;
   uuid?: () => string;
 }
 
@@ -240,7 +242,7 @@ export function createStateStore(deps: StateStoreDeps = {}) {
     // package set is a Token conflict — never stored as a valid standard
     // seat. The conflict survives in the file only when it arrived by import
     // or package upgrade; every write must resolve it first.
-    const conflicts = catalogTokenConflicts(parsed.data.pool);
+    const conflicts = parsed.data.pool.version === 1 ? catalogTokenConflicts(parsed.data.pool) : [];
     if (conflicts.length > 0) {
       throw new OperationConflict(
         "INVALID_REQUEST",
@@ -250,6 +252,7 @@ export function createStateStore(deps: StateStoreDeps = {}) {
     // CAS gate next, after the semantic gate above: the on-disk bytes must
     // hash to the token the writer read. An unreadable pool fails loud
     // rather than comparing against null.
+    const recheckRuntime = parsed.data.pool.version === 2 ? await (deps.guardPresetWrite ?? guardPresetWrite)(ctx.stableRoot) : () => {};
     const actualSha256 = readPeerPoolFile(file, false).sha256;
     if (actualSha256 !== parsed.data.expectedSha256) {
       throw new OperationConflict(
@@ -259,6 +262,7 @@ export function createStateStore(deps: StateStoreDeps = {}) {
       );
     }
     const bytes = `${JSON.stringify(parsed.data.pool, null, 2)}\n`;
+    recheckRuntime();
     writePrivate(ctx.stableRoot, PEER_POOL_FILE, bytes, uuid);
     return { schemaVersion: 1, pool: parsed.data.pool, sha256: sha256Hex(bytes) };
   }

@@ -7,6 +7,7 @@ import { pathToFileURL } from 'node:url';
 import { createTaskRuntimeResolver } from '../plugin/server/desk-task-runtime.ts';
 import { resolveBinding } from '../plugin/server/runtime/cli/launch.ts';
 import { readCatalog } from '../plugin/server/runtime/cli/routing.ts';
+import { presetChoiceSet } from '../plugin/server/runtime/cli/preset-routing.ts';
 
 function fixture(t) {
   const root = mkdtempSync(join(tmpdir(), 'slp-task-route-'));
@@ -59,6 +60,31 @@ test('task runtime uses the installed resolver and preserves the complete eligib
   assert.equal(resolved.routing.catalogSha256, f.selection().catalogSha256);
   assert.deepEqual(f.calls, [{ cwd: f.repository }]);
   assert.deepEqual(f.imports, [pathToFileURL(f.modulePath).href]);
+});
+
+test('new Manager dispatch preserves a v1 candidate strict provider ABI when host snapshots expose models',async t=>{
+ const f=fixture(t);f.setEntries([{provider:'slp-devin-peer',enabled:true,status:'ready',models:[{id:'swe-2-high',thinkingOptions:[{id:'max'}]}]}]);
+ const resolver=createTaskRuntimeResolver({runtimePath:f.runtimePath,daemonHome:f.daemonHome,host:()=>f.host,
+  importModule:async()=>({resolveBinding:(role,request,disposition)=>{
+   for(const provider of request.providers) if(Object.hasOwn(provider,'models'))throw new Error('Unknown legacy provider field: models');
+   return resolveBinding(role,request,disposition);
+  }})});
+ const resolved=await resolver(f.repository,f.selection());
+ assert.equal(resolved.provider,'slp-devin-peer',JSON.stringify(resolved));assert.equal(resolved.thinkingOptionId,'max');
+});
+
+test('preset-capable task dispatch retains model metadata and binds the selected supported effort',async t=>{
+ const f=fixture(t),model={id:'swe-2-high',thinkingOptions:[{id:'medium'},{id:'max'}]};
+ f.pool.version=2;Object.assign(f.pool.options[0],{displayName:'Worker',description:'Bounded repair',runtimeRule:'none',effortPolicy:{kind:'select'}});
+ delete f.pool.options[0].thinkingOptionId;f.savePool();
+ f.setEntries([{provider:'slp-devin-peer',enabled:true,status:'ready',models:[model]}]);
+ const inventory=[{id:'slp-devin-peer',enabled:true,status:'available',models:[model]}];
+ const set=presetChoiceSet(readCatalog(f.repository,f.daemonHome),'peer',inventory);
+ const selection={...f.selection(),thinkingOptionId:'medium',selectionSha256:set.selectionSha256,routingContext:{}};
+ const resolver=createTaskRuntimeResolver({runtimePath:f.runtimePath,daemonHome:f.daemonHome,host:()=>f.host,
+  importModule:async()=>({FORMATION_CAPABILITIES:{peerPresets:2},resolveBinding})});
+ const resolved=await resolver(f.repository,selection);assert.equal(resolved.provider,'slp-devin-peer',JSON.stringify(resolved));
+ assert.equal(resolved.thinkingOptionId,'medium');
 });
 
 test('task runtime resolves OpenCode only with live ACP transport and ready SDK evidence',async t=>{

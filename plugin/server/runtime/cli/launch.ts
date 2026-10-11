@@ -30,7 +30,7 @@ import { spawnKit } from './spawn-kit.ts';
 import { assignmentFileSelection, assignmentCarrier } from './assignment-file.ts';
 import { SLP_ROLE_PREFIX, LAUNCH_BINDING_PREFIX, ASSIGNMENT_HEADER, PLAN_LOCATOR_CAPTION } from '../../../shared/runtime/session-delivery.ts';
 import { buildHandoffRecap } from '../handoff-recap.ts';
-export { preflightPeerChoice, selectPeerSeat, revalidatePeerSelection } from './seat-selection.ts';
+export { preflightPeerChoice, selectPeerSeat, revalidatePeerSelection, peerSelectionNeedsCapabilities } from './seat-selection.ts';
 export const verifyFormationCandidate = (root: string) => verifyInstall(root);
 
 // Every Binding source normalises to { binding, routing? } right here, so nothing
@@ -314,7 +314,7 @@ function plan(root: string, request: LaunchRequest, packet: HandoffPacket | null
   };
 }
 
-export const FORMATION_CAPABILITIES = { existingPlacement: 1 } as const;
+export const FORMATION_CAPABILITIES = { existingPlacement: 1, peerPresets: 2 } as const;
 export const launchPlan = (root: string, request: LaunchRequest, context?: import('./types.ts').TrustedLaunchContext) => plan(root, request, null, context);
 export const handoffPlan = (root: string, request: LaunchRequest) => plan(root, request, handoffPacket(request));
 
@@ -416,6 +416,9 @@ export function requestSchema(handoff = false) {
       'catalog routing — required for peer': {
         'route.optionId': 'an option id from the routes output',
         'route.catalogSha256': 'the sha256 routes returned — stale or missing fails',
+        'route.thinkingOptionId': 'v2 only — selected supported effort, explicit null for runtime default, from route-choices or route-decide; v1 keeps its fixed option settings',
+        'route.selectionSha256': 'v2 only — capability/choice hash from route-choices or route-decide',
+        'route.routingContext': 'v2 only — exact reference/constraint context returned by discovery/decision',
         'route.disposition': 'peer only — the bounded specialism (engineer, architect, reviewer, scout, …)',
         'route.decision': 'Jev receipt from `route-decide` — verified when supplied (shadow mode records jevChoice/declined in the plan), and REQUIRED + binding when the daemon arms jev.capabilities.routing (a bare optionId then fails)',
         providers: 'live list_providers array, each provider object verbatim — the option’s canonical slp-<family>-<role> wrapper must be observed',

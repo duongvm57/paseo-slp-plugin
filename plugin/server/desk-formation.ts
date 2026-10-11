@@ -1,3 +1,4 @@
+import { observePeerReference, reobservePeerReference } from "./peer-reference.ts";
 // One ordinary/Lean invocation: fresh plan → durable issue → native create
 // without work → positive tuple observation → durable send (or caller handoff). No queue needed.
 import { pathToFileURL } from "node:url";
@@ -8,7 +9,7 @@ import { createDeskOperations, type OperationIdentity } from "./desk-operation.t
 import { verifySeat } from "./desk-seat-observation.ts";
 import { createTaskBoundedHost } from "./desk-task-host.ts";
 import type { TaskHostApi } from "./desk-task-execution-host.ts";
-import { observeTaskProviders, type TaskRuntimeApi } from "./desk-task-runtime.ts";
+import { observeTaskProviders, taskProviderInventory, type TaskRuntimeApi } from "./desk-task-runtime.ts";
 import { WIRE_LIMITS, type DeskRejectionValue } from "../shared/enforcement.ts";
 import type { DeskSeatCreateInputValue } from "../shared/delegation.ts";
 import type { MembershipValue } from "./desk-store.ts";
@@ -32,7 +33,8 @@ type FormationRequest = {
 };
 type FormationModule = {
   launchPlan(root: string, request: FormationRequest, context?: TrustedLaunchContext): Omit<Plan, "modeSupport">;
-  FORMATION_CAPABILITIES?: { existingPlacement?: number };
+  FORMATION_CAPABILITIES?: { existingPlacement?: number; peerPresets?: number };
+  peerSelectionNeedsCapabilities?: typeof import("./runtime/cli/seat-selection.ts").peerSelectionNeedsCapabilities;
   preflightPeerChoice?: typeof import("./runtime/cli/seat-selection.ts").preflightPeerChoice;
   selectPeerSeat?: typeof import("./runtime/cli/seat-selection.ts").selectPeerSeat;
   revalidatePeerSelection?: typeof import("./runtime/cli/seat-selection.ts").revalidatePeerSelection;
@@ -92,9 +94,10 @@ export function createFormationPlanner(deps: {
     try { return await load(pathToFileURL(candidateModulePath(deps.runtimePath, "launch")).href) as FormationModule; }
     catch { throw new FormationPlanningError("RUNTIME_INTEGRITY", "the bound candidate launch module is unavailable"); }
   };
-  const peerRequest = (row: MembershipValue, input: DeskSeatCreateInputValue, context?: SelectionContext): PeerSelectionRequest => ({
+  const peerRequest = async (row: MembershipValue, input: DeskSeatCreateInputValue, context?: SelectionContext): Promise<PeerSelectionRequest> => ({
     repository: context?.target?.source.repository ?? context?.source?.repository ?? context?.sourceRepository ?? row.createCwd, assignment: input.assignment, paseoHome: deps.daemonHome,
     ...(input.role === "peer" && input.selection ? { selection: input.selection } : {}),
+    ...(input.role === "peer" && input.routingRequirements ? { routingContext: await observePeerReference(createTaskBoundedHost(deps.host()!), input.routingRequirements) } : {}),
   });
   const observeProviders = async (row: MembershipValue, context?: SelectionContext) => {
     const host = deps.host();
@@ -105,10 +108,6 @@ export function createFormationPlanner(deps: {
       return observed;
     } catch { throw new FormationPlanningError("CAPABILITY_GAP", "connected provider snapshot failed"); }
   };
-  const providerInventory = (observed: Awaited<ReturnType<typeof observeProviders>>) => observed.entries.map(entry => ({
-    id: entry.provider, enabled: entry.enabled === true, status: entry.status === "ready" && !entry.error ? "available" : "unavailable",
-    ...(entry.extends !== undefined ? { extends: entry.extends } : {}),
-  }));
   const requireSelection = (launch: FormationModule) => {
     if (typeof launch.preflightPeerChoice !== "function" || typeof launch.selectPeerSeat !== "function"
       || typeof launch.revalidatePeerSelection !== "function" || typeof launch.verifyFormationCandidate !== "function") {
@@ -135,6 +134,7 @@ export function createFormationPlanner(deps: {
     try { profiles = input.role === "lead" ? saved() : undefined; }
     catch { throw new FormationPlanningError("INVALID_RECORD", "saved profile configuration is unreadable or invalid"); }
     const observed = await observeProviders(row, context);
+    if (input.role === "peer" && input.runtime?.routingContext) await reobservePeerReference(createTaskBoundedHost(host), input.runtime.routingContext);
     // Profile reads straddle the awaited provider observation. Full bundles
     // are compared, and then re-planned before every native effect.
     if (profiles !== undefined) {
@@ -144,7 +144,7 @@ export function createFormationPlanner(deps: {
     }
     if (context?.selected !== undefined) {
       requireSelection(launch);
-      try { launch.revalidatePeerSelection!(peerRequest(row, input, context), context.selected, providerInventory(observed)); }
+      try { launch.revalidatePeerSelection!(await peerRequest(row, input, context), context.selected, taskProviderInventory(observed, launch.FORMATION_CAPABILITIES?.peerPresets === 2)); }
       catch { throw new FormationPlanningError("ROUTE_DRIFT", "fixed Peer selection or provider evidence changed before the next effect"); }
     }
     let planned: Omit<Plan, "modeSupport">;
@@ -152,7 +152,7 @@ export function createFormationPlanner(deps: {
       repository: context?.target?.cwd ?? row.createCwd, workspaceId: context?.target?.workspaceId ?? row.workspaceId!, role: input.role,
       assignment: `${input.assignment}\nHandback route: the verified parent agent ID is ${row.agentId}.\nAt handback, send exactly one native report to the verified parent above.\nA finish notification only signals the event; it does not replace the report or establish acceptance.\nA standby Lead reports readiness separately; readiness is not a technical verdict.\nAuthority reference (claim): ${input.grantRef}`,
       taskLabel: input.taskLabel, paseoHome: deps.daemonHome,
-      providers: providerInventory(observed),
+      providers: taskProviderInventory(observed, launch.FORMATION_CAPABILITIES?.peerPresets === 2),
       ...(profiles !== undefined ? { profiles } : {}),
       ...(input.role === "peer" ? { route: { ...(context?.selected?.route ?? input.runtime), disposition: input.disposition } } : {}),
     }, context?.target || context?.source ? {
@@ -210,7 +210,9 @@ export function createFormationPlanner(deps: {
     preflightPeer: async (row: MembershipValue, input: DeskSeatCreateInputValue, context?: SelectionContext) => {
       if (row.workspaceId === null && input.placement?.kind !== "existing") throw new FormationPlanningError("CAPABILITY_GAP", "formation requires an exact workspace");
       const launch = await loadLaunch(); requireSelection(launch);
-      return launch.preflightPeerChoice!(peerRequest(row, input, context));
+      const request = await peerRequest(row, input, context);
+      const providers = launch.peerSelectionNeedsCapabilities?.(request) ? taskProviderInventory(await observeProviders(row, context), launch.FORMATION_CAPABILITIES?.peerPresets === 2) : undefined;
+      return launch.preflightPeerChoice!(request, providers);
     },
     selectPeer: async (row: MembershipValue, input: DeskSeatCreateInputValue, phase: PhaseWriter, guard: () => Promise<DeskRejectionValue | null>, context?: SelectionContext) => {
       if (row.workspaceId === null && !context?.target) throw new FormationPlanningError("CAPABILITY_GAP", "formation requires an exact workspace");
@@ -219,7 +221,7 @@ export function createFormationPlanner(deps: {
       const refused = await guard();
       if (refused !== null) throw new FormationPlanningError(refused.code, refused.message);
       requireSelection(launch);
-      return launch.selectPeerSeat!(peerRequest(row, input, context), { providers: providerInventory(observed), phase });
+      return launch.selectPeerSeat!(await peerRequest(row, input, context), { providers: taskProviderInventory(observed, launch.FORMATION_CAPABILITIES?.peerPresets === 2), phase });
     },
   });
 }

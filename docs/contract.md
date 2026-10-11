@@ -408,7 +408,7 @@ first; when the repository has no catalog, the plugin-owned user-scope pool
 declared fallback. Onboarding prepares a pool of complete provider/model/settings
 options with suitableFor, avoidFor, notes and explicit eligibility — authored in
 the manager surface, where model/mode values come from the live provider
-catalog. The 12 standard archetype ids are reserved: on them the package owns
+catalog. For version 1 pools, the 12 standard archetype ids are reserved: on them the package owns
 the closed `axis:value` suitability vocabulary (docs/spec/routing-criteria.md)
 and the fields are read-only; any other id is a custom seat with free strings,
 and a reserved id carrying divergent tokens is a Token conflict that cannot be
@@ -421,6 +421,25 @@ a saved slp-peer limits the pool. No catalog in either scope, or an
 empty/no-eligible pool, blocks Peer creation until setup is completed — never a
 saved profile, another repository's catalog or inherited Lead settings. An empty
 repository catalog remains authoritative and disables the fallback.
+
+Version 2 pools use open editable preset entries: new pools start with five
+parked defaults (Fast, Balanced, Advanced, Frontier, Cross-provider); existing
+and empty pools are never seeded or rewritten on load. Explicit conversion
+preserves identities/settings/fallback/notes/passthrough fields and keeps old
+effort Fixed. Saving v2 verifies the active candidate advertises peerPresets=2;
+old/unverifiable or changing active bindings block the write without rewriting
+the pool. An absent binding permits pre-install authoring. Older binaries cannot read v2; Manager offers the original v1
+JSON for restoration. See [open presets](spec/peer-pool-presets.md).
+V2 Lead/Jev discovery reads the same descriptions/hints and supported effort
+pairs for every entry, including custom ones. The server pins and revalidates
+entry/effort, capability hash and explicit cross-provider reference context;
+names, list order and template origin do not create reserved semantics.
+Cross-provider compares normalized runtime families, so Devin coding followed
+by Codex/Luna review qualifies without model-vendor declarations. Managed role
+wrappers normalize to their family; a missing or unknown reference blocks that
+branch. The historical v2 rule literal is retained, and the routing semantics
+pin changes so old receipts cannot replay under the new interpretation. This changes selection,
+not role authority, disposition, review or source precedence.
 
 ## Jev routing
 
@@ -436,7 +455,7 @@ prepare --check remain offline and merely verify the supplied receipt. Two
 modes: shadow (enabled without capabilities.routing — either routing entry emits
 a receipt, the Lead still chooses, the plan records both picks for agreement
 measurement) and armed (capabilities.routing=true — the receipt is required
-and binding, including optionId matching the recorded choice); when supplied
+and binding, including optionId matching the recorded choice for v1, and the full preset/effort pair for v2); when supplied
 a receipt is always verified, current toggles apply to fresh formation/preparation
 and never mutate running seats. Shadow evaluation precedes arming: the Human
 pre-registers exit criteria (agreement rate and the asymmetric error class)
