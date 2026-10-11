@@ -9,6 +9,7 @@ import { canonicalSha256 } from "./config-view.ts";
 import { assertRealComponents, ensurePrivateDirectory, fsyncDirectory } from "./kept-files.ts";
 import type { DeskRejectionValue } from "../shared/enforcement.ts";
 import { WIRE_LIMITS } from "../shared/enforcement.ts";
+import { DESK_OPERATION_RETRY_RECOVERY } from "../shared/runtime/desk-contract.ts";
 
 const CAP = WIRE_LIMITS.deskBridgeRequestBytes;
 const LEGACY_SCAN_LIMIT = 4096;
@@ -26,7 +27,10 @@ const nativeKey = (identity: OperationIdentity) => canonicalSha256([
   identity.repoKey, identity.agentId, identity.kind, identity.requestId,
 ]);
 const reject = (code: DeskRejectionValue["code"], message: string): DeskRejectionValue => ({
-  ok: false, code, message, recovery: "retain this operation; inspect its receipt and reconcile recorded identities without resubmitting effects",
+  ok: false, code, message,
+  recovery: code === "IDEMPOTENCY_CONFLICT"
+    ? DESK_OPERATION_RETRY_RECOVERY
+    : "retain this operation; inspect its receipt and reconcile recorded identities without resubmitting effects",
 });
 
 export function createDeskOperations(stableRoot: string) {

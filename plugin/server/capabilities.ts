@@ -14,7 +14,7 @@
 //
 // Source pins: the host tree was audited at PASEO_SOURCE_REVISION; historical
 // SDK citations retain their audited 0.8.0 pin. Current build dependencies are
-// `@getpaseo/*` 0.10.0 in package.json. An upgrade does not refresh old evidence:
+// `@getpaseo/*` 0.11.2 in package.json. An upgrade does not refresh old evidence:
 // rows can drift, so re-audit on upgrade and keep the original pins visible.
 
 import { z } from "zod";

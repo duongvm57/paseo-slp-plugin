@@ -31,7 +31,9 @@ for (const mode of ['off','unconfigured']) {
 test('shadow requires independent selection even with a sole option',async t=>{
  const f=selectionFixture(t,{mode:'shadow',count:1});
  assert.equal((await preflightPeerChoice(f.request)).state,'selection-required');
- await assert.rejects(selectPeerSeat(f.request,f.deps),/independent Lead selection/);assert.equal(f.calls.logical,0);
+ await assert.rejects(selectPeerSeat(f.request,f.deps),error=>{
+  assert.match(error.message,/independent Lead selection/);assert.equal(error.reason,'selection-required');return true;
+ });assert.equal(f.calls.logical,0);
 });
 for(const choice of ['second',ROUTE_DECLINE_CANDIDATE]){
  test('shadow retains independent first choice and full advisory '+choice,async t=>{

@@ -1,4 +1,10 @@
 // Plain recovery vocabulary and bounds; no host, filesystem or schema dependency.
+export const DESK_FORMATION_REASONS = {
+  jevDecisionRequired: "jev-routing-decision-required",
+} as const;
+export const DESK_OPERATION_RETRY_RECOVERY =
+  "Read the original operation: unchanged input replays its receipt. Corrected recorded input needs a new requestId only after confirming the original operation issued no effects; otherwise retain agent/request IDs and reconcile resources without recreation or resubmitting effects.";
+
 export const DESK_REJECTION_LIMITS = {
   rejectionMessage: 2048,
   rejectionRecovery: 1024,

@@ -362,7 +362,7 @@ test('agent.create: guarded and ordinary operation pointers reach each role with
     }
     assert.match(prompt, /references\/delegation-execution.md/, id);
     assert.match(prompt, /references\/task-execution.md/, id);
-    assert.match(prompt, /Unavailable\s+required reviewers or adverse findings never relax the gate/, id);
+    assert.match(prompt, /unavailable reviewers or adverse findings\s+never relax required gates/, id);
     assert.equal(/When the assignment or protocol\s+requires independent review/.test(prompt), role === 'lead', id);
   }
 });

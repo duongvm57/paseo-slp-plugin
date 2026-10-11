@@ -422,14 +422,14 @@ export const DESK_TOOL_CATALOG = [
     roles: ["supervisor", "lead"],
     visible: true,
     mutation: true,
-    description: "Form Lead/Peer; optional Peer runtime/selection. Placement caller/existing; worktree gap. Pending retains ID. Caller sends prompt notifyOnFinish; server sends.",
+    description: "Form Lead/Peer. Peer: omit runtime/selection. Placement caller/existing; worktree gap. Pending keeps ID. Caller: exact prompt + notifyOnFinish.",
   },
   {
     name: "slp_operation_get",
     roles: ["supervisor", "lead", "peer"],
     visible: true,
     mutation: false,
-    description: "Read this caller's formation/delivery receipt by original requestId before considering resubmission.",
+    description: "Read own formation/delivery receipt before resubmission; no resume.",
   },
   {
     name: "slp_task_deliver",

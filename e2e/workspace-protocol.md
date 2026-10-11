@@ -112,7 +112,8 @@ families and does not require switching Supervisor/Lead profiles to match each P
 
 Basic begin requires settings.source="profiles-and-peer-pool", settings.profiles,
 settings.providers and settings.peerPool (the proposed catalog). It records
-settings.roles for Supervisor/Lead only; Lead chooses the Peer option at delegation.
+settings.roles for Supervisor/Lead only; ordinary Peer formation resolves its
+option on the server, with independent Lead choice when requested.
 Raw receipts, model capability discovery and matching fixture pool bytes still need
 review. Frozen older manifests retain their saved-profile criteria. Candidate
 alignment uses upgrade/reload only under current runtime authority.
@@ -193,15 +194,19 @@ Verify the workspace's actual path equals fixtureRoot on the target host.
 
 Create only Supervisor using its saved profile through Paseo create_agent. Record
 profile bytes, exact request/response and actual runtime settings. Supervisor
-refreshes slp-lead before delegation. Lead reads routes, chooses a Peer option with
-its rationale (under armed Jev routing the reason trail is the decision receipt's
-distribution), validates a fresh hash via prepare, and creates the Peer from that
-bundle. Profile inventories cannot override the Peer pool. U2 traces profiles for
+forms Lead through slp_seat_create from the fresh saved slp-lead profile.
+Lead forms ordinary Peers through slp_seat_create with runtime/selection omitted;
+when choices are returned, it supplies an independent selection.optionId.
+The server pins the pool/Jev route; record the returned option/hash/settings and,
+under armed Jev, the retained decision receipt's distribution. The
+routes/prepare/create_agent chain is only CLI compatibility on its assigned path.
+Profile inventories cannot override the Peer pool. U2 traces profiles for
 Supervisor/Lead and project option/hash/settings for Peer, including both families
 when mixed-peer is selected.
 
 For every seat the scenario tree forms, record the formation evidence: the
-calling parent's ID, the agent-scoped create request/response, the returned
+calling parent's ID, the desk formation receipt and native SDK create evidence
+(or agent-scoped create_agent request/response on compatibility), the returned
 child ID with its host parent, workspace/cwd and the report recipient named in
 the brief. A prompt sent into a pre-existing session is not a create and
 establishes no parentage; observe-existing assignments keep the seat's real
