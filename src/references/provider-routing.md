@@ -2,9 +2,8 @@
 
 Human owns complete bundles and pool/budget/fallback decisions. Supervisor/
 Lead normally use saved slp-supervisor/slp-lead profiles; Peer uses the
-assigned repository pool. A specifically Human-tagged role option or explicit
-Supervisor/Lead experiment remains a separately authorized route, not a
-missing-profile/Peer-pool workaround. Dispositions imply no fixed model.
+assigned repository pool. Human-tagged role options/experiments need separate
+authority; neither replaces missing profiles/pools. Dispositions imply no fixed model.
 
 ## Saved Supervisor/Lead profile
 
@@ -17,28 +16,28 @@ Use common policy's once-per-session route verification. If PASEO_AGENT_ID
 is unavailable, slp_status({}) supplies your desk identity/workspace for one
 bounded host lookup; record missing parent/report metadata as a gap.
 
-For CLI compatibility or a host without the native operation, write a compact
-prepare request with role/repository/workspaceId/assignment
-and optional taskLabel (without a role prefix). Run prepare --live --emit
-create --paseo-home <verified-home>. The helper loads saved profiles, fetches
-providers from that home's live daemon, validates them and emits the exact
-create record. It starts no session and has no configured-only fallback.
-Consult prepare --schema once if the input shape is unknown.
+For assigned CLI compatibility or an unbound host, prepare
+role/repository/workspaceId/assignment and optional taskLabel (no role prefix).
+Run prepare --live --emit create --paseo-home <verified-home>: it resolves saved
+profiles against that daemon's fresh providers and emits arguments only, with
+no configured-only fallback. Use prepare --schema for unfamiliar input.
 
 For CLI compatibility, preserve supplied live arrays verbatim or use inventoryFile.
 --emit create validates; --check diagnoses rejection, not a required second pass.
 
-Preserve the emitted bundle and verify returned settings/parent/placement
-under delegation. Profile/option pins take precedence over protocol
-agent_mode fallback; unresolved mode needs Human. Missing profile or
-unavailable provider blocks that launch, not a search for another runtime.
-Configured managed inventory is not live evidence; inline live providers
-win over inventoryFile. Preparation and host create are not atomic.
+Verify emitted settings/parent/placement. Profile/option pins precede protocol
+agent_mode; unresolved mode needs Human. Missing profile or unavailable provider
+blocks that launch, not a search for another runtime. Configured inventory is
+not live evidence: inline providers override inventoryFile. Preparation/host
+create are not atomic.
 
 ## Peer pool
 
 For ordinary/Lean slp_seat_create, the server reads the assigned repository pool
-and pins selection once; no routes/prepare/route-decide choreography is required.
+and pins selection once. Start with runtime/selection omitted and consume its
+result as described in delegation-execution.md. Runtime discovery and Jev
+decisions belong to that server operation; a full runtime pin selects the
+compatibility path and must already include every required receipt.
 A linked caller without local routing/protocol inherits its configured same-Git
 main checkout; no trustworthy source means gap, not silent user fallback.
 A repository catalog wins even when empty; otherwise
@@ -54,9 +53,11 @@ Old optionId/catalogSha256/decision pins remain supported and freshly validated;
 armed decline/config/key/network failure blocks without default substitution.
 The runtime resolves the complete bundle against fresh host providers before effects.
 
-Desk task dispatch still needs explicit pool/Jev pins. CLI compatibility uses
+## Explicit task dispatch and CLI compatibility
+
+Task dispatch needs explicit pool/Jev pins. CLI compatibility uses
 slp.mjs routes <absolute-repository> --paseo-home <home>, live list_providers,
-Peer pins in prepare and --emit create; no prepare-time Jev network calls.
+Peer pins in prepare --emit create; prepare never calls Jev.
 Preserve complete settings and exact model IDs including slashes; never overlay
 inherited effort/features or bypass Peer routing with bindings.
 

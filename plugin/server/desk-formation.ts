@@ -16,6 +16,7 @@ import type { PeerSelectionRequest, SelectedPeer } from "./runtime/cli/seat-sele
 import type { TrustedLaunchContext } from "./runtime/cli/types.ts";
 import { FormationPlacementError, FormationPlacementUncertain, type FormationTargetPin, type FormationSourcePin, type createFormationPlacement } from "./desk-placement.ts";
 import { registeredMembership } from "./desk-membership.ts";
+import { DESK_FORMATION_REASONS, DESK_OPERATION_RETRY_RECOVERY } from "../shared/runtime/desk-contract.ts";
 
 type ModeSupport = { provider: string; modes: string[] };
 type Plan = {
@@ -42,21 +43,36 @@ type PhaseWriter = (name: string, value: unknown) => void;
 const formationEvidenceTooLarge = (value: unknown) =>
   Buffer.byteLength(JSON.stringify(value)) * 3 > WIRE_LIMITS.deskBridgeRequestBytes - 32768;
 function selectionFailure(error: unknown): DeskRejectionValue {
-  const e = error as { name?: unknown; code?: unknown } | null;
+  const e = error as { name?: unknown; code?: unknown; reason?: unknown } | null;
   if (e?.name === "SeatSelectionError" && ["INVALID_RECORD", "ROUTE_DRIFT", "REQUEST_TOO_LARGE"].includes(e.code as string)) {
+    if (e.code === "INVALID_RECORD" && e.reason === "declined") {
+      return reject("INVALID_RECORD", "Jev declined Peer routing; no suitable option was selected",
+        "Retain the recorded decline and requestId. Escalate the Human-owned pool decision; do not retry the decline, choose another provider or change Jev settings.");
+    }
+    if (e.code === "ROUTE_DRIFT" && e.reason === "selection-mismatch") {
+      return reject("ROUTE_DRIFT", "independent selection differs from the armed Jev decision",
+        `Inspect the retained decision and resolve the choice with the owning Lead/Human. Do not silently discard an assigned selection. ${DESK_OPERATION_RETRY_RECOVERY}`);
+    }
+    if (e.code === "INVALID_RECORD" && e.reason === "selection-required") {
+      return reject("INVALID_RECORD", "Peer formation requires an independent selection.optionId",
+        `Choose an eligible option independently. An unadmitted selection-required response can keep its requestId. ${DESK_OPERATION_RETRY_RECOVERY}`);
+    }
     return reject(e.code as DeskRejectionValue["code"], "Peer selection failed; inspect pool eligibility, independent choice and Jev receipt/configuration");
   }
-  if (error instanceof FormationPlanningError) return reject(error.code, error.message);
+  if (error instanceof FormationPlanningError) return reject(error.code, error.message, error.recovery);
   const reason = typeof e?.code === "string" && /^jev-[a-z-]+$/.test(e.code) ? ` (${e.code})` : "";
   return reject("INVALID_RECORD", `Peer selection failed${reason}; resolve the pool/Jev configuration or decision failure without provider fallback`);
 }
-const reject = (code: DeskRejectionValue["code"], message: string): DeskRejectionValue => ({
+const reject = (code: DeskRejectionValue["code"], message: string, recovery?: string): DeskRejectionValue => ({
   ok: false, code, message,
-  recovery: "inspect retained formation evidence; resolve the missing capability or drift without repeating an uncertain create/send",
+  recovery: recovery ?? "inspect retained formation evidence; resolve the missing capability or drift without repeating an uncertain create/send",
 });
 export class FormationPlanningError extends Error {
   readonly code: DeskRejectionValue["code"];
-  constructor(code: DeskRejectionValue["code"], message: string) { super(message); this.code = code; }
+  readonly recovery?: string;
+  constructor(code: DeskRejectionValue["code"], message: string, recovery?: string) {
+    super(message); this.code = code; this.recovery = recovery;
+  }
 }
 
 function placementFailure(error: unknown, agentId?: string, target?: FormationTargetPin) {
@@ -144,7 +160,16 @@ export function createFormationPlanner(deps: {
       protocolRepository: (context.target?.source ?? context.source!).repository,
       protocolPinned: (context.target?.source ?? context.source!).configuration["workspace-protocol.md"] !== null,
     } : undefined); }
-    catch { throw new FormationPlanningError("INVALID_RECORD", "fresh saved profile/pool/provider validation failed; refresh the preparation evidence"); }
+    catch (error) {
+      // Only the installed runtime's bounded reason crosses this boundary;
+      // arbitrary launch errors may contain private config or filesystem data.
+      if (input.role === "peer" && input.runtime !== undefined
+        && (error as { code?: unknown } | null)?.code === DESK_FORMATION_REASONS.jevDecisionRequired) {
+        throw new FormationPlanningError("INVALID_RECORD", "explicit Peer runtime lacks the decision receipt required by armed Jev routing",
+          `Default: omit runtime for ordinary server selection; full-pin compatibility requires its matching decision receipt. Keep Jev and pool settings unchanged. ${DESK_OPERATION_RETRY_RECOVERY}`);
+      }
+      throw new FormationPlanningError("INVALID_RECORD", "fresh saved profile/pool/provider validation failed; inspect saved bundles and pool eligibility against the connected provider snapshot");
+    }
     const separator = planned.create.provider.indexOf("/");
     if (separator <= 0) throw new FormationPlanningError("INVALID_RECORD", "fresh formation plan has no exact provider identity");
     const provider = planned.create.provider.slice(0, separator);
@@ -295,7 +320,8 @@ export async function runSeatCreate(row: MembershipValue, input: DeskSeatCreateI
         return modeSupportError(plan) ?? plan;
       }
       catch (error) {
-        return error instanceof FormationPlacementError || error instanceof FormationPlanningError ? reject(error.code, error.message)
+        return error instanceof FormationPlacementError || error instanceof FormationPlanningError
+          ? reject(error.code, error.message, error instanceof FormationPlanningError ? error.recovery : undefined)
           : reject("INVALID_RECORD", "fresh formation preparation failed");
       }
     };

@@ -21,9 +21,9 @@
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "devDependencies": {
-    "@getpaseo/client": "0.10.0",
-    "@getpaseo/plugin": "0.10.0",
-    "@getpaseo/protocol": "0.10.0",
+    "@getpaseo/client": "0.11.2",
+    "@getpaseo/plugin": "0.11.2",
+    "@getpaseo/protocol": "0.11.2",
     "@types/node": "24.10.1",
     "@types/react": "19.1.17",
     "esbuild": "0.25.12",

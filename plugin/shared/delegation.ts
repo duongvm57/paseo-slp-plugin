@@ -26,8 +26,10 @@ const formation = {
  * Profiles and complete settings are server-resolved, with no overrides. */
 export const DeskSeatCreateInput = z.discriminatedUnion("role", [
   z.object({ ...formation, role: z.literal("lead") }).strict(),
-  z.object({ ...formation, role: z.literal("peer"), runtime: DeskTaskRuntimePin.optional(),
-    selection: z.object({ optionId: DeskTaskRuntimePin.shape.optionId }).strict().optional(),
+  z.object({ ...formation, role: z.literal("peer"), runtime: DeskTaskRuntimePin.optional()
+      .describe("Full pool/Jev pins."),
+    selection: z.object({ optionId: DeskTaskRuntimePin.shape.optionId }).strict().optional()
+      .describe("Independent returned pick."),
     disposition: z.string().min(1).max(64).regex(/^[A-Za-z][A-Za-z0-9_-]*$/).optional() }).strict(),
 ]).superRefine((body, ctx) => {
   if (body.role === "peer" && body.runtime !== undefined && body.selection !== undefined) {

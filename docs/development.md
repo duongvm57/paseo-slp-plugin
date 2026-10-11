@@ -232,7 +232,8 @@ the entrypoint does not change the unverified E2E states above.
 To run a `basic-*` scenario, configure the two Supervisor/Lead
 profiles and the fixture's Peer pool for the matching family. The coordinator
 prepares fixture/protocol, pool and baseline; the Supervisor creates a Lead
-per the saved profile, the Lead picks the Peer option itself. There is no
+per the saved profile. Ordinary Peer formation resolves the option server-side;
+the Lead supplies an independent choice when requested. There is no
 pre-launch confirmer for basic. U2 cross-checks profiles for Supervisor/Lead
 and option/hash for the Peer. `mixed-peer` checks a pool containing both
 Codex/Pi — no extra saved profile needed and no forcing the Lead's family per

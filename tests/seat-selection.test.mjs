@@ -31,7 +31,9 @@ for (const mode of ['off','unconfigured']) {
 test('shadow requires independent selection even with a sole option',async t=>{
  const f=selectionFixture(t,{mode:'shadow',count:1});
  assert.equal((await preflightPeerChoice(f.request)).state,'selection-required');
- await assert.rejects(selectPeerSeat(f.request,f.deps),/independent Lead selection/);assert.equal(f.calls.logical,0);
+ await assert.rejects(selectPeerSeat(f.request,f.deps),error=>{
+  assert.match(error.message,/independent Lead selection/);assert.equal(error.reason,'selection-required');return true;
+ });assert.equal(f.calls.logical,0);
 });
 for(const choice of ['second',ROUTE_DECLINE_CANDIDATE]){
  test('shadow retains independent first choice and full advisory '+choice,async t=>{
@@ -55,7 +57,14 @@ test('armed default selects Jev choice once and revalidates without network',asy
 });
 test('armed independent selection cannot override a different Jev answer',async t=>{
  const f=selectionFixture(t,{mode:'armed'});
- await assert.rejects(selectPeerSeat({...f.request,selection:{optionId:'first'}},f.deps),/differs from armed/);
+ let answer;
+ const decide=async req=>{answer=await f.decide(req);return answer;};
+ await assert.rejects(selectPeerSeat({...f.request,selection:{optionId:'first'}},{...f.deps,decide}),/differs from armed/);
+ assert.deepEqual(f.phases.map(phase=>phase.name),['route-issued','route-mismatch']);
+ const retained=f.phases[1].value;
+ assert.deepEqual(retained.selection,{optionId:'first'});
+ for(const [key,value] of Object.entries(answer))assert.deepEqual(retained[key],value,key);
+ assert.ok(Buffer.byteLength(JSON.stringify(retained))<=32768);
  assert.equal(f.calls.logical,1);
  assert.equal((await selectPeerSeat({...f.request,selection:{optionId:'second'}},f.deps)).route.optionId,'second');
 });
@@ -116,4 +125,21 @@ test('choice preflight reports omitted candidates and bounds bytes without inven
 test('full decision exceeding phase allowance refuses without discarding receipt',async t=>{
  const f=selectionFixture(t,{mode:'armed'});const decide=async req=>{const answer=await f.decide(req);answer.warnings=['x'.repeat(40000)];return answer;};
  await assert.rejects(selectPeerSeat(f.request,{...f.deps,decide}),error=>error.code==='REQUEST_TOO_LARGE');assert.equal(f.phases.length,1);
+});
+test('armed mismatch refuses oversized evidence before retaining any answer',async t=>{
+ const f=selectionFixture(t,{mode:'armed'});
+ const decide=async req=>{const answer=await f.decide(req);answer.warnings=['x'.repeat(40000)];return answer;};
+ await assert.rejects(selectPeerSeat({...f.request,selection:{optionId:'first'}},{...f.deps,decide}),error=>error.code==='REQUEST_TOO_LARGE');
+ assert.deepEqual(f.phases.map(phase=>phase.name),['route-issued']);
+ assert.equal(f.calls.logical,1);
+});
+test('armed mismatch does not retain an invalid decision or inconsistent envelope',async t=>{
+ for(const field of ['hash','envelope']){
+  const f=selectionFixture(t,{mode:'armed'});
+  const decide=async req=>{const answer=await f.decide(req);
+   if(field==='hash')answer.decision.sha256='0'.repeat(64);else answer.optionId='first';
+   return answer;};
+  await assert.rejects(selectPeerSeat({...f.request,selection:{optionId:'first'}},{...f.deps,decide}));
+  assert.deepEqual(f.phases.map(phase=>phase.name),['route-issued']);
+ }
 });

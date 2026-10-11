@@ -174,8 +174,9 @@ Human-confirmed revision applied to new work.
 Six rules fall out of the role model and shape everything below:
 
 - **One control plane.** Within a task, only Paseo owns agent lifecycle,
-  workspace, parentage and timeline. Seats create children through
-  agent-scoped `create_agent` so the host records who spawned whom; a
+  workspace, parentage and timeline. Bound seats form children through
+  `slp_seat_create`, whose SDK create records the native parent;
+  agent-scoped `create_agent` serves stock/compatibility launches. A
   Peer's role contract forbids it from spawning or managing agents. If
   seats could create their own untracked workers, two control planes
   would share no ledger and review/cleanup would become unreliable.
@@ -412,17 +413,13 @@ SLP orchestration is just Paseo primitives used in a disciplined order:
 
 ```
 Human ──create_agent(profile=slp-supervisor)──▶ Supervisor seat
-                                                    │ runs `prepare`
-                                                    │ (renders title,
-                                                    │  assignment,
-                                                    │  binding, kit)
+                                                    │ slp_seat_create(role=lead)
+                                                    │ saved profile resolved server-side
                                                     ▼
-                              create_agent(provider=slp-*-lead)
-                                                    │
-                                                    ▼
-                                              Lead seat ──prepare──▶
-                              create_agent(provider=slp-*-peer, disposition)
-                                                    │
+                                              Lead seat
+                                                    │ slp_seat_create(role=peer)
+                                                    │ runtime/selection omitted
+                                                    │ pool/Jev resolved server-side
                                                     ▼
                                               Peer seat ──handback──▶ Lead
                                                     │
@@ -434,11 +431,13 @@ Human ──create_agent(profile=slp-supervisor)──▶ Supervisor seat
 `prepare` is the standalone planner: given a request (role, family, repo,
 assignment, report-recipient), it emits the complete `create_agent`
 argument record — correct title format, structured assignment, launch
-binding, workspace. Orchestrating seats are instructed to route every
-spawn through it, which is what keeps the chain consistent when humans
-aren't in the loop. The spawn kit in each injected bundle is what lets a
-seat call `create_agent`/`send_agent_prompt` without first paying the
-MCP schema-discovery tax.
+binding, workspace. It serves explicit CLI compatibility and hosts without
+the bound formation operation. Ordinary formation calls `slp_seat_create`;
+the server plans, selects and pins the runtime before native create and delivery.
+If independent choice is required, the caller supplies a returned option through
+`selection.optionId`. The spawn kit carries that default and approximate tool
+signatures so a seat can form children and deliver prompts without re-deriving
+the entire MCP schema.
 
 Peers return results by prompting the agent ID named in their assignment
 (`report-recipient`) — Paseo agent messaging, no special channel.

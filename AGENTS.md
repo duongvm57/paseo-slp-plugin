@@ -9,8 +9,9 @@ Basic commands: `npm test`, `npm run typecheck`, `npm run check`,
 Verify with the steps in [docs/development.md#testing](docs/development.md#testing);
 do not copy them here.
 
-For this repository, delegate through Paseo `create_agent` so the Human can
-inspect and chat with each agent. Codex internal sub-agents are disabled; do not
+For this repository, delegate through inspectable Paseo agents: bound Lead/Peer
+formation uses `slp_seat_create`; stock seats and compatibility use `create_agent`.
+The Human can inspect and chat with each agent. Codex internal sub-agents are disabled; do not
 use native spawn/delegation tools, including when a skill requests sub-agents.
 
 Keep one writer per moving scope and preserve unrelated work. Report exact

@@ -2,6 +2,8 @@
 
 Check desk binding first (slp_status if available); use bound slp_seat_create
 for Lead/Peer, including existing worktrees (references/delegation-execution.md).
+Peer default: omit runtime/selection for server pool/Jev choice;
+returned choices need selection.optionId.
 New worktree: Paseo create_workspace under host-setup authority, then
 slp_seat_create placement existing. create_agent remains compatibility/recovery.
 Keep uncertain seat IDs; never recreate.
@@ -26,12 +28,12 @@ consume admission receipts for reservations, seat pins and effects.
 For ordinary/Lean creation or observation, read references/delegation-execution.md
 for receipts/compatibility verification.
 Before runtime choice/settings/fallback, read references/provider-routing.md.
-Unavailable machinery grants no bypass of required paths.
+Unavailable tools grant no bypass.
 
-Lead's explicit review selection precedes the candidate round: minimum
-sufficient independent mandates for material decision-changing questions and
-explicit obligations. An absent selection is an open decision. Unavailable
-required reviewers or adverse findings never relax the gate.
+Lead records review selection before each candidate: minimum sufficient
+independent mandates for material questions/obligations.
+Missing selection remains open; unavailable reviewers or adverse findings
+never relax required gates.
 Before selecting reviewers, read references/review-gates.md.
 Tiny classification reduces ceremony, never authority, ownership,
 parentage or required review; reassess scope/risk growth.

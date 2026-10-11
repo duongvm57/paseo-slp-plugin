@@ -44,7 +44,7 @@ export function spawnKit(role: string) {
   if (!roles.includes(role)) throw new Error('Unknown role');
   return {
     note: orchestrates(role)
-      ? 'approximate; consult the specific live schema for unfamiliar parameters or a mismatch; new worktree: use Paseo create_workspace under its host-setup grant, then slp_seat_create placement existing (kind=worktree is a gap); pending: slp_operation_get with the same requestId, keep the ID, never recreate'
+      ? 'approximate; consult the specific live schema for unfamiliar parameters or a mismatch; ordinary Peer: start slp_seat_create with runtime/selection omitted for server pool/Jev selection; returned choices use selection.optionId; full runtime is compatibility with complete receipts; new worktree: use Paseo create_workspace under its host-setup grant, then slp_seat_create placement existing (kind=worktree is a gap); pending: slp_operation_get with the same requestId, keep the ID, never recreate'
       : 'approximate; see tools/list; agentId: full id, not list_agents shortId; without slp_desk tools, hand back with one native send_agent_prompt report',
     tools: orchestrates(role) ? [...orchestratingTools] : [...peerTools],
   };

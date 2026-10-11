@@ -63,6 +63,7 @@ import { settingIdPattern, unsafeModelPattern, rejectRouteKeys, verifyProvider,
   runtimeSettingKeys, profileRouteKeys, swe2ModelPattern } from './binding.ts';
 import { readJevConfig, verifyReceipt } from './jev.ts';
 import { catalogTokenConflicts, seatTokenConflict, ROUTING_VOCABULARY_VERSION } from "../../../shared/runtime/routing-vocabulary.ts";
+import { DESK_FORMATION_REASONS } from "../../../shared/runtime/desk-contract.ts";
 
 const record = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === 'object' && !Array.isArray(value);
 const nonempty = (value: unknown): value is string => typeof value === 'string' && value.trim().length > 0;
@@ -300,7 +301,8 @@ export function catalogBinding(repository: string, role: string, providers: Prov
     jevDeclined = jevChoice === ROUTE_DECLINE_CANDIDATE;
     if (jevDeclined && jevMode) throw new Error('Jev declined to route: the receipt records "no suitable option" — the pool is Human-owned, escalate rather than retry');
   } else if (jevMode) {
-    throw new Error('Jev routing mode is on for this daemon: prepare requires a route.decision receipt — run slp route-decide to obtain one (the Human can disable Jev routing to restore Lead judgment)');
+    throw Object.assign(new Error('Armed Jev routing requires a route.decision receipt for explicit runtime pins. Ordinary slp_seat_create obtains it server-side when runtime is omitted; CLI compatibility obtains it with route-decide.'),
+      { code: DESK_FORMATION_REASONS.jevDecisionRequired });
   }
   const option = catalog.options.find(item => item.id === route.optionId);
   if (!option) throw new Error(`Unknown routing option ${route.optionId}`);

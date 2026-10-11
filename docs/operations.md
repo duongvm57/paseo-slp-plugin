@@ -270,9 +270,9 @@ To set per-role model and reasoning:
    it does not activate or rewrite the live profiles. The card reports when
    stored choices differ from the live binding.
 4. When creating a session directly, pick the saved profile in the model
-   picker. For Peers, use onboarding to set up the repo pool; the Lead picks
-   a suitable option from the pool and passes that provider/model/settings
-   into `create_agent`.
+   picker. For Peers, use onboarding to set up the repo pool, then ordinary
+   `slp_seat_create` resolves the pool/Jev route without runtime overrides.
+   The Lead supplies an independent choice when the operation requests one.
 
 **Thinking** is reasoning effort; **Mode** is the permission/approval level —
 two separate settings. Pick values the provider/model actually offers. Agents
@@ -411,7 +411,8 @@ or the plugin-owned user-scope pool
 Manager's Peer pool card is its sole writer. Each option carries a
 `pi`/`codex`/`devin`/`claude` provider, model, settings,
 `suitableFor`, `avoidFor`, `notes` and an
-`enabled`/`availability` state. The Lead chooses per task — Engineer,
+`enabled`/`availability` state. Ordinary formation resolves the task's option
+server-side; the Lead supplies an independent choice when requested. Engineer,
 Architect and Reviewer are not hard-mapped to models. Two Peers can differ in
 provider/model/effort without any extra saved profile. The card's archetype
 list shows the shape: each of the 12 standard seats names a kind of work and
@@ -431,8 +432,10 @@ the Lead's own settings, or to another repo's catalog.
 ### Ordinary Peer formation through the desk
 
 Call `slp_seat_create` with requestId, role=peer, taskLabel, assignment and
-its grantRef. `runtime` is optional; `selection: {optionId}` is an independent
-Lead choice and cannot accompany runtime. No provider/settings override is
+its grantRef. Start with runtime and selection omitted. `selection: {optionId}`
+supplies an independent Lead choice when the operation returns choices.
+An explicit runtime is full-pin compatibility and must already carry its required
+pool/Jev receipts; it cannot accompany selection. No provider/settings override is
 accepted. The assignment's raw prose is the Jev routing brief.
 
 | Jev mode | No runtime/selection | selection | Existing full runtime |
@@ -462,6 +465,9 @@ intent or Jev, using the same three-copy allowance and 32KiB reserve as the
 final evidence check; shorten it and reuse the unconsumed requestId.
 Selection/plan evidence only known after decision is also checked before native
 allocation. Existing full-runtime validation and retained replay stay unchanged.
+
+For a refused or uncertain operation, consume its bounded cause/recovery and
+follow the [agent-facing recovery procedure](../src/references/delegation-execution.md#refused-or-uncertain-formation).
 
 The child is created without work, its native tuple is observed, then the default
 caller delivery returns an exact prompt for send_agent_prompt with
@@ -563,10 +569,10 @@ Configuration is per daemon, via the SLP Manager's **Jev** card
 All toggles default off, evaluated at preparation time — toggling
 never mutates running seats, and disabling keeps the stored key. Two modes:
 
-- **Shadow** (`enabled` on, `capabilities.routing` off): `route-decide`
-  emits a receipt but the Lead's own pick stays binding; `prepare` verifies
-  the receipt and records both picks (`routing.jev.jevChoice`, `.declined`)
-  in the plan.
+- **Shadow** (`enabled` on, `capabilities.routing` off): ordinary formation
+  requires an independent Lead choice and obtains the advisory receipt on the
+  server. CLI compatibility obtains it with `route-decide`; `prepare` verifies
+  the supplied receipt and records both picks (`routing.jev.jevChoice`, `.declined`).
 - **Armed** (`enabled` and `capabilities.routing` both on): the receipt is
   required and binding — `route.optionId` must equal its choice.
 

@@ -514,8 +514,8 @@ test('standalone bundles deliver semantic obligations and conditional operation 
       assert.ok(instructions.includes(`references/${ref}`));
       assert.ok(!instructions.includes(body(`src/references/${ref}`)), `${ref} remains conditional`);
     }
-    assert.match(instructions, /minimum\s+sufficient independent mandates for material decision-changing questions/);
-    assert.match(instructions, /Unavailable\s+required reviewers or adverse findings never relax the gate/);
+    assert.match(instructions, /minimum\s+sufficient\s+independent mandates for material questions\/obligations/);
+    assert.match(instructions, /unavailable reviewers or adverse findings\s+never relax required gates/);
     assert.match(instructions, /Check desk binding first \(slp_status if available\); use bound slp_seat_create\s+for Lead\/Peer, including existing worktrees/);
     assert.match(instructions, /New worktree: Paseo create_workspace under host-setup authority, then\s+slp_seat_create placement existing/);
     assert.match(instructions, /create_agent remains compatibility\/recovery/);
@@ -531,7 +531,7 @@ test('standalone bundles deliver semantic obligations and conditional operation 
   assert.match(direct, /agent-scoped Paseo create_agent/);
   assert.match(direct, /actual host parent\/workspace\/cwd and bundle/);
   assert.match(direct, /Default placement is the parent workspace, including read-only review/);
-  assert.match(direct, /formation in that brief\/receipt: parent, seat, workspace\/cwd/);
+  assert.match(direct, /Record parent, seat, workspace\/cwd, isolation reason and baseline resources there/);
   assert.match(direct, /preserve taskLabel\/disposition and the actual parent/);
   assert.match(direct, /Empty inventory alone proves no absence/);
   const monitoring = body('src/references/monitoring.md').replace(/\s+/gu, ' ');

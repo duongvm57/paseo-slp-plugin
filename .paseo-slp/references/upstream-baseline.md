@@ -12,18 +12,35 @@ a "no plugin change" outcome.
 
 | Package | Pinned | Assessed | Coverage | Date | Outcome |
 |---|---|---|---|---|---|
-| `@getpaseo/plugin` | 0.10.0 | 0.10.0 | Full `.d.ts`/`.js` diff (no code delta) | 2026-09-28 | Additive; bump landed |
-| `@getpaseo/client` | 0.10.0 | 0.10.0 | Full `.d.ts`/`.js` diff | 2026-09-28 | Additive; bump landed |
-| `@getpaseo/protocol` | 0.10.0 | 0.10.0 | Full diff | 2026-09-28 | Additive; bump landed |
-| `@getpaseo/server` | host 0.9.1 (unpinned) | 0.10.0 | Touchpoint-map files + parity backend exercised at 0.10.0 | 2026-09-28 | No break found; auth internals renamed, unused |
-| `@getpaseo/cli` | host 0.9.1 (unpinned) | 0.10.0 | Full `.d.ts`/`.js` diff 0.9.1→0.10.0 | 2026-09-28 | Additive; `paseo run` caller-agent verify is strictly safer |
+| `@getpaseo/plugin` | 0.11.2 | 0.11.2 | Public SDK declarations and consumed touchpoints; no live probe | 2026-10-11 | Additive SDK APIs; existing aliases retained, no optional API adoption |
+| `@getpaseo/client` | 0.11.2 | 0.11.2 | Public declarations and changed runtime methods; no live probe | 2026-10-11 | Contracts retained; send queue and usage additions inspected |
+| `@getpaseo/protocol` | 0.11.2 | 0.11.2 | Imported schema/type touchpoints; generated validators not exhaustively assessed | 2026-10-11 | Optional desktopTrigger/options; ProviderOptions relaxed |
+| `@getpaseo/server` | unpinned host; not changed | 0.11.2 | Partial plugin/config/provider touchpoints, not whole host | 2026-10-11 | Inspection only; no host installation or live compatibility claim |
+| `@getpaseo/cli` | unpinned host; not changed | 0.11.2 | Partial plugin/schedule/command delta, not full CLI | 2026-10-11 | Inspection only; no CLI installation |
 
-`requirements.paseo` in `plugin/paseo-plugin.json`: `>=0.8.0` — upper bound
-dropped by Human decision after the 0.10.0 sync (daemon upgrades must not
-block the plugin; the 0.8.0 floor stands because the plugin SDK does not
-exist earlier). Field must stay present: an absent `requirements.paseo` is
-treated by the daemon as a pre-0.8 legacy plugin and blocked.
-Manifest verified by the real 0.10.0 `readPluginManifest`.
+`requirements.paseo` in `plugin/paseo-plugin.json`: `>=0.10.3`, unchanged
+by this SDK update. The earlier record of `>=0.8.0` described the September
+assessment, not the current manifest. Field must stay present: an absent
+`requirements.paseo` is treated by the daemon as a pre-0.8 legacy plugin.
+Updating build dependencies does not update historical capability evidence,
+raise the supported host floor or prove runtime compatibility.
+
+## 2026-10-11 bounded SDK update
+
+Human requested the latest local SDK while preparing the spawn-guidance fix
+for a PR. All five npm stable tags resolved to 0.11.2; only the three direct
+SDK dependencies and the plugin's protocol dependency were updated. Package
+tarballs, SHA256 pins, changed-file inventories, diffs and the pre-update
+impact report are retained under
+`~/slp-traces/spawn-guidance-fix-20261010/sdk-0.11.2/`.
+Release source: [Paseo v0.11.2 changelog](https://github.com/getpaseo/paseo/blob/v0.11.2/CHANGELOG.md).
+
+Coverage is deliberately partial: no optional upstream feature was adopted,
+no live daemon/plugin cutover was performed, and generated protocol
+validators plus unconsumed host internals remain unassessed. Subsequent
+syncs must start at 0.10.0 for those unreviewed surfaces. Source checks and
+independent-review outcomes are reported in the PR; this record alone is
+not test or acceptance evidence.
 
 ## Open items from the last assessment
 
@@ -32,7 +49,7 @@ Manifest verified by the real 0.10.0 `readPluginManifest`.
 - Docs pinned to 0.8.0 need re-baselining with a bump:
   `docs/spec/paseo-plugin-implementation.md`,
   `docs/spec/paseo-plugin-feasibility.md`, `docs/contract.md`.
-- No live daemon exercise on 0.10.0; `tests/fixtures/supervision/*.json` were
+- No live daemon exercise on 0.11.2 in this SDK update; `tests/fixtures/supervision/*.json` were
   recorded on host 0.9.1 and not re-recorded.
 
 ## Evidence

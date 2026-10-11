@@ -529,8 +529,8 @@ test('ACP delivery keeps verified core while refreshing language and restoring c
     assert.match(next, /Human stop/);
     assert.match(next, /Missing task evidence is a gap/);
     assert.match(next, /Review selection never waives\s+a Human, assignment or protocol obligation/);
-    assert.equal(/Lead's explicit review selection precedes the candidate round/.test(next), role !== 'peer');
-    assert.equal(/Unavailable\s+required reviewers or adverse findings never relax the gate/.test(next), role !== 'peer');
+    assert.equal(/Lead records review selection before each candidate/.test(next), role !== 'peer');
+    assert.equal(/unavailable reviewers or adverse findings\s+never relax required gates/.test(next), role !== 'peer');
     assert.equal(/record\s+selection\/reason before the candidate round/.test(next), role === 'lead');
     assert.equal(/Before each review\s+selection or revision, including not-required, reviewer choice, re-review or\s+acceptance, read applicable gate rules/.test(next), role === 'lead');
     assert.equal(/Reviewer\/Auditor stays independent of writer and accepting owner/.test(next), role === 'peer');
