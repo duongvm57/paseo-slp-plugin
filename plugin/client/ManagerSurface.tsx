@@ -1,15 +1,16 @@
 // Management surface for the paseo-slp plugin (spec §2, §10).
-// PluginSurfaceProps carry host.id/host.label only — the daemon home is
-// administrator input, never a prop. No auto-activation: every mutation is an
-// explicit press behind the two §4 authority acknowledgments, and status is
+// PluginScreenProps carry host.id/host.label only — the daemon home is
+// administrator input, never a prop. Profiles Save explicitly chains save then activation; opening the UI
+// never activates; runtime starts require the two §4 authority acknowledgments. Status is
 // fetched on demand, then polled every second only while an operation pends.
 //
-// The layout is a guided top-down flow — target, status, authority, activate —
-// with recovery and override controls collapsed behind their own headers so
-// the default view shows only what an activation needs.
-import { useCallback, useEffect, useRef, useState } from "react";
+// Overview presents runtime identity and configuration summaries. Sections
+// share one host session; drafts remain mounted while sections change.
+// Target paths and authority acknowledgments never enter screen params.
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useRpc } from "@getpaseo/plugin/client";
-import type { PluginSurfaceProps } from "@getpaseo/plugin/client";
+import { Modal } from "@getpaseo/plugin/client/react-native";
+import type { PluginScreenProps } from "@getpaseo/plugin/client";
 import type { PluginTheme } from "@getpaseo/plugin";
 import {
   Pressable,
@@ -81,6 +82,8 @@ import {
   styles,
 } from "./ui-kit.tsx";
 import type { Colors, ControlState } from "./ui-kit.tsx";
+import { SettingsSelect } from "@getpaseo/plugin/client/ui";
+import { readDisplaySnapshot, rememberRead, useTargetLifetime } from "./target-async.ts";
 import { useCatalogCache, useCatalogDemand } from "./catalog-demand.ts";
 import { useLanguageCard } from "./cards/language.ts";
 import { useRoutingCard, RoutingCard } from "./cards/routing.tsx";
@@ -93,16 +96,9 @@ import { useSupervisionCard, SupervisionCard } from "./cards/supervision.tsx";
 // (registry pickerRank), FAMILY_LABEL the display names — no local literals.
 const AUTHORITY = { exclusiveAdministrativeWindow: true, verifiedHostHomeMapping: true } as const;
 
-
-// In-surface nav — the mockup's left sidebar nav ported as a tab strip
-// inside the routing region (the sidebar chrome itself is not ported).
-const MANAGER_SECTIONS = [
-  { id: "profiles", label: "Role profiles" },
-  { id: "pool", label: "Peer pool" },
-  { id: "language", label: "Communication language" },
-  { id: "jev", label: "Jev" },
-] as const;
-type ManagerSectionId = (typeof MANAGER_SECTIONS)[number]["id"];
+import { MANAGER_SECTIONS, managerSection } from "./manager-navigation.ts";
+import type { ManagerSectionId } from "./manager-navigation.ts";
+import { RuntimeIdentity, jevSummary } from "./runtime-overview.tsx";
 
 // ---------------------------------------------------------------------------
 // Surface
@@ -123,7 +119,14 @@ const STATUS_DETAIL_LABELS = new Set([
   "Live acceptance",
 ]);
 
-export function ManagerSurface({ host, layout, theme, navigation }: PluginSurfaceProps) {
+type ManagerProps = PluginScreenProps & { onSectionChange?: (section: ManagerSectionId) => void };
+export function ManagerSurface(props: ManagerProps) {
+  // A host switch owns a new session: no detected home, authority checkbox,
+  // draft, busy flag or late completion crosses the host boundary.
+  return <ManagerSession key={props.host.id} {...props} />;
+}
+
+function ManagerSession({ host, layout, theme, navigation, params = {}, onSectionChange }: ManagerProps) {
   const colors = theme.colors;
   const compact = layout.compact;
   const callStatus = useRpc(status);
@@ -144,10 +147,13 @@ export function ManagerSurface({ host, layout, theme, navigation }: PluginSurfac
   const callGetSupervision = useRpc(getSupervision);
   const callSetSupervision = useRpc(setSupervision);
 
-  const [detectedHome, setDetectedHome] = useState<string | null>(null);
+  const [detectedHome, setDetectedHome] = useState<string | null>(() => readDisplaySnapshot<string>(`home:${host.id}`));
   const [homeOverride, setHomeOverride] = useState("");
   const [exclusiveWindow, setExclusiveWindow] = useState(false);
   const [mappingConfirmed, setMappingConfirmed] = useState(false);
+  const [saveConfirmationOpen, setSaveConfirmationOpen] = useState(false);
+  const [saveApplyBusy, setSaveApplyBusy] = useState(false);
+  const saveApplyRun = useRef<symbol | null>(null);
   const [adoptIdentical, setAdoptIdentical] = useState(false);
   const [nodePath, setNodePath] = useState("");
   const [binaries, setBinaries] = useState<Record<FamilyName, string>>(
@@ -163,7 +169,13 @@ export function ManagerSurface({ host, layout, theme, navigation }: PluginSurfac
   // the active section — inactive sections stay mounted under display:none
   // so drafts and card-local state survive, but never lay out or scroll
   // into view.
-  const [activeSection, setActiveSection] = useState<ManagerSectionId>("profiles");
+  const [localSection, setLocalSection] = useState<ManagerSectionId>(() => managerSection(params));
+  const activeSection = onSectionChange ? managerSection(params) : localSection;
+  const setActiveSection = (section: ManagerSectionId) => {
+    setLocalSection(section);
+    onSectionChange?.(section);
+  };
+  useEffect(() => { setLocalSection(managerSection(params)); }, [params.section]);
   const sectionShown = (id: ManagerSectionId) => (activeSection === id ? null : { display: "none" as const });
   // Role profiles: the mockup's two-column .profile-grid, measured on the
   // card body container (never the window) — two panels ≥700px, else stacked.
@@ -174,12 +186,15 @@ export function ManagerSurface({ host, layout, theme, navigation }: PluginSurfac
     if (focus) dom?.focus?.();
   };
   const [store] = useState(createTargetViews);
+  const [statusFresh, setStatusFresh] = useState(false);
   const [view, setView] = useState<TargetView>(emptyTargetView);
 
   const home = homeOverride.trim() !== "" ? homeOverride.trim() : (detectedHome ?? "");
   const target: TargetValue | null = isDaemonHome(home) ? { hostId: host.id, daemonHome: home } : null;
   const key = target ? targetKey(target) : null;
   const keyRef = useRef<string | null>(key);
+  const captureTarget = useTargetLifetime(key);
+  const statusSequence = useRef(0);
   const autoLoadedFor = useRef<string | null>(null);
 
   // Prefill the daemon home from the plugin process's own environment
@@ -190,7 +205,7 @@ export function ManagerSurface({ host, layout, theme, navigation }: PluginSurfac
     void (async () => {
       try {
         const detected = await callLocalTarget({ schemaVersion: 1 });
-        if (!cancelled) setDetectedHome(detected.daemonHome);
+        if (!cancelled) { rememberRead(`home:${host.id}`, detected.daemonHome); setDetectedHome(detected.daemonHome); }
       } catch { /* detection unavailable — the field stays empty for manual input */ }
     })();
     return () => { cancelled = true; };
@@ -199,9 +214,25 @@ export function ManagerSurface({ host, layout, theme, navigation }: PluginSurfac
 
   // Two-host isolation: each (hostId, daemonHome) keeps its own view state in
   // the store; switching the target swaps in that target's snapshot.
-  useEffect(() => {
+  useLayoutEffect(() => {
     keyRef.current = key;
-    setView(target ? store.get(target) ?? emptyTargetView() : emptyTargetView());
+    autoLoadedFor.current = null;
+    const previous = target ? store.get(target) : undefined;
+    const retained = key ? readDisplaySnapshot<StatusResult>(`status:${key}`) : null;
+    const restored = previous ? { ...previous, busy: false } : { ...emptyTargetView(), status: retained };
+    setStatusFresh(false);
+    if (target) store.set(target, restored);
+    setView(restored);
+    setExclusiveWindow(false);
+    setMappingConfirmed(false);
+    setSaveConfirmationOpen(false);
+    setSaveApplyBusy(false);
+    saveApplyRun.current = null;
+    setAdoptIdentical(false);
+    setNodePath("");
+    setBinaries(Object.fromEntries(FAMILY_IDS.map(family => [family, ""])) as Record<FamilyName, string>);
+    setInterruptedId("");
+    setReconcileAction("inspect");
     // eslint-disable-next-line react-hooks/exhaustive-deps -- key captures target
   }, [key]);
 
@@ -214,20 +245,24 @@ export function ManagerSurface({ host, layout, theme, navigation }: PluginSurfac
   }, [store]);
 
   const refresh = useCallback(async (forTarget: TargetValue, operationId?: string): Promise<StatusResult | null> => {
+    const ticket = captureTarget(), issued = ++statusSequence.current;
     try {
       const next = await callStatus({ schemaVersion: 1, target: forTarget, ...(operationId ? { operationId } : {}) });
+      if (!ticket.isCurrent() || issued !== statusSequence.current) return null;
+      rememberRead(`status:${targetKey(forTarget)}`, next);
+      setStatusFresh(true);
       update({ status: next, lastError: null }, forTarget);
       return next;
     } catch (error) {
-      update({ lastError: errorMessage(error) }, forTarget);
+      if (ticket.isCurrent() && issued === statusSequence.current) { setStatusFresh(false); update({ lastError: errorMessage(error) }, forTarget); }
       return null;
     }
-  }, [callStatus, update]);
+  }, [callStatus, update, captureTarget]);
 
   // Once a target is known (detected or typed), fetch status automatically —
   // read-only, so no authority acknowledgment is needed to inspect.
   useEffect(() => {
-    if (!target || !key || view.status || view.busy || autoLoadedFor.current === key) return;
+    if (!target || !key || autoLoadedFor.current === key) return;
     autoLoadedFor.current = key;
     void refresh(target);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- key captures target
@@ -236,7 +271,7 @@ export function ManagerSurface({ host, layout, theme, navigation }: PluginSurfac
   const statusView = view.status;
 
   const cache = useCatalogCache(target, key, statusView?.operation, callCatalog);
-  const { catalogs, featureSets, catalogLoadingFor, featuresLoadingFor, retryCatalog, retryFeatureSet } = cache;
+  const { catalogs, featureSets, catalogLoadingFor, featuresLoadingFor, retryCatalog, retryFeatureSet, catalogIsRefreshing, featureIsRefreshing } = cache;
 
   // Retain the existing card-hook argument contract. Cards now own their
   // async session tickets, while shell patches remain target-bound.
@@ -245,7 +280,7 @@ export function ManagerSurface({ host, layout, theme, navigation }: PluginSurfac
 
   // The language card owns its draft/apply lifecycle (prefill from status
   // until the Human edits, immediate-off toggle) — cards/language.ts.
-  const language = useLanguageCard({ target, targetKey: key, isCurrentKey, statusView, callSetLanguage, refresh, update });
+  const language = useLanguageCard({ target, targetKey: key, isCurrentKey, statusView, statusFresh, callSetLanguage, refresh, update });
 
   // The routing card owns the stored value, the editable form, its
   // once-per-target load, prefill and save — cards/routing.tsx. `form` and
@@ -288,6 +323,8 @@ export function ManagerSurface({ host, layout, theme, navigation }: PluginSurfac
     catalogs,
     featureSets,
     featuresLoadingFor,
+    catalogIsRefreshing,
+    featureIsRefreshing,
     scrollFocusNode,
     update,
   });
@@ -323,7 +360,7 @@ export function ManagerSurface({ host, layout, theme, navigation }: PluginSurfac
       const next = await refresh(target, pending.operationId);
       if (cancelled) return;
       if (next == null) { schedule(STATUS_POLL_MS); return; }
-      if (operationPending(next.operation)) { schedule(pollDelayAfterStatus(next)); return; }
+      if (!next.operation || next.operation.operationId !== pending.operationId || operationPending(next.operation)) { schedule(pollDelayAfterStatus(next) || STATUS_POLL_MS); return; }
       update({ pending: null }, target);
     };
     schedule(pending.nextPollMs);
@@ -332,17 +369,29 @@ export function ManagerSurface({ host, layout, theme, navigation }: PluginSurfac
   }, [key, pending?.operationId]);
 
   const runOperation = useCallback(async (invoke: () => Promise<StartResult>, operationId: string) => {
-    if (!target || view.busy) return;
-    update({ busy: true, lastError: null, notice: null }, target);
+    if (!statusFresh || !target || view.busy || view.pending || (view.status?.operation && operationPending(view.status.operation))) return;
+    const current = store.get(target);
+    if (current?.busy || current?.pending) return;
+    const ticket = captureTarget();
+    if (!ticket.isCurrent()) return;
+    update({ busy: true, lastError: null, notice: `Starting operation ${operationId}. Target changes do not cancel server work; inspect this ID before retrying.` }, target);
     const finish = (start: StartResult) => {
       // startPatch keeps start.conflicts visible whether or not the response
       // was accepted — an accepted reconcile inspect can still report drift.
+      if (!ticket.isCurrent()) {
+        applyPatch(store, target, startPatch(start), null);
+        return;
+      }
       update(startPatch(start), target);
-      void refresh(target);
+      void refresh(target, start.operation?.operationId);
     };
     try {
       finish(await invoke());
     } catch (error) {
+      if (!ticket.isCurrent()) {
+        applyPatch(store, target, { busy: false, lastError: `Operation ${operationId} did not return: ${errorMessage(error)}. Inspect this exact ID before retrying.` }, null);
+        return;
+      }
       // §3: an invoke timeout does not cancel server-side work. Poll the
       // original operationId and retry the identical request only when status
       // reports it absent — never assume the timeout cancelled anything.
@@ -350,6 +399,7 @@ export function ManagerSurface({ host, layout, theme, navigation }: PluginSurfac
       try {
         probe = await callStatus({ schemaVersion: 1, target, operationId });
       } catch { /* probe failure reported below */ }
+      if (!ticket.isCurrent()) return;
       if (probe == null) {
         update({ busy: false, lastError: `${errorMessage(error)} (status probe failed as well)` }, target);
         return;
@@ -360,7 +410,7 @@ export function ManagerSurface({ host, layout, theme, navigation }: PluginSurfac
         try {
           finish(await invoke());
         } catch (again) {
-          update({ busy: false, lastError: errorMessage(again) }, target);
+          if (ticket.isCurrent()) update({ busy: false, lastError: errorMessage(again) }, target);
         }
       } else if (recovery.kind === "poll") {
         update({
@@ -375,9 +425,9 @@ export function ManagerSurface({ host, layout, theme, navigation }: PluginSurfac
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- key captures target
-  }, [key, view.busy, update, callStatus, refresh]);
+  }, [key, statusFresh, view.status, view.busy, view.pending, update, callStatus, refresh, captureTarget, store]);
 
-  const canMutate = target != null && exclusiveWindow && mappingConfirmed && !view.busy;
+  const canMutate = statusFresh && !(statusView?.operation && operationPending(statusView.operation)) && target != null && exclusiveWindow && mappingConfirmed && !view.busy && !view.pending && !saveApplyBusy;
   // Conflicts from the last start response, the tracked operation's own
   // status(opId) results, and the status itself — merged and deduped; an
   // accepted or succeeded operation's conflicts stay visible.
@@ -410,10 +460,58 @@ export function ManagerSurface({ host, layout, theme, navigation }: PluginSurfac
   };
 
   const runActivate = () => {
+    if (!canMutate || routing.busy || saveApplyRun.current) return;
     const input = activateInput();
     if ("error" in input) { update({ lastError: input.error }, target!); return; }
     void runOperation(() => callActivate(input), input.operationId);
   };
+
+  const saveAndApplyProfiles = async () => {
+    if (profileMetadataPending || !routing.fresh || !target || !statusView?.binding || !canMutate || routing.busy || saveApplyRun.current || !routing.differs) return;
+    const input = activateInput();
+    if ("error" in input) return;
+    const ticket = captureTarget(), run = Symbol("save-apply");
+    const canonicalHome = statusView.target.daemonHome;
+    saveApplyRun.current = run;
+    setSaveApplyBusy(true);
+    setSaveConfirmationOpen(false);
+    try {
+      if (!await routing.save() || !ticket.isCurrent()) return;
+      const fresh = await refresh(target);
+      if (!ticket.isCurrent()) return;
+      const current = store.get(target);
+      if (!fresh || fresh.embeddedCandidateSha256 !== input.candidateSha256
+        || fresh.target.hostId !== input.target.hostId || fresh.target.daemonHome !== canonicalHome
+        || current?.busy || current?.pending || operationPending(fresh.operation)) {
+        update({ lastError: "Profiles were saved, but applying needs a fresh unchanged target/runtime. Inspect Maintenance before retrying." }, target);
+        return;
+      }
+      await runOperation(() => callActivate(input), input.operationId);
+    } finally {
+      if (saveApplyRun.current === run) {
+        saveApplyRun.current = null;
+        setSaveApplyBusy(false);
+      }
+    }
+  };
+
+  const profileMetadataPending = ["supervisor", "lead"].some(role => {
+    const form = routing.form[role as "supervisor" | "lead"];
+    return catalogIsRefreshing(catalogScope(form.family, role as RoleName));
+  }) || routing.featureKeys.some(key => key != null && featureIsRefreshing(key));
+  const requestSaveAndApply = () => {
+    if (profileMetadataPending || !statusFresh || !routing.fresh || !target || !statusView?.binding || view.busy || view.pending || routing.busy || saveApplyRun.current || !routing.differs) return;
+    if (!exclusiveWindow || !mappingConfirmed || statusView.binding.candidateSha256 !== statusView.embeddedCandidateSha256) setSaveConfirmationOpen(true);
+    else void saveAndApplyProfiles();
+  };
+
+  const confirmationControls = () => <>
+    <CheckRow colors={colors} checked={exclusiveWindow} onToggle={setExclusiveWindow}
+      title="Exclusive configuration window" hint="No other writers may edit daemon configuration while an operation runs" />
+    <CheckRow colors={colors} checked={mappingConfirmed} onToggle={setMappingConfirmed} disabled={!target}
+      title="Daemon home confirmed" hint={target ? `${target.daemonHome} is the home of this daemon` : "Detect or configure the daemon home first"} />
+    <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>{EXCLUSIVE_WINDOW_NOTICE}</Text>
+  </>;
 
   const runReconcile = () => {
     // §4: canonical home + candidate must be displayed before any operation —
@@ -445,24 +543,94 @@ export function ManagerSurface({ host, layout, theme, navigation }: PluginSurfac
     void runOperation(() => callDeactivate(input), input.operationId);
   };
 
+  const headerSubtitle = `${statusFresh ? "Runtime and work settings" : view.lastError ? "Runtime read unavailable" : statusView ? "Updating saved view" : "Reading runtime"} on ${host.label}`;
   return (
     <ScrollView
-      contentContainerStyle={{ padding: compact ? 12 : 24, gap: compact ? 12 : 16 }}
+      style={{ backgroundColor: colors.surface0 }}
+      contentContainerStyle={{ padding: compact ? 12 : 24, gap: compact ? 12 : 16, width: "100%", maxWidth: 1120, alignSelf: "center" }}
     >
       <View style={styles.headerRow}>
         <View style={{ flex: 1, gap: 4 }}>
           <Text style={[styles.pageTitle, { color: colors.foreground }]}>SLP</Text>
-          <Text style={[styles.muted, { color: colors.foregroundMuted }]}>
-            Provider hierarchy on {host.label}
+          <Text numberOfLines={1} ellipsizeMode="tail" accessibilityLiveRegion="polite"
+            accessibilityLabel={headerSubtitle} accessibilityHint={!statusFresh ? "Writes wait for a fresh read." : undefined}
+            style={[styles.muted, { color: colors.foregroundMuted }]}>
+            {headerSubtitle}
           </Text>
         </View>
         <StatePill colors={colors} state={statusView?.state ?? null} />
       </View>
 
+      <RuntimeIdentity colors={colors} statusView={statusView} home={home} />
+
+        <>
+        {view.lastError ? <Text selectable style={[styles.muted, { color: colors.statusDanger }]}>{view.lastError}</Text> : null}
+        {view.notice ? <Text selectable style={[styles.muted, { color: colors.foregroundMuted }]}>{view.notice}</Text> : null}
+        {view.pending ? <KV colors={colors} label="Tracked operation" value={view.pending.operationId} /> : null}
+        {conflictList.length > 0 ? <Card colors={colors} title="Conflicts · inspect before changing configuration">
+          {conflictLines(conflictList).map((line, index) => <Text key={index} selectable style={[styles.mutedSmall, { color: colors.statusDanger }]}>{line}</Text>)}
+        </Card> : null}
+        </>
+
+      <Modal title="Save and apply profiles" open={saveConfirmationOpen} onOpenChange={setSaveConfirmationOpen}>
+        <Modal.Content>
+          <View style={{ gap: 12 }}>
+            <RuntimeIdentity colors={colors} statusView={statusView} home={home} />
+            <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>These choices apply to future launches; existing sessions keep their current runtime.</Text>
+            {statusView?.binding && statusView.binding.candidateSha256 !== statusView.embeddedCandidateSha256 ?
+              <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>Applying also updates the bound runtime to the version in this plugin.</Text> : null}
+            {confirmationControls()}
+            <View style={styles.chipRow}>
+              <Button colors={colors} label="Cancel" onPress={() => setSaveConfirmationOpen(false)} />
+              <Button colors={colors} kind="primary" label="Save and apply" disabled={!canMutate || routing.busy || !routing.differs}
+                onPress={() => void saveAndApplyProfiles()} />
+            </View>
+          </View>
+        </Modal.Content>
+      </Modal>
+
+      {params.section && !MANAGER_SECTIONS.some(section => section.id === params.section) ?
+        <Text style={[styles.mutedSmall, { color: colors.statusWarning }]}>Unknown section. Showing Overview.</Text> : null}
+      {compact ? <SettingsSelect label="SLP section" value={activeSection}
+        options={MANAGER_SECTIONS.map(section => ({ label: section.label, value: section.id }))}
+        onValueChange={setActiveSection} /> : null}
+          <View style={compact ? { display: "none" } : undefined}><View role="tablist" accessibilityLabel="Manager sections" style={styles.navStrip}>
+            {MANAGER_SECTIONS.map(section => {
+              const active = activeSection === section.id;
+              return (
+                <Pressable
+                  key={section.id}
+                  onPress={() => setActiveSection(section.id)}
+                  accessibilityRole="tab"
+                  accessibilityLabel={`${section.label} tab`}
+                  accessibilityState={{ selected: active }}
+                  style={(state: ControlState) => [
+                    styles.navItem,
+                    compact && styles.navItemCompact,
+                    (active || (state.hovered && !active)) && { backgroundColor: colors.surface2 },
+                    state.focused && focusRing(colors),
+                    state.pressed && { opacity: 0.75 },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.navLabel,
+                      compact && { fontSize: 12 },
+                      { color: active ? colors.accent : colors.foregroundMuted },
+                      active && { fontWeight: "700" },
+                    ]}
+                  >
+                    {section.label}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View></View>
+
       <Card
         colors={colors}
-        title="Daemon home"
-        subtitle="Detected from this daemon's environment — use Advanced to manage a different home."
+        title="Inspect selected host"
+        subtitle="Read-only inspection. Refresh after changing the binding or configuration."
       >
         {home ? (
           <KV colors={colors} label="Daemon home" value={home} />
@@ -479,14 +647,16 @@ export function ManagerSurface({ host, layout, theme, navigation }: PluginSurfac
         />
       </Card>
 
+      {view.lastError && statusView ? <Text style={[styles.mutedSmall, { color: colors.statusWarning }]}>Last status read retained. Refresh to verify current state.</Text> : null}
+      {view.lastError && !statusView ? <Text selectable style={[styles.muted, { color: colors.statusDanger }]}>{view.lastError}</Text> : null}
       {statusView ? (
-        <Card
+        <View style={sectionShown("overview")}><Card
           colors={colors}
-          title="Status"
+          title="Runtime status"
           subtitle={stateHint(statusView.state) || undefined}
         >
-          {statusRows(statusView, { compact })
-            .filter(row => !STATUS_DETAIL_LABELS.has(row.label))
+          {statusRows(statusView, { full: true })
+            .filter(row => !STATUS_DETAIL_LABELS.has(row.label) && !["Embedded candidate", "Active candidate", "Daemon home (canonical)"].includes(row.label))
             .map(row => (
               <KV key={row.label} colors={colors} label={row.label} value={row.value} />
             ))}
@@ -522,7 +692,7 @@ export function ManagerSurface({ host, layout, theme, navigation }: PluginSurfac
             open={statusDetailsOpen}
             onToggle={() => setStatusDetailsOpen(open => !open)}
           >
-            {statusRows(statusView, { compact })
+            {statusRows(statusView, { full: true })
               .filter(row => STATUS_DETAIL_LABELS.has(row.label))
               .map(row => (
                 <KV key={row.label} colors={colors} label={row.label} value={row.value} />
@@ -551,121 +721,34 @@ export function ManagerSurface({ host, layout, theme, navigation }: PluginSurfac
               ))}
             </View>
           ) : null}
-        </Card>
+        </Card></View>
       ) : null}
 
-      <Card
-        colors={colors}
-        title="Activation"
-        subtitle={statusView ? undefined : "Inspect the daemon first — the candidate and conflicts must be visible before any change."}
-      >
-        <CheckRow
-          colors={colors}
-          checked={exclusiveWindow}
-          onToggle={setExclusiveWindow}
-          title="Exclusive configuration window"
-          hint="No other writers may edit daemon configuration while an operation runs"
-        />
-        <CheckRow
-          colors={colors}
-          checked={mappingConfirmed}
-          onToggle={setMappingConfirmed}
-          disabled={!target}
-          title="Daemon home confirmed"
-          hint={target ? `${target.daemonHome} is the home of this daemon` : "Detect or configure the daemon home first"}
-        />
-        <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
-          {EXCLUSIVE_WINDOW_NOTICE}
-        </Text>
-        {!statusView?.binding ? (
-          <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
-            Activation creates the SLP Supervisor and SLP Lead agent profiles, bound per
-            the Role profiles card — an unrouted role falls back to the first enabled,
-            available family.
-          </Text>
-        ) : null}
-        <Button
-          colors={colors}
-          kind="primary"
-          label={statusView ? activationLabel(statusView) : "Activate"}
-          onPress={runActivate}
-          disabled={!canMutate || !statusView}
-        />
-      </Card>
+      <View style={sectionShown("overview")}><Card colors={colors} title="Configuration" subtitle="Drafts stay here while you switch sections. Save each editor explicitly.">
+        <KV colors={colors} label="Profiles" value={routing.saved ? saveApplyBusy || view.pending ? "Saved; Apply operation in progress" : "Saved; inspect latest Apply result" : routing.dirty ? "Unsaved draft" : routing.diverged ? "Saved profiles differ from binding" : "Inspect Profiles for saved and applied settings"} />
+        <KV colors={colors} label="Peer pool" value={pool.poolReadError ? "Read unavailable" : pool.poolDirty ? "Unsaved draft" : pool.poolData?.error ? "Pool unavailable" : pool.poolData ? pool.poolData.pool ? "Saved pool; read at next formation" : "No saved pool" : "Awaiting pool read"} />
+        <KV colors={colors} label="Jev" value={jevSummary(jev.view, jev.loadError, { dirty: jev.dirty, saved: jev.saved })} />
+        <View style={styles.chipRow}>{MANAGER_SECTIONS.filter(section => section.id !== "overview" && section.id !== "maintenance").map(section => <Button key={section.id} colors={colors} label={`Open ${section.label.toLowerCase()}`} onPress={() => setActiveSection(section.id)} />)}</View>
+      </Card></View>
 
-      {statusView ? (
-        // The routing region's own intro — the mockup's .route-intro eyebrow +
-        // headline + sub-copy, then the sidebar nav ported as an in-surface
-        // tab strip. The host SLP header and the prototype's sidebar chrome
-        // stay outside this surface.
-        <View style={{ gap: compact ? 8 : 12 }}>
-          <View style={{ gap: 4 }}>
-            <Text style={[styles.eyebrow, { color: colors.foregroundMuted }]}>Routing configuration</Text>
-            <Text style={[styles.routingHeadline, { color: colors.foreground }]}>Peer routing configuration</Text>
-            <Text style={[styles.muted, { color: colors.foregroundMuted }]}>
-              Review the draft. Save when the whole pool is ready.
-            </Text>
-          </View>
-          <View role="tablist" accessibilityLabel="Manager sections" style={styles.navStrip}>
-            {MANAGER_SECTIONS.map(section => {
-              const active = activeSection === section.id;
-              return (
-                <Pressable
-                  key={section.id}
-                  onPress={() => setActiveSection(section.id)}
-                  accessibilityRole="tab"
-                  accessibilityLabel={`${section.label} tab`}
-                  accessibilityState={{ selected: active }}
-                  style={(state: ControlState) => [
-                    styles.navItem,
-                    compact && styles.navItemCompact,
-                    (active || (state.hovered && !active)) && { backgroundColor: colors.surface2 },
-                    state.focused && focusRing(colors),
-                    state.pressed && { opacity: 0.75 },
-                  ]}
-                >
-                  <Text
-                    style={[
-                      styles.navLabel,
-                      compact && { fontSize: 12 },
-                      { color: active ? colors.accent : colors.foregroundMuted },
-                      active && { fontWeight: "700" },
-                    ]}
-                  >
-                    {section.label}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </View>
-        </View>
-      ) : null}
-
-      {statusView ? (
-        // ONE card edits the full profile each role binds — family, model,
-        // mode, feature values, thinking option — behind one Save issuing a
-        // single set-role-routing call with the full routing object
-        // (saveRouting always builds both roles). The stored routing is the
-        // sole role→provider configurator and applies at the NEXT
-        // activation — saving never activates on its own, and a divergence
-        // between the stored routing and the live binding shows once on the
-        // card. The peer note lives inside this card because it scopes what
-        // routing does NOT configure; a separate card would orphan one line
-        // of disclosure.
+      {/* Keep the Profiles frame mounted while the first read is pending. */}
         <View style={sectionShown("profiles")}>
         <RoutingCard
           colors={colors}
           target={target}
           statusView={statusView}
           routing={routing}
+          onSave={requestSaveAndApply}
+          applyBusy={saveApplyBusy || view.busy || view.pending != null}
+          readOnly={!statusFresh || profileMetadataPending}
           catalogs={catalogs}
           catalogLoadingFor={catalogLoadingFor}
           retryCatalog={retryCatalog}
           retryFeatureSet={retryFeatureSet}
+          catalogIsRefreshing={catalogIsRefreshing}
+          featureIsRefreshing={featureIsRefreshing}
         />
         </View>
-      ) : null}
-
       {target ? (
         // The user-scope Peer pool — slp-runtime/state/peer-pool.json, the
         // catalog readCatalog resolves for every repository without its own
@@ -694,7 +777,7 @@ export function ManagerSurface({ host, layout, theme, navigation }: PluginSurfac
         <View style={sectionShown("language")}>
         <LanguageCard
           colors={colors}
-          disabled={language.disabled}
+          disabled={language.disabled || !statusFresh}
           busy={language.busy}
           on={language.on}
           value={language.value}
@@ -716,16 +799,19 @@ export function ManagerSurface({ host, layout, theme, navigation }: PluginSurfac
         // value.
         <View style={sectionShown("jev")}>
         <JevCard colors={colors} target={target} jev={jev} />
-        {/* Supervision config is per-daemon-home plugin state (same class as
-            the Jev card) — daemon defaults for discovered Leads plus explicit
-            per-Lead routes, CAS-guarded whole-file saves, served-home
-            verified server-side.
-            The card mounts inside the Jev section: supervision assessments
-            run through the same Jev config this section edits, and its
-            on/off switch is the Jev supervision capability. */}
-        <SupervisionCard colors={colors} target={target} jev={jev} supervision={supervision} navigation={navigation} />
         </View>
       ) : null}
+
+      {target ? <View style={sectionShown("supervision")}>
+        <SupervisionCard colors={colors} target={target} jev={jev} supervision={supervision} navigation={navigation} />
+      </View> : null}
+
+      <View style={sectionShown("maintenance")}>
+      <Card colors={colors} title="Runtime setup" subtitle="Initial activation, runtime updates and recovery. Saving Profiles applies its choices automatically.">
+        {confirmationControls()}
+        <Button colors={colors} kind="primary" label={activationLabel(statusView)} onPress={runActivate}
+          disabled={!canMutate || !statusView || routing.busy} />
+      </Card>
 
       <Collapse
         colors={colors}
@@ -831,6 +917,7 @@ export function ManagerSurface({ host, layout, theme, navigation }: PluginSurfac
           />
         </View>
       </Collapse>
+      </View>
     </ScrollView>
   );
 }

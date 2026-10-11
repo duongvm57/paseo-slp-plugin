@@ -4,16 +4,17 @@
 // refresh/lastError plumbing. Toggle off applies immediately (nothing to
 // type); toggle on waits for the Apply press so an empty value is never
 // written.
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useState } from "react";
 import type { StatusResult, TargetValue } from "../../shared/contracts.ts";
 import { useTargetLifetime } from "../target-async.ts";
 import { errorMessage } from "../manager-state.ts";
 
-export function useLanguageCard({ target, targetKey, isCurrentKey, statusView, callSetLanguage, refresh, update }: {
+export function useLanguageCard({ target, targetKey, isCurrentKey, statusView, statusFresh = true, callSetLanguage, refresh, update }: {
   target: TargetValue | null;
   targetKey: string | null;
   isCurrentKey: (key: string) => boolean;
   statusView: StatusResult | null;
+  statusFresh?: boolean;
   callSetLanguage: (input: { schemaVersion: 1; target: TargetValue; value: string | null }) => Promise<unknown>;
   refresh: (target: TargetValue) => void;
   update: (patch: { lastError: string | null }, target: TargetValue) => void;
@@ -35,7 +36,10 @@ export function useLanguageCard({ target, targetKey, isCurrentKey, statusView, c
 
   // A stale op must not clear the busy flag of a newer op on the displayed
   // target — the target-switch reset releases the abandoned flag instead.
-  useEffect(() => {
+  useLayoutEffect(() => {
+    setLanguageOn(false);
+    setLanguageValue("");
+    setLanguageDirty(false);
     setLanguageBusy(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- targetKey captures target
   }, [targetKey]);
@@ -43,7 +47,7 @@ export function useLanguageCard({ target, targetKey, isCurrentKey, statusView, c
   // Toggle off applies immediately (nothing to type); toggle on waits for
   // the Apply press so an empty value is never written.
   const applyLanguage = async (value: string | null) => {
-    if (!target || !targetKey) return;
+    if (!statusFresh || !target || !targetKey) return;
     const ticket = capture();
     setLanguageBusy(true);
     try {
@@ -56,7 +60,7 @@ export function useLanguageCard({ target, targetKey, isCurrentKey, statusView, c
       setLanguageDirty(false);
       void refresh(target);
     } catch (error) {
-      update({ lastError: errorMessage(error) }, target);
+      if (ticket.isCurrent()) update({ lastError: errorMessage(error) }, target);
     } finally {
       if (ticket.isCurrent()) setLanguageBusy(false);
     }
@@ -81,7 +85,7 @@ export function useLanguageCard({ target, targetKey, isCurrentKey, statusView, c
     on: languageOn,
     value: languageValue,
     busy: languageBusy,
-    disabled: !target || languageBusy,
+    disabled: !statusFresh || !target || languageBusy,
     onToggle,
     onChangeText,
     onApply,

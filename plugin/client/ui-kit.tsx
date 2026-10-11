@@ -50,7 +50,7 @@ export function Card({ colors, title, subtitle, trailing, children }: {
     <View style={[styles.card, { backgroundColor: colors.surface1, borderColor: colors.border }]}>
       {title || trailing ? (
         <View style={styles.cardHeadRow}>
-          {title ? <Text style={[styles.cardTitle, { color: colors.foreground, flex: 1 }]}>{title}</Text> : null}
+          {title ? <Text style={[styles.cardTitle, { color: colors.foreground, flex: 1, minWidth: 180 }]}>{title}</Text> : null}
           {trailing}
         </View>
       ) : null}
@@ -217,6 +217,7 @@ export function ChipSelect<T extends string>({ colors, value, options, onChange,
             key={option.value}
             onPress={() => onChange(option.value)}
             disabled={disabled}
+            hitSlop={{ top: 3, bottom: 3, left: 0, right: 0 }}
             accessibilityRole="button"
             accessibilityState={{ selected: active, disabled: disabled === true }}
             style={(state: ControlState) => variant === "choice"
@@ -574,13 +575,13 @@ export const styles = StyleSheet.create({
   headerRow: { flexDirection: "row", alignItems: "flex-start", gap: 12 },
   pageTitle: { fontSize: 22, fontWeight: "700" },
   card: { borderWidth: 1, borderRadius: 12, padding: 14, gap: 10 },
-  cardTitle: { fontSize: 20, fontWeight: "600" },
+  cardTitle: { fontSize: 18, fontWeight: "600" },
   muted: { fontSize: 14, lineHeight: 21 },
   mutedSmall: { fontSize: 12, lineHeight: 16 },
-  button: { borderWidth: 1, borderRadius: 7, paddingVertical: 8, paddingHorizontal: 12, alignItems: "center", alignSelf: "flex-start" },
+  button: { minHeight: 44, justifyContent: "center", borderWidth: 1, borderRadius: 7, paddingVertical: 8, paddingHorizontal: 12, alignItems: "center", alignSelf: "flex-start" },
   buttonDisabled: { opacity: 0.45 },
   buttonLabel: { fontSize: 14, fontWeight: "600" },
-  checkRow: { flexDirection: "row", alignItems: "flex-start", gap: 10, borderRadius: 6, padding: 2 },
+  checkRow: { minHeight: 44, flexDirection: "row", alignItems: "flex-start", gap: 10, borderRadius: 6, padding: 2 },
   checkbox: { width: 20, height: 20, borderWidth: 1.5, borderRadius: 5, alignItems: "center", justifyContent: "center", marginTop: 1 },
   switchTrack: { width: 32, height: 20, borderRadius: 10, justifyContent: "center", paddingHorizontal: 3, marginTop: 1 },
   switchThumb: { width: 14, height: 14, borderRadius: 7 },
@@ -596,7 +597,7 @@ export const styles = StyleSheet.create({
   fieldLabel: { fontSize: 13, fontWeight: "500" },
   roleBox: { borderWidth: 1, borderRadius: 8, padding: 12, gap: 10 },
   roleTitle: { fontSize: 14, fontWeight: "600" },
-  input: { borderWidth: 1, borderRadius: 6, paddingVertical: 8, paddingHorizontal: 10, fontSize: 14 },
+  input: { minHeight: 44, borderWidth: 1, borderRadius: 6, paddingVertical: 8, paddingHorizontal: 10, fontSize: 14 },
   inputMultiline: { minHeight: 72, textAlignVertical: "top" },
   collapseHeader: { flexDirection: "row", alignItems: "center", gap: 8, borderRadius: 6, padding: 2 },
   collapseChevron: { fontSize: 14, width: 14 },
@@ -610,11 +611,11 @@ export const styles = StyleSheet.create({
   conflictBox: { borderWidth: 1, borderRadius: 8, padding: 10, gap: 6 },
   divider: { borderTopWidth: 1, marginVertical: 2 },
   pickerSelectedLabel: { fontSize: 14, flexShrink: 1 },
-  pickerRow: { paddingVertical: 8, paddingHorizontal: 10 },
+  pickerRow: { minHeight: 44, justifyContent: "center", paddingVertical: 8, paddingHorizontal: 10 },
   pickerRowLabel: { fontSize: 13 },
   // Draft-clarity mockup tokens mapped onto host theme slots — card-head
   // row, badges, tinted notices, mono identity text, underlined token links.
-  cardHeadRow: { flexDirection: "row", alignItems: "center", gap: 10 },
+  cardHeadRow: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 10 },
   badge: { borderWidth: 1, borderRadius: 5, paddingVertical: 2, paddingHorizontal: 7 },
   badgeLabel: { fontSize: 11, fontWeight: "700", lineHeight: 16 },
   eyebrow: { fontSize: 11, fontWeight: "700", letterSpacing: 1.6, textTransform: "uppercase" },
@@ -631,11 +632,13 @@ export const styles = StyleSheet.create({
   // (no accent-tint slot) and the focus ring to accent (no focus slot).
   routingHeadline: { fontSize: 27, fontWeight: "700", letterSpacing: -0.5, lineHeight: 33 },
   navStrip: { flexDirection: "row", flexWrap: "wrap", gap: 4 },
-  navItem: { paddingVertical: 9, paddingHorizontal: 12, borderRadius: 6 },
-  navItemCompact: { paddingVertical: 5, paddingHorizontal: 8 },
+  navItem: { minHeight: 44, justifyContent: "center", paddingVertical: 9, paddingHorizontal: 12, borderRadius: 6 },
+  navItemCompact: { paddingVertical: 8, paddingHorizontal: 10 },
   navLabel: { fontSize: 13, fontWeight: "500" },
-  profileGrid: { gap: 18 },
-  profilePanel: { borderWidth: 1, borderRadius: 9, padding: 18, gap: 10 },
+  // Two bases341 + gap18 wrap below700px using native layout alone.
+  // A narrow container clamps each panel, including phones under341px.
+  profileGrid: { gap: 18, flexDirection: "row", flexWrap: "wrap", alignItems: "flex-start" },
+  profilePanel: { borderWidth: 1, borderRadius: 9, padding: 18, gap: 10, flexBasis: 341, flexGrow: 1, flexShrink: 1, minWidth: 0, maxWidth: "100%" },
   profileHeading: { borderBottomWidth: 1, paddingBottom: 13, marginBottom: 5, gap: 3 },
   profileRole: { fontSize: 17, fontWeight: "600" },
   profileFeature: { borderRadius: 7, padding: 11 },

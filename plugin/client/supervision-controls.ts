@@ -5,6 +5,7 @@
 // state of its own — the bell is re-derived from the served daemon's stored
 // config on load, after local changes, and on a slow poll so another
 // client's change converges.
+import { managerLocation } from "./manager-navigation.ts";
 import type { PluginClientContext } from "@getpaseo/plugin/client";
 import { disableSupervisionNotifications, getSupervisionStatus } from "../shared/supervision.ts";
 
@@ -21,11 +22,13 @@ type Registration = { remove(): void };
 
 export function contributeSupervisionControls(client: PluginClientContext): () => void {
   let disposed = false;
+  let readSequence = 0;
   const bells = new Map<string, Registration>(); // workspaceId → bell
 
   const disable = async (): Promise<void> => {
+    if (disposed) return;
     await client.rpc(disableSupervisionNotifications, { schemaVersion: 2 });
-    notifySupervisionChanged();
+    if (!disposed) notifySupervisionChanged();
   };
 
   const addBell = (workspaceId: string): Registration => client.addHeaderButton({
@@ -39,7 +42,7 @@ export function contributeSupervisionControls(client: PluginClientContext): () =
         items: [
           {
             kind: "item", id: "settings", title: "Open supervision settings", icon: "Settings",
-            behavior: { kind: "action", onPress() { client.openSurface("manager"); } },
+            behavior: { kind: "action", onPress() { if (!disposed) client.openScreen(managerLocation("supervision")); } },
           },
           { kind: "separator", id: "separator" },
           {
@@ -54,14 +57,16 @@ export function contributeSupervisionControls(client: PluginClientContext): () =
   // The bell mirrors the stored notify recipients; a failed read leaves the
   // current bells (no flicker on a transient RPC error).
   const refresh = async (): Promise<void> => {
+    if (disposed) return;
+    const issued = ++readSequence;
     let status;
     try {
       status = await client.rpc(getSupervisionStatus, { schemaVersion: 2 });
     } catch {
       return;
     }
-    if (disposed) return;
-    const wanted = new Set(status.error === null ? status.recipients.map(recipient => recipient.workspaceId) : []);
+    if (disposed || issued !== readSequence || status.error !== null) return;
+    const wanted = new Set(status.recipients.map(recipient => recipient.workspaceId));
     for (const [workspaceId, bell] of bells) {
       if (!wanted.has(workspaceId)) { bell.remove(); bells.delete(workspaceId); }
     }
@@ -69,16 +74,21 @@ export function contributeSupervisionControls(client: PluginClientContext): () =
       if (!bells.has(workspaceId)) bells.set(workspaceId, addBell(workspaceId));
     }
   };
-  const onChange = () => { void refresh(); };
+  const onChange = () => { void refresh().catch(error => { if (!disposed) console.error("SLP supervision bell registration failed", error); }); };
   listeners.add(onChange);
 
   const poll = setInterval(onChange, SUPERVISION_BELL_POLL_MS);
-  void refresh();
+  onChange();
   return () => {
+    if (disposed) return;
     disposed = true;
     clearInterval(poll);
     listeners.delete(onChange);
-    for (const bell of bells.values()) bell.remove();
+    const failures: unknown[] = [];
+    for (const bell of bells.values()) {
+      try { bell.remove(); } catch (error) { failures.push(error); }
+    }
     bells.clear();
+    if (failures.length) throw new AggregateError(failures, "SLP supervision bell cleanup failed");
   };
 }

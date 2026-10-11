@@ -354,13 +354,13 @@ test('family hints distinguish availability states', () => {
 
 test('activate label distinguishes first bind, re-verify, and rebind', () => {
   assert.equal(activationKind(null), 'activate');
-  assert.equal(activationLabel(null), 'Activate');
+  assert.equal(activationLabel(null), 'Activate SLP runtime');
   const bound = statusView();
   assert.equal(activationKind(bound), 'reverify');
-  assert.equal(activationLabel(bound), 'Re-verify binding');
+  assert.equal(activationLabel(bound), 'Apply saved profiles');
   const diverged = statusView({ binding: { ...bound.binding, candidateSha256: SHA_B } });
   assert.equal(activationKind(diverged), 'rebind');
-  assert.equal(activationLabel(diverged), 'Rebind');
+  assert.equal(activationLabel(diverged), 'Update SLP runtime');
 });
 
 test('reconcile complete/restore-before require the interrupted operation id', () => {
@@ -813,7 +813,7 @@ test('the routing UI is one card with one save and one divergence warning', () =
   // the one set-role-routing call that carries both roles. The label is
   // "Save" — the card context already names what is saved (spec §9).
   assert.equal(occurrences(source, '"Save routing"') + occurrences(routingCard, '"Save routing"'), 0, 'label shortened to Save');
-  assert.equal(occurrences(routingCard, '"Save"'), 1, 'exactly one Save button');
+  assert.equal(occurrences(routingCard, '"Save profiles"'), 1, 'exactly one Save button');
   assert.equal(occurrences(routingCard, 'callSetRoleRouting('), 1, 'one set-role-routing call site');
   assert.equal(occurrences(routingCard, 'routing.save()'), 1, 'one save dispatch');
 
@@ -825,7 +825,7 @@ test('the routing UI is one card with one save and one divergence warning', () =
 
   // The divergence warning renders once on the card, not once per role.
   assert.equal(
-    occurrences(routingCard, 'Stored role profiles differ from the live binding'),
+    occurrences(routingCard, 'Saved profile choices differ from the live profiles'),
     1,
     'exactly one divergence warning',
   );
@@ -911,20 +911,19 @@ test('the routing UI is one card with one save and one divergence warning', () =
   assert.equal(occurrences(bundle, 'Initial profiles'), 0);
 });
 
-test('activation is a prerequisite: it renders above Role profiles and gates Save', () => {
+test('save/apply confirmation is on demand, setup is in Maintenance and bound Save prerequisite stays', () => {
   const source = readFileSync(join(root, 'plugin/client/ManagerSurface.tsx'), 'utf8');
 
-  // Human-mandated order (2026-09-19 round-2 polish): activation is the
-  // prerequisite, so its card sits above the Role profiles card it feeds,
-  // and Role profiles sits above Communication language — the apply action
-  // is adjacent to the "re-activation required" warning that names it.
+  // Human chose Save-success then Apply. Runtime setup remains in Maintenance;
+  // the Profiles save retains its bound/diff gates and opens authority on demand.
   const cardOrder = [
-    'title="Daemon home"',
-    'title="Status"',
-    'title="Activation"',
+    '<RuntimeIdentity',
+    'label="SLP section"',
+    'title="Runtime status"',
     '<RoutingCard',
     '<PeerPoolCard',
     '<LanguageCard',
+    'title="Runtime setup"',
     'title="Advanced"',
     'title="Maintenance"',
   ];
@@ -948,7 +947,7 @@ test('activation is a prerequisite: it renders above Role profiles and gates Sav
   // The card JSX lives in the routing card module (wave 11 S3c).
   const routingModule = readFileSync(join(root, 'plugin/client/cards/routing.tsx'), 'utf8');
   const saveButton = routingModule.match(
-    /label=\{routing\.busy \? "Saving…" : "Save"\}[\s\S]*?disabled=\{([^}]*)\}/,
+    /label=\{routing\.busy \? "Saving…" : applyBusy \? "Applying…" : "Save profiles"\}[\s\S]*?disabled=\{([^}]*)\}/,
   );
   assert.ok(saveButton, 'Save button not found');
   assert.match(saveButton[1], /!statusView\?\.binding/, 'Save is not gated on a live binding');
@@ -970,7 +969,8 @@ test('activation is a prerequisite: it renders above Role profiles and gates Sav
   // by name — the previous "role profiles above" copy went spatially stale
   // when the cards reordered.
   assert.equal(occurrences(source, 'role profiles above'), 0, 'stale spatial copy');
-  assert.ok(source.includes('the Role profiles card'), 'activation note must name the card');
+  assert.ok(source.includes('title="Save and apply profiles"'), 'authority prompt must describe the combined action');
+  assert.ok(!source.includes('title="Apply saved configuration"'), 'large shared apply card must be removed');
 });
 
 // --- peer pool --------------------------------------------------------------
@@ -1466,71 +1466,21 @@ test('custom controls carry RN accessibility props and stale mockup strings stay
 // hover/focus/pressed/disabled states) ported onto host theme slots.
 // ---------------------------------------------------------------------------
 
-test('the in-surface tab strip switches the four routing sections in order', () => {
-  const source = readFileSync(join(root, 'plugin/client/ManagerSurface.tsx'), 'utf8');
-  // Four items in the fixed section order — Supervision is not a tab; its
-  // card mounts inside the Jev section it depends on.
-  const nav = source.slice(source.indexOf('MANAGER_SECTIONS = ['), source.indexOf('] as const'));
-  for (const label of ['"Role profiles"', '"Peer pool"', '"Communication language"', '"Jev"']) {
-    assert.ok(nav.includes(`label: ${label}`), `nav item missing: ${label}`);
-  }
-  assert.ok(!nav.includes('id: "supervision"'), 'supervision must not be a nav tab');
-  assert.ok(!nav.includes('id: "tracker"'), 'the retired tracker keeps no nav tab');
-  const order = ['profiles', 'pool', 'language', 'jev'].map(id => nav.indexOf(`id: "${id}"`));
-  assert.deepEqual([...order].sort((a, b) => a - b), order, 'nav order must be profiles → pool → language → jev');
-  // Tab semantics: a press activates the section — no scrolling to it.
-  assert.ok(source.includes('accessibilityLabel="Manager sections"'), 'tab strip a11y label missing');
-  assert.ok(source.includes('role="tablist"'), 'tab strip must use a tablist container role');
-  assert.ok(source.includes('accessibilityRole="tab"'), 'nav items must be tabs');
-  assert.ok(source.includes('accessibilityState={{ selected: active }}'), 'tabs must expose selected state');
-  assert.ok(source.includes('setActiveSection(section.id)'), 'tab press must switch the active section');
-  // Inactive sections stay mounted under display:none — drafts and
-  // card-local state survive a tab switch, but nothing lays out.
-  for (const id of ['profiles', 'pool', 'language', 'jev']) {
-    assert.ok(source.includes(`sectionShown("${id}")`), `section ${id} must gate layout on the active tab`);
-  }
-  assert.ok(!source.includes('sectionShown("supervision")'), 'supervision keeps no separate section gate');
-  // The supervision card renders inside the jev-gated view.
-  const jevView = source.slice(source.indexOf('sectionShown("jev")'), source.indexOf('sectionShown("jev")') + 1200);
-  assert.ok(jevView.includes('<SupervisionCard'), 'SupervisionCard must mount inside the Jev section');
-  // The scroll-anchor machinery is gone — scrolling never reveals sections.
-  for (const gone of ['sectionTops', 'scrollToSection', 'onRootScroll', 'scrollTo({ y:', 'onScroll={']) {
-    assert.ok(!source.includes(gone), `scroll-anchor machinery remains: ${gone}`);
-  }
-});
+// Manager section behavior and draft retention are exercised through the
+// mounted component in client-manager-ui.test.mjs. The earlier four-section
+// mockup is superseded by the Human-approved Overview/native navigation plan.
 
-test('the routing region opens with the mockup headline and sub-copy', () => {
-  const source = readFileSync(join(root, 'plugin/client/ManagerSurface.tsx'), 'utf8');
-  const kit = readFileSync(join(root, 'plugin/client/ui-kit.tsx'), 'utf8');
-  assert.ok(source.includes('Routing configuration'), 'eyebrow missing');
-  assert.ok(source.includes('Peer routing configuration'), 'headline missing');
-  assert.ok(source.includes('Review the draft. Save when the whole pool is ready.'), 'sub-copy missing');
-  // The eyebrow uppercases via the shared style (ui-kit), not a hardcoded string.
-  const eyebrow = kit.slice(kit.indexOf('eyebrow:'), kit.indexOf('noticeBox:'));
-  assert.ok(eyebrow.includes('textTransform: "uppercase"'), 'eyebrow must uppercase via style');
-  // The host SLP header is untouched — no second page title.
-  assert.equal(occurrences(kit + source, 'pageTitle'), 2, 'page title style + its single use only');
-});
-
-test('role profiles lay out in a container-measured two-column panel grid', () => {
-  // The card JSX lives in the routing card module (wave 11 S3c).
+test('role profiles wrap within their container without a measure-then-switch render', () => {
   const source = readFileSync(join(root, 'plugin/client/cards/routing.tsx'), 'utf8');
-  // The threshold is measured on the card body container — never the window.
-  assert.ok(source.includes('profilePanelWide'), 'wide-panel flag missing');
-  assert.ok(
-    source.includes('onLayout={event => setProfilePanelWide(event.nativeEvent.layout.width >= 700)}'),
-    'the grid must measure its own container at the ~700px breakpoint',
-  );
-  assert.ok(!source.includes('Dimensions.get'), 'window measurement is forbidden — use the container');
-  assert.ok(
-    source.includes('flexDirection: profilePanelWide ? "row" : "column"'),
-    'two-column/one-column switch missing',
-  );
-  // Panels are bordered sub-cards on the subtler surface.
   const kit = readFileSync(join(root, 'plugin/client/ui-kit.tsx'), 'utf8');
+  assert.ok(!source.includes('setProfilePanelWide') && !source.includes('onLayout='));
+  assert.ok(!source.includes('Dimensions.get'));
+  const grid = kit.slice(kit.indexOf('profileGrid:'), kit.indexOf('profilePanel:'));
+  assert.ok(grid.includes('flexDirection: "row"') && grid.includes('flexWrap: "wrap"'));
   const panel = kit.slice(kit.indexOf('profilePanel:'), kit.indexOf('profileHeading:'));
-  assert.ok(panel.includes('borderWidth: 1') && panel.includes('padding: 18'), 'profile-panel geometry missing');
-  assert.ok(source.includes('backgroundColor: colors.surface0 }, profilePanelWide'), 'panel fill must use the surface slot');
+  assert.ok(panel.includes('borderWidth: 1') && panel.includes('padding: 18'));
+  assert.ok(panel.includes('maxWidth: "100%"') && panel.includes('minWidth: 0'));
+  assert.ok(source.includes('backgroundColor: colors.surface0'));
 });
 
 test('provider family and mode render as mockup choice chips', () => {

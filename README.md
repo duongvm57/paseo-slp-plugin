@@ -99,7 +99,7 @@ candidate proof and required independent review still apply; a tiny task grants 
 
 You need:
 
-- Paseo `>=0.10.3`, with `pluginsEnabled: true` and an effective `mcp.enabled: true`
+- Paseo daemon **and app** `>=0.11.0` for native screen/sidebar UI, with `pluginsEnabled: true` and an effective `mcp.enabled: true`
 - a POSIX daemon host (Linux/macOS), with Node.js 22.x from 22.18, or Node.js 23.6+
   (native TypeScript stripping)
 - the CLI of each provider family you use (Codex, Pi, Devin, Claude, OpenCode), signed in on the daemon host;
@@ -118,13 +118,13 @@ you activate it.
 
 ## First run
 
-1. **Activate.** Open **SLP** in Paseo's sidebar (or *Open SLP manager* from the command palette),
-   choose **Inspect**, confirm **Daemon home confirmed** and **Exclusive configuration window**,
-   then choose **Activate**. Keep other configuration writers out while it runs.
-2. **Pick role models.** In **SLP → Role profiles**, choose a provider and an explicit model for
-   **Supervisor** and **Lead**, plus mode, thinking and features where offered. Choose **Save**,
-   then run the activation action again (**Re-verify binding** or **Rebind**) to apply the choices.
-   Saving alone does not apply them. Models must be set before delegation; Devin uses `swe-2`
+1. **Activate.** Open **SLP** in Paseo's sidebar (or *Open SLP Overview* from the command palette),
+   choose **Inspect**, then open **Maintenance → Runtime setup** and confirm **Daemon home confirmed** and **Exclusive configuration window**,
+   then choose **Activate SLP runtime**. Keep other configuration writers out while it runs.
+2. **Pick role models.** In **SLP → Profiles**, choose a provider and an explicit model for
+   **Supervisor** and **Lead**, plus mode, thinking and features where offered. Choose **Save profiles**,
+   confirm the configuration window and daemon home when prompted. A successful save
+   applies the choices automatically; no separate binding button is needed. Models must be set before delegation; Devin uses `swe-2`
    models. Changes affect future launches, not sessions already running.
 3. **Onboard a repository.** Install the onboarding skill, then ask any agent in that repo to
    *onboard / set up SLP*. It proposes `.paseo-slp/workspace-protocol.md` and the Peer pool, and
@@ -215,7 +215,7 @@ paseo plugin update paseo-slp --ref <tag>   # pinned: choose the new ref explici
 paseo plugin reload paseo-slp               # directory install: after the checkout changes
 ```
 
-After an update or reload, open the SLP manager and run **Rebind** when it offers the new runtime.
+After an update or reload, open the SLP manager and run **Update SLP runtime** when it offers the new runtime.
 Running sessions keep their existing process and role instructions; new launches use the new
 binding. Managed session opens still require the plugin to be running.
 
@@ -226,7 +226,7 @@ profiles and keeps the runtime files for sessions still running), then run
 ### Migrating from 0.6.0 or earlier
 
 With no agents running, use the update/reload command above, then open **SLP → Inspect**
-and run **Rebind**. Saved role preferences and the shared Peer pool are preserved.
+and run **Update SLP runtime**. Saved role preferences and the shared Peer pool are preserved.
 No reinstall or manual state migration is normally needed.
 
 Check these only if they apply to your installation:

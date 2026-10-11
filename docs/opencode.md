@@ -46,7 +46,7 @@ rejecting V1, too-old V2, unknown majors and malformed output. The wrapper
 re-probes before ACP launch because a validated PATH alias may change targets.
 This is an eligibility check, not proof for every eligible build. The measured
 host tuple is installed Paseo 0.10.3 / OpenCode 2.0.24; the plugin manifest
-requires Paseo >=0.10.3. Future builds are not automatically live-tested or
+requires Paseo >=0.11.0 for the native screen/sidebar UI. Future builds are not automatically live-tested or
 E2E-accepted. No install, update, authentication or config repair is attempted
 as a fallback. Standalone `--version` preserves argv, env, stdout/stderr and
 exit status without opening a session.

@@ -1,8 +1,8 @@
 // Routing owns its stored value, draft/prefill, setters and save. Target async
 // owns snapshot reads and session tickets; RPC callables are the adapter seam.
-// Dirty routing drafts intentionally persist across targets. The shell supplies
+// Dirty routing drafts stay within the selected target. The shell supplies
 // status, shared catalog read views and target-bound lastError plumbing.
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useState } from "react";
 import { useTargetSnapshot } from "../target-async.ts";
 import { Text, View } from "react-native";
 import type {
@@ -19,7 +19,6 @@ import type {
 import { FAMILY_LABEL, FAMILY_PICKER_ORDER } from "../../shared/runtime/families.ts";
 import type { RoleName } from "../../shared/runtime/families.ts";
 import {
-  activationLabel,
   applyFamilyChange,
   applySettingChange,
   buildRoleChoice,
@@ -78,7 +77,7 @@ export function useRoutingCard({ target, targetKey, isCurrentKey, statusView, ca
   // stored entry first so any field the schema later adds passes through
   // untouched — the card never silently drops a stored choice.
   const snapshot = useTargetSnapshot(target, targetKey, async target =>
-    (await callGetRoleRouting({ schemaVersion: 1, target })).routing);
+    (await callGetRoleRouting({ schemaVersion: 1, target })).routing, "routing");
   const { data: routing, replace: setRouting, capture } = snapshot;
   const [routingForm, setRoutingForm] = useState<RoutingForm>(emptyRoutingForm);
   const [routingDirty, setRoutingDirty] = useState(false);
@@ -126,8 +125,10 @@ export function useRoutingCard({ target, targetKey, isCurrentKey, statusView, ca
   // Transient flags are per-target: a guarded save-finally skips its busy
   // clear when the target switched, so the switch itself releases the
   // abandoned flag — and a "Saved" badge earned on home A must not carry
-  // over to home B. The dirty form deliberately persists across switches.
-  useEffect(() => {
+  // over to home B. The dirty form resets when the target changes.
+  useLayoutEffect(() => {
+    setRoutingForm(emptyRoutingForm());
+    setRoutingDirty(false);
     setRoutingBusy(false);
     setRoutingSaved(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- targetKey captures target
@@ -196,6 +197,7 @@ export function useRoutingCard({ target, targetKey, isCurrentKey, statusView, ca
       key,
       defs: set?.defs ?? [],
       error: set?.error ?? null,
+      loaded: key === null || set !== undefined,
       loading: key !== null && featuresLoadingFor === key,
     };
   };
@@ -216,17 +218,17 @@ export function useRoutingCard({ target, targetKey, isCurrentKey, statusView, ca
   const diverged = routingDiverges(routing, statusView?.managedProfiles ?? []);
 
   // Save validates through the strict schema server-side and lands
-  // atomically; it takes effect at the NEXT activation — never here. The
+  // atomically; the shell may chain activation after successful same-target Save. The
   // choices are the same builds the Save diff-gate compares, so an enabled
   // button can never write something the gate did not see, and a malformed
   // feature-values JSON arrives here as the build's error and surfaces in
   // lastError before dispatch rather than mid-operation.
   const save = async () => {
-    if (!target || !targetKey) return;
+    if (!target || !targetKey || !snapshot.fresh) return false;
     const supervisor = builds.supervisor;
-    if ("error" in supervisor) { update({ lastError: supervisor.error }, target); return; }
+    if ("error" in supervisor) { update({ lastError: supervisor.error }, target); return false; }
     const lead = builds.lead;
-    if ("error" in lead) { update({ lastError: lead.error }, target); return; }
+    if ("error" in lead) { update({ lastError: lead.error }, target); return false; }
     const ticket = capture();
     setRoutingBusy(true);
     try {
@@ -238,12 +240,14 @@ export function useRoutingCard({ target, targetKey, isCurrentKey, statusView, ca
       // Stale-write guard (the issueKey discipline the pool ops use): a save
       // issued for home A must not land its routing on home B's view, clear
       // B's dirty gate, or flash "Saved" for a write B never saw.
-      if (!ticket.isCurrent()) return;
+      if (!ticket.isCurrent()) return false;
       setRouting(result.routing);
       setRoutingDirty(false);
       setRoutingSaved(true);
+      return true;
     } catch (error) {
-      update({ lastError: errorMessage(error) }, target);
+      if (ticket.isCurrent()) update({ lastError: errorMessage(error) }, target);
+      return false;
     } finally {
       // A stale op must not clear the busy flag of a newer op already
       // in-flight on the displayed target — the target-switch reset above
@@ -253,7 +257,12 @@ export function useRoutingCard({ target, targetKey, isCurrentKey, statusView, ca
   };
 
   return {
+    ready: snapshot.available,
+    fresh: snapshot.fresh,
+    readError: snapshot.error,
+    retryRead: () => { if (target) void snapshot.reload(target); },
     form: routingForm,
+    dirty: routingDirty,
     busy: routingBusy,
     saved: routingSaved,
     differs,
@@ -275,7 +284,19 @@ export function useRoutingCard({ target, targetKey, isCurrentKey, statusView, ca
 
 export type RoutingCardState = ReturnType<typeof useRoutingCard>;
 
-export function RoutingCard({ colors, target, statusView, routing, catalogs, catalogLoadingFor, retryCatalog, retryFeatureSet }: {
+const PROFILE_LOADING_LABELS = { model: "Model", mode: "Mode", features: "Features", thinking: "Thinking option" };
+function PendingProfileValue({ colors, label, value }: { colors: Colors; label: string; value?: string }) {
+  return <View style={styles.field}>
+    <Text style={[styles.legend, { color: colors.foregroundMuted }]}>{label}</Text>
+    <View style={{ borderWidth: 1, borderColor: colors.border, borderRadius: 6, padding: 10, backgroundColor: colors.surface2 }}>
+      <Text selectable style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
+        {value === undefined ? "Loading…" : value || "Provider default"}
+      </Text>
+    </View>
+  </View>;
+}
+
+export function RoutingCard({ colors, target, statusView, routing, catalogs, catalogLoadingFor, retryCatalog, retryFeatureSet, onSave, applyBusy = false, readOnly = false, catalogIsRefreshing = () => false, featureIsRefreshing = () => false }: {
   colors: Colors;
   target: TargetValue | null;
   statusView: StatusResult | null;
@@ -284,28 +305,34 @@ export function RoutingCard({ colors, target, statusView, routing, catalogs, cat
   catalogLoadingFor: string | null;
   retryCatalog: (family: FamilyName, role: RoleName) => Promise<unknown>;
   retryFeatureSet: (key: string) => Promise<unknown>;
+  onSave?: () => void;
+  applyBusy?: boolean;
+  readOnly?: boolean;
+  catalogIsRefreshing?: (scope: string) => boolean;
+  featureIsRefreshing?: (key: string) => boolean;
 }) {
-  const [profilePanelWide, setProfilePanelWide] = useState(false);
   return (
     <Card
       colors={colors}
       title="Role profiles"
-      subtitle="The provider, model, mode, feature values, and thinking option each role's profile binds — applied at the next activation."
+      subtitle="Choose each role's provider, model, mode, features and thinking option. Save profiles saves and applies your choices to future launches."
     >
       <View
-        style={[styles.profileGrid, { flexDirection: profilePanelWide ? "row" : "column", alignItems: "flex-start" }]}
-        onLayout={event => setProfilePanelWide(event.nativeEvent.layout.width >= 700)}
+        style={styles.profileGrid}
       >
       {(["supervisor", "lead"] as const).map(role => {
         const form = routing.form[role];
         const roleCatalog = catalogs[catalogScope(form.family, role)];
         const thinking = thinkingOptionsFor(roleCatalog, form.model);
         const featureDefs = routing.featureDefsFor(role);
-        const disabled = !target || routing.busy;
+        const metadataRefreshing = catalogIsRefreshing(catalogScope(form.family, role)) || (featureDefs.key != null && featureIsRefreshing(featureDefs.key));
+        const disabled = !target || routing.busy || applyBusy || readOnly || !routing.fresh || metadataRefreshing;
+        const catalogPending = !routing.ready || roleCatalog === undefined;
+        const featuresPending = !routing.ready || !featureDefs.loaded;
         return (
           <View
             key={role}
-            style={[styles.profilePanel, { borderColor: colors.border, backgroundColor: colors.surface0 }, profilePanelWide && { flex: 1, minWidth: 0 }]}
+            style={[styles.profilePanel, { borderColor: colors.border, backgroundColor: colors.surface0 }]}
           >
             <View style={[styles.profileHeading, { borderBottomColor: colors.border }]}>
               <Text style={[styles.profileRole, { color: colors.foreground }]}>
@@ -320,7 +347,7 @@ export function RoutingCard({ colors, target, statusView, routing, catalogs, cat
               <ChipSelect
                 colors={colors}
                 variant="choice"
-                value={form.family}
+                value={routing.ready ? form.family : ""}
                 options={FAMILY_PICKER_ORDER.map(entry => ({
                   label: FAMILY_LABEL[entry],
                   value: entry,
@@ -339,7 +366,12 @@ export function RoutingCard({ colors, target, statusView, routing, catalogs, cat
                 Catalog unavailable: {roleCatalog.error} — enter values manually.
               </Text>
             ) : null}
-            {roleCatalog && roleCatalog.models.length > 0 ? (
+            {!catalogPending && metadataRefreshing ? <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>Refreshing provider options…</Text> : null}
+            {routing.readError ? <View>
+              <Text style={[styles.mutedSmall, { color: colors.statusWarning }]}>Profile read unavailable: {routing.readError}</Text>
+              <Button colors={colors} label="Retry profile read" onPress={routing.retryRead} />
+            </View> : null}
+            {catalogPending ? <PendingProfileValue colors={colors} label={PROFILE_LOADING_LABELS.model} value={routing.ready && !routing.readError ? form.model : undefined} /> : roleCatalog && roleCatalog.models.length > 0 ? (
               <OptionPicker
                 colors={colors}
                 label="Model"
@@ -370,7 +402,7 @@ export function RoutingCard({ colors, target, statusView, routing, catalogs, cat
                 disabled={disabled || catalogLoadingFor === catalogScope(form.family, role)}
               />
             ) : null}
-            {roleCatalog && roleCatalog.modes.length > 0 ? (
+            {catalogPending ? <PendingProfileValue colors={colors} label={PROFILE_LOADING_LABELS.mode} value={routing.ready && !routing.readError ? form.modeId : undefined} /> : roleCatalog && roleCatalog.modes.length > 0 ? (
               <View style={styles.field}>
                 <Text style={[styles.legend, { color: colors.foregroundMuted }]}>Mode</Text>
                 <ChipSelect
@@ -419,7 +451,8 @@ export function RoutingCard({ colors, target, statusView, routing, catalogs, cat
             {featureDefs.loading ? (
               <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>Loading features…</Text>
             ) : null}
-            {featureDefs.defs.length > 0 ? (
+            {featureDefs.error && featureDefs.defs.length > 0 ? <Text style={[styles.mutedSmall, { color: colors.statusWarning }]}>Feature refresh unavailable: {featureDefs.error}. Showing previous controls.</Text> : null}
+            {featuresPending ? <PendingProfileValue colors={colors} label={PROFILE_LOADING_LABELS.features} /> : featureDefs.defs.length > 0 ? (
               featureDefs.defs.map(def => (
                 // The mockup's .profile-feature tinted box around each
                 // provider feature control.
@@ -482,7 +515,7 @@ export function RoutingCard({ colors, target, statusView, routing, catalogs, cat
                 ) : null}
               </>
             )}
-            {thinking === null ? (
+            {catalogPending ? <PendingProfileValue colors={colors} label={PROFILE_LOADING_LABELS.thinking} value={routing.ready && !routing.readError ? form.thinkingOptionId : undefined} /> : thinking === null ? (
               // No catalog / no picked model / model not listed — the
               // established free-text degradation path.
               <Field
@@ -535,14 +568,14 @@ export function RoutingCard({ colors, target, statusView, routing, catalogs, cat
       })}
       </View>
       <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
-        Peers are pool-driven — each Lead delegation picks a family, so all four managed
-        peer providers stay generated; the picks above are the only routed roles.
+        Peers use the pool: the bound desk resolves a seat server-side or requests an
+        independent Lead choice. The picks above configure Supervisor and Lead.
       </Text>
       {routing.diverged ? (
         <Text style={[styles.mutedSmall, { color: colors.statusWarning }]}>
-          Stored role profiles differ from the live binding — the changes apply at
-          the next activation; nothing activates on save. Run
-          {` ${activationLabel(statusView)}`} to apply them.
+          Saved profile choices differ from the live profiles. Save profiles applies
+          successful saves to future launches. If applying fails, inspect the reported
+          operation under Maintenance; the saved choices remain available.
         </Text>
       ) : null}
       {routing.saved && statusView?.binding && !routing.diverged ? (
@@ -557,9 +590,9 @@ export function RoutingCard({ colors, target, statusView, routing, catalogs, cat
       ) : null}
       <Button
         colors={colors}
-        label={routing.busy ? "Saving…" : "Save"}
-        disabled={!target || routing.busy || !statusView?.binding || !routing.differs}
-        onPress={() => void routing.save()}
+        label={routing.busy ? "Saving…" : applyBusy ? "Applying…" : "Save profiles"}
+        disabled={!target || routing.busy || applyBusy || readOnly || !routing.fresh || !statusView?.binding || !routing.differs}
+        onPress={onSave ?? (() => void routing.save())}
       />
     </Card>
   );
