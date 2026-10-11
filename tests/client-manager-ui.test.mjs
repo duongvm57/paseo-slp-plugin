@@ -724,3 +724,105 @@ test('an obsolete failed status probe cannot repaint a terminal resolution or ne
   assert.doesNotMatch(JSON.stringify(rig.renderer.toJSON()), /old probe finally failed|status probe failed as well/);
   assert.equal(starts.calls.length, 2);
 });
+
+for (const reply of ['accepted', 'transport-error']) for (const timing of ['away', 'returned']) {
+  test(`initial start survives home A→B→A with ${reply} reply while ${timing}`, async t => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const starts = deferredRpc();
+    const rig = await managerRig(t, { params: { section: 'maintenance' } }, { activate: input => starts.rpc(input) }, true);
+    const atA = over => runtime({ target: { hostId: 'host-a', daemonHome: '/a' }, ...over });
+    const action = () => control(rig, 'Update SLP runtime');
+    const tracked = () => rig.renderer.root.findAll(node => node.props.label === 'Tracked operation' && typeof node.props.value === 'string')[0]?.props.value;
+    const ack = async () => {
+      for (const title of ['Exclusive configuration window', 'Daemon home confirmed']) {
+        await act(async () => rig.renderer.root.findAll(node => node.props.title === title && typeof node.props.onToggle === 'function')[0].props.onToggle(true));
+      }
+    };
+    await act(async () => rig.reads.calls[0].resolve(atA()));
+    await ack();
+    await act(async () => action().props.onPress());
+    const input = starts.calls[0].input, id = input.operationId;
+    const operation = { operationId: id, kind: 'activate', phase: 'verify', outcome: 'pending',
+      startedAt: '2026-10-11T17:00:00Z', updatedAt: '2026-10-11T17:00:00Z', completedAt: null };
+    const deliver = () => act(async () => {
+      if (reply === 'transport-error') starts.calls[0].reject(new Error('original response lost'));
+      else starts.calls[0].resolve({ schemaVersion: 1, accepted: true, state: 'ACTIVATING', operation, conflicts: [], pollAfterMs: 1000 });
+    });
+    await act(async () => rig.renderer.root.findAll(node => node.props.title === 'Advanced' && node.props.subtitle === 'Executable overrides and recovery options')[0].props.onToggle(true));
+    const home = value => act(async () => rig.renderer.root.findAll(node => node.props.label === 'Daemon home' && typeof node.props.onChangeText === 'function')[0].props.onChangeText(value));
+    await home('/b');
+    await act(async () => rig.reads.calls.at(-1).resolve(runtime({ target: { hostId: 'host-a', daemonHome: '/b' } })));
+    if (timing === 'away') await deliver();
+    assert.equal(tracked(), undefined, 'old-target operation must not paint over B');
+    await home('/a');
+    assert.equal(rig.reads.calls.at(-1).input.operationId, id, 'return inspection must query the unresolved original ID');
+    await act(async () => rig.reads.calls.at(-1).resolve(atA()));
+    await ack();
+    assert.equal(tracked(), id);
+    assert.equal(action().props.disabled, true, 'an empty status read cannot release the original start guard');
+    await act(async () => action().props.onPress());
+    assert.equal(starts.calls.length, 1, 'returning cannot dispatch a replacement ID');
+    if (timing === 'returned') await deliver();
+    await act(async () => t.mock.timers.tick(1000));
+    const poll = rig.reads.calls.at(-1);
+    assert.equal(poll.input.operationId, id);
+    if (reply === 'transport-error') {
+      await act(async () => poll.resolve(atA({ conflicts: [{ code: 'NOT_FOUND', message: 'no original journal entry yet' }] })));
+      assert.equal(action().props.disabled, true);
+      const retry = control(rig, 'Retry original operation');
+      assert.equal(retry?.props.disabled, false, 'only fresh explicit absence permits a same-ID retry');
+      assert.equal(starts.calls.length, 1, 'no automatic mutation retry');
+      await act(async () => retry.props.onPress());
+      assert.equal(starts.calls.length, 2);
+      assert.deepEqual(starts.calls[1].input, input, 'explicit retry retains target/candidate/authority and every payload field');
+    } else {
+      await act(async () => poll.resolve(atA({ operation })));
+      assert.equal(action().props.disabled, true);
+    }
+    await act(async () => t.mock.timers.tick(1000));
+    assert.equal(rig.reads.calls.at(-1).input.operationId, id);
+    await act(async () => rig.reads.calls.at(-1).resolve(atA({ operation: { ...operation, outcome: 'succeeded', completedAt: '2026-10-11T17:00:01Z' } })));
+    assert.equal(tracked(), undefined);
+    assert.equal(action().props.disabled, false, 'an exact terminal read releases both tracking and invocation busy');
+    assert.equal(control(rig, 'Refresh').props.disabled, false);
+  });
+}
+
+for (const reject of [false, true]) test(`returned home terminal poll retires the initial start before its late ${reject ? 'error' : 'success'}`, async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const starts = deferredRpc();
+  const rig = await managerRig(t, { params: { section: 'maintenance' } }, { activate: input => starts.rpc(input) }, true);
+  await act(async () => rig.reads.calls[0].resolve(runtime()));
+  const ack = async () => {
+    for (const title of ['Exclusive configuration window', 'Daemon home confirmed']) {
+      await act(async () => rig.renderer.root.findAll(node => node.props.title === title && typeof node.props.onToggle === 'function')[0].props.onToggle(true));
+    }
+  };
+  await ack();
+  await act(async () => control(rig, 'Update SLP runtime').props.onPress());
+  const id = starts.calls[0].input.operationId;
+  await act(async () => rig.renderer.root.findAll(node => node.props.title === 'Advanced' && node.props.subtitle === 'Executable overrides and recovery options')[0].props.onToggle(true));
+  const home = value => act(async () => rig.renderer.root.findAll(node => node.props.label === 'Daemon home' && typeof node.props.onChangeText === 'function')[0].props.onChangeText(value));
+  await home('/b');
+  await home('/a');
+  const terminal = { operationId: id, kind: 'activate', phase: 'verify', outcome: 'succeeded',
+    startedAt: '2026-10-11T17:00:00Z', updatedAt: '2026-10-11T17:00:01Z', completedAt: '2026-10-11T17:00:01Z' };
+  assert.equal(rig.reads.calls.at(-1).input.operationId, id);
+  await act(async () => rig.reads.calls.at(-1).resolve(runtime({ operation: terminal })));
+  await ack();
+  assert.equal(control(rig, 'Refresh').props.disabled, false);
+  assert.equal(control(rig, 'Update SLP runtime').props.disabled, false);
+  await act(async () => control(rig, 'Update SLP runtime').props.onPress());
+  const nextId = starts.calls[1].input.operationId;
+  assert.notEqual(nextId, id);
+  const readCount = rig.reads.calls.length;
+  await act(async () => {
+    if (reject) starts.calls[0].reject(new Error('retired original error'));
+    else starts.calls[0].resolve({ schemaVersion: 1, accepted: true, state: 'ACTIVATING', operation: { ...terminal, outcome: 'pending', completedAt: null }, conflicts: [], pollAfterMs: 1000 });
+  });
+  assert.equal(rig.reads.calls.length, readCount, 'retired callback cannot probe or refresh');
+  assert.equal(control(rig, 'Refresh').props.disabled, true, 'new invocation retains busy ownership');
+  const text = JSON.stringify(rig.renderer.toJSON());
+  assert.ok(text.includes(`Starting operation ${nextId}`));
+  assert.doesNotMatch(text, /retired original error/);
+});

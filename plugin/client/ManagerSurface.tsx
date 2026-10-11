@@ -222,7 +222,9 @@ function ManagerSession({ host, layout, theme, navigation, params = {}, onSectio
     autoLoadedFor.current = null;
     const previous = target ? store.get(target) : undefined;
     const retained = key ? readDisplaySnapshot<StatusResult>(`status:${key}`) : null;
-    const restored = previous ? { ...previous, busy: false } : { ...emptyTargetView(), status: retained };
+    // Leaving a target does not cancel its start invocation. Restore its busy
+    // owner as well as its ID until a response or exact terminal read settles it.
+    const restored = previous ?? { ...emptyTargetView(), status: retained };
     setStatusFresh(false);
     if (target) store.set(target, restored);
     setView(restored);
@@ -290,7 +292,7 @@ function ManagerSession({ host, layout, theme, navigation, params = {}, onSectio
   useEffect(() => {
     if (!target || !key || autoLoadedFor.current === key) return;
     autoLoadedFor.current = key;
-    void refresh(target);
+    void refresh(target, store.get(target)?.pending?.operationId);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- key captures target
   }, [key, view.status, view.busy]);
 
@@ -391,28 +393,34 @@ function ManagerSession({ host, layout, theme, navigation, params = {}, onSectio
     };
     schedule(pending.nextPollMs);
     return () => { cancelled = true; if (timer !== undefined) clearTimeout(timer); };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- re-arm only on target/operation change
-  }, [key, pending?.operationId]);
+    // A start reply may replace the provisional delay with pollAfterMs.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- target/operation/delay own the poll lifetime
+  }, [key, pending?.operationId, pending?.nextPollMs]);
 
   const runOperation = useCallback(async (invoke: () => Promise<StartResult>, operationId: string, retryOriginal = false) => {
     const retrying = retryOriginal && view.pending?.operationId === operationId && view.pending.retryAllowed === true;
     if (!statusFresh || !target || view.busy || (!retrying && view.pending) || (view.status?.operation && operationPending(view.status.operation))) return;
     const current = store.get(target);
     if (current?.busy || (current?.pending && !(retrying && current.pending.operationId === operationId && current.pending.retryAllowed))) return;
+    const original = operationRequests.current.get(targetKey(target));
+    if (original && !(retrying && original.operationId === operationId)) return;
     const ticket = captureTarget();
     if (!ticket.isCurrent()) return;
     operationRequests.current.set(targetKey(target), { operationId, invoke,
       candidate: view.status!.embeddedCandidateSha256, canonicalHome: view.status!.target.daemonHome });
-    update({ busy: true, lastError: null, notice: `Starting operation ${operationId}. Target changes do not cancel server work; inspect this ID before retrying.` }, target);
+    // Track before awaiting acceptance: a delayed reply is not cancellation,
+    // and an empty status read cannot authorize a replacement request.
+    update({ busy: true, pending: { operationId, nextPollMs: STATUS_POLL_MS }, lastError: null,
+      notice: `Starting operation ${operationId}. Target changes do not cancel server work; inspect this ID before retrying.` }, target);
     const finish = (start: StartResult) => {
       if (operationRequests.current.get(targetKey(target))?.operationId !== operationId) return;
+      operationRequests.current.delete(targetKey(target));
       // startPatch keeps start.conflicts visible whether or not the response
       // was accepted — an accepted reconcile inspect can still report drift.
       if (!ticket.isCurrent()) {
         applyPatch(store, target, startPatch(start), null);
         return;
       }
-      operationRequests.current.delete(targetKey(target));
       update(startPatch(start), target);
       void refresh(target, start.operation?.operationId);
     };
