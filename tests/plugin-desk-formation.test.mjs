@@ -416,9 +416,16 @@ test('armed selection mismatch preserves the actual cause and never silently dro
  assert.equal(out.result.code,'ROUTE_DRIFT');
  assert.match(out.result.message,/independent selection differs from the armed Jev decision/);
  assert.match(out.result.recovery,/Do not silently discard an assigned selection/);
+ assert.deepEqual(out.phases.map(phase=>phase.name),['route-issued','route-mismatch']);
+ const retained=out.phases[1].value;
+ assert.deepEqual(retained.selection,req.selection);
+ assert.equal(retained.optionId,'second');assert.equal(retained.mode,'armed');
+ assert.equal(retained.decision.answers.route_option.choice,'second');
+ assert.equal(retained.catalogSha256,f.sha());
  assert.equal(f.effects.length,0);assert.equal(f.decisions(),1);
  const replay=await f.run(req);
  assert.equal(replay.receiptSha256,out.receiptSha256);assert.equal(f.decisions(),1);
+ assert.deepEqual(replay.phases,out.phases);
  assert.equal(f.effects.length,0);
 });
 

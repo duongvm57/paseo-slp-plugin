@@ -119,6 +119,11 @@ export async function selectPeerSeat(request: PeerSelectionRequest, deps: {
         throw new SeatSelectionError("INVALID_RECORD", "Jev declined Peer routing", "declined");
       }
       if (optionId !== undefined && optionId !== answer.optionId) {
+        const mismatch = { ...provisional, ...answer, selection: { optionId } };
+        if (Buffer.byteLength(JSON.stringify(mismatch)) > MAX_SELECTION_BYTES) {
+          throw new SeatSelectionError("REQUEST_TOO_LARGE", "Peer mismatch receipt exceeds its byte budget");
+        }
+        deps.phase("route-mismatch", mismatch);
         throw new SeatSelectionError("ROUTE_DRIFT", "independent selection differs from armed Jev", "selection-mismatch");
       }
       optionId = answer.optionId!;
