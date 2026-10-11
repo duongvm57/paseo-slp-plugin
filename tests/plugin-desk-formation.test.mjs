@@ -402,10 +402,26 @@ for(const failure of ['network','timeout','schema','missing-key','decline']){
   if(failure==='decline')f.setChoice('no-suitable-option');
   const out=await f.run();assert.equal(out.state,'recorded');assert.equal(out.result.ok,false);
   assert.equal(out.phases.length,failure==='decline'?2:1);assert.equal(out.phases[0].name,'route-issued');assert.equal(f.effects.length,0);
-  if(failure==='decline')assert.equal(out.phases[1].value.decision.answers.route_option.choice,'no-suitable-option');
+  if(failure==='decline'){
+   assert.equal(out.phases[1].value.decision.answers.route_option.choice,'no-suitable-option');
+   assert.match(out.result.message,/Jev declined Peer routing/);
+   assert.match(out.result.recovery,/Escalate the Human-owned pool decision; do not retry/);
+  }
   const before=f.calls.fetch;await f.run();assert.equal(f.calls.fetch,before);assert.equal(f.effects.length,0);
  });
 }
+test('armed selection mismatch preserves the actual cause and never silently drops an assigned pick',async t=>{
+ const f=await realPeerFixture(t,'armed');f.setChoice('second');
+ const req={...f.input,selection:{optionId:'first'}},out=await f.run(req);
+ assert.equal(out.result.code,'ROUTE_DRIFT');
+ assert.match(out.result.message,/independent selection differs from the armed Jev decision/);
+ assert.match(out.result.recovery,/Do not silently discard an assigned selection/);
+ assert.equal(f.effects.length,0);assert.equal(f.decisions(),1);
+ const replay=await f.run(req);
+ assert.equal(replay.receiptSha256,out.receiptSha256);assert.equal(f.decisions(),1);
+ assert.equal(f.effects.length,0);
+});
+
 test('caller and server delivery have the same worst-case seven phase budget',async t=>{
  const f=await realPeerFixture(t,'armed');
  const out=await f.run({...f.input,delivery:'server'});
@@ -432,6 +448,56 @@ test('missing bound candidate selector fails automatically but preserves explici
  const req={...f.input,runtime:{optionId:'first',catalogSha256:f.sha()}};
  assert.equal((await f.run(req)).result.state,'awaiting-caller-delivery');
 });
+test('armed explicit runtime without decision gives ordinary recovery without creating or re-deciding',async t=>{
+ const f=await realPeerFixture(t,'armed');
+ const req={...f.input,runtime:{optionId:'first',catalogSha256:f.sha()}};
+ const out=await f.run(req);
+ assert.equal(out.result.code,'INVALID_RECORD');
+ assert.match(out.result.message,/explicit Peer runtime lacks the decision receipt/);
+ assert.match(out.result.recovery,/omit runtime for ordinary server selection/);
+ assert.match(out.result.recovery,/new requestId/);
+ assert.equal(out.phases.some(p=>p.name==='create-issued'||p.name==='send-issued'),false);
+ assert.equal(f.effects.length,0);assert.equal(f.decisions(),0);assert.equal(f.calls.fetch,0);
+ const replay=await f.run(req);
+ assert.equal(replay.receiptSha256,out.receiptSha256);assert.equal(f.decisions(),0);
+ assert.equal((await f.run({...f.input})).code,'IDEMPOTENCY_CONFLICT');
+ f.setChoice('first');
+ const corrected=await f.run({...f.input,requestId:'corrected-automatic'});
+ assert.equal(corrected.result.state,'awaiting-caller-delivery');
+ assert.equal(f.decisions(),1);assert.deepEqual(f.effects.map(p=>p.kind),['create']);
+});
+
+test('missing decision after a full-pin child create keeps its ID and warns against recreation',async t=>{
+ const f=await realPeerFixture(t,'off',1), original=f.host.workspaces.ref;
+ f.host.workspaces.ref=id=>{
+  const ref=original(id);
+  return {...ref,agents:{create:async options=>{
+   const child=await ref.agents.create(options);f.configure('armed');return child;
+  }}};
+ };
+ const req={...f.input,runtime:{optionId:'first',catalogSha256:f.sha()}};
+ const out=await f.run(req);
+ assert.equal(out.result.code,'INVALID_RECORD');assert.equal(out.result.agentId,'child');
+ assert.match(out.result.recovery,/retain agent\/request IDs and reconcile resources without recreation/);
+ assert.deepEqual(f.effects.map(p=>p.kind),['create']);assert.equal(f.decisions(),0);
+ assert.equal(out.phases.some(p=>p.name==='create-issued'),true);
+ assert.equal(out.phases.some(p=>p.name==='delivery-handed-off'||p.name==='send-issued'),false);
+ assert.equal((await f.run(req)).receiptSha256,out.receiptSha256);
+ assert.deepEqual(f.effects.map(p=>p.kind),['create']);
+});
+
+test('unclassified launch errors stay redacted instead of becoming recovery instructions',async t=>{
+ const f=fixture(t),runtimePath=join(f.root,'candidate');
+ install(fileURLToPath(new URL('..',import.meta.url)),runtimePath);
+ const planner=createFormationPlanner({runtimePath,daemonHome:f.root,host:()=>f.host,
+  importModule:async()=>({launchPlan:()=>{throw Object.assign(new Error('private-config-secret'),{code:'untrusted-reason'});}})});
+ await assert.rejects(planner(f.row,{...f.input,role:'peer',runtime:{optionId:'first',catalogSha256:'a'.repeat(64)}}),error=>{
+  assert.equal(error.code,'INVALID_RECORD');assert.doesNotMatch(error.message,/private-config-secret|untrusted-reason/);
+  return true;
+ });
+ assert.equal(f.effects.length,0);
+});
+
 test('automatic provider unavailability blocks without silently selecting another option',async t=>{
  const f=await realPeerFixture(t,'off',1);
  f.host.providers.snapshot=async()=>({entries:[{provider:'slp-codex-peer',enabled:true,status:'unavailable',modes:[{id:'full-access'}]}]});

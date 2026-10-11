@@ -103,7 +103,7 @@ and dependency locks are supporting artifacts, not additional runtime owners.
 | plugin/shared/runtime/session-delivery.ts | Published session-entry/launch/snapshot literals and carrier captions shared by producers and capture. Recognizer grammar stays explicit in its parser; historical wire bytes remain compatible. |
 | plugin/server/jev.ts | Jev state/key RPCs and single-shot supervision requests. Strict plugin Zod config validation, CAS, auth-probe policy and stop cancellation stay here; disk/key observations and locations come from runtime/jev-state, provider/credential rules from the shared runtime. |
 | plugin/server/runtime/jev-state.ts | Jev config/key namespace, uncached raw config/hash observations, stat-only key presence and private regular-file checks before secure key reads. CLI retains historical OFF/unknown-key tolerance; plugin persisted/RPC schemas remain strict. Each adapter owns its diagnostics and capability policy. |
-| plugin/shared/runtime/desk-contract.ts, plugin/shared/runtime/node-version.mjs | Plain recovery-result vocabulary and diagnostic bounds; bootstrap-safe supported Node range/check shared by resolver, shim and CLI. Shared runtime has no Node imports or types. |
+| plugin/shared/runtime/desk-contract.ts, plugin/shared/runtime/node-version.mjs | Plain formation reason/recovery-result vocabulary, immutable-operation recovery text and diagnostic bounds; bootstrap-safe supported Node range/check shared by resolver, shim and CLI. Shared runtime has no Node imports or types. |
 | plugin/server/runtime/cli/ | Standalone CLI runtime: command parsing, installer/identity, verifier/snapshot, policy rendering, routing, agent observations and role transport. Source is colocated with plugin-owned core, but remains an adapter tier; core cannot import CLI modules. `src/` contains only policy/template assets. `bin/` bootstraps and development-only runtime scripts call this runtime directly. |
 | scripts/generate-plugin-payload.mjs, scripts/runtime-graph.mjs | `installUnitPaths()` owns the exact source-byte install unit, including only the two selected plugin runtime subtrees. Legacy identities allow absent runtime roots. The generator encodes bytes/modes and rejects missing, external and reverse-tier dependencies, including erased type imports; graph analysis is development-only. |
 | scripts/generate-readme-diagrams.mjs, docs/images/slp-overview*.svg | Documentation-only SVG source and generated English/Vietnamese README overviews. One layout owns role placement, theme colors and localized labels; `--check` compares the generated assets without writing. Outside the runtime install unit. |
@@ -595,8 +595,9 @@ Non-OpenCode observation needs no new config capability; replay performs no read
 
 Four additive guarded bridge tools retire caller choreography when available.
 slp_seat_create forms a Lead from the saved slp-lead bundle or an ordinary Peer
-with optional runtime: the server selects automatically, accepts an independent
-selection {optionId}, or validates legacy full pool/Jev runtime pins. runtime and
+with runtime/selection omitted on its first ordinary request: the server selects
+automatically, accepts an independent selection {optionId}, or validates legacy
+full pool/Jev runtime pins. runtime and
 selection are mutually exclusive. Parent derives from the bound caller;
 workspace/cwd come from the qualified caller or existing placement. A fresh plan is pinned before create, native identity is observed before
 work, and actor/runtime are revalidated before delivery. The exact selected
@@ -631,7 +632,11 @@ An oversized new automatic request is rejected in preflight before intent or Jev
 using the same three-copy allowance and 32KiB reserve as final evidence checks;
 it consumes no requestId. Selection/plan evidence only known after decision is
 also checked before child allocation. Legacy full-runtime requests keep their
-original path. Retained recorded/partial operations replay before preflight,
+original path. Missing armed Jev decision pins retain INVALID_RECORD with a
+bounded cause and shared operation-recovery text; unclassified launch errors
+stay redacted. The [seat policy](../src/references/delegation-execution.md#refused-or-uncertain-formation)
+owns the recovery procedure. Issued/uncertain effects are never resumed by recovery.
+Retained recorded/partial operations replay before preflight,
 never re-decide or resume, and preserve their original bytes and phase count.
 Successful omitted-placement automatic formation uses at most 7 of 16 phases; omitted-placement full-runtime keeps 5. Explicit placement adds up to 5 phases, for a worst case of 12/16.
 

@@ -209,10 +209,13 @@ prose.
 
 ## Bound seat formation
 
-`slp_seat_create` is a desk MCP tool, not a CLI command. Peer runtime may be
-omitted; server-side selection is described in [operations](operations.md#ordinary-peer-formation-through-the-desk).
-Use `selection: {optionId}` for an independent pick or an existing full runtime
-pin, never both. The spawn kit exposes both optional arguments. A choice response
+`slp_seat_create` is a desk MCP tool, not a CLI command. Start ordinary Peer
+formation with runtime and selection omitted; server-side selection is described
+in [operations](operations.md#ordinary-peer-formation-through-the-desk).
+If choices are returned, supply `selection: {optionId}` for an independent pick.
+Explicit runtime is the compatibility path and requires already-complete
+pool/Jev pins; it does not ask the server to fill missing receipts.
+The spawn kit exposes both optional arguments, which are mutually exclusive. A choice response
 is unadmitted, not a successful create. After admission exact replay never calls
 Jev or resumes effects. `prepare`/`--check`/handoff preparation remain offline
 and still require explicit Peer pool pins; the new selector is not run by them.
@@ -230,7 +233,7 @@ and evidence without runnable delivery; replay never repairs or recreates it.
 ## `route-decide`
 
 `route-decide <request.json> [--schema] [--out <path>] [--paseo-home <absolute-home>]`
-is the CLI path
+is the explicit CLI compatibility/routing path, separate from ordinary desk formation,
 that calls routing Jev (the admitted slp_seat_create executor also invokes it) — see [Jev-assisted routing](operations.md#jev-assisted-routing-optional)
 for what it is and when it applies. The request carries `repository`, an
 optional `role` (default `peer`) and a Lead-authored `brief` — a nonempty

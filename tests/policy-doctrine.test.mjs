@@ -135,6 +135,7 @@ test('session boundary is semantic, not a task ID or runtime capability', () => 
     /unless an explicit Human exception applies/,
     /Reliable compaction may continue; no numeric compaction threshold/);
   pins(direct, /Human may explicitly form a standby Lead.*Record that exception/,
+    /standby Lead: read-only orientation and ownership\/handback acknowledgment.*first phase/,
     /first phase, not the future project.*without relaxing any Peer outcome boundary/);
 });
 
@@ -420,8 +421,10 @@ test('review method tools stay conditional and keep Lead obligations', () => {
 
 
 test('ordinary formation requires no caller routing choreography and preserves truthful pending recovery', () => {
-  pins(direct, /Peer runtime is optional.*server selects once.*full-pin compatibility/,
-    /Use selection for independent choice; no settings overrides/,
+  pins(direct, /Ordinary Peer: omit runtime\/selection for server pool\/Jev choice/,
+    /selection-required with operationAdmitted=false.*add selection.optionId before admission/,
+    /Full-pin compatibility validates complete pool\/Jev pins; no settings overrides/,
+    /recorded refusal keeps its original body and requestId.*new requestId only after.*no create\/send was issued/,
     /same-Git workspace\/cwd and pins routing\/protocol separately/,
     /Placement\/automatic runtime\/selection waits briefly for exact registration; legacy omitted full-pin Peer\/Lead keeps its delivery path/,
     /Pending directs slp_operation_get with the same requestId: immutable evidence, no resume\/recreate/,
@@ -429,13 +432,14 @@ test('ordinary formation requires no caller routing choreography and preserves t
     /V1 kind=worktree reports a gap before effects/,
     /SDK open may revive archived workspaces; prefer active IDs/,
     /Never install dependencies or materialize to hide a gap/);
-  pins('src/references/provider-routing.md', /no routes\/prepare\/route-decide choreography is required/,
+  pins('src/references/provider-routing.md', /Start with runtime\/selection omitted.*Runtime discovery and Jev decisions belong to that server operation/,
     /linked caller without local routing\/protocol inherits its configured same-Git main checkout/,
     /no trustworthy source means gap, not silent user fallback/,
     /Shadow requires independent Lead selection even for one option; errors block/,
     /Off\/unconfigured selects a sole eligible option; several options return choices for selection.optionId/,
     /armed decline\/config\/key\/network failure blocks without default substitution/);
-  pins('src/references/jev-routing.md', /route-decide or slp_seat_create invokes it; admitted formation pins once, replay never re-decides/,
+  pins('src/references/jev-routing.md', /Ordinary slp_seat_create obtains the decision server-side when runtime is omitted/,
+    /Explicit CLI compatibility invokes route-decide; admitted formation pins once, replay never re-decides/,
     /prepare and --check verify receipts offline/);
 });
 
@@ -493,5 +497,5 @@ test('seat formation policy stays within frozen per-file and total word budgets'
   for (const [path, cap] of Object.entries(caps)) assert.ok(words(raw(path)) <= cap, `${path} exceeds ${cap} words`);
   const all = installUnitPaths(root).filter(path => path.startsWith('src/') && path.endsWith('.md'));
   assert.deepEqual([...all].sort(), Object.keys(caps).sort(), 'account for every installed policy file');
-  assert.equal(all.reduce((total, path) => total + words(raw(path)), 0), 10385, 'net-zero total policy words');
+  assert.ok(all.reduce((total, path) => total + words(raw(path)), 0) <= 10385, 'frozen total policy word ceiling; pruning needs no filler');
 });

@@ -22,8 +22,9 @@ export type SelectedPeer = {
 };
 export class SeatSelectionError extends Error {
   readonly code: "INVALID_RECORD" | "ROUTE_DRIFT" | "REQUEST_TOO_LARGE";
-  constructor(code: SeatSelectionError["code"], message: string) {
-    super(message); this.name = "SeatSelectionError"; this.code = code;
+  readonly reason?: "declined" | "selection-mismatch" | "selection-required";
+  constructor(code: SeatSelectionError["code"], message: string, reason?: SeatSelectionError["reason"]) {
+    super(message); this.name = "SeatSelectionError"; this.code = code; this.reason = reason;
   }
 }
 const MAX_SELECTION_BYTES = 32 * 1024;
@@ -82,10 +83,10 @@ export async function selectPeerSeat(request: PeerSelectionRequest, deps: {
   const seen = readInputs(request);
   let optionId = request.selection?.optionId;
   if (seen.mode === "shadow" && optionId === undefined) {
-    throw new SeatSelectionError("INVALID_RECORD", "shadow requires an independent Lead selection");
+    throw new SeatSelectionError("INVALID_RECORD", "shadow requires an independent Lead selection", "selection-required");
   }
   if ((seen.mode === "off" || seen.mode === "unconfigured") && optionId === undefined) {
-    if (seen.usable.length !== 1) throw new SeatSelectionError("INVALID_RECORD", "multiple eligible Peer options require selection");
+    if (seen.usable.length !== 1) throw new SeatSelectionError("INVALID_RECORD", "multiple eligible Peer options require selection", "selection-required");
     optionId = seen.usable[0].id;
   }
   let decision: unknown;
@@ -115,10 +116,10 @@ export async function selectPeerSeat(request: PeerSelectionRequest, deps: {
           throw new SeatSelectionError("REQUEST_TOO_LARGE", "Peer decline receipt exceeds its byte budget");
         }
         deps.phase("route-declined", declined);
-        throw new SeatSelectionError("INVALID_RECORD", "Jev declined Peer routing");
+        throw new SeatSelectionError("INVALID_RECORD", "Jev declined Peer routing", "declined");
       }
       if (optionId !== undefined && optionId !== answer.optionId) {
-        throw new SeatSelectionError("ROUTE_DRIFT", "independent selection differs from armed Jev");
+        throw new SeatSelectionError("ROUTE_DRIFT", "independent selection differs from armed Jev", "selection-mismatch");
       }
       optionId = answer.optionId!;
     }
