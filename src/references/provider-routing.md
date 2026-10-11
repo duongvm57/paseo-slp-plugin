@@ -50,7 +50,7 @@ are not classes. Choose selection.optionId + selection.thinkingOptionId (null
 for runtime default); one model with several efforts has several choices.
 For cross-provider, name the author/opinion source in routingRequirements.referenceAgentId;
 add crossProvider:true when the assignment requires it across the pool. Missing
-model-vendor identity is a gap; wrappers prove no different vendor. Keep explicit
+reference provider is a gap; compare runtime families (Devin to Codex qualifies). Keep explicit
 rules/effort limits. Preserve selectionSha256/routingContext in compatibility;
 Shadow compares independent pairs, Armed pins Jev's pair. No effort overlay,
 mid-turn changes, retry ladder or extra budget.

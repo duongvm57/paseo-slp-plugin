@@ -94,12 +94,10 @@ export function PresetPoolCard({ colors, pool, availableFamilies, catalogs, retr
         <Collapse colors={colors} title="Additional settings" open={advanced[seat.uid] === true} onToggle={() => setAdvanced(state => ({ ...state, [seat.uid]: !state[seat.uid] }))}>
           <Field colors={colors} label="Stable preset ID" hint="Only identity is constrained; names and descriptions are open. Renaming updates the designated fallback."
             value={seat.id} onChangeText={pool.setSeatId(index)} disabled={disabled} />
-          <Field colors={colors} label="Model provider" hint="Human-declared model vendor, not the runtime wrapper. Cross-provider needs this identity for both the candidate and reference model in the pool."
-            value={seat.modelProvider ?? ''} onChangeText={value => edit(index, 'modelProvider', value)} disabled={disabled} />
           <Text style={[styles.fieldLabel, { color: colors.foregroundMuted }]}>Runtime rule</Text>
-          <ChipSelect colors={colors} value={seat.runtimeRule ?? 'none'} options={[{ label: 'None', value: 'none' }, { label: 'Different model provider from reference', value: 'different-model-provider' }]}
+          <ChipSelect colors={colors} value={seat.runtimeRule ?? 'none'} options={[{ label: 'None', value: 'none' }, { label: 'Different runtime provider from reference', value: 'different-model-provider' }]}
             onChange={value => edit(index, 'runtimeRule', value)} disabled={disabled} />
-          <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>This rule is explicit. Renaming a preset never changes it. The assignment must name its reference seat when using cross-provider.</Text>
+          <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>Lead / Jev compares runtime providers, such as Devin and Codex. No model-vendor setup is needed. The assignment names the seat whose work is being reviewed.</Text>
           {seat.effortKind !== 'fixed' ? <Field colors={colors} label="Allowed effort IDs" hint="Optional: one supported effort ID per line. Blank allows all recognized pure effort choices."
             value={seat.allowedEfforts?.join('\n') ?? ''} onChangeText={value => edit(index, 'allowedEfforts', lineList(value).length ? lineList(value) : undefined)} disabled={disabled} multiline /> : null}
           {catalog?.modes.length ? <ChipSelect colors={colors} value={seat.modeId} options={[{ label: 'Runtime default mode', value: '' }, ...catalog.modes.map(m => ({ value: m.id, label: m.label })),

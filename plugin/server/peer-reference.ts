@@ -1,6 +1,6 @@
 import { canonicalJson } from "./runtime/cli/jev.ts";
-// Read the explicitly named reference seat. Runtime-family names do not prove
-// model vendor; Human-declared model-provider identity is resolved by the pool.
+// Read the explicitly named reference seat. Routing compares its observed
+// runtime family; model-vendor declarations are not required.
 import type { PresetRoutingContext } from './runtime/cli/preset-routing.ts';
 export type ReferenceHost = { agents?: { ref(id: string): { refresh(): Promise<{ agent: { id: string; provider?: string; model?: string | null } | null } | null> } } };
 export async function observePeerReference(host: ReferenceHost, requirements?: { crossProvider?: boolean; referenceAgentId?: string }): Promise<PresetRoutingContext> {

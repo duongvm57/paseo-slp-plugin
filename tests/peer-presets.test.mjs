@@ -17,7 +17,7 @@ function fixture(t, mode='off') {
  f.catalog.options=starterPeerOptions().map((o,i)=>({...o,provider:'codex',model:'fixture-'+i,enabled:true,
   modelProvider:i===4?'other':'primary',modeId:'full-access',notes:'PRIVATE_NOTE_'+i}));
  f.providers[0].models=f.catalog.options.map(o=>({id:o.model,thinkingOptions:[{id:'low'},{id:'high'},{id:'ultracode'}]}));
- f.request.routingContext={reference:{agentId:'writer',provider:'slp-codex-peer',model:'fixture-0'}};
+ f.request.routingContext={reference:{agentId:'writer',provider:'slp-devin-peer',model:'swe-2-high'}};
  f.savePool();
  return f;
 }
@@ -79,20 +79,28 @@ test('one model with several effort pairs still requires selection; unknown orch
  assert.equal((await selectPeerSeat(f.request,f.deps)).route.thinkingOptionId,'ultracode');
 });
 
-test('cross-provider uses model vendor and explicit rule, survives rename, and requires reference identity',async t=>{
- const f=fixture(t);f.catalog.options[4].displayName='Renamed alternative';f.savePool();
+test('cross-provider compares runtime families without vendor declarations or reference pool entries',async t=>{
+ const f=fixture(t);f.catalog.options[4].displayName='Renamed alternative';
+ f.catalog.options.forEach(o=>delete o.modelProvider);f.savePool();
  assert.ok(choice(f,'cross-provider'));
- f.request.routingContext.reference.model='fixture-4';
+ f.request.routingContext.reference={agentId:'writer',provider:'slp-codex-lead',model:'unlisted-author-model'};
  let set=presetChoiceSet(f.catalog,'peer',f.providers,f.request.routingContext);
  assert.ok(!set.choices.some(c=>c.optionId==='cross-provider'));
- assert.ok(set.excluded.find(e=>e.optionId==='cross-provider').reasons.includes('same-model-provider'));
+ assert.ok(set.excluded.find(e=>e.optionId==='cross-provider').reasons.includes('same-provider'));
  f.request.routingContext={};set=presetChoiceSet(f.catalog,'peer',f.providers,{});
- assert.equal(set.choices.length,8);assert.ok(set.excluded.some(e=>e.reasons.includes('reference-model-provider-unknown')));
- f.request.routingContext={crossProvider:true,reference:{agentId:'writer',provider:'slp-codex-peer',model:'fixture-0'}};
- set=presetChoiceSet(f.catalog,'peer',f.providers,f.request.routingContext);assert.equal(set.choices.length,2);
- assert.equal(set.choices[0].optionId,'cross-provider');
- delete f.catalog.options[0].modelProvider;f.savePool();
+ assert.equal(set.choices.length,8);assert.ok(set.excluded.some(e=>e.reasons.includes('reference-provider-unknown')));
+ f.request.routingContext={crossProvider:true,reference:{agentId:'writer',provider:'slp-devin-peer',model:'swe-2-high'}};
+ set=presetChoiceSet(f.catalog,'peer',f.providers,f.request.routingContext);assert.equal(set.choices.length,10);
+ assert.ok(set.choices.some(c=>c.optionId==='cross-provider'));
+ const withWrapper=set.selectionSha256;
+ f.request.routingContext.reference.provider='devin';
+ assert.equal(presetChoiceSet(f.catalog,'peer',f.providers,f.request.routingContext).choices.length,10,'base provider and managed wrapper normalize alike');
+ assert.notEqual(presetChoiceSet(f.catalog,'peer',f.providers,f.request.routingContext).selectionSha256,withWrapper,'raw reference observation remains pinned');
+ f.request.routingContext.reference.provider='custom-unrecognized';
  assert.equal(presetChoiceSet(f.catalog,'peer',f.providers,f.request.routingContext).choices.length,0);
+ f.request.routingContext.reference.provider='codex';
+ f.catalog.options[4].modelProvider='other-vendor';
+ assert.equal(presetChoiceSet(f.catalog,'peer',f.providers,f.request.routingContext).choices.length,0,'declared model vendors cannot bypass a same-runtime requirement');
 });
 
 test('armed Jev selects a custom preset + effort, receipts bind capabilities and descriptions',async t=>{
@@ -188,7 +196,7 @@ test('native cross-provider reference drift after create retains the child and w
  const f=placementFixture(t,{count:2});f.catalog.version=2;
  f.catalog.options.forEach((o,i)=>{Object.assign(o,{model:'fixture-'+i,displayName:'Preset '+i,description:'Independent judgment',modelProvider:i?'other':'primary',runtimeRule:i?'different-model-provider':'none',effortPolicy:{kind:'select'}});delete o.thinkingOptionId;});f.savePool();
  f.host.providers.snapshot=async()=>({entries:[{provider:'slp-codex-peer',enabled:true,status:'ready',modes:[{id:'full-access'}],models:f.catalog.options.map(o=>({id:o.model,thinkingOptions:[{id:'low'},{id:'high'}]}))}]});
- f.snapshots.set('writer',{id:'writer',provider:'slp-codex-peer',model:'fixture-0'});
+ f.snapshots.set('writer',{id:'writer',provider:'slp-devin-peer',model:'swe-2-high'});
  const req={...f.input,routingRequirements:{referenceAgentId:'writer',crossProvider:true},selection:{optionId:'second',thinkingOptionId:'high'}};
  f.setAfterCreate(()=>{f.snapshots.get('writer').model='changed-model';});
  const out=await f.run(req);assert.equal(out.result.code,'ROUTE_DRIFT',JSON.stringify(out));assert.equal(out.result.agentId,'child');

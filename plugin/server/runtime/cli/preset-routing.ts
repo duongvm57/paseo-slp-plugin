@@ -27,16 +27,9 @@ export function validateRoutingContext(value: unknown): PresetRoutingContext {
     || (ref.agentId !== undefined && (typeof ref.agentId !== 'string' || !ref.agentId || ref.agentId.length > 256)))) throw new Error('Invalid reference runtime');
   return value as PresetRoutingContext;
 }
-const vendor = (s: unknown) => typeof s === 'string' && s.trim() ? s.trim().toLowerCase() : null;
 const family = (provider: string) => families.find(f => provider === f || ['peer', 'lead', 'supervisor'].some(r => provider === providerId(r, f)));
-function referenceVendor(catalog: Catalog, context: PresetRoutingContext) {
-  if (!context.reference) return null;
-  const found = new Set(catalog.options.filter(o => o.provider === family(context.reference!.provider) && o.model === context.reference!.model)
-    .map(o => vendor(o.modelProvider)).filter(v => v !== null));
-  return found.size === 1 ? [...found][0] : null;
-}
 export function presetChoiceSet(catalog: Catalog, role: string, providers: Provider[] | undefined, rawContext?: unknown) {
-  const context = validateRoutingContext(rawContext), referenceModelProvider = referenceVendor(catalog, context);
+  const context = validateRoutingContext(rawContext), referenceProvider = context.reference ? family(context.reference.provider) ?? null : null;
   const choices: PresetChoice[] = [], excluded: { optionId: string; reasons: string[] }[] = [];
   const capabilities: { provider: string; model: string; thinkingOptions: unknown; defaultThinkingOptionId: unknown }[] = [];
   for (const option of catalog.options) {
@@ -50,9 +43,10 @@ export function presetChoiceSet(catalog: Catalog, role: string, providers: Provi
     const model = observed?.models?.find(m => m.id === option.model && m.isSelectable !== false);
     if (!model) reasons.push('model-capability-unavailable');
     if (context.crossProvider || preset.runtimeRule === 'different-model-provider') {
-      if (!context.reference || !referenceModelProvider) reasons.push('reference-model-provider-unknown');
-      if (!vendor(preset.modelProvider)) reasons.push('model-provider-unknown');
-      else if (vendor(preset.modelProvider) === referenceModelProvider) reasons.push('same-model-provider');
+      // Keep the original v2 rule literal readable. Cross-provider means a
+      // different runtime family (e.g. Devin -> Codex), not a model vendor.
+      if (!referenceProvider) reasons.push('reference-provider-unknown');
+      else if (option.provider === referenceProvider) reasons.push('same-provider');
     }
     let efforts: (string | null)[] = [];
     if (model) {
@@ -77,8 +71,8 @@ export function presetChoiceSet(catalog: Catalog, role: string, providers: Provi
       thinkingOptionId, runtimeRule: preset.runtimeRule!,
     });
   }
-  const selectionSha256 = hash(canonicalJson({ semantics: PRESET_ROUTING_VERSION, context, referenceModelProvider, capabilities, choices, excluded }));
-  return { choices, excluded, selectionSha256, context, referenceModelProvider };
+  const selectionSha256 = hash(canonicalJson({ semantics: PRESET_ROUTING_VERSION, context, referenceProvider, capabilities, choices, excluded }));
+  return { choices, excluded, selectionSha256, context, referenceProvider };
 }
 export function boundedPresetChoices(set: ReturnType<typeof presetChoiceSet>) {
   if (set.choices.length === 0) throw new Error(`No eligible preset + effort pair: ${JSON.stringify(set.excluded)}`);

@@ -31,6 +31,6 @@ For a new pool, Manager offers five parked starter presets: Fast, Balanced,
 Advanced, Frontier and Cross-provider. Human chooses models, edits English
 starter descriptions or adds arbitrary presets. Effort can be Lead/Jev-selected
 within supported values or Human-fixed. Cross-provider has an explicit rule
-relative to a named reference seat; declare model vendors when host metadata
-cannot supply them. Existing v1 pools stay unchanged. Preview and review a v2
+relative to a named reference seat's runtime provider (for example Devin to Codex);
+no model-vendor declarations are needed. Existing v1 pools stay unchanged. Preview and review a v2
 conversion explicitly; retain the original v1 JSON for a possible downgrade.

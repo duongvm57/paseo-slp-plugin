@@ -434,8 +434,11 @@ V2 Lead/Jev discovery reads the same descriptions/hints and supported effort
 pairs for every entry, including custom ones. The server pins and revalidates
 entry/effort, capability hash and explicit cross-provider reference context;
 names, list order and template origin do not create reserved semantics.
-Host wrapper identity is not model vendor: missing/conflicting Human-declared
-vendor identity excludes the cross-provider branch. This changes selection,
+Cross-provider compares normalized runtime families, so Devin coding followed
+by Codex/Luna review qualifies without model-vendor declarations. Managed role
+wrappers normalize to their family; a missing or unknown reference blocks that
+branch. The historical v2 rule literal is retained, and the routing semantics
+pin changes so old receipts cannot replay under the new interpretation. This changes selection,
 not role authority, disposition, review or source precedence.
 
 ## Jev routing

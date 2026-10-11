@@ -1,7 +1,9 @@
 // Open, Human-authored Peer options. These defaults seed a new pool only;
 // template names/ids never determine routing behavior.
-export const PRESET_ROUTING_VERSION = 'peer-presets-v2';
+export const PRESET_ROUTING_VERSION = 'peer-presets-v2-runtime-provider';
 export type EffortPolicy = { kind: 'select'; allowed?: string[] } | { kind: 'fixed'; thinkingOptionId: string | null };
+// Historical v2 literal retained for saved-pool compatibility; it now compares
+// runtime providers, not Human-declared model vendors.
 export type PresetRuntimeRule = 'none' | 'different-model-provider';
 export interface PresetFields {
   displayName?: string; description?: string; selectionHints?: string;
@@ -13,7 +15,7 @@ export const PEER_PRESETS = [
   { id: 'balanced', displayName: 'Balanced', description: 'Balance capability, responsiveness, and execution cost for general work.' },
   { id: 'advanced', displayName: 'Advanced', description: 'Favor stronger capability for complex reasoning and sustained work.' },
   { id: 'frontier', displayName: 'Frontier', description: 'Offer the strongest configured capability for the most demanding problems.' },
-  { id: 'cross-provider', displayName: 'Cross-provider', description: 'Use a different model provider from the reference seat for an alternative perspective.' },
+  { id: 'cross-provider', displayName: 'Cross-provider', description: 'Use a different runtime provider from the reference seat for an alternative perspective, such as Codex reviewing work done by Devin.' },
 ] as const;
 export function starterPeerOptions() {
   return PEER_PRESETS.map(p => ({ ...p, templateOrigin: p.id, provider: '' as const, model: '', roles: ['peer'],

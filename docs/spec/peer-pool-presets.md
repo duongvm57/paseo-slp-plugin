@@ -58,7 +58,7 @@ Alongside the existing id/provider/model/settings/eligibility fields, v2 has:
 - `selectionHints`: optional advisory text sent to Lead/Jev.
 - `notes`: private, optional text, never sent to routing.
 - `templateOrigin`: optional provenance only; no reserved-ID behavior.
-- `modelProvider`: optional Human-declared model vendor, used for cross-provider.
+- `modelProvider`: retained optional legacy metadata; cross-provider does not use it.
 - `runtimeRule`: `none` or `different-model-provider`, explicit and editable.
 - `effortPolicy`: `{kind:"fixed", thinkingOptionId:string|null}` or
   `{kind:"select", allowed?:string[]}`. Null is an explicit runtime default.
@@ -104,13 +104,17 @@ It refreshes the named seat's provider/model and rechecks that runtime before
 effects. It does not assume the Lead is the reference. An assignment-wide
 crossProvider requirement filters every entry, regardless of its name.
 
-Host snapshots currently identify runtime wrappers, not model vendors. The
-pool's Human-declared modelProvider on entries matching the observed reference
-runtime supplies that identity. Missing/conflicting declarations exclude the
-cross-provider branch. Changing wrappers alone proves no different vendor.
-If the reference model has no declared identity in the pool, configure that
-identity before using this rule; no vendor is guessed from a model ID.
-Different vendors do not establish independent authority, mandate or evidence.
+Cross-provider compares runtime families (`devin`, `codex`, `pi`, etc.), not
+model vendors. Devin coding followed by Codex/Luna review qualifies without
+additional setup. Managed role wrappers normalize to the same family:
+`slp-codex-lead` and `slp-codex-peer` both mean Codex. The reference model need
+not have an entry in the pool. A missing or unrecognized reference provider
+excludes the branch rather than guessing. Model changes within one runtime
+provider do not satisfy the rule. Existing `modelProvider` fields remain
+preserved as unused metadata. Keep the original `different-model-provider`
+wire literal for saved-pool compatibility; routing semantics are pinned as
+`peer-presets-v2-runtime-provider`, rejecting old decision receipts. Different
+providers do not establish independent authority, mandate or evidence.
 
 CLI `route-choices <request.json|->` reads the same v2 pairs without Jev or
 admission, including when routing is off. Copy the chosen optionId/thinkingOptionId,
