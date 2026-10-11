@@ -159,23 +159,20 @@ export function useSupervisionCard({ target, targetKey, isCurrentKey, callGetSup
     const ticket = capture();
     setReloading(true);
     void loadAgents();
-    try {
-      const result = await callGetSupervision({ schemaVersion: 2, target });
-      if (!ticket.isCurrent()) return;
-      snapshot.acceptRead(result);
+    const result = await snapshot.reload(target);
+    if (!ticket.isCurrent() || result === null) return;
+    if (result.ok) {
       setCardError(null);
-      setForm(formFromConfig(result.config));
+      setForm(formFromConfig(result.data.config));
       setDirty(false);
       setSaved(false);
       setUnverified([]);
       notifySupervisionChanged();
-    } catch (error) {
-      const message = errorMessage(error);
-      if (ticket.isCurrent()) update({ lastError: message }, target);
-      if (ticket.isCurrent()) setCardError({ message: translateError(message), cas: false });
-    } finally {
-      if (ticket.isCurrent()) setReloading(false);
+    } else {
+      update({ lastError: result.error }, target);
+      setCardError({ message: translateError(result.error), cas: false });
     }
+    setReloading(false);
   };
 
   const restore = () => {

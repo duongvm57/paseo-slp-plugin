@@ -52,15 +52,15 @@ export function useCatalogCache(target: TargetValue | null, key: string | null,
   const [catalogRevision, setCatalogRevision] = useState(0);
   const [catalogLoadingFor, setCatalogLoadingFor] = useState<string | null>(null);
   const [featuresLoadingFor, setFeaturesLoadingFor] = useState<string | null>(null);
-  const generation = useRef({ catalogs: initial.current.catalogs,
-    features: initial.current.features, requests: new Map<string, object>(),
+  const generation = useRef({ catalogs: { ...initial.current.catalogs },
+    features: { ...initial.current.features }, requests: new Map<string, object>(),
     observed: new Set<string>(), display: initial.current });
   const refreshedActivation = useRef<string | null>(null);
   const committedKey = useRef<string | null>(null);
   const hadTarget = useRef(false);
   const invalidate = (display = displaySnapshot(key), restore = false) => {
-    const catalogs = restore ? display.catalogs : {};
-    const features = restore ? display.features : {};
+    const catalogs = restore ? { ...display.catalogs } : {};
+    const features = restore ? { ...display.features } : {};
     generation.current = { catalogs, features, requests: new Map(), observed: new Set(), display };
     setCatalogs(catalogs);
     setFeatureSets(features);

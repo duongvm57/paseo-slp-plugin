@@ -267,3 +267,40 @@ for (const [name, spec] of Object.entries(cards)) test(`${name}: reopening retai
   assert.equal(current.fresh, true);
   assert.equal(spec.value(current), spec.expected('/b'));
 });
+
+for (const name of ['pool', 'supervision']) test(`${name}: failed manual reload revokes freshness and preserves the draft until successful retry`, async t => {
+  const spec = cards[name], { state, read, write } = await setup(t, spec);
+  await act(async () => read.calls[0].resolve(spec.result('/a')));
+  assert.equal(state.current.fresh, true);
+  act(() => spec.edit(state.current));
+  const draft = name === 'pool' ? state.current.poolForm : state.current.form;
+  const reload = () => name === 'pool' ? state.current.reloadPeerPool() : state.current.reload();
+  let pending;
+  act(() => { pending = reload(); });
+  assert.equal(state.current.fresh, false, 'starting a new read immediately revokes write readiness');
+  await act(async () => { read.calls[1].reject(new Error('manual read failed')); await pending; });
+  assert.equal(state.current.fresh, false, 'failure cannot revive the old read');
+  assert.deepEqual(name === 'pool' ? state.current.poolForm : state.current.form, draft, 'failed discard preserves the authored draft');
+  assert.equal(name === 'pool' ? state.current.poolReadError : state.current.readError, 'manual read failed');
+  if (name === 'pool') assert.equal(state.current.poolLocked, true);
+  await act(async () => spec.run(state.current));
+  assert.equal(write.calls.length, 0, 'direct handler cannot save with the stale snapshot');
+  act(() => { pending = reload(); });
+  await act(async () => { read.calls[2].resolve(spec.result('/a')); await pending; });
+  assert.equal(state.current.fresh, true);
+  assert.equal(name === 'pool' ? state.current.poolReadError : state.current.readError, null);
+});
+
+for (const name of ['pool', 'supervision']) test(`${name}: an older same-target reload cannot revive readiness after a newer failed read`, async t => {
+  const spec = cards[name], { state, read } = await setup(t, spec);
+  await act(async () => read.calls[0].resolve(spec.result('/a')));
+  const reload = () => name === 'pool' ? state.current.reloadPeerPool() : state.current.reload();
+  let oldRead, newRead;
+  act(() => { oldRead = reload(); newRead = reload(); });
+  await act(async () => { read.calls[2].reject(new Error('newer read failed')); await newRead; });
+  assert.equal(state.current.fresh, false);
+  await act(async () => { read.calls[1].resolve(spec.result('/stale')); await oldRead; });
+  assert.equal(state.current.fresh, false);
+  assert.equal(name === 'pool' ? state.current.poolReadError : state.current.readError, 'newer read failed');
+  assert.equal(spec.value(state.current), spec.expected('/a'));
+});

@@ -446,23 +446,20 @@ export function usePeerPoolCard({ target, targetKey, isCurrentKey, callGetPeerPo
     if (!target || !targetKey) return;
     const ticket = capture();
     setPoolReloading(true);
-    try {
-      const result = await callGetPeerPool({ schemaVersion: 1, target });
-      if (!ticket.isCurrent()) return;
-      snapshot.acceptRead(result);
+    const result = await snapshot.reload(target);
+    if (!ticket.isCurrent() || result === null) return;
+    if (result.ok) {
       setPoolError(null);
       setPoolDirty(false);
       setPoolSaved(false);
       setPoolCopied(false);
       setStandardAppliedId(null);
       setConvertSeatIndex(null);
-    } catch (error) {
-      const message = errorMessage(error);
-      if (ticket.isCurrent()) update({ lastError: message }, target);
-      if (ticket.isCurrent()) setPoolError({ message, cas: false });
-    } finally {
-      if (ticket.isCurrent()) setPoolReloading(false);
+    } else {
+      update({ lastError: result.error }, target);
+      setPoolError({ message: result.error, cas: false });
     }
+    setPoolReloading(false);
   };
   const requestReload = (origin: "notice" | "footer") => {
     if (poolDirty) {

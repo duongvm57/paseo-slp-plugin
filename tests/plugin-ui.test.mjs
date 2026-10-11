@@ -200,7 +200,7 @@ test('status responses poll every STATUS_POLL_MS and stop at terminal', () => {
 
 test('a dropped start response polls, retries only when absent, never hijacks', () => {
   // Operation absent -> the identical request may be retried.
-  assert.deepEqual(recoverPendingStart(OP_ID, statusView({ operation: null })), { kind: 'retry' });
+  assert.deepEqual(recoverPendingStart(OP_ID, statusView({ operation: null, conflicts: [{ code: 'NOT_FOUND', message: 'no operation in journal' }] })), { kind: 'retry' });
   // Same operation pending -> keep polling; the request already landed.
   assert.deepEqual(recoverPendingStart(OP_ID, statusView({ operation: operation() })), { kind: 'poll' });
   // Same operation terminal -> settled, no retry needed.
@@ -1092,7 +1092,8 @@ test('the Peer pool card authors the pool through catalog-backed pickers', () =>
   // back as expectedSha256; a conflict reloads instead of overwriting.
   const poolCardModule = readFileSync(join(root, 'plugin/client/cards/peer-pool.tsx'), 'utf8');
   assert.equal(occurrences(poolCardModule, 'callSetPeerPool('), 1, 'one set-peer-pool call site');
-  assert.equal(occurrences(poolCardModule, 'callGetPeerPool('), 2, 'load + reload reads');
+  assert.equal(occurrences(poolCardModule, 'callGetPeerPool('), 1, 'one read adapter is shared by initial and manual reload');
+  assert.ok(poolCardModule.includes('snapshot.reload(target)'), 'manual reload goes through the shared lifecycle');
   assert.ok(poolCardModule.includes('expectedSha256'), 'CAS token is sent on save');
   assert.ok(poolCardModule.includes('peerPoolDiffers('), 'Save is diff-gated on the built pool');
   assert.equal(occurrences(peerCard, '"Save pool"'), 1, 'one pool save button');

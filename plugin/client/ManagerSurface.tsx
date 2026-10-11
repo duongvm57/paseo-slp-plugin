@@ -195,6 +195,9 @@ function ManagerSession({ host, layout, theme, navigation, params = {}, onSectio
   const keyRef = useRef<string | null>(key);
   const captureTarget = useTargetLifetime(key);
   const statusSequence = useRef(0);
+  // Retain the frozen request until its start/uncertainty is resolved. This is not
+  // authority: explicit retry also requires fresh target/candidate + acknowledgments.
+  const operationRequests = useRef(new Map<string, { operationId: string; invoke: () => Promise<StartResult>; candidate: string; canonicalHome: string }>());
   const autoLoadedFor = useRef<string | null>(null);
 
   // Prefill the daemon home from the plugin process's own environment
@@ -245,19 +248,42 @@ function ManagerSession({ host, layout, theme, navigation, params = {}, onSectio
   }, [store]);
 
   const refresh = useCallback(async (forTarget: TargetValue, operationId?: string): Promise<StatusResult | null> => {
-    const ticket = captureTarget(), issued = ++statusSequence.current;
+    const ticket = captureTarget();
+    if (!ticket.isCurrent() || keyRef.current !== targetKey(forTarget)) return null;
+    const issued = ++statusSequence.current;
+    setStatusFresh(false);
+    update({ lastError: null }, forTarget);
     try {
       const next = await callStatus({ schemaVersion: 1, target: forTarget, ...(operationId ? { operationId } : {}) });
       if (!ticket.isCurrent() || issued !== statusSequence.current) return null;
       rememberRead(`status:${targetKey(forTarget)}`, next);
       setStatusFresh(true);
-      update({ status: next, lastError: null }, forTarget);
+      const tracked = store.get(forTarget)?.pending;
+      const observed = operationId && tracked?.operationId === operationId ? next.operation : null;
+      if (observed != null && observed.operationId === operationId && !operationPending(observed)) {
+        // An exact terminal read supersedes the matching in-flight retry, not
+        // only its poll tracker. Retire its callback before releasing busy so
+        // late success/error cannot overwrite this result or the next start.
+        const request = operationRequests.current.get(targetKey(forTarget));
+        const settlesInvocation = request?.operationId === operationId;
+        if (settlesInvocation) operationRequests.current.delete(targetKey(forTarget));
+        update({ status: next, lastError: null, pending: null,
+          ...(settlesInvocation ? { busy: false } : {}),
+          notice: `Operation ${operationId} resolved: ${observed.outcome}.` }, forTarget);
+      } else if (operationId && tracked?.operationId === operationId && tracked.uncertain) {
+        // Only a complete explicit NOT_FOUND observation permits retry of the
+        // same frozen request; missing/foreign/error observations do not.
+        const retryAllowed = next.operation == null && next.conflicts.some(conflict => conflict.code === "NOT_FOUND");
+        update({ status: next, lastError: null, pending: { ...tracked, retryAllowed } }, forTarget);
+      } else {
+        update({ status: next, lastError: null }, forTarget);
+      }
       return next;
     } catch (error) {
       if (ticket.isCurrent() && issued === statusSequence.current) { setStatusFresh(false); update({ lastError: errorMessage(error) }, forTarget); }
       return null;
     }
-  }, [callStatus, update, captureTarget]);
+  }, [callStatus, update, captureTarget, store]);
 
   // Once a target is known (detected or typed), fetch status automatically —
   // read-only, so no authority acknowledgment is needed to inspect.
@@ -361,71 +387,86 @@ function ManagerSession({ host, layout, theme, navigation, params = {}, onSectio
       if (cancelled) return;
       if (next == null) { schedule(STATUS_POLL_MS); return; }
       if (!next.operation || next.operation.operationId !== pending.operationId || operationPending(next.operation)) { schedule(pollDelayAfterStatus(next) || STATUS_POLL_MS); return; }
-      update({ pending: null }, target);
+      update({ pending: null, notice: `Operation ${pending.operationId} resolved: ${next.operation.outcome}.` }, target);
     };
     schedule(pending.nextPollMs);
     return () => { cancelled = true; if (timer !== undefined) clearTimeout(timer); };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- re-arm only on target/operation change
   }, [key, pending?.operationId]);
 
-  const runOperation = useCallback(async (invoke: () => Promise<StartResult>, operationId: string) => {
-    if (!statusFresh || !target || view.busy || view.pending || (view.status?.operation && operationPending(view.status.operation))) return;
+  const runOperation = useCallback(async (invoke: () => Promise<StartResult>, operationId: string, retryOriginal = false) => {
+    const retrying = retryOriginal && view.pending?.operationId === operationId && view.pending.retryAllowed === true;
+    if (!statusFresh || !target || view.busy || (!retrying && view.pending) || (view.status?.operation && operationPending(view.status.operation))) return;
     const current = store.get(target);
-    if (current?.busy || current?.pending) return;
+    if (current?.busy || (current?.pending && !(retrying && current.pending.operationId === operationId && current.pending.retryAllowed))) return;
     const ticket = captureTarget();
     if (!ticket.isCurrent()) return;
+    operationRequests.current.set(targetKey(target), { operationId, invoke,
+      candidate: view.status!.embeddedCandidateSha256, canonicalHome: view.status!.target.daemonHome });
     update({ busy: true, lastError: null, notice: `Starting operation ${operationId}. Target changes do not cancel server work; inspect this ID before retrying.` }, target);
     const finish = (start: StartResult) => {
+      if (operationRequests.current.get(targetKey(target))?.operationId !== operationId) return;
       // startPatch keeps start.conflicts visible whether or not the response
       // was accepted — an accepted reconcile inspect can still report drift.
       if (!ticket.isCurrent()) {
         applyPatch(store, target, startPatch(start), null);
         return;
       }
+      operationRequests.current.delete(targetKey(target));
       update(startPatch(start), target);
       void refresh(target, start.operation?.operationId);
     };
     try {
       finish(await invoke());
     } catch (error) {
+      // A transport failure says nothing about acceptance. Retain the original
+      // ID before probing so a failed/foreign/missing read cannot admit a new
+      // mutation. The existing per-target tracker owns subsequent read-only polls.
+      const unresolved = {
+        busy: false,
+        pending: { operationId, nextPollMs: STATUS_POLL_MS, uncertain: true, retryAllowed: false },
+        notice: `Operation ${operationId} has an unconfirmed outcome. Inspect this exact ID before retrying; no mutation is retried automatically.`,
+        lastError: errorMessage(error),
+      };
+      if (operationRequests.current.get(targetKey(target))?.operationId !== operationId) return;
       if (!ticket.isCurrent()) {
-        applyPatch(store, target, { busy: false, lastError: `Operation ${operationId} did not return: ${errorMessage(error)}. Inspect this exact ID before retrying.` }, null);
+        const current = store.get(target);
+        if (!current?.pending || current.pending.operationId === operationId) applyPatch(store, target, unresolved, null);
         return;
       }
-      // §3: an invoke timeout does not cancel server-side work. Poll the
-      // original operationId and retry the identical request only when status
-      // reports it absent — never assume the timeout cancelled anything.
-      let probe: StatusResult | null = null;
-      try {
-        probe = await callStatus({ schemaVersion: 1, target, operationId });
-      } catch { /* probe failure reported below */ }
-      if (!ticket.isCurrent()) return;
+      update(unresolved, target);
+      const probe = await refresh(target, operationId);
+      if (!ticket.isCurrent() || operationRequests.current.get(targetKey(target))?.operationId !== operationId) return;
       if (probe == null) {
-        update({ busy: false, lastError: `${errorMessage(error)} (status probe failed as well)` }, target);
+        update({ lastError: `${errorMessage(error)} (status probe failed as well)` }, target);
         return;
       }
-      update({ status: probe }, target);
       const recovery = recoverPendingStart(operationId, probe);
-      if (recovery.kind === "retry") {
-        try {
-          finish(await invoke());
-        } catch (again) {
-          if (ticket.isCurrent()) update({ busy: false, lastError: errorMessage(again) }, target);
-        }
+      if (recovery.kind === "settled") {
+        update({ pending: null, notice: `Operation ${operationId} resolved: ${recovery.operation.outcome}.` }, target);
       } else if (recovery.kind === "poll") {
-        update({
-          busy: false,
-          pending: { operationId, nextPollMs: STATUS_POLL_MS },
-          notice: "start call did not return; the operation was accepted — tracking it",
-        }, target);
-      } else if (recovery.kind === "settled") {
-        update({ busy: false, pending: null }, target);
+        update({ notice: `Operation ${operationId} was accepted and is still pending — tracking this ID.` }, target);
       } else {
-        update({ busy: false, lastError: recovery.message }, target);
+        // Even an absent journal entry does not authorize a replacement ID or
+        // an automatic mutation retry. Keep the original ID available to inspect.
+        update({ lastError: recovery.kind === "unresolved" ? recovery.message : `Operation ${operationId} is not yet confirmed in the journal; inspect this ID before retrying.` }, target);
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- key captures target
   }, [key, statusFresh, view.status, view.busy, view.pending, update, callStatus, refresh, captureTarget, store]);
+
+  const retryOriginalOperation = () => {
+    if (!target || !key || !statusFresh || !exclusiveWindow || !mappingConfirmed || view.busy || saveApplyBusy || routing.busy || !view.pending?.retryAllowed) return;
+    const original = operationRequests.current.get(key);
+    if (!original || original.operationId !== view.pending.operationId
+      || original.candidate !== statusView?.embeddedCandidateSha256
+      || original.canonicalHome !== statusView?.target.daemonHome) return;
+    void runOperation(original.invoke, original.operationId, true);
+  };
+  const original = key ? operationRequests.current.get(key) : undefined;
+  const canRetryOriginal = statusFresh && exclusiveWindow && mappingConfirmed && !view.busy && !saveApplyBusy && !routing.busy
+    && view.pending?.retryAllowed === true && original?.operationId === view.pending.operationId
+    && original?.candidate === statusView?.embeddedCandidateSha256 && original?.canonicalHome === statusView?.target.daemonHome;
 
   const canMutate = statusFresh && !(statusView?.operation && operationPending(statusView.operation)) && target != null && exclusiveWindow && mappingConfirmed && !view.busy && !view.pending && !saveApplyBusy;
   // Conflicts from the last start response, the tracked operation's own
@@ -567,6 +608,10 @@ function ManagerSession({ host, layout, theme, navigation, params = {}, onSectio
         {view.lastError ? <Text selectable style={[styles.muted, { color: colors.statusDanger }]}>{view.lastError}</Text> : null}
         {view.notice ? <Text selectable style={[styles.muted, { color: colors.foregroundMuted }]}>{view.notice}</Text> : null}
         {view.pending ? <KV colors={colors} label="Tracked operation" value={view.pending.operationId} /> : null}
+        {view.pending?.uncertain && view.pending.retryAllowed ? <View style={{ gap: 6 }}>
+          <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>The original ID is not recorded in the latest journal read. Retry sends the identical request with that ID; it does not create a replacement.</Text>
+          <Button colors={colors} label="Retry original operation" disabled={!canRetryOriginal} onPress={retryOriginalOperation} />
+        </View> : null}
         {conflictList.length > 0 ? <Card colors={colors} title="Conflicts · inspect before changing configuration">
           {conflictLines(conflictList).map((line, index) => <Text key={index} selectable style={[styles.mutedSmall, { color: colors.statusDanger }]}>{line}</Text>)}
         </Card> : null}
@@ -642,7 +687,7 @@ function ManagerSession({ host, layout, theme, navigation, params = {}, onSectio
         <Button
           colors={colors}
           label={statusView ? "Refresh" : "Inspect"}
-          onPress={() => { if (target) void refresh(target); }}
+          onPress={() => { if (target) void refresh(target, view.pending?.operationId); }}
           disabled={!target || view.busy}
         />
       </Card>
@@ -725,7 +770,7 @@ function ManagerSession({ host, layout, theme, navigation, params = {}, onSectio
       ) : null}
 
       <View style={sectionShown("overview")}><Card colors={colors} title="Configuration" subtitle="Drafts stay here while you switch sections. Save each editor explicitly.">
-        <KV colors={colors} label="Profiles" value={routing.saved ? saveApplyBusy || view.pending ? "Saved; Apply operation in progress" : "Saved; inspect latest Apply result" : routing.dirty ? "Unsaved draft" : routing.diverged ? "Saved profiles differ from binding" : "Inspect Profiles for saved and applied settings"} />
+        <KV colors={colors} label="Profiles" value={routing.saved ? saveApplyBusy || view.pending ? view.pending?.uncertain ? "Saved; Apply outcome unconfirmed" : "Saved; Apply operation in progress" : "Saved; inspect latest Apply result" : routing.dirty ? "Unsaved draft" : routing.diverged ? "Saved profiles differ from binding" : "Inspect Profiles for saved and applied settings"} />
         <KV colors={colors} label="Peer pool" value={pool.poolReadError ? "Read unavailable" : pool.poolDirty ? "Unsaved draft" : pool.poolData?.error ? "Pool unavailable" : pool.poolData ? pool.poolData.pool ? "Saved pool; read at next formation" : "No saved pool" : "Awaiting pool read"} />
         <KV colors={colors} label="Jev" value={jevSummary(jev.view, jev.loadError, { dirty: jev.dirty, saved: jev.saved })} />
         <View style={styles.chipRow}>{MANAGER_SECTIONS.filter(section => section.id !== "overview" && section.id !== "maintenance").map(section => <Button key={section.id} colors={colors} label={`Open ${section.label.toLowerCase()}`} onPress={() => setActiveSection(section.id)} />)}</View>

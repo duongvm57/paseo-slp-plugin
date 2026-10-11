@@ -50,29 +50,29 @@ export function useTargetSnapshot<T>(target: TargetValue | null, key: string | n
     // Replacement may be an optimistic draft projection; only successful
     // read RPCs populate the remount display cache.
   };
-  const acceptRead = (next: T) => {
-    if (!capture().isCurrent()) return;
-    if (cacheKey) rememberRead(cacheKey, next);
-    setData(next); setError(null); setLoaded(true); setFresh(true);
-  };
+  const readSequence = useRef(0);
   const reload = async (forTarget: TargetValue) => {
-    // Old render handlers must not issue a read for the new session.
-    if (key !== targetKey(forTarget)) return;
+    // Both target lifetime and read ordering own completion: a manual read
+    // supersedes an older initial/manual read in the same target session.
+    if (key !== targetKey(forTarget)) return null;
     const ticket = capture();
-    if (!ticket.isCurrent()) return;
+    if (!ticket.isCurrent()) return null;
+    const issued = ++readSequence.current;
+    const current = () => ticket.isCurrent() && issued === readSequence.current;
     setError(null);
     setFresh(false);
     try {
       const next = await adapter.current(forTarget);
-      if (ticket.isCurrent()) {
-        if (cacheKey) rememberRead(cacheKey, next);
-        setData(next); setError(null); setLoaded(true); setFresh(true);
-      }
+      if (!current()) return null;
+      if (cacheKey) rememberRead(cacheKey, next);
+      setData(next); setError(null); setLoaded(true); setFresh(true);
+      return { ok: true as const, data: next };
     } catch (cause) {
-      if (ticket.isCurrent()) {
-        if (!cacheKey) setData(null);
-        setError(errorMessage(cause)); setLoaded(true); setFresh(false);
-      }
+      if (!current()) return null;
+      const message = errorMessage(cause);
+      if (!cacheKey) setData(null);
+      setError(message); setLoaded(true); setFresh(false);
+      return { ok: false as const, error: message };
     }
   };
   useEffect(() => {
@@ -84,5 +84,5 @@ export function useTargetSnapshot<T>(target: TargetValue | null, key: string | n
     // should cancel a read. Replay runs this effect again with a new ticket.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key]);
-  return { data, error, loaded, available: loaded || (cacheKey !== null && completedReads.has(cacheKey)), fresh, acceptRead, replace, reload, capture };
+  return { data, error, loaded, available: loaded || (cacheKey !== null && completedReads.has(cacheKey)), fresh, replace, reload, capture };
 }

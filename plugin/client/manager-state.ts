@@ -70,7 +70,7 @@ export interface TargetView {
   reportedConflicts: ConflictValue[] | null;
   /** Tracked pending operation; nextPollMs is the server's pollAfterMs for the
    * first poll, then STATUS_POLL_MS per status poll (spec §3). */
-  pending: { operationId: string; nextPollMs: number } | null;
+  pending: { operationId: string; nextPollMs: number; uncertain?: boolean; retryAllowed?: boolean } | null;
 }
 
 export const emptyTargetView = (): TargetView => ({
@@ -142,7 +142,9 @@ export type StartRecovery =
 // NOT_FOUND). A foreign pending operation is never hijacked.
 export function recoverPendingStart(operationId: string, view: StatusResult): StartRecovery {
   const operation = view.operation;
-  if (operation == null) return { kind: "retry" };
+  if (operation == null) return view.conflicts.some(conflict => conflict.code === "NOT_FOUND")
+    ? { kind: "retry" }
+    : { kind: "unresolved", message: `status has not confirmed operation ${operationId}` };
   if (operation.operationId !== operationId) {
     return { kind: "unresolved", message: `status returned operation ${operation.operationId}, not the dispatched ${operationId}` };
   }

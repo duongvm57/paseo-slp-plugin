@@ -520,3 +520,207 @@ test('Profiles frame is already mounted before local target and initial status r
   assert.equal(control(rig, 'Save profiles').props.disabled, true);
   assert.ok(card());
 });
+
+test('manual Refresh after a fresh read keeps the header row stable and revokes write readiness until completion', async t => {
+  const rig = await managerRig(t, {}, {}, true);
+  await act(async () => rig.reads.calls[0].resolve(runtime()));
+  const subtitle = () => rig.renderer.root.findAll(node => node.type === 'Text' && node.props.accessibilityLiveRegion === 'polite'
+    && typeof node.props.accessibilityLabel === 'string' && node.props.accessibilityLabel.endsWith(' on Fixture host'))[0];
+  const language = () => rig.renderer.root.findAll(node => node.type.name === 'LanguageCard')[0];
+  const before = rig.renderer.toJSON().children.slice(0, 2).map(node => node.type);
+  assert.equal(language().props.disabled, false);
+  await act(async () => control(rig, 'Refresh').props.onPress());
+  assert.equal(subtitle().props.accessibilityLabel, 'Updating saved view on Fixture host');
+  assert.equal(subtitle().props.numberOfLines, 1);
+  assert.equal(subtitle().props.accessibilityHint, 'Writes wait for a fresh read.');
+  assert.equal(language().props.disabled, true);
+  assert.deepEqual(rig.renderer.toJSON().children.slice(0, 2).map(node => node.type), before);
+  await act(async () => rig.reads.calls[1].resolve(runtime()));
+  assert.equal(subtitle().props.accessibilityLabel, 'Runtime and work settings on Fixture host');
+  assert.equal(language().props.disabled, false);
+  assert.deepEqual(rig.renderer.toJSON().children.slice(0, 2).map(node => node.type), before);
+});
+
+test('activation transport failure plus failed probe retains its original ID and blocks a replacement submission', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const starts = deferredRpc();
+  const rig = await managerRig(t, {}, { activate: input => starts.rpc(input) }, true);
+  await act(async () => rig.reads.calls[0].resolve(runtime()));
+  for (const title of ['Exclusive configuration window', 'Daemon home confirmed']) {
+    await act(async () => rig.renderer.root.findAll(node => node.props.title === title && typeof node.props.onToggle === 'function')[0].props.onToggle(true));
+  }
+  const action = () => control(rig, 'Update SLP runtime');
+  await act(async () => action().props.onPress());
+  const id = starts.calls[0].input.operationId;
+  await act(async () => starts.calls[0].reject(new Error('start transport lost')));
+  assert.equal(rig.reads.calls[1].input.operationId, id);
+  await act(async () => rig.reads.calls[1].reject(new Error('probe transport lost')));
+  const tracked = rig.renderer.root.findAll(node => node.props.label === 'Tracked operation' && typeof node.props.value === 'string')[0];
+  assert.equal(tracked?.props.value, id, 'uncertain acceptance must retain a structured operation guard');
+  assert.equal(action().props.disabled, true);
+  await act(async () => action().props.onPress());
+  assert.equal(starts.calls.length, 1);
+  await act(async () => control(rig, 'Refresh').props.onPress());
+  assert.equal(rig.reads.calls.at(-1).input.operationId, id, 'manual inspection targets the original ID');
+  await act(async () => rig.reads.calls.at(-1).resolve(runtime({ operation: null })));
+  assert.equal(action().props.disabled, true, 'an absent/partial operation cannot erase uncertain acceptance');
+  await act(async () => t.mock.timers.tick(5000));
+  assert.equal(rig.reads.calls.at(-1).input.operationId, id);
+  const operation = { operationId: id, kind: 'activate', phase: 'verify', outcome: 'succeeded',
+    startedAt: '2026-10-11T08:00:00Z', updatedAt: '2026-10-11T08:00:01Z', completedAt: '2026-10-11T08:00:01Z' };
+  await act(async () => rig.reads.calls.at(-1).resolve(runtime({ operation })));
+  assert.equal(action().props.disabled, false, 'exact tracked terminal result resolves the uncertainty');
+  assert.equal(starts.calls.length, 1, 'read-only recovery never retries a mutation');
+});
+
+for (const observation of ['not-found', 'foreign']) test(`uncertain start with ${observation} probe never automatically mutates or replaces its ID`, async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const starts = deferredRpc();
+  const rig = await managerRig(t, {}, { activate: input => starts.rpc(input) }, true);
+  await act(async () => rig.reads.calls[0].resolve(runtime()));
+  for (const title of ['Exclusive configuration window', 'Daemon home confirmed']) {
+    await act(async () => rig.renderer.root.findAll(node => node.props.title === title && typeof node.props.onToggle === 'function')[0].props.onToggle(true));
+  }
+  await act(async () => control(rig, 'Update SLP runtime').props.onPress());
+  const request = starts.calls[0].input, id = request.operationId;
+  await act(async () => starts.calls[0].reject(new Error('response dropped')));
+  const pending = { operationId: 'foreign-operation', kind: 'activate', phase: 'verify', outcome: 'pending', startedAt: '2026-10-11T08:00:00Z', updatedAt: '2026-10-11T08:00:00Z', completedAt: null };
+  await act(async () => rig.reads.calls[1].resolve(runtime(observation === 'not-found'
+    ? { operation: null, conflicts: [{ code: 'NOT_FOUND', message: `no operation ${id} in this journal` }] }
+    : { operation: pending })));
+  assert.equal(starts.calls.length, 1, 'even confirmed absence is not an automatic retry');
+  assert.equal(control(rig, 'Update SLP runtime').props.disabled, true);
+  const tracked = () => rig.renderer.root.findAll(node => node.props.label === 'Tracked operation' && typeof node.props.value === 'string')[0];
+  assert.equal(tracked().props.value, id);
+  if (observation === 'foreign') {
+    assert.equal(control(rig, 'Retry original operation'), undefined, 'foreign operation cannot authorize retry');
+    await act(async () => control(rig, 'Refresh').props.onPress());
+    assert.equal(rig.reads.calls.at(-1).input.operationId, id);
+    await act(async () => rig.reads.calls.at(-1).resolve(runtime({ operation: { ...pending, operationId: id, outcome: 'failed', completedAt: '2026-10-11T08:00:01Z' } })));
+    assert.equal(tracked(), undefined, 'manual exact terminal inspection resolves the original guard');
+    assert.equal(starts.calls.length, 1);
+    return;
+  }
+  const retry = () => control(rig, 'Retry original operation');
+  assert.equal(retry().props.disabled, false);
+  const ack = rig.renderer.root.findAll(node => node.props.title === 'Daemon home confirmed' && typeof node.props.onToggle === 'function')[0];
+  await act(async () => ack.props.onToggle(false));
+  assert.equal(retry().props.disabled, true);
+  await act(async () => retry().props.onPress());
+  assert.equal(starts.calls.length, 1);
+  await act(async () => ack.props.onToggle(true));
+  await act(async () => { retry().props.onPress(); retry().props.onPress(); });
+  assert.equal(starts.calls.length, 2, 'an explicit same-ID retry dispatches once');
+  assert.deepEqual(starts.calls[1].input, request, 'retry preserves all original target/candidate/authority/payload bytes');
+  await act(async () => starts.calls[1].reject(new Error('retry response also lost')));
+  assert.equal(rig.reads.calls.at(-1).input.operationId, id);
+  await act(async () => rig.reads.calls.at(-1).reject(new Error('second probe failed')));
+  assert.equal(tracked().props.value, id);
+  assert.equal(starts.calls.length, 2, 'a second transport failure remains read-only until explicit retry');
+});
+
+test('chained Save Apply transport uncertainty keeps saved choices and original operation tracking', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const starts = deferredRpc();
+  const rig = await managerRig(t, { params: { section: 'profiles' } }, {
+    'set-role-routing': async input => ({ routing: input.routing }), activate: input => starts.rpc(input),
+  }, true);
+  await act(async () => rig.reads.calls[0].resolve(runtime({ embeddedCandidateSha256: A })));
+  await act(async () => rig.routing().setField('supervisor', 'model')('saved-model'));
+  await act(async () => control(rig, 'Save profiles').props.onPress());
+  await acknowledge(rig);
+  await act(async () => control(rig, 'Save and apply').props.onPress());
+  await act(async () => rig.reads.calls[1].resolve(runtime({ embeddedCandidateSha256: A })));
+  const id = starts.calls[0].input.operationId;
+  await act(async () => starts.calls[0].reject(new Error('Apply response lost')));
+  await act(async () => rig.reads.calls[2].reject(new Error('Apply probe lost')));
+  assert.equal(rig.routing().saved, true);
+  assert.equal(rig.routing().form.supervisor.model, 'saved-model');
+  assert.ok(JSON.stringify(rig.renderer.toJSON()).includes('Saved; Apply outcome unconfirmed'));
+  const card = rig.renderer.root.findAll(node => node.type.name === 'RoutingCard')[0];
+  await act(async () => card.props.onSave());
+  assert.equal(starts.calls.length, 1);
+  assert.equal(rig.calls.filter(call => call.name === 'set-role-routing').length, 1);
+  assert.equal(rig.renderer.root.findAll(node => node.props.label === 'Tracked operation' && node.props.value === id).length > 0, true);
+});
+
+for (const reject of [false, true]) for (const startNext of [false, true]) test(`terminal poll during identical retry settles busy before delayed retry ${reject ? 'rejection' : 'success'} with ${startNext ? 'a newer' : 'no newer'} operation`, async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const starts = deferredRpc();
+  const rig = await managerRig(t, {}, { activate: input => starts.rpc(input) }, true);
+  await act(async () => rig.reads.calls[0].resolve(runtime()));
+  for (const title of ['Exclusive configuration window', 'Daemon home confirmed']) {
+    await act(async () => rig.renderer.root.findAll(node => node.props.title === title && typeof node.props.onToggle === 'function')[0].props.onToggle(true));
+  }
+  await act(async () => control(rig, 'Update SLP runtime').props.onPress());
+  const original = starts.calls[0].input, id = original.operationId;
+  await act(async () => starts.calls[0].reject(new Error('initial response lost')));
+  await act(async () => rig.reads.calls[1].resolve(runtime({ operation: null, conflicts: [{ code: 'NOT_FOUND', message: `no operation ${id} in journal` }] })));
+  assert.equal(starts.calls.length, 1, 'confirmed absence alone does not retry');
+  await act(async () => control(rig, 'Retry original operation').props.onPress());
+  assert.equal(starts.calls.length, 2);
+  assert.deepEqual(starts.calls[1].input, original);
+  assert.equal(control(rig, 'Refresh').props.disabled, true, 'retry invocation initially owns busy');
+  await act(async () => t.mock.timers.tick(1000));
+  const poll = rig.reads.calls.at(-1);
+  assert.equal(poll.input.operationId, id);
+  const terminal = { operationId: id, kind: 'activate', phase: 'verify', outcome: 'succeeded',
+    startedAt: '2026-10-11T09:00:00Z', updatedAt: '2026-10-11T09:00:01Z', completedAt: '2026-10-11T09:00:01Z' };
+  await act(async () => poll.resolve(runtime({ operation: terminal })));
+  assert.equal(control(rig, 'Refresh').props.disabled, false, 'exact terminal poll settles the retry invocation busy ownership');
+  assert.equal(control(rig, 'Update SLP runtime').props.disabled, false);
+  assert.equal(rig.renderer.root.findAll(node => node.props.label === 'Tracked operation').length, 0);
+  const beforeNext = rig.reads.calls.length;
+  if (startNext) await act(async () => control(rig, 'Update SLP runtime').props.onPress());
+  assert.equal(starts.calls.length, startNext ? 3 : 2, 'a subsequent operation requires another explicit action');
+  const nextId = startNext ? starts.calls[2].input.operationId : null;
+  if (startNext) assert.notEqual(nextId, id);
+  assert.equal(control(rig, 'Refresh').props.disabled, startNext);
+  await act(async () => {
+    if (reject) starts.calls[1].reject(new Error('late old retry rejection'));
+    else starts.calls[1].resolve({ schemaVersion: 1, accepted: true, state: 'ACTIVATING', operation: { ...terminal, outcome: 'pending', completedAt: null }, conflicts: [], pollAfterMs: 1000 });
+  });
+  assert.equal(control(rig, 'Refresh').props.disabled, startNext, 'old retry completion cannot alter resolved/newer busy state');
+  assert.equal(rig.reads.calls.length, beforeNext, 'retired retry does not issue a stale status refresh/probe');
+  assert.doesNotMatch(JSON.stringify(rig.renderer.toJSON()), /late old retry rejection/);
+  if (!startNext) {
+    assert.ok(JSON.stringify(rig.renderer.toJSON()).includes(`Operation ${id} resolved: succeeded.`));
+    assert.equal(control(rig, 'Update SLP runtime').props.disabled, false);
+    return;
+  }
+  assert.ok(JSON.stringify(rig.renderer.toJSON()).includes(`Starting operation ${nextId}`));
+  await act(async () => starts.calls[2].resolve({ schemaVersion: 1, accepted: true, state: 'ACTIVE', operation: { ...terminal, operationId: nextId }, conflicts: [], pollAfterMs: 0 }));
+  assert.equal(rig.reads.calls.at(-1).input.operationId, nextId);
+  await act(async () => rig.reads.calls.at(-1).resolve(runtime({ operation: { ...terminal, operationId: nextId } })));
+  assert.equal(control(rig, 'Refresh').props.disabled, false);
+  assert.equal(control(rig, 'Update SLP runtime').props.disabled, false);
+});
+
+test('an obsolete failed status probe cannot repaint a terminal resolution or newer operation', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const starts = deferredRpc();
+  const rig = await managerRig(t, {}, { activate: input => starts.rpc(input) }, true);
+  await act(async () => rig.reads.calls[0].resolve(runtime()));
+  for (const title of ['Exclusive configuration window', 'Daemon home confirmed']) {
+    await act(async () => rig.renderer.root.findAll(node => node.props.title === title && typeof node.props.onToggle === 'function')[0].props.onToggle(true));
+  }
+  await act(async () => control(rig, 'Update SLP runtime').props.onPress());
+  const id = starts.calls[0].input.operationId;
+  await act(async () => starts.calls[0].reject(new Error('start response lost')));
+  const probe = rig.reads.calls[1];
+  assert.equal(probe.input.operationId, id);
+  await act(async () => t.mock.timers.tick(1000));
+  const poll = rig.reads.calls[2];
+  assert.equal(poll.input.operationId, id);
+  const terminal = { operationId: id, kind: 'activate', phase: 'verify', outcome: 'succeeded',
+    startedAt: '2026-10-11T09:00:00Z', updatedAt: '2026-10-11T09:00:01Z', completedAt: '2026-10-11T09:00:01Z' };
+  await act(async () => poll.resolve(runtime({ operation: terminal })));
+  assert.equal(control(rig, 'Refresh').props.disabled, false);
+  await act(async () => control(rig, 'Update SLP runtime').props.onPress());
+  const nextId = starts.calls[1].input.operationId;
+  await act(async () => probe.reject(new Error('old probe finally failed')));
+  assert.equal(control(rig, 'Refresh').props.disabled, true);
+  assert.ok(JSON.stringify(rig.renderer.toJSON()).includes(`Starting operation ${nextId}`));
+  assert.doesNotMatch(JSON.stringify(rig.renderer.toJSON()), /old probe finally failed|status probe failed as well/);
+  assert.equal(starts.calls.length, 2);
+});

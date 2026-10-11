@@ -208,3 +208,37 @@ test('cold demand reads independent roles concurrently', async t => {
   const { rpc } = await setup(t, false, { scopes: [{ family: 'codex', role: 'supervisor' }, { family: 'codex', role: 'lead' }], features: [] });
   assert.deepEqual(rpc.calls.map(call => call.input.role).sort(), ['lead', 'supervisor']);
 });
+
+test('failed feature reads never enter completed metadata retention or bypass its 128-entry bound', async t => {
+  const mod = await loadHooks(t), rpc = deferredRpc(); let current, renderer;
+  function Screen() {
+    const target = { hostId: 'bounded-host', daemonHome: '/bounded' };
+    current = mod.useCatalogCache(target, mod.targetKey(target), undefined, rpc.rpc);
+    return null;
+  }
+  t.after(async () => { await act(async () => renderer?.unmount()); });
+  await act(async () => { renderer = TestRenderer.create(React.createElement(Screen)); });
+  let reads;
+  // Failure results are measured provider errors, not failed transport retries.
+  act(() => { reads = current.ensure([], Array.from({ length: 129 }, (_, i) => `codex|peer|failed-${i}|`)); });
+  await act(async () => { for (const call of rpc.calls) call.resolve({ schemaVersion: 1, models: [], modes: [], features: [], error: 'provider unavailable' }); await reads; });
+  assert.equal(Object.keys(current.featureSets).length, 129, 'current-session diagnostics remain available');
+  await act(async () => renderer.unmount());
+  await act(async () => { renderer = TestRenderer.create(React.createElement(Screen)); });
+  assert.deepEqual(current.featureSets, {}, 'failures are not completed metadata and must not leak through an aliased restored map');
+  const offset = rpc.calls.length;
+  act(() => { reads = current.ensure([], Array.from({ length: 129 }, (_, i) => `codex|peer|ready-${i}|`)); });
+  await act(async () => { for (const call of rpc.calls.slice(offset)) call.resolve(result(call.input.model)); await reads; });
+  await act(async () => renderer.unmount());
+  await act(async () => { renderer = TestRenderer.create(React.createElement(Screen)); });
+  assert.equal(Object.keys(current.featureSets).length, 128, 'successful completed metadata uses bounded eviction');
+  assert.equal(current.featureSets['codex|peer|ready-0|'], undefined);
+  const retained = structuredClone(current.featureSets);
+  let failedRefresh;
+  act(() => { failedRefresh = current.retryFeatureSet('codex|peer|ready-1|'); });
+  await act(async () => { rpc.calls.at(-1).resolve({ schemaVersion: 1, models: [], modes: [], features: [], error: 'refresh failed' }); await failedRefresh; });
+  assert.equal(current.featureSets['codex|peer|ready-1|'].error, 'refresh failed');
+  await act(async () => renderer.unmount());
+  await act(async () => { renderer = TestRenderer.create(React.createElement(Screen)); });
+  assert.deepEqual(current.featureSets, retained, 'a failed revalidation cannot mutate the retained completed map');
+});
