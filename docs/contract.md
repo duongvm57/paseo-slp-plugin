@@ -189,10 +189,20 @@ saved role routing generates the chosen Supervisor/Lead providers and all
 five Peer providers; absent routing keeps all fifteen. Peer chooses runtime from
 the project pool, not a saved profile. Devin bindings accept swe-2 models only. OpenCode uses generic ACP (`extends: acp`) with the role wrapper for both
 managed and standalone installation; native OpenCode is unsupported.
-The plugin requires Paseo >=0.10.3. OpenCode detection and launch re-probes
-accept V2 >=2.0.10, reject V1/unknown majors and preserve validated PATH aliases.
-Measured compatibility is Paseo 0.10.3/OpenCode 2.0.24; the range is an API
-compatibility boundary, not evidence that every later release was tested.
+The plugin requires Paseo >=0.11.0 for native screen/sidebar UI on both the
+daemon and app. The invariant is that each runtime supports the entry's required
+APIs before loading it. The manifest's `requirements.paseo` lets Paseo reject an
+incompatible daemon before installation/loading and an incompatible app before
+evaluating client code. Repository protocol owns work ceremony, and the repo
+harness owns checks and setup; neither participates in plugin loading on every
+connected app. Incompatible imports can fail before either is consulted, so this
+compatibility gate belongs to manifest enforcement.
+
+OpenCode detection and launch re-probes accept V2 >=2.0.10, reject V1/unknown
+majors and preserve validated PATH aliases.
+Historical transport verification used Paseo 0.10.3/OpenCode 2.0.24; it does
+not verify the native UI floor. The >=0.11.0 range is an API compatibility
+boundary for app and daemon, not evidence that every later release was tested.
 [OpenCode support](opencode.md) records the transport and proof limits.
 Peer disposition belongs to the assignment, independent of pool option choice.
 Standalone installation refuses collisions with owned provider and Supervisor/Lead
@@ -252,6 +262,14 @@ checks collision/adoption explicitly, and legacy restore/removal uses only
 recorded IDs. See [OpenCode compatibility](opencode.md).
 
 ## Configuration transactions
+
+In the Manager UI, an explicit **Save profiles** saves and then applies the
+successful save on the same target. Required administrative acknowledgments
+appear on demand. Save failure, target/runtime drift or an outstanding operation
+stops the chained activation; saved choices remain available after an Apply
+failure. Opening the screen or reloading the plugin never activates. Other
+editors retain their own save semantics. Initial activation and recovery live
+under Maintenance.
 
 SLP management operations are administrator-only and require an exclusive
 administrative edit window for the selected daemon. Do not edit daemon

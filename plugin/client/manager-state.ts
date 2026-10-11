@@ -70,7 +70,7 @@ export interface TargetView {
   reportedConflicts: ConflictValue[] | null;
   /** Tracked pending operation; nextPollMs is the server's pollAfterMs for the
    * first poll, then STATUS_POLL_MS per status poll (spec §3). */
-  pending: { operationId: string; nextPollMs: number } | null;
+  pending: { operationId: string; nextPollMs: number; uncertain?: boolean; retryAllowed?: boolean } | null;
 }
 
 export const emptyTargetView = (): TargetView => ({
@@ -142,7 +142,9 @@ export type StartRecovery =
 // NOT_FOUND). A foreign pending operation is never hijacked.
 export function recoverPendingStart(operationId: string, view: StatusResult): StartRecovery {
   const operation = view.operation;
-  if (operation == null) return { kind: "retry" };
+  if (operation == null) return view.conflicts.some(conflict => conflict.code === "NOT_FOUND")
+    ? { kind: "retry" }
+    : { kind: "unresolved", message: `status has not confirmed operation ${operationId}` };
   if (operation.operationId !== operationId) {
     return { kind: "unresolved", message: `status returned operation ${operation.operationId}, not the dispatched ${operationId}` };
   }
@@ -233,8 +235,8 @@ export function stateHint(state: StateValue): string {
   }
 }
 
-export function statusRows(view: StatusResult, options: { compact?: boolean } = {}): StatusRow[] {
-  const sha = (value: string) => shortenSha(value, options.compact ? 8 : 12);
+export function statusRows(view: StatusResult, options: { compact?: boolean; full?: boolean } = {}): StatusRow[] {
+  const sha = (value: string) => options.full ? value : shortenSha(value, options.compact ? 8 : 12);
   const rows: StatusRow[] = [
     { label: "State", value: view.state },
     // The server canonicalizes target.daemonHome — show it in every layout so
@@ -298,7 +300,7 @@ export function activationKind(view: StatusResult | null): ActivationKind {
   return view.binding.candidateSha256 === view.embeddedCandidateSha256 ? "reverify" : "rebind";
 }
 export const activationLabel = (view: StatusResult | null): string =>
-  ({ activate: "Activate", reverify: "Re-verify binding", rebind: "Rebind" })[activationKind(view)];
+  ({ activate: "Activate SLP runtime", reverify: "Apply saved profiles", rebind: "Update SLP runtime" })[activationKind(view)];
 
 // ---------------------------------------------------------------------------
 // Role routing (Phase 1 settings-driven provider generation)

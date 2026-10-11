@@ -7,7 +7,7 @@ The [README](../README.md) is the short tour; command details live in
 
 ## Requirements
 
-- Paseo `>=0.10.3` with `pluginsEnabled: true` in the daemon's
+- Paseo daemon and app `>=0.11.0` for native screen/sidebar UI, with `pluginsEnabled: true` in the daemon's
   `config.json`.
 - A POSIX daemon host (Linux/macOS) with Node 22.x from 22.18, or Node 23.6+
   (the plugin resolves a stable ordinary Node —
@@ -53,8 +53,10 @@ plugin manages the runtime installation and host configuration.
 
 ## Activation
 
-Open **SLP** in the sidebar (or "Open SLP manager" from the command palette) —
-or call the `activate` RPC. The surface asks for the daemon home to manage,
+Open **SLP** in the upper sidebar (or "Open SLP Overview" from the command palette) —
+or call the `activate` RPC. Overview shows the active binding beside the candidate
+in this plugin, with the canonical daemon home and last binding verification.
+The screen asks for the daemon home to manage,
 confirms the host/home mapping, and
 requires the exclusive administrative edit window: while an operation runs,
 no other writer should edit `config.json` — the plugin verifies this
@@ -77,13 +79,14 @@ Activation:
 - Records a receipt in `slp-runtime/state/receipt.json` — the journal of
   every operation, used for drift detection and recovery.
 
-The surface's **Inspect** button is read-only — use it to inspect state
+The screen's **Inspect** / **Refresh** button is read-only — use it to inspect state
 (`INACTIVE`/`ACTIVE`/`RECOVERY_REQUIRED`), the current binding, family
 availability and conflicts before changing anything.
 
 - No agent is created during install or activation. The three roles stay
   intact.
-- **Peers need no saved profile** — the Lead picks each Peer's runtime from
+- **Peers need no saved profile** — bound desk formation resolves a seat server-side,
+  or returns options for the Lead's independent selection, from
   the Peer pool (the user-scope `slp-runtime/state/peer-pool.json`, or a
   repo-pinned `.paseo-slp/slp-routing.json`).
 - Repos keep their tactics in `.paseo-slp/workspace-protocol.md`; onboarding
@@ -95,13 +98,43 @@ availability and conflicts before changing anything.
   the journal, the state moves to `RECOVERY_REQUIRED`; run **Reconcile →
   inspect** to re-verify and resolve before retrying.
 
+## SLP screen and work panel
+
+Overview is the default destination. Profiles, Peer pool, Routing / Jev,
+Supervision, Language and Maintenance have their own sections; compact clients
+use a section selector. Section links survive reload and back/forward. An
+unknown section opens Overview with a notice. Only section identifiers travel
+in the screen URL; target paths and authority acknowledgments stay in the form.
+
+A draft is not a saved configuration. **Save profiles** saves the choices and then
+applies them after a successful save on the same target. The existing configuration
+window and daemon-home confirmations appear on demand; no separate Apply press is
+needed. Opening the UI or reloading the plugin never activates. Initial activation,
+runtime updates and recovery remain in **Maintenance → Runtime setup**. Pool saves take effect at the next formation read. Drafts survive section
+changes and reset when you change host or daemon home. Changing target does not
+cancel server operations: keep the displayed operation ID for inspection and
+recovery. Maintenance contains executable overrides, reconciliation and
+deactivation; the full canonical home and candidate stay visible before changes.
+
+The sidebar's **Quick view** reads runtime status when opened and on explicit
+refresh. Paseo owns its desktop popover or compact bottom sheet. It does not
+aggregate workspace work. The supervision bell opens **Supervision** directly.
+
+The workspace **SLP work** panel shows registered objectives, recorded owners,
+full-ledger queue counts and bounded record pages. **Open owner chat** uses the
+selected host; **Copy owner ID** is available when navigation is missing.
+Record details preserve provenance and shared resolver context. Missing counts,
+absent desk, errors and a measured empty queue remain distinct. Runtime activity,
+recorded review/task rulings and measurements do not establish project acceptance
+or resource settlement. Use Reload when the work changes.
+
 ## Getting started
 
 Setup is one-time; per task only steps 4–5 repeat.
 
 1. Install and activate the plugin ([Installation sources](#installation-sources), [Activation](#activation)).
-2. Set explicit Supervisor/Lead models in **SLP → Role profiles**, save and
-   apply them with the activation action ([Agent profiles](#agent-profiles)).
+2. Set explicit Supervisor/Lead models in **SLP → Profiles** and choose **Save profiles**;
+   successful saves apply automatically ([Agent profiles](#agent-profiles)).
    Prepare suitable enabled options in the shared **Peer pool**, or choose a
    repo-pinned pool during onboarding. Optional, once: the **Communication language** card
    sets the language managed seats use for everything they write to each
@@ -262,13 +295,16 @@ first, then walk me through it step by step.
 
 To set per-role model and reasoning:
 
-1. Activate the plugin first, then open **SLP → Role profiles**.
+1. Activate the plugin first, then open **SLP → Profiles**.
 2. For **Supervisor** and **Lead**, choose the family, an explicit **Model**,
    **Thinking**, **Mode** and features where the provider offers them.
-3. Choose **Save**, then run the activation action again (**Re-verify binding**
-   or **Rebind**) to apply the saved routing. Save changes the routing file;
-   it does not activate or rewrite the live profiles. The card reports when
-   stored choices differ from the live binding.
+3. Choose **Save profiles**. Confirm the exclusive configuration window and daemon
+   home when prompted. A successful same-target save automatically applies the saved
+   routing. Save failures and target/runtime changes stop the Apply step; if Apply
+   fails, the saved choices remain and the operation/error is shown for recovery
+   under **Maintenance**. A runtime mismatch is disclosed before confirming because
+   the existing activation also updates the runtime. Nothing activates on opening
+   the screen or reloading the plugin.
 4. When creating a session directly, pick the saved profile in the model
    picker. For Peers, use onboarding to set up the repo pool, then ordinary
    `slp_seat_create` resolves the pool/Jev route without runtime overrides.
@@ -606,7 +642,7 @@ Human disables the capability in the Manager card and Lead judgment resumes.
 ### Communication supervision (optional)
 
 Supervision is a second opt-in capability, configured in the
-**Supervision** section inside the SLP Manager's **Jev** tab
+**Supervision** section of the SLP screen
 (`<daemonHome>/slp-runtime/state/supervision.json`, file schema 3, 0600, sha256
 CAS). It is off by default — configuring Jev alone never enables
 observation. The card has one **Supervision** switch (the Jev

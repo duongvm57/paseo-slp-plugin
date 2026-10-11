@@ -2,20 +2,21 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 import type { ReactNode } from "react";
 import { useRpc, useWorkspace } from "@getpaseo/plugin/client";
 import type { PluginWorkspacePanelProps } from "@getpaseo/plugin/client";
-import { ScrollView, Text, View } from "react-native";
+import { Pressable, ScrollView, Text, View } from "react-native";
 import { getWorkspaceWorkflow } from "../shared/workflow-view.ts";
 import type { WorkspaceWorkflowRequest, WorkspaceWorkflowResult } from "../shared/workflow-view.ts";
 import type { DeskWorkflowProjectionItemValue } from "../shared/enforcement.ts";
 import { useTargetLifetime } from "./target-async.ts";
 import { errorMessage } from "./manager-state.ts";
-import { Button, Card, Collapse, KV } from "./ui-kit.tsx";
-import type { Colors } from "./ui-kit.tsx";
+import { OwnerLink } from "./owner-link.tsx";
+import { Badge, Button, Card, KV, styles, focusRing } from "./ui-kit.tsx";
+import type { Colors, ControlState } from "./ui-kit.tsx";
 
 type Section = WorkspaceWorkflowRequest["page"]["section"];
 const sections: { id: Section; title: string }[] = [
-  { id: "briefs", title: "Brief history" }, { id: "decisions", title: "Decisions" },
-  { id: "ownership", title: "Owners and dependencies" }, { id: "reviews", title: "Review" },
-  { id: "evidence", title: "Candidate and checks" }, { id: "tasks", title: "Tasks" },
+  { id: "tasks", title: "Tasks" }, { id: "ownership", title: "Owners and dependencies" },
+  { id: "briefs", title: "Brief history" }, { id: "reviews", title: "Review" },
+  { id: "evidence", title: "Candidate and checks" }, { id: "decisions", title: "Decisions" },
 ];
 
 const firstPage = (workspaceId: string, assignmentId: string | null = null, section: Section = "briefs"): WorkspaceWorkflowRequest => ({
@@ -95,7 +96,8 @@ const taskEntryTitles: Record<string, string> = {
 };
 
 function taskQueueLine(taskCounts: WorkspaceWorkflowResult["assignments"][number]["taskCounts"] | undefined): string {
-  if (taskCounts == null) return "task queue not recorded on this desk";
+  if (taskCounts === undefined) return "task counts unavailable in this projection";
+  if (taskCounts === null) return "task queue not recorded on this desk";
   const tasks = taskCounts.backlog + taskCounts.ready + taskCounts.held + taskCounts.running
     + taskCounts.integrating + taskCounts.settled + taskCounts.superseded;
   if (tasks === 0 && taskCounts.openHolds + taskCounts.pendingAcks + taskCounts.resources + taskCounts.controls === 0) {
@@ -160,7 +162,17 @@ function RecordedFields({ colors, value }: { colors: Colors; value: object }) {
 
 function RecordDetails({ colors, title, children }: { colors: Colors; title: string; children: ReactNode }) {
   const [open, setOpen] = useState(false);
-  return <Collapse colors={colors} title={title} open={open} onToggle={setOpen}>{children}</Collapse>;
+  return <View style={{ borderTopWidth: 1, borderColor: colors.border, gap: 8 }}>
+    <Pressable accessibilityRole="button" accessibilityLabel={title} accessibilityState={{ expanded: open }}
+      onPress={() => setOpen(current => !current)} style={(state: ControlState) => [
+        { minHeight: 44, paddingVertical: 8, flexDirection: "row", alignItems: "center", gap: 8 },
+        state.hovered && { backgroundColor: colors.surface2 }, state.focused && focusRing(colors),
+      ]}>
+      <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>{open ? "▾" : "▸"}</Text>
+      <Text style={[styles.fieldLabel, { color: colors.foreground, flex: 1 }]}>{title}</Text>
+    </Pressable>
+    {open ? <View style={{ gap: 8 }}>{children}</View> : null}
+  </View>;
 }
 
 const metadataFields = new Set(["requestId", "actorMembershipId", "ownerMembershipId", "reviewerSeatId", "actorSeatId",
@@ -169,6 +181,32 @@ const metadataFields = new Set(["requestId", "actorMembershipId", "ownerMembersh
 // row kinds keep their existing primary/metadata split untouched.
 const taskStampFields = new Set(["entryId", "entityId", "taskId", "assignmentId", "revision", "priorEntryId",
   "actorAgentId", "actorMembershipId", "ownershipRevision", "briefRevision", "entrySha256", "priorEntrySha256", "requestId"]);
+
+function TaskSummary({ colors, item }: { colors: Colors; item: Extract<DeskWorkflowProjectionItemValue, { kind: "taskEntry" }> }) {
+  const row = item.row;
+  const state = row.kind === "result" ? `${row.provenance} evidence`
+    : row.kind === "adjudication" ? `recorded verdict ${row.verdict}`
+    : row.kind === "resource" ? `recorded disposition ${row.disposition}`
+    : row.kind === "hold" && row.state === "ruled" ? `${row.ruling?.outcome ?? "unknown ruling"} hold`
+    : `recorded state ${row.state}`;
+  return <>
+    <View style={styles.chipRow}>
+      <Badge colors={colors} label={item.current ? "Current entity revision" : "Historical entity revision"} />
+      <Badge colors={colors} label={state} />
+    </View>
+    {row.kind === "task" ? <Text selectable style={[styles.muted, { color: colors.foreground }]}>{row.outcome}</Text> : null}
+    {row.kind === "hold" ? <Text selectable style={[styles.muted, { color: colors.statusWarning }]}>{row.question ?? row.proposition}</Text> : null}
+    {item.readiness ? <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
+      Queue · {item.readiness.bucket} · {item.readiness.eligible ? "eligible" : "not eligible"}{item.readiness.reasons.length ? ` · ${item.readiness.reasons.join(", ")}` : ""}
+    </Text> : null}
+    {item.resultQualification ? <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
+      Result qualification · {item.resultQualification.qualified ? "qualified" : "not qualified"}{item.resultQualification.reasons.length ? ` · ${item.resultQualification.reasons.join(", ")}` : ""}
+    </Text> : null}
+    {item.currentRuling ? <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
+      Current task ruling · {item.currentRuling.verdict} · {item.currentRuling.reason}
+    </Text> : null}
+  </>;
+}
 
 function WorkItem({ colors, item, briefRevision }: { colors: Colors; item: DeskWorkflowProjectionItemValue; briefRevision: number }) {
   if (item.kind === "reviewDisagreement") return <Card colors={colors} title="Unresolved review disagreement">
@@ -195,26 +233,45 @@ function WorkItem({ colors, item, briefRevision }: { colors: Colors; item: DeskW
     {"briefRevision" in row && row.briefRevision !== briefRevision ? <Text style={{ color: colors.statusWarning }}>
       Recorded against brief {row.briefRevision}; the current brief is {briefRevision}.
     </Text> : null}
-    {item.kind === "scopeReview" ? <Text style={{ color: colors.foregroundMuted }}>{qualificationLine(item)}</Text> : null}
-    {item.kind === "taskEntry" ? <Text style={{ color: colors.foregroundMuted }}>{taskCaption(item)}</Text> : null}
-    <RecordedFields colors={colors} value={primary} />
-    {item.kind === "taskEntry" && item.readiness !== null ? <RecordDetails colors={colors} title="Current task readiness — shared resolver">
-      <RecordedFields colors={colors} value={item.readiness} />
-    </RecordDetails> : null}
-    {item.kind === "taskEntry" && item.resultQualification !== null ? <RecordDetails colors={colors} title="Current task result qualification — shared resolver">
-      <RecordedFields colors={colors} value={item.resultQualification} />
-    </RecordDetails> : null}
-    {item.kind === "taskEntry" && item.currentRuling !== null ? <RecordDetails colors={colors} title="Current task ruling — shared projection">
-      <RecordedFields colors={colors} value={item.currentRuling} />
-    </RecordDetails> : null}
-    {item.kind === "taskEntry" ? <RecordDetails colors={colors} title="Recap summary row">
-      <RecordedFields colors={colors} value={item.summary} />
-    </RecordDetails> : null}
-    <RecordDetails colors={colors} title="Record provenance"><RecordedFields colors={colors} value={metadata} /></RecordDetails>
+    {item.kind === "scopeReview" ? <>
+      <Badge colors={colors} label={`Recorded review · ${item.row.verdict}`} />
+      <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>{qualificationLine(item)}</Text>
+      <KV colors={colors} label="Reviewer" value={item.row.reviewerAgentId} />
+      <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>Review time is not supplied by this projection.</Text>
+    </> : null}
+    {item.kind === "candidateObservation" ? <>
+      <Badge colors={colors} label={item.row.incomplete.length ? "Measured candidate · incomplete coverage" : "Measured candidate observation"} />
+      <KV colors={colors} label="Measured at" value={item.row.measuredAt} />
+      <KV colors={colors} label="Candidate snapshot" value={item.row.snapshotSha256} />
+      <KV colors={colors} label="Observed for seat" value={item.row.seatAgentId} />
+    </> : null}
+    {item.kind === "checkDefinition" ? <><Badge colors={colors} label="Declared check" /><Text style={[styles.muted, { color: colors.foreground }]}>{item.row.label}</Text></> : null}
+    {item.kind === "checkRun" ? <>
+      <Badge colors={colors} label={`Runtime check observation · ${item.row.status}`} />
+      <KV colors={colors} label="Check" value={item.row.checkId} />
+      <KV colors={colors} label="Exit code" value={item.row.exitCode === null ? "Unavailable" : String(item.row.exitCode)} />
+      <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>Check time is not supplied by this projection.{item.row.outputTruncated ? " Output tail is truncated; inspect its evidence pointer." : ""}</Text>
+    </> : null}
+    {item.kind === "taskEntry" ? <>
+      <TaskSummary colors={colors} item={item} />
+      <RecordDetails colors={colors} title="Task context and limits">
+        <Text selectable style={[styles.muted, { color: colors.foregroundMuted }]}>{taskCaption(item)}</Text>
+        {item.readiness !== null ? <><Text style={[styles.fieldLabel, { color: colors.foreground }]}>Current task readiness — shared resolver</Text><RecordedFields colors={colors} value={item.readiness} /></> : null}
+        {item.resultQualification !== null ? <><Text style={[styles.fieldLabel, { color: colors.foreground }]}>Current task result qualification — shared resolver</Text><RecordedFields colors={colors} value={item.resultQualification} /></> : null}
+        {item.currentRuling !== null ? <><Text style={[styles.fieldLabel, { color: colors.foreground }]}>Current task ruling — shared projection</Text><RecordedFields colors={colors} value={item.currentRuling} /></> : null}
+      </RecordDetails>
+    </> : null}
+    {["taskEntry", "scopeReview", "checkRun", "checkDefinition", "candidateObservation"].includes(item.kind)
+      ? <RecordDetails colors={colors} title="Record details and provenance">
+          <RecordedFields colors={colors} value={primary} />
+          {item.kind === "taskEntry" ? <><Text style={[styles.fieldLabel, { color: colors.foreground }]}>Recap summary row</Text><RecordedFields colors={colors} value={item.summary} /></> : null}
+          <Text style={[styles.fieldLabel, { color: colors.foreground }]}>Record provenance</Text><RecordedFields colors={colors} value={metadata} />
+        </RecordDetails>
+      : <><RecordedFields colors={colors} value={primary} /><RecordDetails colors={colors} title="Record provenance"><RecordedFields colors={colors} value={metadata} /></RecordDetails></>}
   </Card>;
 }
 
-export function WorkflowPanel({ workspaceId, host, theme, layout }: PluginWorkspacePanelProps) {
+export function WorkflowPanel({ workspaceId, host, theme, layout, navigation }: PluginWorkspacePanelProps) {
   const directory = useWorkspace(workspaceId, workspace => workspace.directory);
   const call = useRpc(getWorkspaceWorkflow);
   const reader = useWorkspaceWorkflow(JSON.stringify([host.id, workspaceId, directory]), workspaceId, call);
@@ -222,10 +279,10 @@ export function WorkflowPanel({ workspaceId, host, theme, layout }: PluginWorksp
   const current = reader.current;
   const result = current?.result;
   const view = result?.view;
-  return <ScrollView contentContainerStyle={{ padding: layout.compact ? 12 : 24, gap: 14 }}>
+  return <ScrollView style={{ backgroundColor: colors.surface0 }} contentContainerStyle={{ padding: layout.compact ? 12 : 24, gap: 14, width: "100%", maxWidth: 1120, alignSelf: "center" }}>
     <Text style={{ color: colors.foreground, fontSize: 22, fontWeight: "600" }}>SLP work</Text>
     <Text style={{ color: colors.foregroundMuted }}>
-      Read the repository's recorded brief, decisions, owners, review and proof. Reload for current state. This view does not establish acceptance.
+      Recorded assignments, owners, task queues and proof on {host.label}. Reload for current state. Runtime activity, recorded rulings and results do not establish project acceptance or resource settlement.
     </Text>
     <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
       <Button colors={colors} label="Reload" onPress={() => { void reader.reload(); }} disabled={current?.loading} />
@@ -243,33 +300,39 @@ export function WorkflowPanel({ workspaceId, host, theme, layout }: PluginWorksp
       <Text style={{ color: colors.foregroundMuted }}>{result.assignments.length} of {result.assignmentTotal} registered assignments · ledger {result.ledgerRevision}</Text>
       {result.assignmentOffset > 0 ? <Text style={{ color: colors.foregroundMuted }}>{result.assignmentOffset} earlier entries omitted from this page; Reload returns to the first page.</Text> : null}
       {result.assignmentTotal === 0 ? <Text style={{ color: colors.foregroundMuted }}>No assignments are registered in this desk.</Text> : null}
-      {result.assignments.map(assignment => <Card key={assignment.id} colors={colors} title={assignment.objective ?? assignment.id}>
-        <Text selectable style={{ color: colors.foregroundMuted }}>
-          {assignment.id} · {assignment.state} · owner {assignment.ownerAgentId} · ownership revision {assignment.ownershipRevision}
-          {assignment.objectiveBasis === "registration" ? " · registration objective" : ` · brief ${assignment.briefRevision}`}
-          {` · ${taskQueueLine(assignment.taskCounts)}`}
-        </Text>
+      {result.assignments.map(assignment => <Card key={assignment.id} colors={colors} title={assignment.objective ?? "Objective not recorded"}
+        trailing={<Badge colors={colors} label={`Recorded · ${assignment.state}`} />}>
+        <OwnerLink colors={colors} hostId={host.id} agentId={assignment.ownerAgentId} navigation={navigation} />
+        <Text style={[styles.muted, { color: colors.foregroundMuted }]}>{taskQueueLine(assignment.taskCounts)}</Text>
         <Button colors={colors} label="Read assignment" onPress={() => { void reader.select(assignment.id); }} />
+        <RecordDetails colors={colors} title="Assignment details">
+          <KV colors={colors} label="Assignment ID" value={assignment.id} />
+          <KV colors={colors} label="Ownership revision" value={String(assignment.ownershipRevision)} />
+          <KV colors={colors} label="Objective source" value={assignment.objectiveBasis === "registration" ? "Registration objective" : `Operative brief ${assignment.briefRevision}`} />
+          <KV colors={colors} label="Recorded owner ID" value={assignment.ownerAgentId} />
+        </RecordDetails>
       </Card>)}
     </> : null}
     {view ? <>
-      <Text selectable style={{ color: colors.foregroundMuted }}>{view.assignmentId} · brief {view.briefRevision} · ledger {view.ledgerRevision}</Text>
-      <Text selectable style={{ color: colors.foregroundMuted }}>
-        Owner {view.ownership.ownerAgentId} · ownership revision {view.ownership.ownershipRevision}
-        {view.ownership.ownerMembership ? ` · recorded membership ${view.ownership.ownerMembership.state}` : " · membership unrecorded"}
-        {view.ownership.ownerAgentId !== view.ownership.registeredOwnerAgentId || view.ownership.ownerMembershipId !== view.ownership.registeredOwnerMembershipId
-          ? ` · registered owner ${view.ownership.registeredOwnerAgentId}` : ""}
-      </Text>
-      {view.ownership.acceptedAcknowledgment ? <Text selectable style={{ color: colors.foregroundMuted }}>
-        Accepted {view.ownership.acceptedAcknowledgment.acceptId} from offer {view.ownership.acceptedAcknowledgment.offerId}
-        {view.ownership.acceptedAcknowledgment.gaps.length > 0 ? ` · recorded gaps: ${view.ownership.acceptedAcknowledgment.gaps.join(", ")}` : ""}
-        {" — a responsibility acknowledgment, not review approval or project acceptance."}
-      </Text> : null}
-      {view.currentBrief ? <Card colors={colors} title="Operative brief" subtitle="Authority and source pointers are recorded claims.">
+      <Card colors={colors} title={view.currentBrief?.body.objective ?? view.legacyObjective ?? "Objective not recorded"}>
+        <OwnerLink colors={colors} hostId={host.id} agentId={view.ownership.ownerAgentId} navigation={navigation} />
+        <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
+          ownership revision {view.ownership.ownershipRevision} · {view.ownership.ownerMembership ? `recorded membership ${view.ownership.ownerMembership.state}` : "membership unrecorded"}
+        </Text>
+        <Text style={[styles.muted, { color: colors.foregroundMuted }]}>{taskQueueLine(view.taskCounts)}</Text>
+        <RecordDetails colors={colors} title="Assignment and owner provenance">
+          <KV colors={colors} label="Assignment ID" value={view.assignmentId} />
+          <KV colors={colors} label="Brief revision" value={String(view.briefRevision)} />
+          <KV colors={colors} label="Ledger revision" value={String(view.ledgerRevision)} />
+          <RecordedFields colors={colors} value={view.ownership} />
+          <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>An ownership acknowledgment records responsibility; it is not review approval, host liveness or project acceptance.</Text>
+        </RecordDetails>
+      </Card>
+      {view.currentBrief ? <RecordDetails colors={colors} title="Operative brief · authority and source pointers are recorded claims">
         <Text selectable style={{ color: colors.foreground, fontSize: 17, fontWeight: "600" }}>{view.currentBrief.body.objective}</Text>
         <RecordedFields colors={colors} value={Object.fromEntries(Object.entries(view.currentBrief.body).filter(([key]) => key !== "objective"))} />
         <RecordDetails colors={colors} title="Brief provenance"><RecordedFields colors={colors} value={Object.fromEntries(Object.entries(view.currentBrief).filter(([key]) => key !== "body"))} /></RecordDetails>
-      </Card> : <Card colors={colors} title="Legacy assignment — structured brief absent">
+      </RecordDetails> : <Card colors={colors} title="Legacy assignment — structured brief absent">
         <Text selectable style={{ color: colors.foregroundMuted }}>{view.legacyObjective ?? "No objective recorded."}</Text>
       </Card>}
       {view.section === "tasks" ? <Card colors={colors} title="Current task queue"
@@ -287,10 +350,11 @@ export function WorkflowPanel({ workspaceId, host, theme, layout }: PluginWorksp
       <Text style={{ color: colors.foregroundMuted }}>
         {view.items.length} of {view.total} records · {view.omittedBefore} earlier and {view.omittedAfter} later records outside this page. Reload returns to the first page.
       </Text>
-      <Text style={{ color: colors.foregroundMuted }}>Declared intent and evidence pointers are claims. Candidate/check measurements describe what the runtime observed; a recorded review is not project acceptance.</Text>
+      <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>Declared intent and evidence pointers are claims; candidate/check observations are measurements. Review qualification and current rulings come from the desk.</Text>
       {view.items.map((item, index) => <WorkItem key={`${item.kind}:${view.omittedBefore + index}`} colors={colors} item={item} briefRevision={view.briefRevision} />)}
     </> : null}
     {result?.assignmentNextCursor || view?.nextCursor ? <Button colors={colors} label="Next page" onPress={() => { void reader.more(); }} /> : null}
+    {result?.generatedAt ? <KV colors={colors} label="Work read at" value={result.generatedAt} /> : null}
     {result?.target ? <RecordDetails colors={colors} title="Read source">
       <KV colors={colors} label="Host" value={host.label} />
       <RecordedFields colors={colors} value={result.target} />

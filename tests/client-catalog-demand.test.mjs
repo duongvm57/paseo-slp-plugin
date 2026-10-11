@@ -1,5 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import React from 'react';
+import TestRenderer from 'react-test-renderer';
 import { act, deferredRpc, loadHooks, renderHook } from './helpers/client-hooks-harness.mjs';
 
 // Oracle strings deliberately do not import implementation key helpers.
@@ -168,4 +170,75 @@ test('an errored empty observation does not satisfy the next demand pass; a usab
   await update({ features: ['codex|peer|model-d|mode-4'] });
   assert.equal(rpc.calls.slice(pinned).filter(call => !call.input.model).length, 0,
     'a usable errored catalog stays satisfied — measured errors are re-read, not re-fetched per demand');
+});
+
+test('metadata survives remount, revalidates, retains controls on error and isolates host/home', async t => {
+  const mod = await loadHooks(t), rpc = deferredRpc(); let current, renderer;
+  function Screen({ hostId = 'host-1', home = '/a', operation }) {
+    const target = { hostId, daemonHome: home };
+    current = mod.useCatalogCache(target, mod.targetKey(target), operation, rpc.rpc);
+    mod.useCatalogDemand(current, scopes, [feature]);
+    return null;
+  }
+  t.after(async () => { await act(async () => renderer?.unmount()); });
+  await act(async () => { renderer = TestRenderer.create(React.createElement(Screen)); });
+  await settle(rpc.calls, 'known');
+  await act(async () => renderer.unmount());
+  await act(async () => { renderer = TestRenderer.create(React.createElement(Screen)); });
+  assert.equal(current.catalogs[scope].models[0].id, 'known');
+  assert.equal(current.featureSets[feature].defs[0].id, 'known');
+  assert.equal(rpc.calls.length, 4, 'retention never suppresses fresh reads');
+  assert.equal(current.catalogIsRefreshing(scope), true);
+  await act(async () => { for (const call of rpc.calls.slice(2)) call.resolve({ ...result(''), models: [], modes: [], features: [], error: 'refresh unavailable' }); });
+  assert.equal(current.catalogs[scope].models[0].id, 'known');
+  assert.equal(current.catalogs[scope].error, 'refresh unavailable');
+  assert.equal(current.featureSets[feature].defs[0].id, 'known');
+  assert.equal(current.featureSets[feature].error, 'refresh unavailable');
+  await act(async () => renderer.unmount());
+  await act(async () => { renderer = TestRenderer.create(React.createElement(Screen, { hostId: 'host-2' })); });
+  assert.deepEqual(current.catalogs, {}); assert.deepEqual(current.featureSets, {});
+  await settle(rpc.calls.slice(4), 'other-host');
+  await act(async () => renderer.unmount());
+  await act(async () => { renderer = TestRenderer.create(React.createElement(Screen, { operation: activation('changed-runtime') })); });
+  assert.deepEqual(current.catalogs, {}, 'a changed runtime invalidates retained metadata');
+  assert.deepEqual(current.featureSets, {});
+});
+
+test('cold demand reads independent roles concurrently', async t => {
+  const { rpc } = await setup(t, false, { scopes: [{ family: 'codex', role: 'supervisor' }, { family: 'codex', role: 'lead' }], features: [] });
+  assert.deepEqual(rpc.calls.map(call => call.input.role).sort(), ['lead', 'supervisor']);
+});
+
+test('failed feature reads never enter completed metadata retention or bypass its 128-entry bound', async t => {
+  const mod = await loadHooks(t), rpc = deferredRpc(); let current, renderer;
+  function Screen() {
+    const target = { hostId: 'bounded-host', daemonHome: '/bounded' };
+    current = mod.useCatalogCache(target, mod.targetKey(target), undefined, rpc.rpc);
+    return null;
+  }
+  t.after(async () => { await act(async () => renderer?.unmount()); });
+  await act(async () => { renderer = TestRenderer.create(React.createElement(Screen)); });
+  let reads;
+  // Failure results are measured provider errors, not failed transport retries.
+  act(() => { reads = current.ensure([], Array.from({ length: 129 }, (_, i) => `codex|peer|failed-${i}|`)); });
+  await act(async () => { for (const call of rpc.calls) call.resolve({ schemaVersion: 1, models: [], modes: [], features: [], error: 'provider unavailable' }); await reads; });
+  assert.equal(Object.keys(current.featureSets).length, 129, 'current-session diagnostics remain available');
+  await act(async () => renderer.unmount());
+  await act(async () => { renderer = TestRenderer.create(React.createElement(Screen)); });
+  assert.deepEqual(current.featureSets, {}, 'failures are not completed metadata and must not leak through an aliased restored map');
+  const offset = rpc.calls.length;
+  act(() => { reads = current.ensure([], Array.from({ length: 129 }, (_, i) => `codex|peer|ready-${i}|`)); });
+  await act(async () => { for (const call of rpc.calls.slice(offset)) call.resolve(result(call.input.model)); await reads; });
+  await act(async () => renderer.unmount());
+  await act(async () => { renderer = TestRenderer.create(React.createElement(Screen)); });
+  assert.equal(Object.keys(current.featureSets).length, 128, 'successful completed metadata uses bounded eviction');
+  assert.equal(current.featureSets['codex|peer|ready-0|'], undefined);
+  const retained = structuredClone(current.featureSets);
+  let failedRefresh;
+  act(() => { failedRefresh = current.retryFeatureSet('codex|peer|ready-1|'); });
+  await act(async () => { rpc.calls.at(-1).resolve({ schemaVersion: 1, models: [], modes: [], features: [], error: 'refresh failed' }); await failedRefresh; });
+  assert.equal(current.featureSets['codex|peer|ready-1|'].error, 'refresh failed');
+  await act(async () => renderer.unmount());
+  await act(async () => { renderer = TestRenderer.create(React.createElement(Screen)); });
+  assert.deepEqual(current.featureSets, retained, 'a failed revalidation cannot mutate the retained completed map');
 });

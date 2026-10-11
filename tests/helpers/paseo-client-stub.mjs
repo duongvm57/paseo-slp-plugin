@@ -15,3 +15,8 @@ export function useWorkspace(workspaceId, selector) {
   const value = paseoState.current?.workspaces?.current?.(workspaceId);
   return value ? selector(value) : null;
 }
+
+export function useAgent(agentId, selector) {
+  const value = paseoState.current?.agents?.current?.(agentId);
+  return value ? selector(value) : null;
+}

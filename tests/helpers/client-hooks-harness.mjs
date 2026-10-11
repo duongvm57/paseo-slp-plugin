@@ -21,6 +21,7 @@ export async function loadHooks(t) {
     alias: {
       'react-native': join(root, 'tests/helpers/rn-stub.mjs'),
       '@getpaseo/plugin/client/react-native': join(root, 'tests/helpers/client-clipboard-stub.mjs'),
+      '@getpaseo/plugin/client/ui': join(root, 'tests/helpers/paseo-ui-stub.mjs'),
       '@getpaseo/plugin/client': join(root, 'tests/helpers/paseo-client-stub.mjs'),
     },
     plugins: [{ name: 'one-react', setup(builder) {

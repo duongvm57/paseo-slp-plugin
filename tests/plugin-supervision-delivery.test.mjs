@@ -364,7 +364,7 @@ const makeClient = handlers => {
       rpcCalls.push([contract.name, input]);
       return handlers[contract.name](input);
     },
-    openSurface(id) { opened.push(id); },
+    openScreen(input) { opened.push(input); },
   };
   return { client, items, bells, rpcCalls, opened };
 };

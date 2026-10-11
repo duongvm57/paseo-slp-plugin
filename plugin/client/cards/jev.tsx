@@ -48,7 +48,7 @@ export function useJevCard({ target, targetKey, sameTarget, callGetJev, callSetJ
   // kind is selectable (OpenRouter relay vs TypeSafe first-party);
   // model/baseUrl default per kind, baseUrl editable for custom endpoints.
   const snapshot = useTargetSnapshot(target, targetKey, async target =>
-    (await callGetJev({ schemaVersion: 1, target })).jev);
+    (await callGetJev({ schemaVersion: 1, target })).jev, "jev");
   const { data: jevView, replace: setJevView, error: jevLoadError, reload: loadJev, capture } = snapshot;
   const [jevKind, setJevKind] = useState<JevKind>("openrouter");
   const [jevModel, setJevModel] = useState("");
@@ -87,7 +87,6 @@ export function useJevCard({ target, targetKey, sameTarget, callGetJev, callSetJ
   // finally skips its busy clear, so the switch itself is what releases the
   // abandoned view's pending flags.
   useEffect(() => {
-    setJevView(null);
     setJevDirty(false);
     setJevSaved(false);
     setJevKeyInput("");
@@ -118,7 +117,7 @@ export function useJevCard({ target, targetKey, sameTarget, callGetJev, callSetJ
   // JevProvider schema validates client-side first so a rejected field lands
   // its error AT that field instead of one pooled message.
   const save = async () => {
-    if (!target) return;
+    if (!target || !snapshot.fresh) return;
     const ticket = capture();
     const provider = {
       kind: jevKind,
@@ -171,7 +170,7 @@ export function useJevCard({ target, targetKey, sameTarget, callGetJev, callSetJ
       setJevDirty(false);
       setJevSaved(true);
     } catch (error) {
-      update({ lastError: errorMessage(error) }, target);
+      if (ticket.isCurrent()) update({ lastError: errorMessage(error) }, target);
     } finally {
       // A stale op must not clear the busy flag of a NEWER op already
       // in-flight on the displayed target — the key-change reset releases
@@ -181,7 +180,7 @@ export function useJevCard({ target, targetKey, sameTarget, callGetJev, callSetJ
   };
 
   const saveKey = async (key: string | null) => {
-    if (!target) return;
+    if (!target || !snapshot.fresh) return;
     const ticket = capture();
     setJevKeyBusy(true);
     try {
@@ -196,14 +195,14 @@ export function useJevCard({ target, targetKey, sameTarget, callGetJev, callSetJ
       setJevTest(null);
       setJevView(result.jev);
     } catch (error) {
-      update({ lastError: errorMessage(error) }, target);
+      if (ticket.isCurrent()) update({ lastError: errorMessage(error) }, target);
     } finally {
       if (ticket.isCurrent()) setJevKeyBusy(false);
     }
   };
 
   const runTest = async () => {
-    if (!target) return;
+    if (!target || !snapshot.fresh) return;
     const ticket = capture();
     setJevTestBusy(true);
     setJevTest(null);
@@ -235,7 +234,7 @@ export function useJevCard({ target, targetKey, sameTarget, callGetJev, callSetJ
   // the prefill effect is gated on jevDirty, and saveJev takes supervision
   // from the refreshed view.
   const setSupervisionCapability = async (next: boolean): Promise<string | null> => {
-    if (!target || jevView === null || jevView.provider === null) return "Jev settings are not loaded";
+    if (!snapshot.fresh || !target || jevView === null || jevView.provider === null) return "Jev settings are not loaded";
     const ticket = capture();
     setCapabilityBusy(true);
     try {
@@ -255,7 +254,7 @@ export function useJevCard({ target, targetKey, sameTarget, callGetJev, callSetJ
       return null;
     } catch (error) {
       const message = errorMessage(error);
-      update({ lastError: message }, target);
+      if (ticket.isCurrent()) update({ lastError: message }, target);
       return message;
     } finally {
       if (ticket.isCurrent()) setCapabilityBusy(false);
@@ -264,6 +263,7 @@ export function useJevCard({ target, targetKey, sameTarget, callGetJev, callSetJ
   const setKeyInput = (text: string) => { setJevKeyInput(text); setJevTest(null); };
 
   return {
+    fresh: snapshot.fresh,
     view: jevView,
     kind: jevKind,
     model: jevModel,
@@ -311,12 +311,12 @@ export function JevCard({ colors, target, jev }: {
     <Card
       colors={colors}
       title="Jev"
-      subtitle="Bounded routing decisions — a Lead runs `slp route-decide` so Jev picks the pool seat from the eligible set, and prepare verifies the receipt offline. All toggles default off; an outage fails closed and disabling restores Lead-judgment routing."
+      subtitle="Bounded routing decisions — the bound desk resolves Peer selection server-side. When independent selection is requested, the Lead chooses from the returned options. The compatibility CLI uses `slp route-decide` and offline receipt verification in prepare. All toggles default off; armed routing fails closed on errors."
     >
       {// Mockup recovery finding — the three load states are distinct:
        // loading notice, an error branch with Retry, and the loaded
        // settings. A failed load never paints as eternal "loading…".
-      jev.loadError !== null ? (
+      jev.loadError !== null && jev.view === null ? (
         <View style={[styles.noticeBox, { borderColor: colors.statusDanger, backgroundColor: colors.surface2 }]} accessibilityLiveRegion="polite">
           <Text style={[styles.checkTitle, { color: colors.statusDanger }]}>Could not load Jev settings</Text>
           <Text style={[styles.mutedSmall, { color: colors.statusDanger }]}>{jev.loadError}</Text>
@@ -333,6 +333,12 @@ export function JevCard({ colors, target, jev }: {
         </Text>
       ) : (
         <>
+          {!jev.fresh ? <View>
+            <Text style={[styles.mutedSmall, { color: jev.loadError ? colors.statusWarning : colors.foregroundMuted }]}>
+              {jev.loadError ? `Jev refresh unavailable: ${jev.loadError}. Showing the previous read.` : "Refreshing Jev settings…"}
+            </Text>
+            {jev.loadError ? <Button colors={colors} label="Retry" onPress={() => jev.retryLoad()} /> : null}
+          </View> : null}
           {// Saved provider strip — the SAVED provider/model/baseUrl
            // stays visible above the unsaved settings so a dirty draft
            // never looks like the live config (mockup finding 1).
@@ -378,7 +384,7 @@ export function JevCard({ colors, target, jev }: {
               { label: "OpenRouter", value: "openrouter" },
               { label: "TypeSafe (first-party)", value: "typesafe" },
             ]}
-            disabled={!target || jev.busy}
+            disabled={!jev.fresh || !target || jev.busy}
             onChange={next => {
               jev.setKind(next);
             }}
@@ -393,7 +399,7 @@ export function JevCard({ colors, target, jev }: {
               value={jev.model}
               onChangeText={text => { jev.setModel(text); }}
               placeholder={JEV_KIND_DEFAULT[jev.kind].model}
-              disabled={!target || jev.busy}
+              disabled={!jev.fresh || !target || jev.busy}
             />
             {jev.modelError ? (
               <Text style={[styles.mutedSmall, { color: colors.statusDanger }]} accessibilityLiveRegion="polite">
@@ -411,7 +417,7 @@ export function JevCard({ colors, target, jev }: {
               value={jev.baseUrl}
               onChangeText={text => { jev.setBaseUrl(text); }}
               placeholder={JEV_KIND_DEFAULT[jev.kind].baseUrl}
-              disabled={!target || jev.busy}
+              disabled={!jev.fresh || !target || jev.busy}
             />
             {jev.urlError ? (
               <Text style={[styles.mutedSmall, { color: colors.statusDanger }]} accessibilityLiveRegion="polite">
@@ -422,7 +428,7 @@ export function JevCard({ colors, target, jev }: {
           <SwitchRow
             colors={colors}
             checked={jev.enabledOn}
-            disabled={!target || jev.busy}
+            disabled={!jev.fresh || !target || jev.busy}
             onToggle={next => { jev.setEnabledOn(next); }}
             title="Enable Jev"
             hint="Master toggle — off keeps every capability inert without deleting the stored key."
@@ -430,17 +436,17 @@ export function JevCard({ colors, target, jev }: {
           <SwitchRow
             colors={colors}
             checked={jev.routingOn}
-            disabled={!target || jev.busy || !jev.enabledOn}
+            disabled={!jev.fresh || !target || jev.busy || !jev.enabledOn}
             onToggle={next => { jev.setRoutingOn(next); }}
             title="Routing decisions"
-            hint="When armed, prepare requires a Jev decision receipt for catalog routing (run `slp route-decide`); Lead judgment alone no longer suffices."
+            hint="When armed, bound desk routing requires the server-side Jev choice. Compatibility CLI routing uses `slp route-decide`; prepare verifies its receipt offline."
           />
-          {/* The supervision capability is switched in the Supervision card
-              below (one switch, with its disclosure); this line only points
+          {/* The supervision capability is switched in the Supervision section
+               (one switch, with its disclosure); this line only points
               there so the Jev card does not carry a second control. */}
           <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
             Supervision: {jev.view.capabilities?.supervision === true ? "on" : "off"} — turn it on or off in the
-            Supervision card below.
+            Supervision section.
           </Text>
           {jev.saved && !jev.dirty ? (
             <Text style={[styles.mutedSmall, { color: colors.statusSuccess }]} accessibilityLiveRegion="polite">Saved.</Text>
@@ -449,7 +455,7 @@ export function JevCard({ colors, target, jev }: {
             colors={colors}
             kind="primary"
             label={jev.busy ? "Saving…" : "Apply Jev settings"}
-            disabled={!target || jev.busy || !jev.dirty}
+            disabled={!jev.fresh || !target || jev.busy || !jev.dirty}
             onPress={() => void jev.save()}
           />
           <View style={[styles.divider, { borderTopColor: colors.border }]} />
@@ -476,7 +482,7 @@ export function JevCard({ colors, target, jev }: {
             value={jev.keyInput}
             onChangeText={text => { jev.setKeyInput(text); }}
             placeholder={JEV_KIND_DEFAULT[jev.view.provider?.kind ?? jev.kind].keyPlaceholder}
-            disabled={!target || jev.keyBusy || jev.dirty}
+            disabled={!jev.fresh || !target || jev.keyBusy || jev.dirty}
             secure
           />
           {jev.keyInput.trim() !== "" ? (
@@ -488,19 +494,19 @@ export function JevCard({ colors, target, jev }: {
             <Button
               colors={colors}
               label={jev.keyBusy ? "Working…" : `Save ${JEV_KIND_LABEL[jev.view.provider?.kind ?? jev.kind]} key`}
-              disabled={!target || jev.keyBusy || jev.dirty || jev.keyInput.trim() === ""}
+              disabled={!jev.fresh || !target || jev.keyBusy || jev.dirty || jev.keyInput.trim() === ""}
               onPress={() => void jev.saveKey(jev.keyInput.trim())}
             />
             <Button
               colors={colors}
               label={`Remove ${JEV_KIND_LABEL[jev.view.provider?.kind ?? jev.kind]} key`}
-              disabled={!target || jev.keyBusy || jev.dirty || jev.view?.hasKey !== true}
+              disabled={!jev.fresh || !target || jev.keyBusy || jev.dirty || jev.view?.hasKey !== true}
               onPress={() => void jev.saveKey(null)}
             />
             <Button
               colors={colors}
               label={jev.testBusy ? "Testing…" : `Test ${JEV_KIND_LABEL[jev.view.provider?.kind ?? jev.kind]} connection`}
-              disabled={!target || jev.testBusy || jev.dirty || jev.view?.hasKey !== true || jev.keyInput.trim() !== ""}
+              disabled={!jev.fresh || !target || jev.testBusy || jev.dirty || jev.view?.hasKey !== true || jev.keyInput.trim() !== ""}
               onPress={() => void jev.runTest()}
             />
           </View>

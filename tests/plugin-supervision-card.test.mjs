@@ -43,14 +43,12 @@ const bundleEntry = async () => {
   return { dir, outfile };
 };
 
-let bundlePromise;
-const loadBundle = () => {
-  bundlePromise ??= (async () => {
-    const { dir, outfile } = await bundleEntry();
-    const mod = await import(pathToFileURL(outfile).href);
-    return { ...mod, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
-  })();
-  return bundlePromise;
+// Each test gets its own plugin client module lifetime. Within one test a
+// remount deliberately shares that module to exercise display-cache retention.
+const loadBundle = async () => {
+  const { dir, outfile } = await bundleEntry();
+  const mod = await import(pathToFileURL(outfile).href);
+  return { ...mod, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
 };
 
 const LEAD_ENTRY = {
@@ -135,10 +133,9 @@ const setup = async (t, { strict = false, home = '/home/a' } = {}) => {
   return { mod, capture, rpc, renderer, Harness };
 };
 
-// The card's own gate (supervision.tsx:362): `disabled = !target || busy ||
-// data === null` — with a live target and no op in flight it reduces to the
-// data check, which is what the screenshot shows stuck.
-const controlsEnabled = (capture) => capture.card.data !== null && !capture.card.busy;
+// Match the actual card's read/write gate: a retained snapshot is visible,
+// but only a successful current-lifetime read enables editing.
+const controlsEnabled = (capture) => capture.card.data !== null && capture.card.fresh && !capture.card.busy;
 
 test('fresh-target re-render during a pending get-supervision still lands the snapshot', async (t) => {
   const { mod, capture, rpc } = await setup(t);
@@ -202,4 +199,22 @@ test('a rejected read surfaces readError instead of an endless loading state', a
   await act(async () => { rpc.getDeferreds[0].reject(new Error('get-supervision exploded')); });
   assert.notEqual(capture.card.readError, null, 'readError set on failure');
   assert.equal(capture.card.data, null);
+});
+
+
+test('remount retains completed Supervision data but pending or failed fresh reads keep controls locked', async t => {
+  const { mod, capture, rpc, renderer, Harness } = await setup(t);
+  await act(async () => rpc.getDeferreds[0].resolve(resultFor('/home/a')));
+  assert.equal(controlsEnabled(capture), true);
+  await act(async () => renderer.unmount());
+  let reopened;
+  await act(async () => { reopened = create(React.createElement(Harness, { home: '/home/a' })); });
+  t.after(async () => { await act(async () => reopened.unmount()); });
+  assert.equal(rpc.getCalls.length, 2, 'completed display cache never suppresses the fresh read');
+  assert.equal(capture.card.data.sha256, resultFor('/home/a').sha256);
+  assert.equal(controlsEnabled(capture), false, 'retention alone cannot authorize a CAS edit');
+  await act(async () => rpc.getDeferreds[1].reject(new Error('refresh unavailable')));
+  assert.equal(capture.card.readError, 'refresh unavailable');
+  assert.equal(capture.card.data.sha256, resultFor('/home/a').sha256, 'failure preserves the display snapshot');
+  assert.equal(controlsEnabled(capture), false);
 });

@@ -60,7 +60,7 @@ export function useSupervisionCard({ target, targetKey, isCurrentKey, callGetSup
   update: (patch: { lastError: string | null }, target: TargetValue) => void;
 }) {
   const paseo = usePaseo();
-  const snapshot = useTargetSnapshot(target, targetKey, target => callGetSupervision({ schemaVersion: 2, target }));
+  const snapshot = useTargetSnapshot(target, targetKey, target => callGetSupervision({ schemaVersion: 2, target }), "supervision");
   const { data, replace: setData, error: readError, capture } = snapshot;
   const [form, setForm] = useState<SupervisionForm>(emptySupervisionForm);
   const [dirty, setDirty] = useState(false);
@@ -75,7 +75,6 @@ export function useSupervisionCard({ target, targetKey, isCurrentKey, callGetSup
   // Target switch drops the previous home's snapshot, draft and every
   // transient flag — a draft authored against home A must never save into B.
   useEffect(() => {
-    setData(null);
     setForm(emptySupervisionForm());
     setDirty(false);
     setSaving(false);
@@ -119,7 +118,7 @@ export function useSupervisionCard({ target, targetKey, isCurrentKey, callGetSup
   };
 
   const save = async () => {
-    if (!target || !targetKey) return;
+    if (!snapshot.fresh || !target || !targetKey) return;
     const built = configFromForm(form);
     if ("error" in built) {
       setCardError({ message: built.error, cas: false });
@@ -146,7 +145,7 @@ export function useSupervisionCard({ target, targetKey, isCurrentKey, callGetSup
       // The draft is kept on failure — the Human fixes one thing and saves
       // again instead of re-entering everything.
       const message = errorMessage(error);
-      update({ lastError: message }, target);
+      if (ticket.isCurrent()) update({ lastError: message }, target);
       if (ticket.isCurrent()) {
         setCardError({ message: translateError(message), cas: /changed since|changed during/i.test(message) });
       }
@@ -160,23 +159,20 @@ export function useSupervisionCard({ target, targetKey, isCurrentKey, callGetSup
     const ticket = capture();
     setReloading(true);
     void loadAgents();
-    try {
-      const result = await callGetSupervision({ schemaVersion: 2, target });
-      if (!ticket.isCurrent()) return;
-      setData(result);
+    const result = await snapshot.reload(target);
+    if (!ticket.isCurrent() || result === null) return;
+    if (result.ok) {
       setCardError(null);
-      setForm(formFromConfig(result.config));
+      setForm(formFromConfig(result.data.config));
       setDirty(false);
       setSaved(false);
       setUnverified([]);
       notifySupervisionChanged();
-    } catch (error) {
-      const message = errorMessage(error);
-      update({ lastError: message }, target);
-      if (ticket.isCurrent()) setCardError({ message: translateError(message), cas: false });
-    } finally {
-      if (ticket.isCurrent()) setReloading(false);
+    } else {
+      update({ lastError: result.error }, target);
+      setCardError({ message: translateError(result.error), cas: false });
     }
+    setReloading(false);
   };
 
   const restore = () => {
@@ -186,6 +182,7 @@ export function useSupervisionCard({ target, targetKey, isCurrentKey, callGetSup
   };
 
   return {
+    fresh: snapshot.fresh,
     data,
     form,
     dirty,
@@ -354,7 +351,7 @@ export function SupervisionCard({ colors, target, jev, supervision, navigation }
   const summary = useMemo(() => summarizeObservations(data?.observations ?? null), [data]);
   const leads = leadRows(choices, form);
   const supervisors = supervisorRows(choices, form);
-  const disabled = !target || supervision.busy || data === null;
+  const disabled = !supervision.fresh || !target || supervision.busy || data === null;
   const migration = data?.migration ?? null;
   const gates = data?.gates ?? {};
 
@@ -406,6 +403,7 @@ export function SupervisionCard({ colors, target, jev, supervision, navigation }
         {status.text}
       </Text>
 
+      {data !== null && !supervision.fresh && supervision.readError === null ? <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>Refreshing supervision settings…</Text> : null}
       {supervision.readError !== null ? (
         <Notice colors={colors} tone="bad">
           <Text style={[styles.mutedSmall, { color: colors.statusDanger }]}>

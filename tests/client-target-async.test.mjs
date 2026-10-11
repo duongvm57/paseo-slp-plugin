@@ -1,5 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import React from 'react';
+import TestRenderer from 'react-test-renderer';
 import { act, deferredRpc, loadHooks, renderHook } from './helpers/client-hooks-harness.mjs';
 
 const homeTarget = home => ({ hostId: 'host-1', daemonHome: home });
@@ -100,13 +102,13 @@ for (const [name, spec] of Object.entries(cards)) {
     assert.equal(spec.busy(state.current), false);
   });
 }
-test('routing keeps its dirty draft while pool clears its draft/editor on target switch', async t => {
+test('routing and pool clear target-owned drafts/editor on target switch', async t => {
   const routing = await setup(t, cards.routing);
   await act(async () => routing.read.calls[0].resolve(routingResult('/a')));
   act(() => cards.routing.edit(routing.state.current));
   await routing.update({ home: '/b' });
   await act(async () => routing.read.calls[1].resolve(routingResult('/b')));
-  assert.equal(routing.state.current.form.supervisor.model, 'draft');
+  assert.equal(routing.state.current.form.supervisor.model, 'supervisor-/b');
   const pool = await setup(t, cards.pool);
   await act(async () => pool.read.calls[0].resolve(poolResult('/a')));
   act(() => { cards.pool.edit(pool.state.current); pool.state.current.setOpenSeat(0); });
@@ -230,4 +232,75 @@ test('pool delayed clipboard completion does not flash Copied on another target'
   await act(async () => { clipboard.calls[0].resolve(); await copy; });
   assert.equal(state.current.poolCopied, false);
   await act(async () => read.calls[1].resolve(poolResult('/b')));
+});
+
+for (const [name, spec] of Object.entries(cards)) test(`${name}: reopening retains only completed target reads and requires fresh data before writing`, async t => {
+  const mod = await loadHooks(t), read = deferredRpc(), write = deferredRpc();
+  let current, renderer;
+  function Screen({ home = '/a' }) {
+    const target = homeTarget(home);
+    current = mod[spec.hook]({ target, targetKey: mod.targetKey(target),
+      isCurrentKey: () => true, sameTarget: () => true, statusView: null,
+      catalogs: {}, featureSets: {}, featuresLoadingFor: null, scrollFocusNode: () => {}, update: () => {},
+      [spec.get]: read.rpc, [spec.set]: write.rpc, callSetJevKey: write.rpc, callTestJev: write.rpc });
+    return null;
+  }
+  t.after(async () => { await act(async () => renderer?.unmount()); });
+  await act(async () => { renderer = TestRenderer.create(React.createElement(Screen)); });
+  await act(async () => read.calls[0].resolve(spec.result('/a')));
+  assert.equal(spec.value(current), spec.expected('/a'));
+  await act(async () => renderer.unmount());
+  await act(async () => { renderer = TestRenderer.create(React.createElement(Screen)); });
+  assert.equal(spec.value(current), spec.expected('/a'), 'completed read remains visible before the fresh RPC');
+  assert.equal(current.fresh, false);
+  await act(async () => { spec.edit(current); await spec.run(current); });
+  assert.equal(write.calls.length, 0, 'retained data cannot authorize a write');
+  await act(async () => read.calls[1].reject(new Error('refresh unavailable')));
+  assert.equal(current.fresh, false);
+  assert.equal(write.calls.length, 0);
+  const error = name === 'routing' ? current.readError : name === 'pool' ? current.poolReadError : name === 'jev' ? current.loadError : current.readError;
+  assert.equal(error, 'refresh unavailable');
+  await act(async () => renderer.unmount());
+  await act(async () => { renderer = TestRenderer.create(React.createElement(Screen, { home: '/b' })); });
+  assert.notEqual(spec.value(current), spec.expected('/a'), 'another home never gets the retained read');
+  await act(async () => read.calls[2].resolve(spec.result('/b')));
+  assert.equal(current.fresh, true);
+  assert.equal(spec.value(current), spec.expected('/b'));
+});
+
+for (const name of ['pool', 'supervision']) test(`${name}: failed manual reload revokes freshness and preserves the draft until successful retry`, async t => {
+  const spec = cards[name], { state, read, write } = await setup(t, spec);
+  await act(async () => read.calls[0].resolve(spec.result('/a')));
+  assert.equal(state.current.fresh, true);
+  act(() => spec.edit(state.current));
+  const draft = name === 'pool' ? state.current.poolForm : state.current.form;
+  const reload = () => name === 'pool' ? state.current.reloadPeerPool() : state.current.reload();
+  let pending;
+  act(() => { pending = reload(); });
+  assert.equal(state.current.fresh, false, 'starting a new read immediately revokes write readiness');
+  await act(async () => { read.calls[1].reject(new Error('manual read failed')); await pending; });
+  assert.equal(state.current.fresh, false, 'failure cannot revive the old read');
+  assert.deepEqual(name === 'pool' ? state.current.poolForm : state.current.form, draft, 'failed discard preserves the authored draft');
+  assert.equal(name === 'pool' ? state.current.poolReadError : state.current.readError, 'manual read failed');
+  if (name === 'pool') assert.equal(state.current.poolLocked, true);
+  await act(async () => spec.run(state.current));
+  assert.equal(write.calls.length, 0, 'direct handler cannot save with the stale snapshot');
+  act(() => { pending = reload(); });
+  await act(async () => { read.calls[2].resolve(spec.result('/a')); await pending; });
+  assert.equal(state.current.fresh, true);
+  assert.equal(name === 'pool' ? state.current.poolReadError : state.current.readError, null);
+});
+
+for (const name of ['pool', 'supervision']) test(`${name}: an older same-target reload cannot revive readiness after a newer failed read`, async t => {
+  const spec = cards[name], { state, read } = await setup(t, spec);
+  await act(async () => read.calls[0].resolve(spec.result('/a')));
+  const reload = () => name === 'pool' ? state.current.reloadPeerPool() : state.current.reload();
+  let oldRead, newRead;
+  act(() => { oldRead = reload(); newRead = reload(); });
+  await act(async () => { read.calls[2].reject(new Error('newer read failed')); await newRead; });
+  assert.equal(state.current.fresh, false);
+  await act(async () => { read.calls[1].resolve(spec.result('/stale')); await oldRead; });
+  assert.equal(state.current.fresh, false);
+  assert.equal(name === 'pool' ? state.current.poolReadError : state.current.readError, 'newer read failed');
+  assert.equal(spec.value(state.current), spec.expected('/a'));
 });

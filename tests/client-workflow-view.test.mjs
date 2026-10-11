@@ -107,13 +107,13 @@ test('client contribution opens the work panel in workspace context and removes 
   const removed = [];
   const add = kind => value => { registrations.push({ kind, value }); return () => removed.push({ kind, value }); };
   const cleanup = mod.contributeClient({
-    addSurface: (id, Component) => add('surface')({ id, Component }),
-    addSidebarItem: add('sidebar'), addCommandCenterItem: add('command'), addWorkspacePanel: add('panel'),
+    addScreen: add('screen'),
+    addSidebarHeaderItem: add('sidebar'), addCommandCenterItem: add('command'), addWorkspacePanel: add('panel'),
     rpc: async () => ({ error: null, recipients: [] }),
     addHeaderButton: () => { throw new Error('no notification recipient was selected'); },
   });
   let cleaned = false;
-  t.after(() => { if (!cleaned) cleanup(); });
+  t.after(() => { if (!cleaned) return cleanup(); });
   const panel = registrations.find(row => row.kind === 'panel' && row.value.id === 'slp-work');
   assert.equal(panel.value.context, 'workspace');
   assert.equal(panel.value.Component, mod.WorkflowPanel);
@@ -122,7 +122,7 @@ test('client contribution opens the work panel in workspace context and removes 
   let opened;
   command.value.onSelect({ openPanel: id => { opened = id; }, openSurface: () => assert.fail('work reads open a workspace panel') });
   assert.equal(opened, 'slp-work');
-  cleanup();
+  await cleanup();
   cleaned = true;
   assert.equal(removed.length, 5);
 });
@@ -175,7 +175,7 @@ test('native work panel distinguishes absent state, legacy context and unavailab
   assert.match(text(), /ownership revision/);
   assert.match(text(), /recorded membership host-confirmed/);
   assert.match(text(), /Legacy outcome/);
-  assert.match(text(), /not project acceptance/);
+  assert.match(text(), /do not establish project acceptance/);
   await press('Reload');
   await act(async () => reads.calls[3].resolve(response({ state: 'unavailable', view: null,
     problem: { code: 'STATE_UNREADABLE', detail: 'The bound desk is unreadable.' } })));
@@ -261,6 +261,8 @@ test('native work panel renders the sixth tasks section with queue counts and re
   assert.match(text(), /Task declaration/);
   assert.match(text(), /Current task queue/);
   assert.match(text(), /tasks 1 · ready 0 · held 1/);
+  assert.doesNotMatch(text(), /Recorded state open\. Current revision/, 'full context stays in its disclosure');
+  await act(async () => { for (const node of renderer.root.findAll(node => node.props.accessibilityLabel === 'Task context and limits')) node.props.onPress(); });
   assert.match(text(), /Recorded state open\. Current revision for this entity\. Current task context: readiness held \(not eligible\) — question-open; result qualification qualified \(scope proof terminal-approved-round\); current task ruling accepted \(adj-current\)/);
   assert.match(text(), /Retained hold — remains an active obligation until a current-owner ruling releases or withdraws it/);
   assert.match(text(), /Current task result qualification — shared resolver/);
@@ -356,6 +358,7 @@ test('native work panel renders a projection seeded by the exported task runner'
   assert.match(text(), /Task declaration/);
   assert.match(text(), /Current task queue/);
   assert.match(text(), /tasks 1 · ready 0 · held 1/);
+  await act(async () => { for (const node of renderer.root.findAll(node => node.props.accessibilityLabel === 'Task context and limits')) node.props.onPress(); });
   assert.match(text(), /readiness held \(not eligible\) — question-open/);
   assert.match(text(), /result qualification not qualified \(scope proof null\) — result-unruled/);
   assert.match(text(), /no current task ruling is projected/);

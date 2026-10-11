@@ -71,7 +71,7 @@ import {
 } from "../ui-kit.tsx";
 import type { JevCardState } from "./jev.tsx";
 
-export function usePeerPoolCard({ target, targetKey, isCurrentKey, callGetPeerPool, callSetPeerPool, catalogs, featureSets, featuresLoadingFor, scrollFocusNode, update }: {
+export function usePeerPoolCard({ target, targetKey, isCurrentKey, callGetPeerPool, callSetPeerPool, catalogs, featureSets, featuresLoadingFor, catalogIsRefreshing = () => false, featureIsRefreshing = () => false, scrollFocusNode, update }: {
   target: TargetValue | null;
   targetKey: string | null;
   isCurrentKey: (key: string) => boolean;
@@ -80,6 +80,8 @@ export function usePeerPoolCard({ target, targetKey, isCurrentKey, callGetPeerPo
   catalogs: Partial<Record<string, CatalogResult>>;
   featureSets: Record<string, { defs: CatalogResult["features"]; error: string | null }>;
   featuresLoadingFor: string | null;
+  catalogIsRefreshing?: (scope: string) => boolean;
+  featureIsRefreshing?: (key: string) => boolean;
   scrollFocusNode: (node: unknown, focus?: boolean) => void;
   update: (patch: { lastError: string | null }, target: TargetValue) => void;
 }) {
@@ -87,7 +89,7 @@ export function usePeerPoolCard({ target, targetKey, isCurrentKey, callGetPeerPo
   // CAS save + the legacy import view); `poolForm` is the editable copy.
   // Saves are whole-file with optimistic concurrency — a sha mismatch
   // refuses the write and the operator reloads.
-  const snapshot = useTargetSnapshot(target, targetKey, target => callGetPeerPool({ schemaVersion: 1, target }));
+  const snapshot = useTargetSnapshot(target, targetKey, target => callGetPeerPool({ schemaVersion: 1, target }), "peer-pool");
   const { data: poolData, replace: setPoolData, error: poolReadError, capture } = snapshot;
   const [poolForm, setPoolForm] = useState<PeerPoolForm>(emptyPeerPoolForm);
   const [poolDirty, setPoolDirty] = useState(false);
@@ -139,7 +141,6 @@ export function usePeerPoolCard({ target, targetKey, isCurrentKey, callGetPeerPo
   // this a draft authored against home A could save into home B — B's
   // fresh sha256 would satisfy the CAS token and hide the swap.
   useEffect(() => {
-    setPoolData(null);
     setPoolForm(emptyPeerPoolForm());
     setPoolDirty(false);
     setPoolSaving(false);
@@ -205,7 +206,11 @@ export function usePeerPoolCard({ target, targetKey, isCurrentKey, callGetPeerPo
   // with no read there is no CAS token and no shared baseline to diff.
   // Either pending pool op locks mutations; the labels stay per-operation.
   const poolBusy = poolSaving || poolReloading;
-  const poolLocked = poolBusy || poolData === null;
+  const metadataPending = poolForm.seats.some(seat => seat.family !== "" && (
+    catalogIsRefreshing(catalogScope(seat.family, "peer")) ||
+    (seat.model.trim() !== "" && featureIsRefreshing(featureKey(seat.family, "peer", seat.model.trim(), seat.modeId.trim())))
+  ));
+  const poolLocked = poolBusy || poolData === null || !snapshot.fresh || metadataPending;
   // §7.4.D — reserved ids whose draft tokens diverge from the package set.
   // The card notice presses open the seat; the seat row carries the same
   // marker, and buildPeerPool refuses to Save/Copy while any remain.
@@ -383,7 +388,7 @@ export function usePeerPoolCard({ target, targetKey, isCurrentKey, callGetPeerPo
   // AND opens the offending seat's editor; a CAS refusal lands in the card's
   // notice area (§7.4.D) with a Reload affordance instead of only lastError.
   const savePeerPool = async () => {
-    if (!target || !targetKey) return;
+    if (metadataPending || !snapshot.fresh || !target || !targetKey) return;
     if ("error" in poolBuild) {
       update({ lastError: poolBuild.error }, target);
       if (poolBuild.seatIndex != null) setOpenSeat(poolBuild.seatIndex);
@@ -415,10 +420,10 @@ export function usePeerPoolCard({ target, targetKey, isCurrentKey, callGetPeerPo
       setConvertSeatIndex(null);
     } catch (error) {
       const message = errorMessage(error);
-      update({ lastError: message }, target);
+      if (ticket.isCurrent()) update({ lastError: message }, target);
       // A stale failure must not paint home A's error onto home B's card —
-      // lastError is target-bound and stays safe unguarded, but the
-      // card-local poolError must check the issue key like the success path.
+      // both shell errors and card-local state use the issue-time ticket,
+      // including a switch back to the same target after a newer session.
       if (ticket.isCurrent()) {
         const cas = message.includes("peer pool changed");
         setPoolError({
@@ -441,23 +446,20 @@ export function usePeerPoolCard({ target, targetKey, isCurrentKey, callGetPeerPo
     if (!target || !targetKey) return;
     const ticket = capture();
     setPoolReloading(true);
-    try {
-      const result = await callGetPeerPool({ schemaVersion: 1, target });
-      if (!ticket.isCurrent()) return;
-      setPoolData(result);
+    const result = await snapshot.reload(target);
+    if (!ticket.isCurrent() || result === null) return;
+    if (result.ok) {
       setPoolError(null);
       setPoolDirty(false);
       setPoolSaved(false);
       setPoolCopied(false);
       setStandardAppliedId(null);
       setConvertSeatIndex(null);
-    } catch (error) {
-      const message = errorMessage(error);
-      update({ lastError: message }, target);
-      if (ticket.isCurrent()) setPoolError({ message, cas: false });
-    } finally {
-      if (ticket.isCurrent()) setPoolReloading(false);
+    } else {
+      update({ lastError: result.error }, target);
+      setPoolError({ message: result.error, cas: false });
     }
+    setPoolReloading(false);
   };
   const requestReload = (origin: "notice" | "footer") => {
     if (poolDirty) {
@@ -496,11 +498,12 @@ export function usePeerPoolCard({ target, targetKey, isCurrentKey, callGetPeerPo
       // confirmation is card state and skips like every other stale paint.
       if (targetKey === null || ticket.isCurrent()) setPoolCopied(true);
     } catch (error) {
-      if (target) update({ lastError: errorMessage(error) }, target);
+      if (target && ticket.isCurrent()) update({ lastError: errorMessage(error) }, target);
     }
   };
 
   return {
+    fresh: snapshot.fresh,
     poolData,
     poolForm,
     poolDirty,
@@ -652,7 +655,7 @@ export function PeerPoolCard({ colors, target, compact, statusView, jev, pool, a
         <Card
           colors={colors}
           title="Peer pool"
-          subtitle="User-scope seats a Lead picks per task. Supervisor and Lead keep their saved profiles — only Peer routes here."
+          subtitle="User-scope Peer seats. Bound desk selection is resolved server-side, or returns options for an independent Lead choice. Supervisor and Lead use their saved profiles."
           // Draft-state badge beside the card title (mockup dirty-badge):
           // amber while edits are unsaved, else the saved/absent state.
           trailing={
@@ -665,6 +668,9 @@ export function PeerPoolCard({ colors, target, compact, statusView, jev, pool, a
             )
           }
         >
+          {poolData !== null && !pool.fresh ? <Text style={[styles.mutedSmall, { color: poolReadError ? colors.statusWarning : colors.foregroundMuted }]}>
+            {poolReadError ? `Pool refresh unavailable: ${poolReadError}. Showing the previous read; Reload to retry.` : "Refreshing pool…"}
+          </Text> : null}
           {jev.view?.enabled === true && jev.view.capabilities?.routing === true ? (
             <View style={[styles.noticeBox, { borderColor: colors.accent, backgroundColor: colors.surface2 }]}>
               <Text style={[styles.mutedSmall, { color: colors.foreground }]}>
