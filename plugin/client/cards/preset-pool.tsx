@@ -74,7 +74,7 @@ export function PresetPoolCard({ colors, pool, availableFamilies, catalogs, retr
         <Field colors={colors} label="When to use" hint="Lead / Jev reads your description. Edit in any language; the preset name is not a fixed routing class."
           value={seat.description ?? ''} onChangeText={value => edit(index, 'description', value)} disabled={disabled} multiline />
         <CheckRow colors={colors} title="Enabled" checked={seat.enabled} onToggle={pool.setSeatEnabled(index)} disabled={disabled} />
-        <Text style={[styles.fieldLabel, { color: colors.foregroundMuted }]}>Runtime provider</Text>
+        <Text style={[styles.fieldLabel, { color: colors.foregroundMuted }]}>Provider</Text>
         <ChipSelect colors={colors} value={seat.family} options={[{ label: 'Unset', value: '' as const },
           ...availableFamilies.map(value => ({ value, label: FAMILY_LABEL[value] })),
           ...(seat.family && !availableFamilies.includes(seat.family) ? [{ value: seat.family, label: `${FAMILY_LABEL[seat.family]} (unavailable)` }] : [])]}
@@ -88,30 +88,32 @@ export function PresetPoolCard({ colors, pool, availableFamilies, catalogs, retr
         <ChipSelect colors={colors} value={seat.effortKind ?? 'select'} options={[{ label: 'Lead / Jev chooses', value: 'select' }, { label: 'Fixed', value: 'fixed' }]}
           onChange={value => edit(index, 'effortKind', value)} disabled={disabled} />
         {seat.effortKind === 'fixed' ? thinking ? <ChipSelect colors={colors} value={seat.thinkingOptionId}
-          options={[{ label: 'Runtime default', value: '' }, ...thinking.options.map(e => ({ label: e.label, value: e.id })),
+          options={[{ label: 'Provider default', value: '' }, ...thinking.options.map(e => ({ label: e.label, value: e.id })),
             ...(seat.thinkingOptionId && !thinking.options.some(e => e.id === seat.thinkingOptionId) ? [{ label: `${seat.thinkingOptionId} (stored)`, value: seat.thinkingOptionId }] : [])]}
           onChange={pool.setSeatField(index, 'thinkingOptionId')} disabled={disabled} />
           : <Field colors={colors} label="Fixed effort ID" value={seat.thinkingOptionId} onChangeText={pool.setSeatField(index, 'thinkingOptionId')} disabled={disabled} />
           : <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>{thinking ? thinking.options.length ? `Automatic effort choices: ${thinking.options.filter(isAutomaticEffort).map(e => e.label).join(', ') || 'None recognized; use Fixed or resolve host metadata.'}` : 'This model has no separate effort choices; runtime default only.' : 'A fresh model catalog is required before automatic effort selection.'}</Text>}
         <Collapse colors={colors} title="Additional settings" open={advanced[seat.uid] === true} onToggle={() => setAdvanced(state => ({ ...state, [seat.uid]: !state[seat.uid] }))}>
-          <Field colors={colors} label="Stable preset ID" hint="Only identity is constrained; names and descriptions are open. Renaming updates the designated fallback."
-            value={seat.id} onChangeText={pool.setSeatId(index)} disabled={disabled} />
-          <Text style={[styles.fieldLabel, { color: colors.foregroundMuted }]}>Runtime rule</Text>
-          <ChipSelect colors={colors} value={seat.runtimeRule ?? 'none'} options={[{ label: 'None', value: 'none' }, { label: 'Different runtime provider from reference', value: 'different-model-provider' }]}
-            onChange={value => edit(index, 'runtimeRule', value)} disabled={disabled} />
-          <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>Lead / Jev compares runtime providers, such as Devin and Codex. No model-vendor setup is needed. The assignment names the seat whose work is being reviewed.</Text>
+          <View style={styles.field}>
+            <Text style={[styles.fieldLabel, { color: colors.foregroundMuted }]}>Provider selection</Text>
+            <ChipSelect colors={colors} value={seat.runtimeRule ?? 'none'} options={[{ label: 'No restriction', value: 'none' }, { label: 'Different provider from reference', value: 'different-model-provider' }]}
+              onChange={value => edit(index, 'runtimeRule', value)} disabled={disabled} />
+            {seat.runtimeRule === 'different-model-provider' ? <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>For a second perspective: use a different provider from the agent being reviewed, such as Codex reviewing Devin. Lead / Jev names that reference agent.</Text> : null}
+          </View>
           {seat.effortKind !== 'fixed' ? <View style={styles.field}>
             <Text style={[styles.fieldLabel, { color: colors.foregroundMuted }]}>Allowed efforts</Text>
             <CheckRow colors={colors} title="All supported efforts" checked={seat.allowedEfforts === undefined}
               hint="Lead / Jev can choose any supported effort, including newly available choices."
               onToggle={all => edit(index, 'allowedEfforts', all ? undefined : efforts.map(e => e.id))}
               disabled={disabled || (seat.allowedEfforts === undefined && efforts.length === 0)} />
-            {efforts.map(e => <CheckRow key={e.id} colors={colors} title={e.label}
+            <View style={styles.chipRow}>
+            {efforts.map(e => <View key={e.id} style={{ minWidth: 96, flexBasis: 120, flexGrow: 1, maxWidth: 180 }}><CheckRow colors={colors} title={e.label}
               checked={seat.allowedEfforts === undefined || seat.allowedEfforts.includes(e.id)}
               onToggle={checked => {
                 const selected = seat.allowedEfforts ?? efforts.map(option => option.id);
                 edit(index, 'allowedEfforts', checked ? [...selected, e.id] : selected.filter(id => id !== e.id));
-              }} disabled={disabled} />)}
+              }} disabled={disabled} /></View>)}
+            </View>
             {storedEfforts.map(id => <CheckRow key={id} colors={colors} title={`${id} (stored, unavailable)`} checked
               hint="Kept from your saved configuration; not currently available for automatic selection. Uncheck to remove."
               onToggle={() => edit(index, 'allowedEfforts', seat.allowedEfforts?.filter(value => value !== id))} disabled={disabled} />)}
@@ -119,19 +121,27 @@ export function PresetPoolCard({ colors, pool, availableFamilies, catalogs, retr
               : efforts.length === 0 ? <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>{thinking.options.length === 0 ? 'This model uses runtime default only; leave All supported efforts selected.' : 'No automatic effort choices recognized. Use Fixed or resolve host metadata.'}</Text> : null}
             {seat.allowedEfforts?.length === 0 ? <Text accessibilityLiveRegion="polite" style={[styles.mutedSmall, { color: colors.statusWarning }]}>Choose at least one effort, or select All supported efforts.</Text> : null}
           </View> : null}
-          {catalog?.modes.length ? <ChipSelect colors={colors} value={seat.modeId} options={[{ label: 'Runtime default mode', value: '' }, ...catalog.modes.map(m => ({ value: m.id, label: m.label })),
+          <View style={[styles.field, { paddingTop: 12, borderTopWidth: 1, borderColor: colors.border }]}>
+          {catalog?.modes.length ? <View style={styles.field}>
+            <Text style={[styles.fieldLabel, { color: colors.foregroundMuted }]}>Permission mode</Text>
+            <ChipSelect colors={colors} value={seat.modeId} options={[{ label: 'Provider default', value: '' }, ...catalog.modes.map(m => ({ value: m.id, label: m.label })),
             ...(seat.modeId && !catalog.modes.some(m => m.id === seat.modeId) ? [{ label: `${seat.modeId} (stored)`, value: seat.modeId }] : [])]} onChange={pool.setSeatField(index, 'modeId')} disabled={disabled} />
-            : <Field colors={colors} label="Mode ID" value={seat.modeId} onChangeText={pool.setSeatField(index, 'modeId')} disabled={disabled} />}
+            </View> : <Field colors={colors} label="Permission mode ID" value={seat.modeId} onChangeText={pool.setSeatField(index, 'modeId')} disabled={disabled} />}
           {features.defs.length ? features.defs.map(def => def.type === 'toggle' ? <SwitchRow key={def.id} colors={colors} title={def.label}
             checked={(seat.feature[def.id] ?? '') === '' ? def.value : seat.feature[def.id] === 'true'} onToggle={value => pool.setSeatFeature(index, def.id)(String(value))} disabled={disabled} />
-            : <View key={def.id} style={styles.field}><Text style={{ color: colors.foregroundMuted }}>{def.label}</Text><ChipSelect colors={colors} value={seat.feature[def.id] ?? ''}
+            : <View key={def.id} style={styles.field}><Text style={[styles.fieldLabel, { color: colors.foregroundMuted }]}>{def.label}</Text><ChipSelect colors={colors} value={seat.feature[def.id] ?? ''}
               options={[{ label: 'Provider default', value: '' }, ...def.options.map(e => ({ label: e.label, value: e.id }))]} onChange={pool.setSeatFeature(index, def.id)} disabled={disabled} /></View>)
             : <Field colors={colors} label="Feature values (JSON)" value={seat.features} onChangeText={pool.setSeatField(index, 'features')} disabled={disabled} />}
           {features.error ? <Button colors={colors} label="Retry feature controls" onPress={() => { if (features.key) void retryFeatureSet(features.key); }} disabled={disabled} /> : null}
+          </View>
+          <View style={[styles.field, { paddingTop: 12, borderTopWidth: 1, borderColor: colors.border }]}>
+          <Field colors={colors} label="Preset ID" hint="Identifies this preset. Renaming also updates its quota fallback reference."
+            value={seat.id} onChangeText={pool.setSeatId(index)} disabled={disabled} />
           <Field colors={colors} label="Selection hints" hint="Optional guidance sent to Lead / Jev. Observations about model behavior are advisory."
             value={seat.selectionHints ?? ''} onChangeText={value => edit(index, 'selectionHints', value)} disabled={disabled} multiline />
           <Field colors={colors} label="Private notes" hint="Local only; excluded from routing input." value={seat.notes} onChangeText={pool.setSeatField(index, 'notes')} disabled={disabled} multiline />
           {migration ? <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>Original suitability: {seat.suitableFor || '(none)'}; avoid: {seat.avoidFor || '(none)'}. These original fields remain preserved for comparison.</Text> : null}
+          </View>
         </Collapse>
         <View style={styles.chipRow}><Button colors={colors} label="Duplicate preset" onPress={pool.copySeatAsCustom(index)} disabled={disabled} />
           <Button colors={colors} label="Remove preset" kind="danger" onPress={pool.removeSeat(index)} disabled={disabled} /></View>
