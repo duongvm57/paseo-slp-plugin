@@ -139,8 +139,9 @@ export function PresetPoolCard({ colors, pool, availableFamilies, catalogs, retr
           <Field colors={colors} label="Preset ID" hint="Identifies this preset. Renaming also updates its quota fallback reference."
             value={seat.id} onChangeText={pool.setSeatId(index)} disabled={disabled} />
           <Field colors={colors} label="Selection hints" hint="Optional guidance sent to Lead / Jev. Observations about model behavior are advisory."
+            placeholder="e.g. Strong at spotting edge cases; may overengineer, so favor simpler approaches."
             value={seat.selectionHints ?? ''} onChangeText={value => edit(index, 'selectionHints', value)} disabled={disabled} multiline />
-          <Field colors={colors} label="Private notes" hint="Local only; excluded from routing input." value={seat.notes} onChangeText={pool.setSeatField(index, 'notes')} disabled={disabled} multiline />
+          <Field colors={colors} label="Private notes" hint="Local only; excluded from routing input." placeholder="e.g. Backup account; quota resets on Monday." value={seat.notes} onChangeText={pool.setSeatField(index, 'notes')} disabled={disabled} multiline />
           {migration ? <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>Original suitability: {seat.suitableFor || '(none)'}; avoid: {seat.avoidFor || '(none)'}. These original fields remain preserved for comparison.</Text> : null}
           </View>
         </Collapse>
