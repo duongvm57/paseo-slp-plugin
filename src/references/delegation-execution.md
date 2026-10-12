@@ -57,13 +57,13 @@ none is needed. Assignment names the verified parent ID and requires one native
 report there at handback. Standby readiness differs from technical verdict;
 avoid acknowledgment loops.
 
-Read result/phases, not outer ok. Replay/operation_get read immutable evidence
-by original kind/requestId; never continue partial/uncertain effects. Native
-identity survives epochs; original epoch stays pinned. callerEpochMatches=false
-permits historical reads only; mutation requires current epoch. Preserve legacy
-addresses, IDs and gaps; corrupt/ambiguous/oversized evidence blocks admission.
-Receipts grant no acceptance, cleanup or follow-up authority;
-the native report establishes the route, not acceptance.
+Read result/phases, not ok. Replay/operation_get reads original caller's
+kind/requestId. Missing evidence proves no absence elsewhere; request
+routing/decision evidence from that caller. Never resume partial/uncertain effects.
+Native identity survives epochs; callerEpochMatches=false allows historical reads,
+never mutation. Preserve epochs, legacy addresses, IDs and gaps;
+corrupt/ambiguous/oversized evidence blocks admission. Receipts grant no acceptance,
+cleanup or follow-up authority; reports establish routes, not acceptance.
 
 ## Refused or uncertain formation
 

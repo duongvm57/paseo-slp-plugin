@@ -37,7 +37,7 @@ test('all seats receive communication, stop and recovery responsibilities', () =
     /identifiers, paths and commands verbatim/,
     /Human stop overrides objectives and callbacks: stop work and follow-ups immediately/,
     /policy recovery restores no task state/,
-    /known unchanged.*sha256sum.*delivered Policy locators.*summary is insufficient.*fresh catalog hash/,
+    /known unchanged.*sha256sum.*delivered Policy locators.*summary is insufficient/,
     /Measure a file with wc -c before reading it; read large files in bounded ranges/,
     /Resume only on a new Human instruction/,
     /First full reads of applicable policy files are required; policy delivered in your bundle needs no re-read or hash check unless lost to compaction/,
@@ -72,7 +72,7 @@ test('formation distinguishes managed admissions from ordinary host verification
     /different checkout\/lane needs declared paths\/reason/,
     /Verify the returned ID against actual host parent\/workspace\/cwd and bundle/,
     /Confirm the brief's report route when its first report arrives/,
-    /the native report establishes the route, not acceptance/,
+    /reports establish routes, not acceptance/,
     /Empty inventory alone proves no absence/,
     /original cannot still create and any old owner is settled/);
   pins(desk, /Ordinary role creation can remain unbound if desk mint\/registration fails/);

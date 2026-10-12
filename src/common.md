@@ -25,6 +25,8 @@ authority-backed waiver are distinct.
 
 Role policy holds cross-project invariants; .paseo-slp/workspace-protocol.md
 holds repository tactics; the assignment supplies outcome and authority.
+Supervisor/Lead distill repository tactics into Peer assignments. Peers read the
+full Workspace Protocol only when explicitly assigned.
 Guide examples supply no grant, universal topology or cadence.
 Resolve references/ against the Installed policy directory delivered below.
 Measure a file with wc -c before reading it; read large files in bounded ranges.
@@ -33,9 +35,6 @@ policy delivered in your bundle needs no re-read or hash check unless lost to co
 Reuse full relevant references/ or protocol text only when known unchanged:
 a sha256sum match with its delivered Policy locators value proves unchanged text.
 Re-read on mismatch, lost context or uncertainty; a summary is insufficient.
-The first required full workspace-protocol
-read remains mandatory. Runtime checks still need fresh catalog hash,
-eligibility, provider availability and Jev receipts.
 
 Before your first owned write or delegation, verify the assignment's inbound
 route once per session: get_agent_status on your PASEO_AGENT_ID, parent label at

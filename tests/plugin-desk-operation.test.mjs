@@ -84,6 +84,9 @@ test('foreign native caller cannot retrieve another actor receipt; a distinct na
  const f=fixture(t); const original=await f.ops.run(f.identity,f.input,async()=>({state:'recorded'}));
  const foreign=f.ops.get({...f.identity,agentId:'foreign'});
  assert.equal(foreign.code,'EVIDENCE_INCOMPLETE');assert.match(foreign.recovery,/native caller.*Ask that Lead/);
+ assert.match(foreign.message,/this caller/);
+ assert.match(foreign.recovery,/does not prove/);
+ assert.equal(Object.hasOwn(foreign,'identity'),false,'foreign callers receive no owner receipt');
  let calls=0; const other=await f.ops.run({...f.identity,requestId:'different'},f.input,async()=>{calls++;return {state:'new'};});
  assert.equal(calls,1); assert.notEqual(other.intentSha256,original.intentSha256);
 });
