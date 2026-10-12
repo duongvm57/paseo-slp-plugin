@@ -14,7 +14,7 @@ export interface Provider extends Record<string, unknown> {
   status?: unknown;
   extends?: unknown;
   provenance?: string;
-  models?: { id: string; isSelectable?: boolean; thinkingOptions?: { id: string; metadata?: Record<string, unknown> }[]; defaultThinkingOptionId?: string }[];
+  models?: { id: string; label?: string; description?: string; isSelectable?: boolean; thinkingOptions?: { id: string; label?: string; description?: string; metadata?: Record<string, unknown> }[]; defaultThinkingOptionId?: string }[];
 }
 export interface Profile extends Record<string, unknown> {
   id: string;

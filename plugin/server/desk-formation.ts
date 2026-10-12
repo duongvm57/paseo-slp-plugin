@@ -347,7 +347,17 @@ export async function runSeatCreate(row: MembershipValue, input: DeskSeatCreateI
     };
     const plan = await prepare(); if ("ok" in plan) return plan;
     const { create } = plan;
-    if ((selected || target) && formationEvidenceTooLarge({ ...(selected ? { selected } : {}), ...(target ? { target } : {}), plan })) {
+    const routingSelection = selected?.selectionEvidence ? {
+      origin: selected.origin, optionId: selected.route.optionId, thinkingOptionId: selected.route.thinkingOptionId,
+      displayName: selected.selectionEvidence.choice.displayName,
+      description: selected.selectionEvidence.choice.description,
+      selectionHints: selected.selectionEvidence.choice.selectionHints,
+      effortDescription: selected.selectionEvidence.choice.effortDescription,
+      policy: selected.selectionEvidence.policy,
+      decisionReceiptSha256: (selected.route.decision as { sha256?: string } | undefined)?.sha256 ?? null,
+      receiptOwnerAgentId: row.agentId, requestId: input.requestId,
+    } : undefined;
+    if ((selected || target) && formationEvidenceTooLarge({ ...(selected ? { selected } : {}), ...(routingSelection ? { routingSelection } : {}), ...(target ? { target } : {}), plan })) {
       // Reserve room for phase/result copies, JSON-RPC string escaping and
       // bounded native tuple evidence before allocating a child. Legacy
       // full-pin invocations keep their original validation/receipt path.
@@ -427,6 +437,7 @@ export async function runSeatCreate(row: MembershipValue, input: DeskSeatCreateI
       if (target) phase("membership-observed", { agentId, registered: member !== null, membershipId: member?.membershipId ?? null });
       if (member === null) return { ok: true, state: "seat-pending", agentId, workspaceId: create.workspaceId,
         parent: verification.parent, sent: false, verification, resourceDisposition: "retained",
+        ...(routingSelection ? { routingSelection } : {}),
         readiness: `exact live membership not established within ${waitMs}ms; read slp_operation_get with this requestId, retain the agent ID, do not recreate or send the assignment without fresh identity/membership/authority proof; this receipt does not auto-resume`,
         nextAction: { tool: "slp_operation_get", arguments: { kind: "seat-create", requestId: input.requestId } },
         assignmentEvidence: { prompt: create.initialPrompt, promptSha256: canonicalSha256(create.initialPrompt) } };
@@ -436,6 +447,7 @@ export async function runSeatCreate(row: MembershipValue, input: DeskSeatCreateI
       phase("delivery-handed-off", { agentId, promptSha256 });
       return { ok: true, state: "awaiting-caller-delivery", agentId, workspaceId: verification.workspaceId, parent: verification.parent,
         sent: false, verification, runtime: { provider: create.provider, ...create.settings, modeSupport: plan.modeSupport }, resourceDisposition: "retained",
+        ...(routingSelection ? { routingSelection } : {}),
         delivery: { tool: "send_agent_prompt", agentId, notifyOnFinish: true, prompt: create.initialPrompt, promptSha256 },
         notification: "caller must send the exact prompt with send_agent_prompt notifyOnFinish=true; the finish notification is an event, not the report or acceptance" };
     }
@@ -444,6 +456,7 @@ export async function runSeatCreate(row: MembershipValue, input: DeskSeatCreateI
     catch { return { ok: true, state: "send-uncertain", agentId, sent: null, verification, resourceDisposition: "retained" }; }
     return { ok: true, state: "host-accepted", agentId, workspaceId: verification.workspaceId, parent: verification.parent,
       sent: true, verification, runtime: { provider: create.provider, ...create.settings, modeSupport: plan.modeSupport }, resourceDisposition: "retained",
+      ...(routingSelection ? { routingSelection } : {}),
       notification: "native-finish-callback-not-established; child reports to observed parent" };
   }, preflight);
 }

@@ -430,8 +430,10 @@ effort Fixed. Saving v2 verifies the active candidate advertises peerPresets=2;
 old/unverifiable or changing active bindings block the write without rewriting
 the pool. An absent binding permits pre-install authoring. Older binaries cannot read v2; Manager offers the original v1
 JSON for restoration. See [open presets](spec/peer-pool-presets.md).
-V2 Lead/Jev discovery reads the same descriptions/hints and supported effort
-pairs for every entry, including custom ones. The server pins and revalidates
+V2 Lead/Jev discovery reads the same Human pool policy, smallest-sufficient
+selection guidance, descriptions/hints and host model/effort meanings for every
+entry, including custom ones. Task names, output length and preset/provider
+labels alone establish no complexity or price rank. The server pins and revalidates
 entry/effort, capability hash and explicit cross-provider reference context;
 names, list order and template origin do not create reserved semantics.
 Cross-provider compares normalized runtime families, so Devin coding followed
@@ -439,7 +441,13 @@ by Codex/Luna review qualifies without model-vendor declarations. Managed role
 wrappers normalize to their family; a missing or unknown reference blocks that
 branch. The historical v2 rule literal is retained, and the routing semantics
 pin changes so old receipts cannot replay under the new interpretation. This changes selection,
-not role authority, disposition, review or source precedence.
+not role authority, disposition, review or source precedence. The selection
+phase retains policy/guidance and the chosen descriptor; native formation
+returns routingSelection with origin/preset/effort, decision hash and the
+issuing Lead's agent/request identity. Lead relays that evidence and its own
+fit reason. Jev supplies typed choice/probability, not a prose explanation.
+Operation receipts remain native-caller scoped; foreign-caller absence does
+not establish that a receipt was never stored.
 
 ## Jev routing
 

@@ -2,7 +2,7 @@
 import type { Catalog, CatalogOption, ResolvedCatalog } from './routing.ts';
 import type { Provider, Route } from './types.ts';
 import type { PresetFields } from '../../../shared/runtime/peer-presets.ts';
-import { PRESET_ROUTING_VERSION, isAutomaticEffort } from '../../../shared/runtime/peer-presets.ts';
+import { PRESET_ROUTING_VERSION, PRESET_SELECTION_GUIDANCE, isAutomaticEffort } from '../../../shared/runtime/peer-presets.ts';
 import { providerId, families } from './profiles.ts';
 import { verifyProvider, rejectRouteKeys, runtimeSettingKeys, profileRouteKeys } from './binding.ts';
 import { canonicalJson, verifyReceipt, readJevConfig, resolveJev, askJev } from './jev.ts';
@@ -15,7 +15,8 @@ export type PresetRoutingContext = {
 };
 export type PresetChoice = { candidateId: string; optionId: string; displayName: string; description: string;
   selectionHints: string; provider: string; model: string; modelProvider: string | null;
-  thinkingOptionId: string | null; runtimeRule: string };
+  thinkingOptionId: string | null; runtimeRule: string;
+  modelLabel: string; modelDescription: string | null; effortLabel: string | null; effortDescription: string | null };
 const object = (v: unknown): v is Record<string, unknown> => v !== null && typeof v === 'object' && !Array.isArray(v);
 export function validateRoutingContext(value: unknown): PresetRoutingContext {
   if (value === undefined) return {};
@@ -64,15 +65,21 @@ export function presetChoiceSet(catalog: Catalog, role: string, providers: Provi
       } else reasons.push('invalid-effort-policy');
     }
     if (reasons.length) { excluded.push({ optionId: option.id, reasons }); continue; }
-    for (const thinkingOptionId of [...new Set(efforts)]) choices.push({
+    for (const thinkingOptionId of [...new Set(efforts)]) {
+      const effort = model?.thinkingOptions?.find(e => e.id === thinkingOptionId);
+      choices.push({
       candidateId: `pair-${hash(canonicalJson([option.id, thinkingOptionId]))}`, optionId: option.id,
       displayName: preset.displayName!, description: preset.description!, selectionHints: preset.selectionHints ?? '',
       provider: option.provider, model: option.model, modelProvider: preset.modelProvider ?? null,
       thinkingOptionId, runtimeRule: preset.runtimeRule!,
-    });
+      modelLabel: model?.label ?? option.model, modelDescription: model?.description ?? null,
+      effortLabel: thinkingOptionId === null ? null : effort?.label ?? thinkingOptionId,
+      effortDescription: effort?.description ?? null,
+    }); }
   }
-  const selectionSha256 = hash(canonicalJson({ semantics: PRESET_ROUTING_VERSION, context, referenceProvider, capabilities, choices, excluded }));
-  return { choices, excluded, selectionSha256, context, referenceProvider };
+  const policy = catalog.policy, selectionGuidance = PRESET_SELECTION_GUIDANCE;
+  const selectionSha256 = hash(canonicalJson({ semantics: PRESET_ROUTING_VERSION, policy, selectionGuidance, context, referenceProvider, capabilities, choices, excluded }));
+  return { policy, selectionGuidance, choices, excluded, selectionSha256, context, referenceProvider };
 }
 export function boundedPresetChoices(set: ReturnType<typeof presetChoiceSet>) {
   if (set.choices.length === 0) throw new Error(`No eligible preset + effort pair: ${JSON.stringify(set.excluded)}`);
@@ -82,12 +89,13 @@ export function boundedPresetChoices(set: ReturnType<typeof presetChoiceSet>) {
 export async function decidePresetRoute(catalog: ResolvedCatalog, request: { role: string; brief: string; providers?: Provider[]; routingContext?: unknown; paseoHome: string }, options: JevOptions = {}) {
   const set = boundedPresetChoices(presetChoiceSet(catalog, request.role, request.providers, request.routingContext));
   const { provider, key, armed } = resolveJev(request.paseoHome, 'routing', { allowShadow: true });
-  const criteria = Object.fromEntries(set.choices.map(c => [c.candidateId, `${c.displayName}: ${c.description}; ${c.provider}/${c.model}; effort ${c.thinkingOptionId ?? 'runtime default'}; ${c.selectionHints}`]));
+  const criteria = Object.fromEntries(set.choices.map(c => [c.candidateId, `${c.displayName}: ${c.description}; ${c.provider}/${c.model}; effort ${c.effortLabel ?? 'runtime default'}${c.effortDescription ? `: ${c.effortDescription}` : ''}; ${c.selectionHints}`]));
   criteria['no-suitable-option'] = 'None of the configured preset + effort pairs meets the task; decline rather than guess.';
   const questions: Record<string, JevQuestion> = { route_option: { type: 'choice',
-    instructions: 'Choose one configured preset + effort pair for the task brief. Read each Human-authored description and hints, including custom presets. Names, list order, template origin and disposition are not fixed routing classes. Weigh uncertainty, constraints, proof obligations and capability; do not equate effort with model tier or infer price/health. Eligibility and explicit runtime rules are precomputed and cannot be overridden by prose. Decline when none fits. Do not propose retries or model/effort overrides.', criteria } };
+    instructions: `Choose one configured preset + effort pair for the task brief. ${set.selectionGuidance} Read all Human descriptions and hints, including custom presets. Eligibility and explicit runtime rules are precomputed and cannot be overridden by prose. Disposition and template origin are not routing classes.`, criteria } };
   const { receipt, answers } = await askJev({ provider, key, state: { task: request.brief, role: request.role,
-    semantics: PRESET_ROUTING_VERSION, options: set.choices, reference: set.context.reference ?? null,
+    semantics: PRESET_ROUTING_VERSION, policy: set.policy, selectionGuidance: set.selectionGuidance,
+    options: set.choices, reference: set.context.reference ?? null,
     crossProvider: set.context.crossProvider === true }, questions,
     context: { capability: 'routing', role: request.role, armed, catalogSha256: catalog.sha256,
       vocabularyVersion: PRESET_ROUTING_VERSION, selectionSha256: set.selectionSha256,

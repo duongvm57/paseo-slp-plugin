@@ -95,8 +95,15 @@ when advertised. A model advertising no separate choices has a default-only
 candidate. Missing model metadata and empty allowed intersections exclude the
 entry, with no invented default.
 
-The same choice set exposes descriptions, hints, explicit rules and entry/effort
-pairs to Lead and Jev. The v2 Jev instructions interpret all eligible entries,
+The same choice set exposes the Human pool policy, shared selection guidance,
+model/effort labels and descriptions, preset hints, explicit rules and pairs
+to Lead and Jev. Choose the smallest sufficient configured capability and
+supported effort for actual ambiguity, dependencies and verification difficulty;
+task labels and brief length alone justify no escalation. Human descriptions
+and constraints remain authoritative; names/provider/model suffixes create no
+fixed tier or price ranking. Selection guidance is advisory, not a claim that
+any particular lower model can complete a task.
+The v2 Jev instructions interpret all eligible entries,
 including arbitrary custom entries, against the raw brief. Criteria keys identify
 pairs, not preset names. Private notes are excluded. Preflight exposes exclusions;
 it never calls Jev or admits an operation. The set is bounded to 64 pairs / 24 KiB;
@@ -105,10 +112,21 @@ exceeding it reports an error and a narrowing action, never truncates silently.
 Off chooses a sole pair or asks the Lead for `selection:{optionId,thinkingOptionId}`.
 Shadow always requires the Lead's independent pair and retains the Jev pair.
 Armed binds Jev's full pair; a supplied independent pair must agree. Receipt and
-route bind catalog hash, v2 semantics and a hash of capabilities/context/choices.
+route bind catalog hash, v2 semantics and a hash of policy/guidance,
+capabilities/context/choices, including host effort meanings.
 Fresh create/delivery revalidation rejects drift. Replay retains its pinned
 decision without another Jev call. Selection never overlays effort after routing,
 changes a running seat, retries a decline or authorizes a cost escalation.
+
+`route-selected` retains the policy, guidance and chosen descriptor for v2.
+Verified native formation returns a compact `routingSelection` with selection
+origin, preset/effort, description/hints, decision hash and receipt-owner
+agent/request ID. It complements native runtime observations; it is not proof
+of task quality. Jev's typed API returns choice/probability, not a prose
+rationale. Lead records its independent fit reason and relays available
+selection evidence to Supervisor/Human. `slp_operation_get` remains native-caller
+scoped; a Supervisor querying a Lead's request as itself cannot infer receipt
+loss. Historical receipt bytes and access authority remain unchanged.
 
 ## Cross-provider and host gaps
 
