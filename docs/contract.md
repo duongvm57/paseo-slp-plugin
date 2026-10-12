@@ -308,8 +308,10 @@ Permissions and role boundaries remain distinct: policy is not tool isolation.
 ## Authority and role policy
 
 The current Human assignment supplies outcome, scope, phase/grants, proof and
-handback. Supervisor/Lead read the effective protocol on entry; Peer receives
-relevant constraints unless explicitly assigned a full read. No global role is
+handback. Supervisor/Lead read the effective protocol on entry and distill relevant
+repository tactics into Peer assignments; Peer reads the full Workspace Protocol
+only when explicitly assigned. Shared policy carries no orchestration read or
+runtime-selection freshness obligation for Peer. No global role is
 written to AGENTS.md. Common policy owns authority, language, host boundaries,
 one writer, required gates, inbound route,
 Human stop and recovery; delegation owns the direct-Lead-write exception. Roles carry responsibilities and decision triggers;
@@ -707,8 +709,10 @@ source pins are rechecked before selection/create/delivery and recorded in the
 existing prepared phase; no phase is added. Without inheritance, historical
 omitted-placement calls qualify caller cwd/common-dir and active workspace
 without adding HEAD/config leases or phase files, including an unborn repository.
-The assignment directs the child to read the source protocol only when that
-file has a non-null configuration pin.
+The assignment directs a Supervisor/Lead child to read the source protocol only
+when that file has a non-null configuration pin. Peer receives the parent's
+task-specific tactics through the assignment; source protocol pins still govern
+server-side routing, mode resolution and drift checks without a default Peer read.
 
 kind=worktree is an admitted CAPABILITY_GAP result with zero formation phases
 and no workspace/Git/setup/Jev effects. The host has no setup-suppression flag.
@@ -768,6 +772,11 @@ intent records blocks new admission rather than inferring absence; existing
 stable-key reads need no legacy scan. No automatic cleanup is added.
 Exact replay and slp_operation_get only read evidence. Failed or
 partial publication keeps a gap; no recovered call resumes unfinished phases.
+Receipt lookup is scoped to the original caller agent, repository, kind and
+requestId; Supervisor cannot retrieve a Lead's receipt with its own identity.
+EVIDENCE_INCOMPLETE reports no retained intent for this caller and directs the
+reader to request routing/decision evidence from the original caller. It proves
+no absence in another caller's receipts and grants no resubmission authority.
 Caller reconciliation is explicit, receipts retain resource obligations and
 neither receipt state nor local green tests establishes project acceptance.
 
@@ -1086,7 +1095,8 @@ drift within the current grant. Native skill installation, host configuration,
 pool changes and live launch remain separate authority. Optional integrations
 create no default setup gates.
 Full unchanged policy text in context may be reused; a summary cannot replace
-it. Changed/lost/uncertain policy needs re-reading and the first full protocol
-read remains required. Catalog, eligibility, provider and Jev evidence still
-need fresh checks. Lead's applicable independent-review decision reads remain
+it. Changed/lost/uncertain policy needs re-reading; Supervisor/Lead still make
+their first full protocol read. Runtime selection keeps fresh catalog,
+eligibility, provider and Jev checks in its applicable routing reference.
+Lead's applicable independent-review decision reads remain
 explicit in its role entry.

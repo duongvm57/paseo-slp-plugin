@@ -43,6 +43,7 @@ conversion. Read references/jev-routing.md for shadow/armed/error, skipping unco
 Old optionId/catalogSha256/decision pins remain supported; armed decline/config/key/network
 failure blocks without default substitution. The runtime resolves the complete bundle
 against fresh host providers before effects; eligibility proves no suitability/quota.
+Catalog hash, eligibility and Jev receipts must also be fresh.
 
 V2: follow returned pool policy/selectionGuidance and every preset's
 description/hints. Choose smallest sufficient capability and effort; record

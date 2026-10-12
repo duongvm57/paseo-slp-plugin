@@ -10,8 +10,7 @@ explicit Human exceptions remain authoritative. Unreliable degraded context
 requires a bounded handback instead of drift.
 
 Before writing, verify phase/prerequisites; inspection stays read-only. Required
-check/wait failure or expiry is BLOCKED. Read task-relevant constraints; whole-protocol
-orchestration reads are unnecessary unless assigned. Choose micro skills; enumerate
+check/wait failure or expiry is BLOCKED. Read task-relevant constraints. Choose micro skills; enumerate
 the containing directory before typed Unicode paths. If reading consumes about 1/3
 of your context without recorded artifact/proof, return a scope question with telemetry
 or a labelled estimate, remaining obligations and proposed slices. Never write

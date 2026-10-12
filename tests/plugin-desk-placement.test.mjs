@@ -245,6 +245,17 @@ test('Git identity drift during the awaited open guard refuses before SDK open',
  assert.equal(out.result.code,'CAPABILITY_GAP');assert.equal(f.hostCalls.some(c=>c.kind==='open'||c.kind==='create'),false);
 });
 
+for(const role of ['lead','peer'])for(const delivery of ['caller','server'])test('pinned source protocol instruction is role-scoped for '+role+' '+delivery,async t=>{
+ const f=placementFixture(t,{role});
+ writeFileSync(join(f.repository,'.paseo-slp/workspace-protocol.md'),'---\nagent_mode: full-access\n---\nSource protocol.\n');
+ const assignment='Inspect the assigned module; preserve its public API.';
+ const out=await f.run({...f.input,assignment,delivery,placement:{kind:'existing',workspaceId:'target',reason:'assigned lane'}});
+ assert.equal(out.result.state,delivery==='caller'?'awaiting-caller-delivery':'host-accepted');
+ const prompt=delivery==='caller'?out.result.delivery.prompt:f.hostCalls.find(call=>call.kind==='send').text;
+ assert.equal(prompt.includes('Use '+f.repository+'/.paseo-slp/workspace-protocol.md'),role==='lead');
+ assert.ok(prompt.includes(assignment));
+});
+
 for(const placement of [undefined,{kind:'caller'}])test('hop2 placed Lead inherits main-checkout source for '+(placement?.kind??'omitted'),async t=>{
  const f=placementFixture(t);
  writeFileSync(join(f.repository,'.paseo-slp/workspace-protocol.md'),'---\nagent_mode: full-access\n---\nSource protocol.\n');
@@ -252,13 +263,14 @@ for(const placement of [undefined,{kind:'caller'}])test('hop2 placed Lead inheri
  writeFileSync(join(f.home,'slp-runtime/state/peer-pool.json'),JSON.stringify({...f.catalog,options:[{...f.options[0],id:'user-only'}]}));
  const lead=await f.run({...f.input,role:'lead',requestId:'first-hop',placement:{kind:'existing',workspaceId:'target',reason:'Lead lane'}});
  assert.equal(lead.result.state,'awaiting-caller-delivery');
+ assert.ok(lead.result.delivery.prompt.includes('Use '+f.repository+'/.paseo-slp/workspace-protocol.md'));
  f.row.agentId=lead.result.agentId;f.row.createCwd=f.target;f.row.workspaceId='target';
  const input={...f.input,requestId:'second-hop',...(placement?{placement}:{})};
  const out=await f.run(input);assert.equal(out.result.state,'awaiting-caller-delivery',JSON.stringify(out));
  const chosen=out.phases.find(p=>p.name==='route-selected').value;
  assert.equal(chosen.source.repository,f.repository);assert.equal(chosen.source.scope,'repository');
  assert.equal(chosen.route.optionId,'first');assert.equal(out.result.parent,'child');assert.equal(out.result.agentId,'grandchild');
- assert.ok(out.result.delivery.prompt.includes('Use '+f.repository+'/.paseo-slp/workspace-protocol.md'));
+ assert.equal(out.result.delivery.prompt.includes('Use '+f.repository+'/.paseo-slp/workspace-protocol.md'),false);
  const calls=f.hostCalls.length;await f.run(input);assert.equal(f.hostCalls.length,calls);
 });
 

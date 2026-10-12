@@ -11,7 +11,7 @@ import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { install, json, hash } from '../plugin/server/runtime/cli/package.ts';
-import { roleBundle, policyLocators } from '../plugin/server/runtime/cli/role-bundle.ts';
+import { roleBundle, roleDelivery, policyLocators } from '../plugin/server/runtime/cli/role-bundle.ts';
 import { liveInventory } from '../plugin/server/runtime/cli/inventory.ts';
 import { verifyProvider } from '../plugin/server/runtime/cli/binding.ts';
 
@@ -562,6 +562,23 @@ test('ACP delivery keeps verified core while refreshing language and restoring c
   assert.ok(!unmanaged.anchor().includes('Communication language:'));
 });
 
+test('Peer entry and recovery receive assignment tactics without orchestration read obligations', t => {
+  const dir = fixture(t), installed = join(dir, 'release');
+  install(root, installed);
+  const delivery = roleDelivery(installed, 'peer', {});
+  for (const text of [roleBundle(installed, 'peer', {}).instructions, delivery.anchor()]) {
+    const peer = text.replace(/\s+/gu, ' ');
+    assert.doesNotMatch(peer, /first required full workspace-protocol read remains mandatory/);
+    assert.doesNotMatch(peer, /Runtime checks still need fresh catalog hash/);
+    assert.match(peer, /Supervisor\/Lead distill repository tactics into Peer assignments/);
+    assert.match(peer, /Peers read the full Workspace Protocol only when explicitly assigned/);
+  }
+  for (const role of ['supervisor', 'lead']) {
+    const instructions = roleBundle(installed, role, {}).instructions.replace(/\s+/gu, ' ');
+    assert.match(instructions, /read \.paseo-slp\/workspace-protocol\.md fully/iu);
+  }
+});
+
 test('tiny policy keeps protocol-owned ceremony separate from required gates and runtime freshness', t => {
   const dir = fixture(t), installed = join(dir, 'release');
   install(root, installed);
@@ -575,8 +592,9 @@ test('tiny policy keeps protocol-owned ceremony separate from required gates and
   assert.match(lead, /Tiny classification reduces ceremony, never authority, ownership, parentage or required review/);
   assert.match(lead, /Tiny labels and missing\/stale protocols grant no exception/);
   assert.match(lead, /Reuse full relevant references\/ or protocol text only when known unchanged/);
-  assert.match(lead, /Runtime checks still need fresh catalog hash, eligibility, provider availability and Jev receipts/);
-  assert.match(lead, /first required full workspace-protocol read remains mandatory/);
+  assert.match(readFileSync(join(installed, 'src/references/provider-routing.md'), 'utf8').replace(/\s+/gu, ' '),
+    /Catalog hash, eligibility and Jev receipts must also be fresh/);
+  assert.match(lead, /Read \.paseo-slp\/workspace-protocol\.md fully on assignment entry/);
   assert.match(protocol, /Lean: short inline brief\/formation/);
   assert.match(protocol, /Peer is default; direct Lead writes need the grant below/);
   assert.match(protocol, /Independent review triggers across methods/);

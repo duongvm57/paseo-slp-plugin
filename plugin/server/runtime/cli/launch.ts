@@ -276,7 +276,7 @@ function plan(root: string, request: LaunchRequest, packet: HandoffPacket | null
   request = prepared.request;
   const assignment = `Repository: ${request.repository}\nWorkspace ID: ${request.workspaceId}\n`
     + (context ? `Routing/protocol repository: ${context.routingRepository}\n`
-      + (context.protocolPinned === true ? `Use ${context.protocolRepository}/.paseo-slp/workspace-protocol.md for the source protocol; execute this assignment in ${request.repository}.\n` : '') : '')
+      + (context.protocolPinned === true && orchestrates(role) ? `Use ${context.protocolRepository}/.paseo-slp/workspace-protocol.md for the source protocol; execute this assignment in ${request.repository}.\n` : '') : '')
     + `${disposition ? `Disposition: ${disposition}\n` : ''}${request.assignment}`
     + assignmentCarrier(assignmentSelection);
   // Surface the intended mode once, at plan level, with its provenance: an
