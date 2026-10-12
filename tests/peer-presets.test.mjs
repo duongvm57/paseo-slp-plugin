@@ -68,6 +68,35 @@ test('discovery exposes model + pure effort pairs and all custom preset descript
  assert.equal(selected.origin,'lead');
 });
 
+test('Lead discovery and Jev receive the same Human pool policy, sufficiency guidance and effort descriptions',async t=>{
+ const f=fixture(t,'shadow');f.catalog.policy='Prefer bounded work on the lighter configured option; retain quality checks.';
+ f.providers[0].models[1].label='Human-visible model';
+ f.providers[0].models[1].description='A workhorse for bounded tasks';
+ f.providers[0].models[1].thinkingOptions[0]={id:'low',label:'Light',description:'Less reasoning for settled steps'};
+ f.savePool();
+ const discovery=await preflightPeerChoice(f.request,f.providers);
+ assert.equal(discovery.policy,f.catalog.policy);
+ assert.match(discovery.selectionGuidance,/smallest sufficient/);
+ const picked=discovery.choices.find(c=>c.optionId==='balanced'&&c.thinkingOptionId==='low');
+ assert.equal(picked.effortLabel,'Light');assert.equal(picked.effortDescription,'Less reasoning for settled steps');
+ assert.equal(picked.modelDescription,'A workhorse for bounded tasks');
+ let body;const fetchImpl=async(url,init)=>{body=JSON.parse(init.body);return f.fetchImpl(url,init);};
+ f.setChoice(picked.candidateId);f.request.selection={optionId:'balanced',thinkingOptionId:'low'};
+ const selected=await selectPeerSeat(f.request,{...f.deps,decide:req=>import('../plugin/server/runtime/cli/jev-routing.ts').then(m=>m.routeDecide(req,{fetchImpl}))});
+ assert.equal(body.state.policy,discovery.policy);assert.equal(body.state.selectionGuidance,discovery.selectionGuidance);
+ assert.deepEqual(body.state.options,discovery.choices);
+ assert.match(body.questions.route_option.instructions,/smallest sufficient/);
+ assert.match(body.questions.route_option.criteria[picked.candidateId],/Less reasoning for settled steps/);
+ assert.ok(!JSON.stringify(body).includes('PRIVATE_NOTE'));
+ assert.equal(selected.selectionEvidence.policy,f.catalog.policy);
+ assert.deepEqual(selected.selectionEvidence.choice,picked);
+ assert.equal(selected.origin,'lead');assert.equal(selected.decisionResult.optionId,'balanced');
+ const before=presetChoiceSet(readCatalog(f.repository,f.home),'peer',f.providers,f.request.routingContext).selectionSha256;
+ f.providers[0].models[1].thinkingOptions[0].description='Changed host meaning';
+ assert.notEqual(presetChoiceSet(readCatalog(f.repository,f.home),'peer',f.providers,f.request.routingContext).selectionSha256,before);
+ assert.throws(()=>revalidatePeerSelection(f.request,selected,f.providers),/capabilities/);
+});
+
 test('one model with several effort pairs still requires selection; unknown orchestration is fixed-only',async t=>{
  const f=fixture(t);f.catalog.options=f.catalog.options.slice(0,1);f.savePool();
  assert.equal((await preflightPeerChoice(f.request,f.providers)).choices.length,2);
@@ -186,6 +215,11 @@ test('installed-candidate native formation pins the returned preset effort and r
  const discovery=await f.run();assert.equal(discovery.state,'selection-required');assert.equal(discovery.choices.length,2);assert.equal(discovery.operationAdmitted,false);
  const req={...f.input,selection:{optionId:o.id,thinkingOptionId:'low'}};
  const out=await f.run(req);assert.equal(out.result.state,'awaiting-caller-delivery',JSON.stringify(out));
+ assert.equal(out.result.routingSelection.origin,'lead');assert.equal(out.result.routingSelection.optionId,o.id);
+ assert.equal(out.result.routingSelection.thinkingOptionId,'low');assert.equal(out.result.routingSelection.policy,f.catalog.policy);
+ assert.equal(out.result.routingSelection.receiptOwnerAgentId,f.row.agentId);assert.equal(out.result.routingSelection.requestId,req.requestId);
+ assert.equal(out.result.routingSelection.decisionReceiptSha256,null);
+ assert.equal(out.phases.find(p=>p.name==='route-selected').value.selectionEvidence.choice.description,o.description);
  assert.equal(f.hostCalls.filter(c=>c.kind==='create').length,1);
  assert.equal(f.hostCalls.find(c=>c.kind==='create').options.config.thinkingOptionId,'low');
  assert.equal((await f.run(req)).receiptSha256,out.receiptSha256);assert.equal(f.hostCalls.filter(c=>c.kind==='create').length,1);
@@ -209,6 +243,7 @@ test('public route-choices CLI discovers off-mode v2 pairs and prepares with the
  const f=fixture(t,'off'),root=fileURLToPath(new URL('..',import.meta.url));
  const requestFile=join(f.dir,'choices.json');writeFileSync(requestFile,JSON.stringify({repository:f.repository,paseoHome:f.home,providers:f.providers,routingContext:f.request.routingContext}));
  const result=JSON.parse(execFileSync(process.execPath,[join(root,'bin/slp.mjs'),'route-choices',requestFile],{encoding:'utf8'}));
+ assert.equal(result.policy,f.catalog.policy);assert.match(result.selectionGuidance,/smallest sufficient/);
  assert.equal(result.choices.length,10);assert.equal(result.omittedCount,0);assert.ok(!JSON.stringify(result).includes('PRIVATE_NOTE'));
  const picked=result.choices.find(c=>c.optionId==='advanced'&&c.thinkingOptionId==='low');
  const route={optionId:picked.optionId,thinkingOptionId:picked.thinkingOptionId,catalogSha256:result.catalogSha256,selectionSha256:result.selectionSha256,routingContext:result.routingContext};

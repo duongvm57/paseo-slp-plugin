@@ -1,6 +1,9 @@
 // Open, Human-authored Peer options. These defaults seed a new pool only;
 // template names/ids never determine routing behavior.
-export const PRESET_ROUTING_VERSION = 'peer-presets-v2-runtime-provider';
+export const PRESET_ROUTING_VERSION = 'peer-presets-v2-sufficient-fit';
+/** One decision objective for both Human/Lead discovery and Jev. Advisory
+ * task fit never overrides eligibility or ranks arbitrary preset names. */
+export const PRESET_SELECTION_GUIDANCE = 'Follow the Human pool policy and assignment constraints. Choose the smallest sufficient configured capability and the least supported effort sufficient for the actual outcome and verification. Assess unresolved ambiguity, dependency interactions, novelty, stakes and how hard correctness is to check. Source-grounded extraction, inventory, formatting and bounded synthesis usually need less reasoning than novel solutions or uncertain premises. A long brief, many files, documentation, review or architecture labels alone do not justify stronger capability or higher effort. Justify extra capability or effort by a concrete unresolved difficulty or Human requirement; verification remains required at every level. Compare model capability and effort separately, using Human descriptions/hints and host effort descriptions. Preset names, ordering, provider identity and model-name suffixes do not define rank or price. If fit cannot be established, decline. Selection grants no retries, budget expansion or changes to the configured bundle.';
 export type EffortPolicy = { kind: 'select'; allowed?: string[] } | { kind: 'fixed'; thinkingOptionId: string | null };
 // Historical v2 literal retained for saved-pool compatibility; it now compares
 // runtime providers, not Human-declared model vendors.
@@ -11,10 +14,10 @@ export interface PresetFields {
   effortPolicy?: EffortPolicy; runtimeRule?: PresetRuntimeRule;
 }
 export const PEER_PRESETS = [
-  { id: 'fast', displayName: 'Fast', description: 'Prioritize responsiveness and efficiency when a lighter model is sufficient.' },
-  { id: 'balanced', displayName: 'Balanced', description: 'Balance capability, responsiveness, and execution cost for general work.' },
-  { id: 'advanced', displayName: 'Advanced', description: 'Favor stronger capability for complex reasoning and sustained work.' },
-  { id: 'frontier', displayName: 'Frontier', description: 'Offer the strongest configured capability for the most demanding problems.' },
+  { id: 'fast', displayName: 'Fast', description: 'Use for clear, bounded work with settled steps: source lookup, extraction, formatting or mechanical edits. Prefer lighter effort when the result is easy to verify.' },
+  { id: 'balanced', displayName: 'Balanced', description: 'Use for ordinary work with several connected steps: implementation, debugging or source-grounded synthesis. Keep scope and checks explicit; choose effort for unresolved reasoning, not output length.' },
+  { id: 'advanced', displayName: 'Advanced', description: 'Use when substantial uncertainty, interacting dependencies or hard-to-check correctness needs deeper reasoning. State the concrete difficulty that a lighter configured option cannot adequately handle.' },
+  { id: 'frontier', displayName: 'Frontier', description: 'Reserve for exceptionally demanding or novel problems with difficult premises, broad dependencies or consequential tradeoffs beyond other configured options. Documentation, review or architecture alone is not a reason to use this preset.' },
   { id: 'cross-provider', displayName: 'Cross-provider', description: 'Use a different runtime provider from the reference seat for an alternative perspective, such as Codex reviewing work done by Devin.' },
 ] as const;
 export function starterPeerOptions() {

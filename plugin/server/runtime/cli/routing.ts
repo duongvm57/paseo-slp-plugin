@@ -368,6 +368,7 @@ export function routeChoices(request: { repository: string; role?: string; paseo
   return { schemaVersion: 2, semantics: PRESET_ROUTING_VERSION, role,
     source: { repository: request.repository, catalogFile: catalog.path, scope: catalog.scope },
     catalogSha256: catalog.sha256, selectionSha256: set.selectionSha256,
+    policy: set.policy, selectionGuidance: set.selectionGuidance,
     routingContext: set.context, choices: set.choices, excluded: set.excluded, omittedCount: 0 };
 }
 export function routeChoicesSchema() {
@@ -375,5 +376,5 @@ export function routeChoicesSchema() {
     request: { repository: 'absolute repository', role: 'optional, default peer', paseoHome: 'optional absolute home',
       providers: 'fresh provider observations with id/enabled/status and per-model models[].thinkingOptions/defaultThinkingOptionId; use the same observations for prepare',
       routingContext: 'optional {crossProvider?:boolean, reference?:{agentId?:string,provider:string,model:string}} from the explicitly relevant reference seat observation' },
-    output: 'catalogSha256, selectionSha256, routingContext, choices including optionId/thinkingOptionId, and exclusions; copy the chosen pair and pins into route.* for prepare' };
+    output: 'policy, selectionGuidance, catalogSha256, selectionSha256, routingContext, choices including model/effort labels and descriptions plus optionId/thinkingOptionId, and exclusions; copy the chosen pair and pins into route.* for prepare' };
 }

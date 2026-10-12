@@ -391,6 +391,22 @@ test('preview budget: an exhausted warm-up budget never starts loading-entry lis
   assert.deepEqual(out.modes, []);
 });
 
+test('preview budget: timer expiry blocks listings even when the wall clock still reports time', async t => {
+  const loadCatalog = await freshCatalog();
+  const { paseo, calls } = fakePaseo({
+    refresh: () => new Promise(() => {}),
+    snapshot: snapshotEntries([{ provider: 'slp-pi-supervisor', status: 'loading' }]),
+  });
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const pending = loadCatalog({ schemaVersion: 1, family: 'pi', role: 'supervisor' }, paseo);
+  await Promise.resolve();
+  t.mock.timers.tick(10_000);
+  const out = await pending;
+  assert.equal(calls.listModels, 0, 'warm-up timeout is terminal for this shared budget');
+  assert.equal(calls.listModes, 0);assert.equal(calls.listFeatures.length, 0);
+  assert.match(out.error, /slp-pi-supervisor is loading/);
+});
+
 const knownThinking = { id: 'high', label: 'High', description: 'More reasoning',
   isDefault: true, metadata: { tier: 2 } };
 const knownToggle = { type: 'toggle', id: 'fast', label: 'Fast', description: 'Faster replies',

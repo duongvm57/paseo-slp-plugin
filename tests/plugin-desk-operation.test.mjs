@@ -82,7 +82,8 @@ test('concurrent epochs share one admission; a losing epoch cannot execute while
 
 test('foreign native caller cannot retrieve another actor receipt; a distinct native request remains independent',async t=>{
  const f=fixture(t); const original=await f.ops.run(f.identity,f.input,async()=>({state:'recorded'}));
- assert.equal(f.ops.get({...f.identity,agentId:'foreign'}).code,'EVIDENCE_INCOMPLETE');
+ const foreign=f.ops.get({...f.identity,agentId:'foreign'});
+ assert.equal(foreign.code,'EVIDENCE_INCOMPLETE');assert.match(foreign.recovery,/native caller.*Ask that Lead/);
  let calls=0; const other=await f.ops.run({...f.identity,requestId:'different'},f.input,async()=>{calls++;return {state:'new'};});
  assert.equal(calls,1); assert.notEqual(other.intentSha256,original.intentSha256);
 });

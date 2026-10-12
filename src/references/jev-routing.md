@@ -14,10 +14,9 @@ option, with decline failing closed. Confidence/distribution grants no retry thr
 
 Runtime precomputes eligibility, withholds private notes and verifies
 provider/model/semantics/question/role/hash/membership. V1 keeps token conflicts
-and vocabulary; axis:value mentions remain unverified prose. V2 sends every
-eligible preset's Human description/hints and supported effort pairs, including
-custom entries. Names/origin/dispositions are not enums. Lead reads the same
-projection; explicit rules/reference constraints filter before Jev. Preserve
+and vocabulary; axis:value mentions remain unverified prose. V2 sends Human
+pool policy, sufficiency guidance, descriptions/hints and host effort meanings.
+Lead reads the same projection; rules/reference constraints filter before Jev. Preserve
 thinkingOptionId/selectionSha256/routingContext; Armed binds the full pair,
 without effort override. Missing identity/capability or oversized choices are
 gaps, never guessed defaults.

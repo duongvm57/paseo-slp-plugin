@@ -174,6 +174,7 @@ async function loadHostCatalog(input: CatalogRequest, paseo: ProviderCatalogApi)
         // loading entry's listing resolution draw from one budget, so the
         // worst-case wait stays inside the preview bound.
         const warmupDeadline = Date.now() + WARMUP_BUDGET_MS;
+        let warmupExpired = false;
         // The first picker query for a scope has no model. Ask the daemon to
         // rediscover this managed provider before reading its snapshot, so a
         // changed CLI behind a stable alias is visible when SLP opens. Feature
@@ -193,7 +194,7 @@ async function loadHostCatalog(input: CatalogRequest, paseo: ProviderCatalogApi)
               (error: unknown) => error instanceof Error ? error.message : String(error),
             ),
             warmupDeadline - Date.now(),
-            () => null,
+            () => { warmupExpired = true; return null; },
           );
         }
         const snapshot = await paseo.providers.snapshot(input.cwd ? { cwd: input.cwd } : undefined);
@@ -214,7 +215,10 @@ async function loadHostCatalog(input: CatalogRequest, paseo: ProviderCatalogApi)
           // client would cache as a terminal error. The resolution shares
           // the warm-up budget: past it, the measured entry state is the
           // answer rather than an RPC the daemon eventually abandons.
-          const resolved = await within(() => listCatalog(entry.provider, errors), warmupDeadline - Date.now(), () => null);
+          // Timer expiry consumes this budget even if clock precision/drift
+          // still reports a positive remainder. Never start another listing.
+          const resolved = warmupExpired ? null
+            : await within(() => listCatalog(entry.provider, errors), warmupDeadline - Date.now(), () => null);
           if (resolved !== null) return { ...resolved, resolvedProvider: entry.provider };
           const timedOut = snapshotEntryCatalog(entry);
           if (timedOut.error) errors.push(timedOut.error);

@@ -44,16 +44,18 @@ Old optionId/catalogSha256/decision pins remain supported; armed decline/config/
 failure blocks without default substitution. The runtime resolves the complete bundle
 against fresh host providers before effects; eligibility proves no suitability/quota.
 
-V2: read every preset's description/hints, including custom entries, against
-the outcome, uncertainty, constraints and proof. Names/origin/order/disposition
-are not classes. Choose selection.optionId + selection.thinkingOptionId (null
-for runtime default); one model with several efforts has several choices.
-For cross-provider, name the author/opinion source in routingRequirements.referenceAgentId;
-add crossProvider:true when the assignment requires it across the pool. Missing
-reference provider is a gap; compare runtime families (Devin to Codex qualifies). Keep explicit
-rules/effort limits. Preserve selectionSha256/routingContext in compatibility;
-Shadow compares independent pairs, Armed pins Jev's pair. No effort overlay,
-mid-turn changes, retry ladder or extra budget.
+V2: follow returned pool policy/selectionGuidance and every preset's
+description/hints. Choose smallest sufficient capability and effort; record
+the concrete uncertainty or verification difficulty justifying stronger choices.
+Task labels, brief length, names/order/origin/disposition imply no tier.
+Choose selection.optionId + selection.thinkingOptionId (null for runtime default).
+For cross-provider name routingRequirements.referenceAgentId; add crossProvider:true
+for an assignment-wide requirement. Runtime families differ (Devin to Codex);
+missing reference is a gap. Preserve rules/effort limits and compatibility
+selectionSha256/routingContext. Shadow compares independent pairs; Armed pins
+Jev's pair. Relay routingSelection and receipt owner/requestId to Supervisor/Human;
+only the issuing Lead reads slp_operation_get. Jev probabilities are evidence,
+not a reported prose rationale. No effort overlay, retry ladder or extra budget.
 
 ## Explicit dispatch and compatibility
 

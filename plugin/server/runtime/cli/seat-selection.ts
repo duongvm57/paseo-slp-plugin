@@ -20,6 +20,7 @@ export type SelectedPeer = {
   source: { repository: string; catalogFile: string; scope: string };
   mode: PeerSelectionMode; modeSha256: string;
   origin: "unique" | "lead" | "jev";
+  selectionEvidence?: { policy: string; selectionGuidance: string; choice: import('./preset-routing.ts').PresetChoice };
   // The full receipt is route.decision; retain the rest without duplicating it.
   decisionResult?: Omit<Awaited<ReturnType<typeof routeDecide>>, "decision">;
 };
@@ -166,7 +167,8 @@ function preflightPresetChoice(request: PeerSelectionRequest, providers: Provide
   if (independent || (seen.mode !== 'shadow' && ((seen.mode === 'armed') || set.choices.length === 1))) return null;
   return { ok: true as const, state: 'selection-required' as const, operationAdmitted: false,
     mode: seen.mode, source: seen.source, catalogSha256: seen.catalog.sha256,
-    selectionSha256: set.selectionSha256, choices: set.choices, excluded: set.excluded, omittedCount: 0 };
+    selectionSha256: set.selectionSha256, policy: set.policy, selectionGuidance: set.selectionGuidance,
+    choices: set.choices, excluded: set.excluded, omittedCount: 0 };
 }
 async function selectPresetPeer(request: PeerSelectionRequest, deps: Parameters<typeof selectPeerSeat>[1]): Promise<SelectedPeer> {
   const seen = readInputs(request), set = presetSet(request, deps.providers);
@@ -201,7 +203,8 @@ async function selectPresetPeer(request: PeerSelectionRequest, deps: Parameters<
   const selected: SelectedPeer = { ...provisional,
     route: { optionId: chosen.optionId, thinkingOptionId: chosen.thinkingOptionId, catalogSha256: seen.catalog.sha256,
       selectionSha256: set.selectionSha256, routingContext: set.context, ...(decision !== undefined ? { decision } : {}) },
-    origin: seen.mode === 'armed' ? 'jev' : request.selection ? 'lead' : 'unique', ...(decisionResult ? { decisionResult } : {}) };
+    origin: seen.mode === 'armed' ? 'jev' : request.selection ? 'lead' : 'unique', ...(decisionResult ? { decisionResult } : {}),
+    selectionEvidence: { policy: set.policy, selectionGuidance: set.selectionGuidance, choice: chosen } };
   revalidatePeerSelection(request, selected, deps.providers);
   if (Buffer.byteLength(JSON.stringify(selected)) > MAX_SELECTION_BYTES) throw new SeatSelectionError('REQUEST_TOO_LARGE', 'Preset selection receipt exceeds its byte budget');
   return selected;
