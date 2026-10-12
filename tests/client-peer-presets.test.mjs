@@ -11,16 +11,16 @@ const oldPool=()=>({version:1,policy:'Keep my policy',extension:{owner:'Human'},
  options:[{id:'fast',provider:'codex',model:'old',thinkingOptionId:'high',roles:['supervisor'],enabled:true,availability:'unavailable',
  suitableFor:['settled work'],avoidFor:[],notes:'PRIVATE',extension:'old entry only'}]});
 const rendered=f=>JSON.stringify(f.renderer.toJSON());
-async function setup(t,initial=null) {
+async function setup(t,initial=null,catalogs={}) {
  const mod=await loadHooks(t);mod.primitiveState.tree=true;
  const read=deferredRpc(),write=deferredRpc(),state={};
  function Harness({home}) {
   const target={hostId:'fixture',daemonHome:home};
   const pool=mod.usePeerPoolCard({target,targetKey:mod.targetKey(target),isCurrentKey:()=>true,
-   callGetPeerPool:read.rpc,callSetPeerPool:write.rpc,catalogs:{},featureSets:{},featuresLoadingFor:null,scrollFocusNode:()=>{},update:()=>{}});
+   callGetPeerPool:read.rpc,callSetPeerPool:write.rpc,catalogs,featureSets:{},featuresLoadingFor:null,scrollFocusNode:()=>{},update:()=>{}});
   state.pool=pool;
   return React.createElement(mod.PeerPoolCard,{colors,target,compact:false,statusView:null,jev:{view:null},pool,
-   availableFamilies:['codex'],catalogs:{},catalogLoadingFor:null,retryCatalog:async()=>{},retryFeatureSet:async()=>{},scrollFocusNode:()=>{}});
+   availableFamilies:['codex'],catalogs,catalogLoadingFor:null,retryCatalog:async()=>{},retryFeatureSet:async()=>{},scrollFocusNode:()=>{}});
  }
  let renderer;await act(async()=>{renderer=TestRenderer.create(React.createElement(Harness,{home:'/a'}));});
  t.after(async()=>{await act(async()=>renderer.unmount());});
@@ -30,6 +30,54 @@ async function setup(t,initial=null) {
  const press=async label=>{const node=button(label);assert.ok(node,`button ${label}`);assert.ok(!node.props.disabled,`${label} enabled`);await act(async()=>node.props.onPress());};
  return {state,renderer,read,write,button,field,press,mod,update:async home=>{await act(async()=>renderer.update(React.createElement(Harness,{home})));}};
 }
+
+const effortPool=allowed=>({version:2,policy:'Choose effort',quotaFallback:{enabled:false,optionId:null},options:[{
+ id:'custom',displayName:'Custom',description:'General work',provider:'codex',model:'model',roles:['peer'],enabled:true,
+ availability:'ready',suitableFor:[],avoidFor:[],notes:'',runtimeRule:'none',effortPolicy:{kind:'select',...(allowed===undefined?{}:{allowed})}}]});
+const effortCatalog=options=>({'codex|peer':{models:[{id:'model',label:'Model',thinkingOptions:options}],modes:[],features:[],error:null}});
+const pressText=async(f,title)=>{const node=f.renderer.root.findAllByType('Pressable').find(n=>n.findAllByType('Text').some(text=>JSON.stringify(text.props.children).includes(title)));assert.ok(node,`control ${title}`);await act(async()=>node.props.onPress());};
+const checkbox=(f,title)=>f.renderer.root.findAllByType('Pressable').find(n=>n.props.accessibilityRole==='checkbox' && n.findAllByType('Text').some(text=>text.props.children===title));
+const toggleEffort=async(f,title)=>{const node=checkbox(f,title);assert.ok(node,`checkbox ${title}`);assert.ok(!node.props.disabled);await act(async()=>node.props.onPress());};
+
+test('allowed efforts use model labels and multi-select; empty selection blocks Save and all-supported omits the restriction',async t=>{
+ const f=await setup(t,effortPool(),effortCatalog([{id:'low',label:'Light'},{id:'high',label:'Thorough'},{id:'plan',label:'Planning mode'}]));
+ await act(async()=>f.state.pool.setOpenSeat(0));await pressText(f,'Additional settings');
+ assert.equal(f.field('Allowed effort IDs'),undefined);
+ assert.equal(checkbox(f,'Planning mode'),undefined,'non-effort modes are not selectable');
+ assert.equal(checkbox(f,'All supported efforts').props.accessibilityState.checked,true);
+ await toggleEffort(f,'Thorough');
+ assert.deepEqual(f.state.pool.poolBuild.pool.options[0].effortPolicy,{kind:'select',allowed:['low']});
+ await toggleEffort(f,'Light');
+ assert.match(rendered(f),/Choose at least one effort/);assert.equal(f.button('Save pool').props.disabled,true);
+ await toggleEffort(f,'Thorough');await f.press('Save pool');
+ assert.deepEqual(f.write.calls[0].input.pool.options[0].effortPolicy,{kind:'select',allowed:['high']});
+ await act(async()=>f.write.calls[0].resolve(result(f.write.calls[0].input.pool)));
+ await act(async()=>f.state.pool.setOpenSeat(0));
+ if(!checkbox(f,'All supported efforts')) await pressText(f,'Additional settings');
+ await toggleEffort(f,'All supported efforts');
+ assert.deepEqual(f.state.pool.poolBuild.pool.options[0].effortPolicy,{kind:'select'});
+ assert.equal(checkbox(f,'Light').props.accessibilityState.checked,true);
+});
+
+test('missing catalog preserves saved effort restrictions, and unavailable values can be removed explicitly',async t=>{
+ const f=await setup(t,effortPool(['retired']));
+ await act(async()=>f.state.pool.setOpenSeat(0));await pressText(f,'Additional settings');
+ assert.deepEqual(f.state.pool.poolBuild.pool.options[0].effortPolicy,{kind:'select',allowed:['retired']});
+ assert.match(rendered(f),/load its catalog/);assert.equal(f.write.calls.length,0);
+ await toggleEffort(f,'retired (stored, unavailable)');assert.equal(f.button('Save pool').props.disabled,true);
+ await toggleEffort(f,'All supported efforts');
+ assert.deepEqual(f.state.pool.poolBuild.pool.options[0].effortPolicy,{kind:'select'});
+ assert.equal(checkbox(f,'All supported efforts').props.disabled,true,'cannot author empty restriction without choices');
+});
+
+test('models without effort choices keep runtime default and fixed effort hides the allowed-efforts selector',async t=>{
+ const f=await setup(t,effortPool(),effortCatalog([]));
+ await act(async()=>f.state.pool.setOpenSeat(0));await pressText(f,'Additional settings');
+ assert.match(rendered(f),/This model uses runtime default only/);
+ assert.equal(checkbox(f,'All supported efforts').props.disabled,true);
+ assert.equal(f.state.pool.poolDirty,false);
+ await pressText(f,'Fixed');assert.equal(checkbox(f,'All supported efforts'),undefined);
+});
 
 test('real preset UI adds/edit custom entries and saves five defaults plus custom through the shared CAS controller',async t=>{
  const f=await setup(t);assert.equal(f.write.calls.length,0,'opening never saves defaults');
