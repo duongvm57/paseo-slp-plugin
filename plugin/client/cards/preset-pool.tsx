@@ -5,7 +5,7 @@ import { Text, View } from 'react-native';
 import type { CatalogResult, FamilyName } from '../../shared/contracts.ts';
 import { FAMILY_LABEL } from '../../shared/runtime/families.ts';
 import { isAutomaticEffort } from '../../shared/runtime/peer-presets.ts';
-import { catalogScope, lineList, newCustomPreset, thinkingOptionsFor } from '../manager-state.ts';
+import { catalogScope, newCustomPreset, thinkingOptionsFor } from '../manager-state.ts';
 import type { PeerSeatForm } from '../manager-state.ts';
 import { Badge, Button, Card, CheckRow, ChipSelect, Collapse, Field, OptionPicker, SwitchRow, styles } from '../ui-kit.tsx';
 import type { Colors } from '../ui-kit.tsx';
@@ -64,6 +64,8 @@ export function PresetPoolCard({ colors, pool, availableFamilies, catalogs, retr
     {pool.poolForm.seats.map((seat, index) => {
       const catalog = seat.family ? catalogs[catalogScope(seat.family, 'peer')] : undefined;
       const thinking = thinkingOptionsFor(catalog, seat.model);
+      const efforts = thinking?.options.filter(isAutomaticEffort) ?? [];
+      const storedEfforts = seat.allowedEfforts?.filter(id => !efforts.some(e => e.id === id)) ?? [];
       const features = pool.featureDefsForSeat(seat);
       const toggle = () => pool.setOpenSeat(pool.openSeat === index ? null : index);
       return <Collapse key={seat.uid} colors={colors} title={seat.displayName || 'Unnamed preset'}
@@ -98,8 +100,25 @@ export function PresetPoolCard({ colors, pool, availableFamilies, catalogs, retr
           <ChipSelect colors={colors} value={seat.runtimeRule ?? 'none'} options={[{ label: 'None', value: 'none' }, { label: 'Different runtime provider from reference', value: 'different-model-provider' }]}
             onChange={value => edit(index, 'runtimeRule', value)} disabled={disabled} />
           <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>Lead / Jev compares runtime providers, such as Devin and Codex. No model-vendor setup is needed. The assignment names the seat whose work is being reviewed.</Text>
-          {seat.effortKind !== 'fixed' ? <Field colors={colors} label="Allowed effort IDs" hint="Optional: one supported effort ID per line. Blank allows all recognized pure effort choices."
-            value={seat.allowedEfforts?.join('\n') ?? ''} onChangeText={value => edit(index, 'allowedEfforts', lineList(value).length ? lineList(value) : undefined)} disabled={disabled} multiline /> : null}
+          {seat.effortKind !== 'fixed' ? <View style={styles.field}>
+            <Text style={[styles.fieldLabel, { color: colors.foregroundMuted }]}>Allowed efforts</Text>
+            <CheckRow colors={colors} title="All supported efforts" checked={seat.allowedEfforts === undefined}
+              hint="Lead / Jev can choose any supported effort, including newly available choices."
+              onToggle={all => edit(index, 'allowedEfforts', all ? undefined : efforts.map(e => e.id))}
+              disabled={disabled || (seat.allowedEfforts === undefined && efforts.length === 0)} />
+            {efforts.map(e => <CheckRow key={e.id} colors={colors} title={e.label}
+              checked={seat.allowedEfforts === undefined || seat.allowedEfforts.includes(e.id)}
+              onToggle={checked => {
+                const selected = seat.allowedEfforts ?? efforts.map(option => option.id);
+                edit(index, 'allowedEfforts', checked ? [...selected, e.id] : selected.filter(id => id !== e.id));
+              }} disabled={disabled} />)}
+            {storedEfforts.map(id => <CheckRow key={id} colors={colors} title={`${id} (stored, unavailable)`} checked
+              hint="Kept from your saved configuration; not currently available for automatic selection. Uncheck to remove."
+              onToggle={() => edit(index, 'allowedEfforts', seat.allowedEfforts?.filter(value => value !== id))} disabled={disabled} />)}
+            {!thinking || catalog?.error ? <Text style={[styles.mutedSmall, { color: colors.statusWarning }]}>Choose a model and load its catalog to see supported efforts.</Text>
+              : efforts.length === 0 ? <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>{thinking.options.length === 0 ? 'This model uses runtime default only; leave All supported efforts selected.' : 'No automatic effort choices recognized. Use Fixed or resolve host metadata.'}</Text> : null}
+            {seat.allowedEfforts?.length === 0 ? <Text accessibilityLiveRegion="polite" style={[styles.mutedSmall, { color: colors.statusWarning }]}>Choose at least one effort, or select All supported efforts.</Text> : null}
+          </View> : null}
           {catalog?.modes.length ? <ChipSelect colors={colors} value={seat.modeId} options={[{ label: 'Runtime default mode', value: '' }, ...catalog.modes.map(m => ({ value: m.id, label: m.label })),
             ...(seat.modeId && !catalog.modes.some(m => m.id === seat.modeId) ? [{ label: `${seat.modeId} (stored)`, value: seat.modeId }] : [])]} onChange={pool.setSeatField(index, 'modeId')} disabled={disabled} />
             : <Field colors={colors} label="Mode ID" value={seat.modeId} onChangeText={pool.setSeatField(index, 'modeId')} disabled={disabled} />}

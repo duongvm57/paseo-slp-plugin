@@ -15,6 +15,15 @@ pool writer, formation executor and receipt verifier enforce it across
 workspaces; a repository protocol cannot replace their schema/selection checks.
 This adds no repository ceremony, authority, tracker or review gate.
 
+The Manager's Allowed efforts control uses model-catalog labels and checkboxes,
+not manually entered IDs. All supported efforts leaves the restriction omitted,
+including future supported choices. Unchecking a choice creates an explicit
+subset; choosing none blocks Save until a choice or All supported efforts is
+selected. Only automatic effort choices appear. Stored unavailable values stay
+visible and removable, and a missing catalog never silently clears a saved
+restriction. Models without effort choices use runtime default with the
+restriction omitted. Fixed effort hides this control.
+
 Readers accept version 1 and version 2. Existing v1 catalogs retain their
 reserved archetype/token semantics, fixed thinking settings and receipts.
 The Manager sends provider model metadata only to an installed candidate that
