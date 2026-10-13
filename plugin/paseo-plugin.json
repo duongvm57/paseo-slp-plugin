@@ -2,6 +2,8 @@
   "id": "paseo-slp",
   "name": "Paseo SLP",
   "description": "Supervisor, Lead and Peer coding-agent teams for Paseo, with a repository desk for assignments, review and evidence.",
+  "icon": "assets/icon.png",
+  "media": ["assets/screenshot-overview.png", "assets/screenshot-peer-pool.png"],
   "requirements": { "paseo": ">=0.11.0" },
   "build": [["npm", "install", "--omit=dev", "--no-audit", "--no-fund"]]
 }
