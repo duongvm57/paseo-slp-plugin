@@ -70,8 +70,8 @@ test('formation distinguishes managed admissions from ordinary host verification
     /grantRef is a declared pointer to the Human grant.*assignment sentence and date.*claim, never authenticated/,
     /For unbound\/older hosts or required compatibility.*prepare --emit create.*agent-scoped Paseo create_agent/,
     /different checkout\/lane needs declared paths\/reason/,
-    /Verify the returned ID against actual host parent\/workspace\/cwd and bundle/,
-    /Confirm the brief's report route when its first report arrives/,
+    /Verify returned ID against actual host parent\/workspace\/cwd and bundle/,
+    /Confirm brief's report route on first report/,
     /reports establish routes, not acceptance/,
     /Empty inventory alone proves no absence/,
     /original cannot still create and any old owner is settled/);
@@ -88,7 +88,7 @@ test('new tasks discover desk formation in always-loaded delegation policy', () 
 
 test('generic inspectable Paseo delegation rules admit desk creation under the authority ceiling', () => {
   pins('src/delegation.md',
-    /slp_seat_create creates a Paseo agent through the desk that the Human can inspect and chat with, satisfying generic Paseo create_agent or inspectability rules; repository rules, protocol clauses or Human instructions forbidding desk creation or requiring another formation path exclusively override this default/);
+    /slp_seat_create creates a Paseo agent through the desk that the Human can inspect and chat with, satisfying Paseo create_agent\/inspectability rules; repository rules, protocol clauses or Human instructions forbidding desk creation or requiring another formation path exclusively override this default/);
 });
 
 for (const scenario of [
@@ -411,7 +411,7 @@ test('review method tools stay conditional and keep Lead obligations', () => {
     /narrow result proves only its scope; verification sufficiency, R1\/R2 replay \(report-records.md\) and acceptance stay with Lead/,
     /state the property to restore.*allowlist over blacklist; not the implementation.*trade-off to publish when chosen; an accepted risk reopens only on new evidence/,
     /Exhaustion is not ACCEPT but a checkpoint.*Lead extends, records a proof gap or escalates/);
-  pins('src/roles/peer.md', /which enumeration may be missing, which docs sentence describes it, which failure class lacks a falsifying test; evidence or "unknown"/,
+  pins('src/roles/peer.md', /Use slp_handback_submit when attached to a desk assignment/, /which enumeration may be missing, which docs sentence describes it, which failure class lacks a falsifying test; evidence or "unknown"/,
     /trigger → consequence → evidence → counterevidence\/unknown, list coverage checked\/unchecked/,
     /write only in assigned scratch.*kill only recorded PIDs.*pass env explicitly per command, read summary\/receipt before long logs/);
   pins('docs/development.md', /the claim decides which receipt qualifies.*full-suite claim needs `selection: default-suite`.*narrow claim may use a `partial` receipt but only for exactly its argv and file list, never as full-suite evidence/,
@@ -422,7 +422,8 @@ test('review method tools stay conditional and keep Lead obligations', () => {
 
 test('ordinary formation requires no caller routing choreography and preserves truthful pending recovery', () => {
   pins(direct, /Ordinary Peer: omit runtime\/selection for server pool\/Jev choice/,
-    /selection-required with operationAdmitted=false.*add selection.optionId before admission/,
+    /selection-required with operationAdmitted=false.*selection.optionId before admission; ambiguous V2 options need selection.thinkingOptionId.*null for runtime default/,
+    /Armed selection confirms\/detects drift, never forces models; Human constraints belong in assignment, Jev's brief, not grantRef/,
     /Full-pin compatibility validates complete pool\/Jev pins; no settings overrides/,
     /recorded refusal keeps its original body and requestId.*new requestId only after.*no create\/send was issued/,
     /same-Git workspace\/cwd and pins routing\/protocol separately/,
@@ -491,11 +492,12 @@ test('seat formation policy stays within frozen per-file and total word budgets'
   "src/references/anti-patterns.md": 612,
   "src/references/governance.md": 635,
   "src/references/monitoring.md": 910,
-  "src/references/jev-routing.md": 233
+  "src/references/jev-routing.md": 233,
+  "src/references/peer-tactics.md": 450
 };
   const words = text => text.trim().split(/\s+/u).length;
   for (const [path, cap] of Object.entries(caps)) assert.ok(words(raw(path)) <= cap, `${path} exceeds ${cap} words`);
   const all = installUnitPaths(root).filter(path => path.startsWith('src/') && path.endsWith('.md'));
   assert.deepEqual([...all].sort(), Object.keys(caps).sort(), 'account for every installed policy file');
-  assert.ok(all.reduce((total, path) => total + words(raw(path)), 0) <= 10385, 'frozen total policy word ceiling; pruning needs no filler');
+  assert.ok(all.reduce((total, path) => total + words(raw(path)), 0) <= 10835, 'frozen total policy word ceiling; pruning needs no filler');
 });

@@ -520,7 +520,7 @@ test('standalone bundles deliver semantic obligations and conditional operation 
     assert.match(instructions, /New worktree: Paseo create_workspace under host-setup authority, then\s+slp_seat_create placement existing/);
     assert.match(instructions, /create_agent remains compatibility\/recovery/);
     assert.match(instructions, /create_agent remains compatibility\/recovery/);
-    assert.match(instructions, /satisfying generic Paseo create_agent or inspectability rules;\s+repository rules, protocol clauses or Human instructions\s+forbidding desk creation or requiring another formation path exclusively override this default/);
+    assert.match(instructions, /satisfying Paseo create_agent\/inspectability rules;\s+repository rules, protocol clauses or Human instructions\s+forbidding desk creation or requiring another formation path exclusively override this default/);
   }
   const lead = roleBundle(installed, 'lead', {}).instructions;
   const supervisor = roleBundle(installed, 'supervisor', {}).instructions;

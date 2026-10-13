@@ -92,7 +92,7 @@ export function createDeskOperations(stableRoot: string) {
     assertRealComponents(stableRoot, path, "operation receipt");
     const intent = read(join(path, "intent.json"));
     if (intent === null) return { ...reject("EVIDENCE_INCOMPLETE", "this caller has no retained intent for this request"),
-      recovery: "Receipts are scoped to the native caller that issued the operation. Ask that Lead for its receipt and routing selection; another caller's lookup does not prove the receipt was never stored. Do not resubmit effects." };
+      recovery: "An unadmitted preflight rejection may leave this caller with no intent or receipt. Receipts are scoped to the native caller that issued the operation; for another caller's operation, ask that Lead for its receipt and routing selection. A foreign-caller lookup does not prove the receipt was never stored. Do not resubmit issued or uncertain effects." };
     const body = Intent.parse(intent.body);
     if (intent.previousSha256 !== null || nativeKey(body.identity) !== nativeKey(identity)) return reject("ACTOR_MISMATCH", "operation identity differs from its native caller");
     const callerEpochMatches = body.identity.membershipId === identity.membershipId;

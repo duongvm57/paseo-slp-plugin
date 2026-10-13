@@ -12,7 +12,7 @@ import { roles, orchestrates } from './profiles.ts';
 // slp_seat_create placement existing. kind=worktree is a gap; pending keeps ID.
 const orchestratingTools = [
   'slp_seat_create(requestId: string, role: "lead", taskLabel: string, assignment: string, grantRef: string, placement?: {kind: "caller"} | {kind: "existing", workspaceId?: string, cwd?: string, reason: string} | {kind: "worktree", reason: string, baseRef?: string, branchName?: string}, delivery?: "caller" | "server")',
-  'slp_seat_create(requestId: string, role: "peer", taskLabel: string, assignment: string, grantRef: string, runtime?: { optionId: string, catalogSha256: string, decision?: object }, selection?: { optionId: string }, disposition?: string, placement?: {kind: "caller"} | {kind: "existing", workspaceId?: string, cwd?: string, reason: string} | {kind: "worktree", reason: string, baseRef?: string, branchName?: string}, delivery?: "caller" | "server")',
+  'slp_seat_create(requestId: string, role: "peer", taskLabel: string, assignment: string, grantRef: string, runtime?: { optionId: string, catalogSha256: string, decision?: object }, selection?: { optionId: string, thinkingOptionId?: string | null }, disposition?: string, placement?: {kind: "caller"} | {kind: "existing", workspaceId?: string, cwd?: string, reason: string} | {kind: "worktree", reason: string, baseRef?: string, branchName?: string}, delivery?: "caller" | "server")',
   'slp_task_deliver(requestId: string, assignmentId: string, expectedLedgerRevision: integer, expectedBriefRevision: integer, expectedOwnershipRevision: integer, task: object, runtime: object, text: string, placement?: object)',
   'slp_task_get(assignmentId: string, taskId: string, attemptId?: string, expectedLedgerRevision?: integer)',
   'slp_operation_get(requestId: string, kind: "seat-create" | "task-deliver")',
@@ -44,7 +44,7 @@ export function spawnKit(role: string) {
   if (!roles.includes(role)) throw new Error('Unknown role');
   return {
     note: orchestrates(role)
-      ? 'approximate; consult the specific live schema for unfamiliar parameters or a mismatch; ordinary Peer: start slp_seat_create with runtime/selection omitted for server pool/Jev selection; returned choices use selection.optionId; full runtime is compatibility with complete receipts; new worktree: use Paseo create_workspace under its host-setup grant, then slp_seat_create placement existing (kind=worktree is a gap); pending: slp_operation_get with the same requestId, keep the ID, never recreate'
+      ? 'approximate; consult the specific live schema for unfamiliar parameters or a mismatch; ordinary Peer: start slp_seat_create with runtime/selection omitted for server pool/Jev selection; returned choices use selection.optionId, plus selection.thinkingOptionId when that option has multiple eligible pairs (null for runtime default); full runtime is compatibility with complete receipts; new worktree: use Paseo create_workspace under its host-setup grant, then slp_seat_create placement existing (kind=worktree is a gap); pending: slp_operation_get with the same requestId, keep the ID, never recreate'
       : 'approximate; see tools/list; agentId: full id, not list_agents shortId; without slp_desk tools, hand back with one native send_agent_prompt report',
     tools: orchestrates(role) ? [...orchestratingTools] : [...peerTools],
   };

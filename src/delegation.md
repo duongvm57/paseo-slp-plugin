@@ -3,12 +3,12 @@
 Check desk binding first (slp_status if available); use bound slp_seat_create
 for Lead/Peer, including existing worktrees (references/delegation-execution.md).
 Peer default: omit runtime/selection for server pool/Jev choice;
-returned choices need selection.optionId.
+choices need selection.optionId; ambiguous V2 needs selection.thinkingOptionId.
 New worktree: Paseo create_workspace under host-setup authority, then
 slp_seat_create placement existing. create_agent remains compatibility/recovery.
 Keep uncertain seat IDs; never recreate.
 slp_seat_create creates a Paseo agent through the desk that the Human can
-inspect and chat with, satisfying generic Paseo create_agent or inspectability rules;
+inspect and chat with, satisfying Paseo create_agent/inspectability rules;
 repository rules, protocol clauses or Human instructions
 forbidding desk creation or requiring another formation path exclusively override this default.
 

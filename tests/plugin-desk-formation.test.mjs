@@ -7,7 +7,7 @@ import { canonicalSha256 } from '../plugin/server/config-view.ts';
 import { createDeskOperations } from '../plugin/server/desk-operation.ts';
 import { createFormationPlanner, runSeatCreate, FormationPlanningError } from '../plugin/server/desk-formation.ts';
 import { DeskSeatCreateInput, DeskTaskDeliverInput } from '../plugin/shared/delegation.ts';
-import { WIRE_LIMITS } from '../plugin/shared/enforcement.ts';
+import { WIRE_LIMITS, DeskRejection } from '../plugin/shared/enforcement.ts';
 import { createFormationPlacement } from '../plugin/server/desk-placement.ts';
 import { execFileSync } from 'node:child_process';
 import { memberRow } from './helpers/desk-bridge-fixture.mjs';
@@ -621,4 +621,102 @@ test('legacy recorded full-runtime intent and all five phases replay byte-for-by
  f.deps.preflightPeer=async()=>assert.fail('old preflight');f.deps.selectPeer=async()=>assert.fail('old Jev');f.deps.plan=async()=>assert.fail('old planner');
  const replay=await f.run(input);assert.equal(replay.result.agentId,'old-child');assert.equal(replay.phases.length,5);
  assert.deepEqual(Object.fromEntries(readdirSync(path).map(name=>[name,readFileSync(join(path,name),'utf8')])),before);assert.equal(f.effects.length,0);
+});
+
+for (const mode of ['unconfigured','off','shadow','armed']) {
+ for (const boundary of ['preflight','select']) {
+  test('v2 '+mode+' '+boundary+' keeps pair diagnostics controlled before create/send',async t=>{
+   const f=await realPeerFixture(t,mode,1);
+   f.catalog.version=2;
+   Object.assign(f.options[0],{displayName:'Fixture',description:'Bounded coding',effortPolicy:{kind:'select'},runtimeRule:'none'});
+   delete f.options[0].thinkingOptionId;f.savePool();
+   f.host.providers.snapshot=async()=>({entries:[{provider:'slp-codex-peer',enabled:true,status:'ready',
+    modes:[{id:'full-access'}],models:[{id:'model/variant',thinkingOptions:[{id:'low'},{id:'high'}]}]}]});
+   if(boundary==='select')f.formationDeps.preflightPeer=async()=>null;
+   let eligibleValues;
+   for(const [suffix,selection,message] of [
+    ['ambiguous',{optionId:'first'},/multiple eligible.*selection.thinkingOptionId/],
+    ['effort',{optionId:'first',thinkingOptionId:'PRIVATE_SECRET'},/does not match an eligible preset \+ effort pair/],
+    ['option',{optionId:'PRIVATE_SECRET'},/does not match an eligible preset \+ effort pair/],
+   ]) {
+    const req={...f.input,requestId:suffix,selection,delivery:'server'};
+    const out=await f.run(req),result=boundary==='select'?out.result:out;
+    assert.equal(result.code,'INVALID_RECORD',JSON.stringify(out));assert.match(result.message,message);
+    assert.deepEqual(DeskRejection.parse(result),result);
+    if(suffix==='ambiguous'){
+     const values=JSON.parse(result.recovery.match(/selected option: (\[[^\n]*?\])\./)[1]);
+     eligibleValues=values;assert.deepEqual(values,['low','high']);assert.equal(result.recovery.length<=WIRE_LIMITS.rejectionRecovery,true);
+    }else assert.match(result.recovery,/Inspect pool eligibility and model\/effort capabilities/);
+    assert.doesNotMatch(JSON.stringify(out),/PRIVATE_SECRET/);
+    assert.equal(f.effects.length,0);assert.equal(f.decisions(),0);
+    const identity={repoKey:'repo',membershipId:f.row.membershipId,agentId:'parent',kind:'seat-create',requestId:suffix};
+    const ops=createDeskOperations(f.formationDeps.stableRoot);
+    if(boundary==='preflight')assert.equal(ops.get(identity).code,'EVIDENCE_INCOMPLETE');
+    else {
+     assert.equal(out.state,'recorded');assert.deepEqual(out.phases,[]);
+     const replay=await f.run(req);assert.equal(replay.receiptSha256,out.receiptSha256);
+    }
+   }
+   // Use the response's actual effort values in every mode; never rely on omitted-selection discovery.
+   const effort=eligibleValues.at(-1);f.setChoice('pair-'+canonicalSha256(['first',effort]));
+   const req={...f.input,requestId:boundary==='preflight'?'ambiguous':'corrected',selection:{optionId:'first',thinkingOptionId:effort},delivery:'server'};
+   const out=await f.run(req);assert.equal(out.result.state,'host-accepted',JSON.stringify(out));
+   assert.deepEqual(f.effects.map(e=>e.kind),['create','send']);
+   assert.equal(f.effects[0].options.config.thinkingOptionId,effort);
+   assert.equal(f.decisions(),mode==='armed'||mode==='shadow'?1:0);
+   const replay=await f.run(req);assert.equal(replay.receiptSha256,out.receiptSha256);assert.equal(f.effects.length,2);
+   if(boundary==='preflight') {
+    f.configure('off');f.catalog.options[0].effortPolicy={kind:'fixed',thinkingOptionId:'high'};f.savePool();
+    const single=await f.run({...req,requestId:'sole',selection:{optionId:'first'}});
+    assert.equal(single.result.state,'host-accepted',JSON.stringify(single));
+   }
+  });
+ }
+}
+
+test('selection failure maps typed reasons without forwarding exception text',async t=>{
+ for(const reason of ['selection-required','effort-required','pair-ineligible','unknown']) {
+  const f=fixture(t);
+  f.deps.preflightPeer=async()=>{throw {name:'SeatSelectionError',code:'INVALID_RECORD',reason,message:'PRIVATE_SECRET',eligibleEfforts:['low','high']};};
+  f.deps.selectPeer=async()=>assert.fail('preflight must refuse');
+  const out=await f.run({...f.input,role:'peer'});
+  assert.equal(out.code,'INVALID_RECORD');assert.doesNotMatch(JSON.stringify(out),/PRIVATE_SECRET/);
+  if(reason==='selection-required')assert.match(out.message,/requires an independent selection.optionId/);
+  assert.deepEqual(f.effects,[]);
+ }
+});
+
+for(const mode of ['unconfigured','off','shadow','armed']) {
+ for(const boundary of ['preflight','select']) {
+  for(const failure of ['disabled-pool','missing-model','no-allowed-effort','selected-disabled','selected-missing-model']) {
+   test('v2 '+mode+' '+boundary+' '+failure+' returns specific empty-pair failure before effects',async t=>{
+    const f=await realPeerFixture(t,mode,2);f.catalog.version=2;
+    for(const option of f.options){Object.assign(option,{displayName:'Fixture',description:'Bounded coding',effortPolicy:{kind:'select'},runtimeRule:'none'});delete option.thinkingOptionId;}
+    let models=[{id:'model/variant',thinkingOptions:[{id:'low'},{id:'high'}]}];
+    if(failure==='disabled-pool')f.options.forEach(o=>o.enabled=false);
+    if(failure==='missing-model')models=[];
+    if(failure==='no-allowed-effort')f.options.forEach(o=>o.effortPolicy.allowed=['medium']);
+    if(failure==='selected-disabled')f.options[0].enabled=false;
+    if(failure==='selected-missing-model')f.options[0].model='PRIVATE_MISSING_MODEL';
+    f.savePool();f.host.providers.snapshot=async()=>({entries:[{provider:'slp-codex-peer',enabled:true,status:'ready',modes:[{id:'full-access'}],models}]});
+    if(boundary==='select')f.formationDeps.preflightPeer=async()=>null;
+    const out=await f.run({...f.input,selection:{optionId:'first'},delivery:'server'}),result=boundary==='select'?out.result:out;
+    assert.equal(result.code,'INVALID_RECORD',JSON.stringify(out));
+    assert.equal(result.message,'No eligible preset + effort pair is available for the selected option/pool');
+    assert.doesNotMatch(JSON.stringify(out),/PRIVATE_MISSING_MODEL|Peer selection failed/);
+    assert.equal(f.effects.length,0);assert.equal(f.decisions(),0);
+    if(boundary==='select')assert.deepEqual(out.phases,[]);
+   });
+  }
+ }
+}
+
+test('effort diagnostic bounds and validates its public scalar surface',async t=>{
+ for(const eligibleEfforts of [[],['x'.repeat(400)],['low',{}],Array(65).fill('low')]){
+  const f=fixture(t);f.deps.selectPeer=async()=>assert.fail('unadmitted');
+  f.deps.preflightPeer=async()=>{throw {name:'SeatSelectionError',code:'INVALID_RECORD',reason:'effort-required',eligibleEfforts,message:'PRIVATE_SECRET'};};
+  const out=await f.run({...f.input,role:'peer'});assert.equal(out.code,'REQUEST_TOO_LARGE');
+  assert.match(out.recovery,/Ask the Human to narrow/);assert.ok(out.recovery.length<=WIRE_LIMITS.rejectionRecovery);
+  assert.doesNotMatch(JSON.stringify(out),/PRIVATE_SECRET|x{100}/);assert.deepEqual(f.effects,[]);
+ }
 });
