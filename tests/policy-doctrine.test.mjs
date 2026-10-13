@@ -118,7 +118,7 @@ for (const scenario of [
 
 test('Supervisor reference reads follow the activity instead of team formation', () => {
   pins('src/roles/supervisor.md',
-    /Read references\/governance.md before causal recording, recovery, policy evolution, audit, drift\/failure investigation or lost momentum/,
+    /Read references\/governance.md before causal recording, cross-project relay, recovery, policy evolution, audit, drift\/failure investigation or lost momentum/,
     /references\/monitoring.md before observation and settlement/);
   assert.doesNotMatch(read('src/roles/supervisor.md'), /when establishing supervision/);
   pins(governance, /Supervisor uses this for causal recording, coordination recovery, authorized cross-project relay and policy evolution/);
@@ -287,6 +287,15 @@ test('governance owns evidence-led investigation, bounded contact and authorized
     /Relay only when the current assignment explicitly grants it and recipient Lead\/route are verified/,
     /Missing grant, route or data authority makes the dependent branch BLOCKED/,
     /read anti-patterns.md and select relevant hypotheses.*what disproves it.*within authority/);
+});
+
+test('Supervisor keeps a protocol inventory and relays tactics with source provenance', () => {
+  pins('src/roles/supervisor.md',
+    /protocol inventory per assigned repo \(path\/sha256\/routing_intent\), refreshed at entry\/handback/);
+  pins(governance,
+    /relayed tactic's source repository; carry only what the target's protocol\/policy supports/,
+    /cross-repository decisions in each affected repository per its protocol \(gap if none\), with a notebook pointer/);
+  assert.doesNotMatch(read(governance), /docs\/decisions|\bADRs?\b/, 'global policy stays repository-agnostic');
 });
 
 test('workflow investigation reaches the conditional twenty-pattern evidence catalogue', () => {
@@ -479,7 +488,7 @@ test('seat formation policy stays within frozen per-file and total word budgets'
   const caps = {
   "src/common.md": 562,
   "src/delegation.md": 266,
-  "src/roles/supervisor.md": 324,
+  "src/roles/supervisor.md": 337,
   "src/roles/lead.md": 419,
   "src/roles/peer.md": 541,
   "src/templates/workspace-protocol.md": 997,
@@ -490,7 +499,7 @@ test('seat formation policy stays within frozen per-file and total word budgets'
   "src/references/orchestration.md": 1148,
   "src/references/delegation-execution.md": 745,
   "src/references/anti-patterns.md": 612,
-  "src/references/governance.md": 635,
+  "src/references/governance.md": 665,
   "src/references/monitoring.md": 910,
   "src/references/jev-routing.md": 233,
   "src/references/peer-tactics.md": 450
@@ -499,5 +508,5 @@ test('seat formation policy stays within frozen per-file and total word budgets'
   for (const [path, cap] of Object.entries(caps)) assert.ok(words(raw(path)) <= cap, `${path} exceeds ${cap} words`);
   const all = installUnitPaths(root).filter(path => path.startsWith('src/') && path.endsWith('.md'));
   assert.deepEqual([...all].sort(), Object.keys(caps).sort(), 'account for every installed policy file');
-  assert.ok(all.reduce((total, path) => total + words(raw(path)), 0) <= 10835, 'frozen total policy word ceiling; pruning needs no filler');
+  assert.ok(all.reduce((total, path) => total + words(raw(path)), 0) <= 10833, 'frozen total policy word ceiling; pruning needs no filler');
 });

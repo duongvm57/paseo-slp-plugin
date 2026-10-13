@@ -32,6 +32,7 @@ Relay only when the current assignment explicitly grants it and recipient
 Lead/route are verified. Share minimum authorized evidence, excluding raw
 assignments/private context. Missing grant, route or data authority makes the
 dependent branch BLOCKED for the assigned authority/Human.
+Name each relayed tactic's source repository; carry only what the target's protocol/policy supports. Record cross-repository decisions in each affected repository per its protocol (gap if none), with a notebook pointer.
 Record from/to project, task and Lead IDs; dependency/interface; minimal
 evidence pointer; request; answer, status/evidence; blocked branch and owner;
 Human decision or additional authority needed; next action; timestamp or

@@ -42,16 +42,16 @@ selection.optionId before admission; ambiguous V2 options need selection.thinkin
 confirms/detects drift, never forces models; Human constraints belong in assignment,
 Jev's brief, not grantRef. Full-pin compatibility validates complete pool/Jev pins;
 no settings overrides.
-Placement defaults to caller; existing worktrees need declared paths/reason.
-It qualifies same-Git workspace/cwd and pins routing/protocol separately.
+Placement defaults to caller; existing worktrees declare paths/reason.
+Qualifies same-Git workspace/cwd and pins routing/protocol separately; Supervisor→Lead may use unnested repositories.
 Placement/automatic runtime/selection waits briefly for exact registration;
 legacy omitted full-pin Peer/Lead keeps its delivery path. Pending directs
 slp_operation_get with the same requestId: immutable evidence, no resume/recreate.
-SDK open may revive archived workspaces; prefer active IDs. Source configuration
-drift blocks delivery; same-Git identity alone grants no authority.
+SDK open may revive archived workspaces; prefer active IDs. Configuration
+drift blocks delivery; same-Git identity grants no authority.
 Lead uses Paseo create_workspace, owns its host setup within
 the grant, then calls slp_seat_create with placement existing and that workspace
-ID. Do not return to create_agent. V1 kind=worktree reports a gap before effects.
+ID. Never return to create_agent. V1 kind=worktree reports a gap before effects.
 Server creates without work, verifies the tuple and returns awaiting-caller-delivery
 with delivery.prompt; send exactly that prompt through send_agent_prompt with
 notifyOnFinish=true. delivery "server" sends without callback; use only when

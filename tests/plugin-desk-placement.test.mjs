@@ -1,12 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync,readFileSync,readdirSync,rmSync,writeFileSync } from 'node:fs';
+import { mkdirSync,readFileSync,readdirSync,realpathSync,rmSync,writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { DeskSeatCreateInput } from '../plugin/shared/delegation.ts';
 import { createDeskOperations } from '../plugin/server/desk-operation.ts';
 import { createFormationPlanner } from '../plugin/server/desk-formation.ts';
-import { placementFixture,fixtureGit } from './helpers/formation-placement-fixture.mjs';
+import { placementFixture,fixtureGit,committedRepository } from './helpers/formation-placement-fixture.mjs';
+import { createTaskGitIo } from '../plugin/server/desk-task-execution-host.ts';
 
 test('placement schema preserves absent/default and strict caller/existing/worktree-gap inputs',()=>{
  const base={requestId:'r',role:'peer',taskLabel:'x',assignment:'read',grantRef:'human'};
@@ -358,4 +359,181 @@ test('membership wait rechecks actor and target after delayed registration',asyn
   assert.equal(out.result.code,drift==='actor'?'AUTHORITY_REQUIRED':'ROUTE_DRIFT',JSON.stringify(out));assert.equal(out.result.agentId,'child');
   assert.equal(f.hostCalls.some(c=>c.kind==='send'),false);
  }
+});
+
+const crossPlacement=(f,by)=>by==='id'?{kind:'existing',workspaceId:'foreign',reason:'other repository'}
+ :by==='cwd'?{kind:'existing',cwd:f.foreign,reason:'other repository'}:{kind:'existing',workspaceId:'foreign',cwd:f.foreign,reason:'other repository'};
+for(const by of ['id','cwd','id+cwd'])test('Supervisor forms a Lead in another repository by '+by+' with target desk membership and target pins',async t=>{
+ const f=placementFixture(t,{role:'lead',callerRole:'supervisor'});
+ mkdirSync(join(f.foreign,'.paseo-slp'),{recursive:true});
+ writeFileSync(join(f.foreign,'.paseo-slp/workspace-protocol.md'),'---\nagent_mode: full-access\n---\nForeign protocol.\n');
+ const out=await f.run({...f.input,placement:crossPlacement(f,by)});
+ assert.equal(out.result.state,'awaiting-caller-delivery',JSON.stringify(out.result));
+ assert.equal(out.result.workspaceId,by==='cwd'?'opened':'foreign');assert.equal(out.result.parent,'parent');
+ assert.equal(f.snapshots.get('child').cwd,f.foreign);
+ const observed=out.phases.find(p=>p.name==='target-observed').value;
+ assert.equal(observed.cwd,f.foreign);assert.equal(observed.gitCommonDir,f.foreignCommonDir);
+ assert.deepEqual({repository:observed.source.repository,gitCommonDir:observed.source.gitCommonDir,head:observed.source.head},
+  {repository:f.foreign,gitCommonDir:f.foreignCommonDir,head:fixtureGit(f.foreign,'rev-parse','HEAD')});
+ assert.notEqual(observed.source.configuration['workspace-protocol.md'],null);
+ // Registration lives in the target repository's desk, never the caller's.
+ assert.equal(out.phases.find(p=>p.name==='membership-observed').value.registered,true);
+ assert.equal(f.members.length,0);assert.equal(f.foreignMembers.length,1);
+ const prompt=out.result.delivery.prompt;
+ assert.ok(prompt.includes('Repository: '+f.foreign));assert.ok(prompt.includes('Routing/protocol repository: '+f.foreign));
+ assert.ok(prompt.includes('Use '+f.foreign+'/.paseo-slp/workspace-protocol.md'));
+ assert.equal(prompt.includes(f.repository+'/.paseo-slp'),false);
+ const calls=f.hostCalls.length,replay=await f.run({...f.input,placement:crossPlacement(f,by)});
+ assert.equal(replay.receiptSha256,out.receiptSha256);assert.equal(f.hostCalls.length,calls);
+});
+
+test('Supervisor cross-repository Lead stays pending while only the caller desk registers it',async t=>{
+ const f=placementFixture(t,{role:'lead',callerRole:'supervisor'});
+ f.deps.readMemberships=gitCommonDir=>gitCommonDir===f.foreignCommonDir?[]:f.members.concat(f.foreignMembers);
+ const out=await f.run({...f.input,placement:crossPlacement(f,'id')});
+ assert.equal(out.result.state,'seat-pending',JSON.stringify(out.result));assert.equal(out.result.sent,false);
+ assert.equal(Object.hasOwn(out.result,'delivery'),false);
+});
+
+for(const [callerRole,role] of [['lead','lead'],['supervisor','peer'],['lead','peer']])for(const by of ['id','id+cwd'])
+ test('cross-repository '+callerRole+' → '+role+' by '+by+' stays rejected before native allocation',async t=>{
+  const f=placementFixture(t,{role,callerRole});
+  const out=await f.run({...f.input,placement:crossPlacement(f,by)});
+  assert.equal(out.result.code,'CAPABILITY_GAP',JSON.stringify(out.result));assert.match(out.result.message,/different Git repository/);
+  assert.equal(f.hostCalls.some(c=>c.kind==='create'||c.kind==='open'),false);
+  assert.equal(f.members.length+f.foreignMembers.length,0);
+ });
+
+for(const placement of [undefined,{kind:'caller'}])test('Supervisor Lead with '+(placement?.kind??'omitted')+' placement still rejects a foreign caller workspace',async t=>{
+ const f=placementFixture(t,{role:'lead',callerRole:'supervisor'});f.workspaces.get('caller').workspaceDirectory=f.foreign;
+ const out=await f.run({...f.input,...(placement?{placement}:{})});
+ assert.equal(out.result.code,'CAPABILITY_GAP',JSON.stringify(out.result));assert.match(out.result.message,/different Git repository/);
+ assert.equal(f.hostCalls.some(c=>c.kind==='create'||c.kind==='open'),false);
+});
+
+for(const by of ['id','cwd'])test('Supervisor Lead into a nested Git repository by '+by+' stays rejected',async t=>{
+ const f=placementFixture(t,{role:'lead',callerRole:'supervisor'});
+ f.workspaces.set('nested',{id:'nested',workspaceDirectory:f.nested,status:'done',archivingAt:null});
+ const placement=by==='id'?{kind:'existing',workspaceId:'nested',reason:'nested'}:{kind:'existing',cwd:f.nested,reason:'nested'};
+ const out=await f.run({...f.input,placement});
+ assert.equal(out.result.code,'CAPABILITY_GAP',JSON.stringify(out.result));
+ assert.equal(f.hostCalls.some(c=>c.kind==='create'||c.kind==='open'),false);
+});
+
+for(const by of ['id','cwd'])test('Supervisor Lead in the same repository keeps the caller-repository pin and phases by '+by,async t=>{
+ const outs=[];
+ for(const callerRole of ['lead','supervisor']){
+  const f=placementFixture(t,{role:'lead',callerRole});
+  const placement=by==='id'?{kind:'existing',workspaceId:'target',reason:'lane'}:{kind:'existing',cwd:f.target,reason:'lane'};
+  const out=await f.run({...f.input,placement});
+  assert.equal(out.result.state,'awaiting-caller-delivery',JSON.stringify(out.result));
+  const observed=out.phases.find(p=>p.name==='target-observed').value;
+  assert.equal(observed.gitCommonDir,f.commonDir);assert.equal(observed.source.repository,f.repository);
+  assert.equal(f.members.length,1);assert.equal(f.foreignMembers.length,0);
+  outs.push(out.phases.map(p=>p.name));
+ }
+ assert.deepEqual(outs[1],outs[0]);
+});
+
+// Nesting compares every registered checkout of both repositories, not only
+// the caller's own checkout and main directory.
+const nestedLayouts={
+ 'target inside another linked worktree of the caller':f=>{const inner=join(f.target,'inner');committedRepository(inner);return realpathSync(inner);},
+ 'another worktree of the target inside the caller checkout':f=>{fixtureGit(f.foreign,'worktree','add','--detach',join(f.repository,'foreign-wt'),'HEAD');return f.foreign;},
+ 'target main inside the caller while placement uses its outside worktree':f=>{const main=join(f.repository,'inner-main');committedRepository(main);
+  const wt=join(f.dir,'inner-wt');fixtureGit(main,'worktree','add','--detach',wt,'HEAD');return realpathSync(wt);},
+ 'caller checkout inside the target checkout':f=>{committedRepository(f.dir);return realpathSync(f.dir);},
+};
+for(const [layout,make] of Object.entries(nestedLayouts))for(const by of ['id','cwd'])test('Supervisor Lead nesting rejects '+layout+' by '+by,async t=>{
+ const f=placementFixture(t,{role:'lead',callerRole:'supervisor'});const dir=make(f);
+ f.workspaces.set('nested-lane',{id:'nested-lane',workspaceDirectory:dir,status:'done',archivingAt:null});
+ const out=await f.run({...f.input,placement:by==='id'?{kind:'existing',workspaceId:'nested-lane',reason:'nested'}:{kind:'existing',cwd:dir,reason:'nested'}});
+ assert.equal(out.result.code,'CAPABILITY_GAP',JSON.stringify(out.result));assert.match(out.result.message,/nested/);
+ assert.equal(out.phases.length,0);assert.equal(f.hostCalls.some(c=>c.kind==='create'||c.kind==='open'),false);
+});
+
+test('Supervisor Lead cross-repository placement fails closed when worktree registration is unobservable',async t=>{
+ const real=createTaskGitIo();
+ const f=placementFixture(t,{role:'lead',callerRole:'supervisor',git:{...real,worktreeList:async()=>{throw new Error('fixture worktree list failure');}}});
+ const out=await f.run({...f.input,placement:crossPlacement(f,'id')});
+ assert.equal(out.result.code,'CAPABILITY_GAP',JSON.stringify(out.result));assert.match(out.result.message,/worktree/);
+ assert.equal(f.hostCalls.some(c=>c.kind==='create'||c.kind==='open'),false);
+});
+
+// Repository classification must not alter same-repository failure paths.
+const sameRepoFailures={
+ 'uncertain id-only refresh':{budgets:{readMs:10,effectMs:10}},
+ 'missing cwd':{},
+};
+for(const [name,options] of Object.entries(sameRepoFailures))test('same-repository '+name+' keeps Lead-caller phases and result for a Supervisor',async t=>{
+ const outs=[];
+ for(const callerRole of ['lead','supervisor']){
+  const f=placementFixture(t,{role:'lead',callerRole,...options});
+  if(name==='uncertain id-only refresh')f.setRefreshFault(()=>new Promise(()=>{}));
+  const placement=name==='missing cwd'?{kind:'existing',cwd:join(f.dir,'missing'),reason:'lane'}:{kind:'existing',workspaceId:'target',reason:'lane'};
+  const out=await f.run({...f.input,placement});
+  assert.equal(f.hostCalls.some(c=>c.kind==='create'),false);
+  outs.push({phases:out.phases.map(p=>p.name),state:out.result.state??null,code:out.result.code??null,message:out.result.message??null});
+ }
+ assert.ok(outs[0].phases.includes('placement-planned'),JSON.stringify(outs[0]));
+ assert.deepEqual(outs[1],outs[0]);
+});
+
+for(const second of ['caller repository','third repository'])test('cross-repository descriptor drift to the '+second+' after classification is refused',async t=>{
+ const f=placementFixture(t,{role:'lead',callerRole:'supervisor'});
+ const third=join(f.dir,'third');committedRepository(third);let reads=0;
+ f.setRefreshFault(id=>{const base=f.workspaces.get(id);reads++;
+  return id==='foreign'&&reads>1?{...base,workspaceDirectory:second==='caller repository'?f.target:realpathSync(third)}:base;});
+ const out=await f.run({...f.input,placement:crossPlacement(f,'id')});
+ assert.equal(out.result.code,'CAPABILITY_GAP',JSON.stringify(out.result));assert.match(out.result.message,/different Git repository/);
+ assert.equal(f.hostCalls.some(c=>c.kind==='create'),false);
+});
+
+test('cross-repository linked worktree inherits the target main checkout configuration and registers in the target desk',async t=>{
+ const f=placementFixture(t,{role:'lead',callerRole:'supervisor'});
+ mkdirSync(join(f.foreign,'.paseo-slp'),{recursive:true});
+ writeFileSync(join(f.foreign,'.paseo-slp/workspace-protocol.md'),'---\nagent_mode: full-access\n---\nForeign protocol.\n');
+ const wt=join(f.dir,'foreign-wt');fixtureGit(f.foreign,'worktree','add','--detach',wt,'HEAD');const dir=realpathSync(wt);
+ f.workspaces.set('foreign-wt',{id:'foreign-wt',workspaceDirectory:dir,status:'done',archivingAt:null});
+ const out=await f.run({...f.input,placement:{kind:'existing',workspaceId:'foreign-wt',reason:'other repository'}});
+ assert.equal(out.result.state,'awaiting-caller-delivery',JSON.stringify(out.result));
+ const observed=out.phases.find(p=>p.name==='target-observed').value;
+ assert.equal(observed.cwd,dir);assert.equal(observed.gitCommonDir,f.foreignCommonDir);
+ assert.equal(observed.source.repository,f.foreign);assert.notEqual(observed.source.configuration['workspace-protocol.md'],null);
+ assert.ok(out.result.delivery.prompt.includes('Use '+f.foreign+'/.paseo-slp/workspace-protocol.md'));
+ assert.equal(f.members.length,0);assert.equal(f.foreignMembers.length,1);
+});
+
+test('cross-repository uncertain descriptor read is retained and replays without effects',async t=>{
+ const f=placementFixture(t,{role:'lead',callerRole:'supervisor',budgets:{readMs:10,effectMs:10}});
+ f.setRefreshFault(()=>new Promise(()=>{}));
+ const out=await f.run({...f.input,placement:crossPlacement(f,'id')});
+ assert.equal(out.result.state,'placement-uncertain',JSON.stringify(out.result));assert.equal(out.result.sent,false);
+ const calls=f.hostCalls.length,replay=await f.run({...f.input,placement:crossPlacement(f,'id')});
+ assert.equal(replay.receiptSha256,out.receiptSha256);assert.equal(f.hostCalls.length,calls);
+ assert.equal(f.hostCalls.some(c=>c.kind==='create'||c.kind==='open'),false);
+});
+
+test('cross-repository target configuration drift before create blocks native allocation',async t=>{
+ const f=placementFixture(t,{role:'lead',callerRole:'supervisor'});
+ f.setProviderHook(()=>{mkdirSync(join(f.foreign,'.paseo-slp'),{recursive:true});writeFileSync(join(f.foreign,'.paseo-slp/workspace-protocol.md'),'drifted\n');});
+ const out=await f.run({...f.input,placement:crossPlacement(f,'id')});
+ assert.equal(out.result.code,'ROUTE_DRIFT',JSON.stringify(out.result));
+ assert.equal(f.hostCalls.some(c=>c.kind==='create'),false);
+});
+
+// Registrations can change while formation awaits provider/SDK reads; nesting
+// is rechecked with every pinned verification before effects and delivery.
+for(const stage of ['before create','after create'])test('cross-repository nesting registered '+stage+' blocks dependent effects',async t=>{
+ const f=placementFixture(t,{role:'lead',callerRole:'supervisor'});let nested=false;
+ const nest=()=>{if(nested)return;nested=true;fixtureGit(f.foreign,'worktree','add','--detach',join(f.repository,'late-foreign-wt'),'HEAD');};
+ if(stage==='before create')f.setProviderHook(nest);else f.setAfterCreate(nest);
+ const out=await f.run({...f.input,placement:crossPlacement(f,'id')});
+ assert.ok(out.phases.some(p=>p.name==='target-observed'));assert.equal(nested,true);
+ assert.equal(out.result.code,'ROUTE_DRIFT',JSON.stringify(out.result));assert.match(out.result.message,/nested/);
+ assert.equal(Object.hasOwn(out.result,'delivery'),false);assert.equal(f.hostCalls.some(c=>c.kind==='send'),false);
+ assert.equal(f.hostCalls.filter(c=>c.kind==='create').length,stage==='before create'?0:1);
+ if(stage==='after create'){assert.equal(out.result.agentId,'child');assert.equal(out.result.sent,false);}
+ const calls=f.hostCalls.length,replay=await f.run({...f.input,placement:crossPlacement(f,'id')});
+ assert.equal(replay.receiptSha256,out.receiptSha256);assert.equal(f.hostCalls.length,calls);
 });
