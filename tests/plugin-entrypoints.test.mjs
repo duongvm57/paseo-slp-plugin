@@ -45,6 +45,8 @@ test('paseo-plugin.json parses through the host readPluginManifest', async t => 
   const manifest = await host.readPluginManifest(PLUGIN_DIR);
   assert.deepEqual(manifest, {
     id: 'paseo-slp',
+    name: 'Paseo SLP',
+    description: 'Supervisor, Lead and Peer coding-agent teams for Paseo, with a repository desk for assignments, review and evidence.',
     requirements: { paseo: '>=0.11.0' },
     build: [['npm', 'install', '--omit=dev', '--no-audit', '--no-fund']],
   });
