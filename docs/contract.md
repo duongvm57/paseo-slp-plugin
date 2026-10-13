@@ -57,7 +57,7 @@ and dependency locks are supporting artifacts, not additional runtime owners.
 | src/references/orchestration.md | Lead's conditional topology, independent review/council, dependency and integration procedure. |
 | src/references/monitoring.md | Supervisor/Lead event observation, heartbeat ownership and bounded-task resource settlement. |
 | src/references/report-records.md | Handback submission versus offline schema/evidence validation, claim/observation limits and settlement mirror/export/sink operation. |
-| src/references/governance.md | Supervisor scope, causal notebook, evidence-led failure investigation, authorized recovery, cross-project relay and policy evolution. |
+| src/references/governance.md | Supervisor scope, causal notebook, evidence-led failure investigation, authorized recovery, cross-project relay with source-repository provenance and cross-repository decision records, and policy evolution. |
 | src/references/peer-tactics.md | Conditional toolbox of fifteen optional tactics for briefs, follow-ups and corrections with an open anchoring/premise/challenge question; read only on need. A tactic grants no scope, write authority, seat or acceptance obligation, and REOPEN_REQUEST/DEPENDENCY_REQUEST/BLOCKED stay existing invariants. |
 | src/references/anti-patterns.md | Conditional twenty-pattern judgment catalogue with specific Inspect evidence, questions and bounded responses; governance owns causal records and authority. Hypotheses, not runtime detectors or a mandatory full audit. |
 | src/references/provider-routing.md | Supervisor/Lead profile selection, Peer pool selection, validation and handoff; conditional pointer to Jev routing procedure. |
@@ -364,7 +364,7 @@ threshold; acceptance, Delivery, closed rework and resource reconciliation
 precede authorized archive, which proves no quiescence.
 
 Supervisor relays Human instructions verbatim, marking inferences separately and
-never attributing added constraints to Human. On Human STOP it preserves already
+never attributing added constraints to Human. Supervisor keeps a per-repository protocol inventory (path/sha256/routing_intent), names the source repository of relayed tactics and records cross-repository decisions in each affected repository. On Human STOP it preserves already
 available evidence/receipts and cancels the verified Lead immediately, without
 waiting for a report or prompting that owner again. Parent cancellation does not
 cancel Peer turns: list_agents is scanned for paseo.parent-agent-id matching the
