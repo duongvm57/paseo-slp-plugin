@@ -521,3 +521,19 @@ test('cross-repository target configuration drift before create blocks native al
  assert.equal(out.result.code,'ROUTE_DRIFT',JSON.stringify(out.result));
  assert.equal(f.hostCalls.some(c=>c.kind==='create'),false);
 });
+
+// Registrations can change while formation awaits provider/SDK reads; nesting
+// is rechecked with every pinned verification before effects and delivery.
+for(const stage of ['before create','after create'])test('cross-repository nesting registered '+stage+' blocks dependent effects',async t=>{
+ const f=placementFixture(t,{role:'lead',callerRole:'supervisor'});let nested=false;
+ const nest=()=>{if(nested)return;nested=true;fixtureGit(f.foreign,'worktree','add','--detach',join(f.repository,'late-foreign-wt'),'HEAD');};
+ if(stage==='before create')f.setProviderHook(nest);else f.setAfterCreate(nest);
+ const out=await f.run({...f.input,placement:crossPlacement(f,'id')});
+ assert.ok(out.phases.some(p=>p.name==='target-observed'));assert.equal(nested,true);
+ assert.equal(out.result.code,'ROUTE_DRIFT',JSON.stringify(out.result));assert.match(out.result.message,/nested/);
+ assert.equal(Object.hasOwn(out.result,'delivery'),false);assert.equal(f.hostCalls.some(c=>c.kind==='send'),false);
+ assert.equal(f.hostCalls.filter(c=>c.kind==='create').length,stage==='before create'?0:1);
+ if(stage==='after create'){assert.equal(out.result.agentId,'child');assert.equal(out.result.sent,false);}
+ const calls=f.hostCalls.length,replay=await f.run({...f.input,placement:crossPlacement(f,'id')});
+ assert.equal(replay.receiptSha256,out.receiptSha256);assert.equal(f.hostCalls.length,calls);
+});

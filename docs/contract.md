@@ -703,7 +703,8 @@ desk serves one repository. The only exception is a Supervisor caller forming a
 Lead with existing placement in a separate repository, where no registered
 checkout (main, bare or linked, from `git worktree list`) of either repository
 contains or is contained by a checkout of the other; unobservable registrations
-fail closed. That repository's main/linked checkout becomes source and target,
+fail closed, and the check repeats (ROUTE_DRIFT) with every pinned verification
+before create, delivery and after the membership wait. That repository's main/linked checkout becomes source and target,
 the Lead registers in its desk, the membership wait reads that ledger, and the
 receipt stays on the Supervisor's desk. A failed classification read keeps the
 caller-repository path and its phases. Lead callers, Peer children,

@@ -198,11 +198,17 @@ export function createFormationPlacement(deps: {
       throw new FormationPlacementError("CAPABILITY_GAP", "placement worktree registrations cannot be observed; cross-repository Lead placement fails closed");
     }
   };
+  // Two repositories are separate desks only when no registered checkout of
+  // either contains, or is contained by, a checkout of the other.
+  const assertSeparate = async (callerCwd: string, targetCwd: string, code: DeskRejectionValue["code"], workspaceId?: string) => {
+    const caller = await checkouts(directory(callerCwd)), target = await checkouts(targetCwd);
+    if (caller.some(a => target.some(b => overlaps(a, b)))) {
+      throw new FormationPlacementError(code, "placement repository is nested with the caller's repository; a cross-repository Lead requires checkouts that neither contain nor are contained by the caller's", workspaceId);
+    }
+  };
   // Supervisor + Lead + existing placement is the only combination that may
   // leave the caller's repository. Every other request, and any failed
-  // classification read, keeps the caller's repo and its historical path. Two
-  // repositories are separate desks only when no checkout of either contains,
-  // or is contained by, a checkout of the other.
+  // classification read, keeps the caller's repo and its historical path.
   const placementRepository = async (row: MembershipValue, input: DeskSeatCreateInputValue, key: string) => {
     const placement = input.placement;
     if (placement?.kind !== "existing" || row.role !== "supervisor" || input.role !== "lead") return null;
@@ -213,10 +219,7 @@ export function createFormationPlacement(deps: {
       repo = await observeCommon(start);
     } catch { return null; }
     if (repo === deps.repo.gitCommonDir) return null;
-    const caller = await checkouts(directory(row.createCwd)), target = await checkouts(start);
-    if (caller.some(a => target.some(b => overlaps(a, b)))) {
-      throw new FormationPlacementError("CAPABILITY_GAP", "placement repository is nested with the caller's repository; a cross-repository Lead requires checkouts that neither contain nor are contained by the caller's", placement.workspaceId);
-    }
+    await assertSeparate(row.createCwd, start, "CAPABILITY_GAP", placement.workspaceId);
     return { repo, start };
   };
   return {
@@ -287,6 +290,9 @@ export function createFormationPlacement(deps: {
       const observed = await observe(pin.workspaceId, pin.cwd, canonicalSha256([row.agentId, pin.workspaceId, "workspace-read"]), pin.gitCommonDir);
       if (observed.head !== pin.head || pin.source.gitCommonDir !== pin.gitCommonDir) throw new FormationPlacementError("ROUTE_DRIFT", "target Git HEAD/repository changed", pin.workspaceId);
       await checkConfiguration(pin.source, observed.cwd);
+      // Registrations may change while formation awaits; recheck before every
+      // cross-repository effect and delivery. Same-repository pins skip this.
+      if (pin.gitCommonDir !== deps.repo.gitCommonDir) await assertSeparate(row.createCwd, observed.cwd, "ROUTE_DRIFT", pin.workspaceId);
     },
     async create(pin: Pick<FormationTargetPin, "workspaceId">, options: TaskWorkspaceCreateOptions) {
       if (!handle || handle.id !== pin.workspaceId) throw new FormationPlacementError("CAPABILITY_GAP", "qualified workspace handle unavailable", pin.workspaceId);
