@@ -68,7 +68,7 @@ function selectionFailure(error: unknown): DeskRejectionValue {
     }
     if (e.code === "INVALID_RECORD" && (e.reason === "pair-ineligible" || e.reason === "no-eligible-pairs")) {
       return reject("INVALID_RECORD", e.reason === "no-eligible-pairs"
-        ? "No eligible preset + effort pair is available for the selected option/pool"
+        ? "No eligible preset + effort pair is available for the selected option or pool"
         : "Peer selection does not match an eligible preset + effort pair",
         `Inspect pool eligibility and model/effort capabilities; ask the Human to correct the pool or capabilities if no pair is eligible. An unadmitted rejection can keep its requestId. ${DESK_OPERATION_RETRY_RECOVERY}`);
     }

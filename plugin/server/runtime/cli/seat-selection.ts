@@ -44,7 +44,7 @@ function readInputs(request: PeerSelectionRequest) {
   if (catalog.version === 1 && (Object.keys(request.routingContext ?? {}).length || request.selection && Object.hasOwn(request.selection, "thinkingOptionId"))) throw new SeatSelectionError("INVALID_RECORD", "v1 pools keep fixed settings; explicitly convert to v2 before using effort selection or reference constraints");
   const usable = eligibleOptions(catalog, "peer").filter(option => catalog.version === 2 || !seatTokenConflict(option));
   if (usable.length === 0) throw new SeatSelectionError("INVALID_RECORD", "no eligible Peer option",
-    catalog.version === 2 && request.selection ? "no-eligible-pairs" : undefined);
+    catalog.version === 2 ? "no-eligible-pairs" : undefined);
   if (request.selection && !usable.some(option => option.id === request.selection!.optionId)) {
     throw new SeatSelectionError("INVALID_RECORD", "selection is not an eligible Peer option", catalog.version === 2
       ? catalog.options.some(option => option.id === request.selection!.optionId) ? "no-eligible-pairs" : "pair-ineligible"
@@ -158,7 +158,7 @@ export async function selectPeerSeat(request: PeerSelectionRequest, deps: {
 function presetSet(request: PeerSelectionRequest, providers: Provider[] | undefined) {
   const set = presetChoiceSet(readCatalog(request.repository, request.paseoHome), 'peer', providers, request.routingContext);
   // Formation diagnostics only: CLI discovery/binding retains its original errors.
-  if (request.selection && set.choices.length === 0) throw new SeatSelectionError('INVALID_RECORD', 'No eligible preset + effort pair for the selected option/pool', 'no-eligible-pairs');
+  if (set.choices.length === 0) throw new SeatSelectionError('INVALID_RECORD', 'No eligible preset + effort pair for the selected option or pool', 'no-eligible-pairs');
   return boundedPresetChoices(set);
 }
 function independentPresetPair(request: PeerSelectionRequest, choices: ReturnType<typeof presetSet>['choices']) {

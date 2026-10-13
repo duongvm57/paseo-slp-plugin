@@ -188,11 +188,14 @@ for (const mode of ['unconfigured','off','shadow','armed']) {
    if(failure==='selected-disabled')f.options[0].enabled=false;
    if(failure==='selected-missing-model')f.options[0].model='PRIVATE_MISSING_MODEL';
    if(failure==='same-provider')f.request.routingContext={crossProvider:true,reference:{provider:'slp-codex-peer',model:'writer'}};
-   f.savePool();const req={...f.request,selection:{optionId:'first'}};
-   const verify=e=>{assert.equal(e.name,'SeatSelectionError');assert.equal(e.reason,'no-eligible-pairs');return true;};
-   await assert.rejects(preflightPeerChoice(req,f.providers),verify);
-   await assert.rejects(selectPeerSeat(req,f.deps),verify);
-   assert.deepEqual(f.phases,[]);assert.equal(f.calls.logical,0);
+   f.savePool();
+   for(const selection of failure.startsWith('selected-')?[{optionId:'first'}]:[undefined,{optionId:'first'}]){
+    const req={...f.request,...(selection?{selection}:{})};
+    const verify=e=>{assert.equal(e.name,'SeatSelectionError');assert.equal(e.code,'INVALID_RECORD');assert.equal(e.reason,'no-eligible-pairs');return true;};
+    await assert.rejects(preflightPeerChoice(req,f.providers),verify);
+    await assert.rejects(selectPeerSeat(req,f.deps),verify);
+    assert.deepEqual(f.phases,[]);assert.equal(f.calls.logical,0);
+   }
    if(!failure.startsWith('selected-')){
     assert.throws(()=>routeChoices({...f.request,providers:f.providers}),e=>e.name==='Error'&&/No eligible preset/.test(e.message));
     assert.throws(()=>catalogBinding(f.repository,'peer',f.providers,{optionId:'first',catalogSha256:f.sha(),selectionSha256:'0'.repeat(64),thinkingOptionId:'low',routingContext:f.request.routingContext},f.home),e=>e.name==='Error'&&/No eligible preset/.test(e.message));
@@ -214,3 +217,36 @@ test('ambiguous effort metadata exposes only a bounded subset of public IDs for 
  });
  assert.equal(f.calls.logical,0);assert.deepEqual(f.phases,[]);
 });
+
+for(const mode of ['unconfigured','off','shadow','armed']) {
+ test('empty pool without selection retains v1 failure and classifies v2 before decisions: '+mode,async t=>{
+  const f=selectionFixture(t,{mode,count:0});
+  const verifyV1=e=>{assert.equal(e.code,'INVALID_RECORD');assert.equal(e.reason,undefined);assert.equal(e.message,'no eligible Peer option');return true;};
+  await assert.rejects(preflightPeerChoice(f.request,f.providers),verifyV1);
+  await assert.rejects(selectPeerSeat(f.request,f.deps),verifyV1);
+  f.catalog.version=2;f.savePool();
+  const verifyV2=e=>{assert.equal(e.code,'INVALID_RECORD');assert.equal(e.reason,'no-eligible-pairs');return true;};
+  await assert.rejects(preflightPeerChoice(f.request,f.providers),verifyV2);
+  await assert.rejects(selectPeerSeat(f.request,f.deps),verifyV2);
+  assert.equal(f.calls.logical,0);assert.deepEqual(f.phases,[]);
+ });
+ for(const count of [1,2]) {
+  test('eligible v2 pool without selection keeps '+mode+' semantics, pairs='+count,async t=>{
+   const f=selectionFixture(t,{mode,count});f.catalog.version=2;
+   for(const option of f.options){Object.assign(option,{displayName:'Fixture',description:'Bounded coding',effortPolicy:{kind:'fixed',thinkingOptionId:'high'},runtimeRule:'none'});delete option.thinkingOptionId;}
+   f.providers[0].models=[{id:'model/variant',thinkingOptions:[{id:'high'}]}];f.savePool();
+   const preflight=await preflightPeerChoice(f.request,f.providers);
+   if(mode==='shadow'||(mode!=='armed'&&count>1)){
+    assert.equal(preflight.state,'selection-required');assert.equal(preflight.operationAdmitted,false);
+    assert.equal(preflight.choices.length,count);assert.ok(preflight.choices.length>0);
+    await assert.rejects(selectPeerSeat(f.request,f.deps),e=>e.reason==='selection-required');
+    assert.equal(f.calls.logical,0);assert.deepEqual(f.phases,[]);
+   }else{
+    assert.equal(preflight,null);f.setChoice('pair-'+hash(canonicalJson(['first','high'])));
+    const selected=await selectPeerSeat(f.request,f.deps);
+    assert.equal(selected.route.optionId,'first');assert.equal(selected.route.thinkingOptionId,'high');
+    assert.equal(selected.origin,mode==='armed'?'jev':'unique');assert.equal(f.calls.logical,mode==='armed'?1:0);
+   }
+  });
+ }
+}

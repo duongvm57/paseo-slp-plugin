@@ -688,11 +688,13 @@ test('selection failure maps typed reasons without forwarding exception text',as
 
 for(const mode of ['unconfigured','off','shadow','armed']) {
  for(const boundary of ['preflight','select']) {
-  for(const failure of ['disabled-pool','missing-model','no-allowed-effort','selected-disabled','selected-missing-model']) {
-   test('v2 '+mode+' '+boundary+' '+failure+' returns specific empty-pair failure before effects',async t=>{
+  for(const failure of ['empty-pool','disabled-pool','missing-model','no-allowed-effort','selected-disabled','selected-missing-model']) {
+   for(const shape of failure.startsWith('selected-')?['selection']:['none','selection']) {
+   test('v2 '+mode+' '+boundary+' '+failure+' '+shape+' returns specific empty-pair failure before effects',async t=>{
     const f=await realPeerFixture(t,mode,2);f.catalog.version=2;
     for(const option of f.options){Object.assign(option,{displayName:'Fixture',description:'Bounded coding',effortPolicy:{kind:'select'},runtimeRule:'none'});delete option.thinkingOptionId;}
     let models=[{id:'model/variant',thinkingOptions:[{id:'low'},{id:'high'}]}];
+    if(failure==='empty-pool')f.catalog.options=[];
     if(failure==='disabled-pool')f.options.forEach(o=>o.enabled=false);
     if(failure==='missing-model')models=[];
     if(failure==='no-allowed-effort')f.options.forEach(o=>o.effortPolicy.allowed=['medium']);
@@ -700,13 +702,14 @@ for(const mode of ['unconfigured','off','shadow','armed']) {
     if(failure==='selected-missing-model')f.options[0].model='PRIVATE_MISSING_MODEL';
     f.savePool();f.host.providers.snapshot=async()=>({entries:[{provider:'slp-codex-peer',enabled:true,status:'ready',modes:[{id:'full-access'}],models}]});
     if(boundary==='select')f.formationDeps.preflightPeer=async()=>null;
-    const out=await f.run({...f.input,selection:{optionId:'first'},delivery:'server'}),result=boundary==='select'?out.result:out;
+    const out=await f.run({...f.input,...(shape==='selection'?{selection:{optionId:'first'}}:{}),delivery:'server'}),result=boundary==='select'?out.result:out;
     assert.equal(result.code,'INVALID_RECORD',JSON.stringify(out));
-    assert.equal(result.message,'No eligible preset + effort pair is available for the selected option/pool');
+    assert.equal(result.message,'No eligible preset + effort pair is available for the selected option or pool');
     assert.doesNotMatch(JSON.stringify(out),/PRIVATE_MISSING_MODEL|Peer selection failed/);
     assert.equal(f.effects.length,0);assert.equal(f.decisions(),0);
     if(boundary==='select')assert.deepEqual(out.phases,[]);
    });
+   }
   }
  }
 }
