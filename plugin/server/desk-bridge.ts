@@ -49,6 +49,7 @@ import {
   deskBridgePaths,
   deskRepoPaths,
   deskReposDir,
+  repoKeyFor,
   type DeskStore,
   type DeskStoreRead,
   type MembershipValue,
@@ -1320,9 +1321,17 @@ export function createDeskBridge(deps: DeskBridgeDeps) {
       return runSeatCreate(ctx.row, ctx.input, { stableRoot: pinnedRoot, repoKey: ctx.bound.repoKey, host, plan,
         preflightPeer: plan.preflightPeer, selectPeer: plan.selectPeer,
         placement, placementCapability: plan.placementCapability,
-        readMemberships: () => {
-          const fresh = freshRow(ctx.bound);
-          return "error" in fresh || fresh.read.state !== "ok" ? null : fresh.read.ledger.memberships;
+        readMemberships: gitCommonDir => {
+          // One desk = one repository: a Supervisor-placed Lead in another
+          // repository registers in that repository's ledger, read-only here.
+          const callerRepo = ctx.seatRead?.state === "ok" ? ctx.seatRead.ledger.repo : null;
+          if (gitCommonDir === null || callerRepo === null || gitCommonDir === callerRepo.gitCommonDir) {
+            const fresh = freshRow(ctx.bound);
+            return "error" in fresh || fresh.read.state !== "ok" ? null : fresh.read.ledger.memberships;
+          }
+          if (store === null) return null;
+          const read = store.read(repoKeyFor({ hostId: callerRepo.hostId, gitCommonDir }));
+          return read.state === "ok" ? read.ledger.memberships : null;
         },
         guard: async () => {
           if (stopped) return rejection("CAPABILITY_GAP", "bridge stopped during formation", "retain the original operation");

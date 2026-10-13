@@ -1,5 +1,8 @@
 // Formation-only placement. Git/common-dir and configuration pins are local;
 // workspace identity comes from the connected SDK. No worktree creation/setup.
+// One desk = one Git repository: placement stays in the caller's repository,
+// except that a Supervisor may place a Lead in another repository's existing
+// workspace; that Lead registers in, and is pinned to, the target repository.
 import { closeSync, constants, fstatSync, openSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { dirname, isAbsolute, join } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -96,12 +99,14 @@ export function createFormationPlacement(deps: {
       timer = setTimeout(() => reject(new TaskHostWaitExpired(operation, effect)), effect ? budgets.effectMs : budgets.readMs);
     })]); } finally { clearTimeout(timer); }
   };
-  const common = async (cwd: string) => {
-    let actual: string;
-    try { actual = await git.commonDir(cwd); }
+  const observeCommon = async (cwd: string) => {
+    try { return await git.commonDir(cwd); }
     catch { throw new FormationPlacementError("CAPABILITY_GAP", "placement Git repository cannot be observed"); }
-    if (actual !== deps.repo.gitCommonDir) {
-      throw new FormationPlacementError("CAPABILITY_GAP", new TaskRepositoryMismatchError(deps.repo.gitCommonDir, actual).message.replace(/^task checkout/, "seat placement"));
+  };
+  const common = async (cwd: string, repo = deps.repo.gitCommonDir) => {
+    const actual = await observeCommon(cwd);
+    if (actual !== repo) {
+      throw new FormationPlacementError("CAPABILITY_GAP", `${new TaskRepositoryMismatchError(repo, actual).message.replace(/^task checkout/, "seat placement")}; only a Supervisor may place a Lead in another repository's existing workspace`);
     }
     return actual;
   };
@@ -112,30 +117,38 @@ export function createFormationPlacement(deps: {
     }
     return value;
   };
-  const locateSource = async (row: MembershipValue) => {
-    const cwd = directory(row.createCwd); await common(cwd);
-    const top = directory(await git.top(cwd)); await common(top);
+  const locateSource = async (start: string, repo = deps.repo.gitCommonDir) => {
+    const cwd = directory(start); await common(cwd, repo);
+    const top = directory(await git.top(cwd)); await common(top, repo);
     const local = configuration(top);
     // Preserve a checkout's own configuration (including protocol-only user
     // pools). A linked checkout lacking both files inherits only its same-Git
     // main checkout, never an unrelated ancestor or the user pool by accident.
     if (Object.values(local).some(value => value !== null)) return { repository: top, configuration: local, inherited: false };
-    const main = dirname(deps.repo.gitCommonDir);
+    const main = dirname(repo);
     if (top === main) return { repository: top, configuration: local, inherited: false };
     try {
-      const repository = directory(main); await common(repository);
+      const repository = directory(main); await common(repository, repo);
       if (directory(await git.top(repository)) !== repository) throw new Error("not the main checkout");
       const pins = configuration(repository);
       if (Object.values(pins).some(value => value !== null)) return { repository, configuration: pins, inherited: true };
     } catch (error) { if (error instanceof FormationPlacementError && error.code === "ROUTE_DRIFT") throw error; }
     throw new FormationPlacementError("CAPABILITY_GAP", "linked checkout has no trustworthy same-repository configuration source; restore the main checkout routing/protocol configuration before formation; no implicit user-pool fallback");
   };
-  const source = async (row: MembershipValue): Promise<FormationSourcePin> => {
-    const located = await locateSource(row);
-    return { repository: located.repository, gitCommonDir: deps.repo.gitCommonDir,
+  const sourceAt = async (start: string, repo = deps.repo.gitCommonDir): Promise<FormationSourcePin> => {
+    const located = await locateSource(start, repo);
+    return { repository: located.repository, gitCommonDir: repo,
       head: await head(located.repository), configuration: located.configuration };
   };
-  const liveDirectory = async (workspaceId: string, cwd: string | null, key: string) => {
+  const source = (row: MembershipValue) => sourceAt(row.createCwd);
+  // A pin outside the caller's repository exists only for a Supervisor caller;
+  // its source is re-located from the target workspace, never the caller.
+  const pinnedSource = (row: MembershipValue, pin: FormationTargetPin) => {
+    if (pin.gitCommonDir === deps.repo.gitCommonDir) return source(row);
+    if (row.role !== "supervisor") throw new FormationPlacementError("CAPABILITY_GAP", "only a Supervisor may place a Lead in another repository", pin.workspaceId);
+    return sourceAt(pin.cwd, pin.gitCommonDir);
+  };
+  const liveDirectory = async (workspaceId: string, cwd: string | null, key: string, repo: string | null = deps.repo.gitCommonDir) => {
     if (!handle || handle.id !== workspaceId) {
       const api = deps.host();
       if (!api || typeof api.workspaces?.ref !== "function") throw new FormationPlacementError("CAPABILITY_GAP", "host lacks workspace ref/refresh", workspaceId);
@@ -152,7 +165,7 @@ export function createFormationPlacement(deps: {
       throw new FormationPlacementError("CAPABILITY_GAP", "workspace is missing, archiving or has no exact live descriptor", workspaceId);
     }
     const actual = directory(snapshot.workspaceDirectory);
-    await common(actual);
+    if (repo !== null) await common(actual, repo);
     // SDK create carries workspaceId; the server resolves cwd from its registry.
     // Qualify the descriptor now, then verify the actual agent cwd after create.
     if (snapshot.workspaceDirectory !== actual || (cwd !== null && cwd !== actual)) {
@@ -160,22 +173,41 @@ export function createFormationPlacement(deps: {
     }
     return actual;
   };
-  const observe = async (workspaceId: string, cwd: string | null, key: string) => {
-    const actual = await liveDirectory(workspaceId, cwd, key);
+  const observe = async (workspaceId: string, cwd: string | null, key: string, repo = deps.repo.gitCommonDir) => {
+    const actual = await liveDirectory(workspaceId, cwd, key, repo);
     return { cwd: actual, head: await head(actual) };
   };
   const checkConfiguration = async (pin: FormationSourcePin, cwd: string) => {
     const targetRoot = directory(await git.top(cwd));
-    await common(targetRoot);
+    await common(targetRoot, pin.gitCommonDir);
     const target = configuration(targetRoot);
     for (const name of CONFIG_FILES) if (target[name] !== null && target[name] !== pin.configuration[name]) {
       throw new FormationPlacementError("ROUTE_DRIFT", "target routing/protocol configuration conflicts with the pinned source");
     }
   };
+  const overlaps = (a: string, b: string) => a === b || a.startsWith(`${b}/`) || b.startsWith(`${a}/`);
+  // Supervisor + Lead + existing placement is the only combination that may
+  // leave the caller's repository. Every other request keeps the caller's repo
+  // and therefore its historical rejection. A nested repository shares paths
+  // with the caller's checkout, so it never qualifies as another desk.
+  const placementRepository = async (row: MembershipValue, input: DeskSeatCreateInputValue, key: string) => {
+    const placement = input.placement;
+    if (placement?.kind !== "existing" || row.role !== "supervisor" || input.role !== "lead") return null;
+    const start = placement.cwd !== undefined ? directory(placement.cwd)
+      : await liveDirectory(placement.workspaceId!, null, key, null);
+    const repo = await observeCommon(start);
+    if (repo === deps.repo.gitCommonDir) return null;
+    const targetTop = directory(await git.top(start));
+    const callerTops = [directory(await git.top(directory(row.createCwd))), dirname(deps.repo.gitCommonDir)];
+    if (callerTops.some(top => overlaps(top, targetTop) || overlaps(top, dirname(repo)))) {
+      throw new FormationPlacementError("CAPABILITY_GAP", "placement repository is nested with the caller's checkout; a cross-repository Lead requires a separate checkout", placement.workspaceId);
+    }
+    return { repo, start };
+  };
   return {
     source,
     async inheritedSource(row: MembershipValue): Promise<FormationSourcePin | undefined> {
-      const located = await locateSource(row);
+      const located = await locateSource(row.createCwd);
       return located.inherited ? { repository: located.repository, gitCommonDir: deps.repo.gitCommonDir,
         head: await head(located.repository), configuration: located.configuration } : undefined;
     },
@@ -196,13 +228,16 @@ export function createFormationPlacement(deps: {
       const placement = input.placement;
       if (!placement || placement.kind === "worktree") throw new FormationPlacementError("CAPABILITY_GAP", "only caller/existing placement can be resolved");
       if (placement.kind === "caller" && row.workspaceId === null) throw new FormationPlacementError("CAPABILITY_GAP", "caller placement requires its exact bound workspace");
-      const sourcePin = await source(row);
+      const foreign = await placementRepository(row, input, canonicalSha256([row.agentId, input.requestId, "repository-read"]));
+      const repo = foreign?.repo ?? deps.repo.gitCommonDir;
+      const freshSource = () => foreign ? sourceAt(foreign.start, repo) : source(row);
+      const sourcePin = await freshSource();
       phase("placement-planned", { source: sourcePin, placement });
       const key = canonicalSha256([sourcePin.gitCommonDir, row.agentId, input.requestId, "workspace-open"]);
       let workspaceId = placement.kind === "caller" ? row.workspaceId : placement.workspaceId;
       const wanted = placement.kind === "caller" ? directory(row.createCwd) : placement.cwd === undefined ? null : directory(placement.cwd);
       let wantedHead: string | null = null;
-      if (wanted !== null) { await common(wanted); wantedHead = await head(wanted); await checkConfiguration(sourcePin, wanted); }
+      if (wanted !== null) { await common(wanted, repo); wantedHead = await head(wanted); await checkConfiguration(sourcePin, wanted); }
       if (workspaceId == null) {
         if (wanted === null) throw new FormationPlacementError("CAPABILITY_GAP", "placement has no workspace or cwd");
         const api = deps.host();
@@ -210,8 +245,8 @@ export function createFormationPlacement(deps: {
         const refused = await guard(); if (refused !== null) throw new FormationPlacementError(refused.code, refused.message);
         // Parent verification awaited the SDK; re-read the qualified Git
         // inputs before issuing open, without treating discovery as a lease.
-        await common(wanted);
-        if (await head(wanted) !== wantedHead || canonicalSha256(await source(row)) !== canonicalSha256(sourcePin)) {
+        await common(wanted, repo);
+        if (await head(wanted) !== wantedHead || canonicalSha256(await freshSource()) !== canonicalSha256(sourcePin)) {
           throw new FormationPlacementError("ROUTE_DRIFT", "placement changed before workspace open");
         }
         await checkConfiguration(sourcePin, wanted);
@@ -222,20 +257,20 @@ export function createFormationPlacement(deps: {
         workspaceId = handle.id;
         phase("workspace-open-returned", { workspaceId });
       }
-      const observed = await observe(workspaceId, wanted, key);
+      const observed = await observe(workspaceId, wanted, key, repo);
       if (wantedHead !== null && observed.head !== wantedHead) throw new FormationPlacementError("ROUTE_DRIFT", "target HEAD changed during workspace resolution", workspaceId);
       await checkConfiguration(sourcePin, observed.cwd);
-      const target: FormationTargetPin = { workspaceId, ...observed, gitCommonDir: deps.repo.gitCommonDir,
+      const target: FormationTargetPin = { workspaceId, ...observed, gitCommonDir: repo,
         source: sourcePin, reason: placement.kind === "existing" ? placement.reason : null };
       await this.verify(row, target);
       phase("target-observed", target);
       return target;
     },
     async verify(row: MembershipValue, pin: FormationTargetPin) {
-      const now = await source(row);
+      const now = await pinnedSource(row, pin);
       if (canonicalSha256(now) !== canonicalSha256(pin.source)) throw new FormationPlacementError("ROUTE_DRIFT", "placement source/configuration changed", pin.workspaceId);
-      const observed = await observe(pin.workspaceId, pin.cwd, canonicalSha256([row.agentId, pin.workspaceId, "workspace-read"]));
-      if (observed.head !== pin.head || pin.gitCommonDir !== deps.repo.gitCommonDir) throw new FormationPlacementError("ROUTE_DRIFT", "target Git HEAD/repository changed", pin.workspaceId);
+      const observed = await observe(pin.workspaceId, pin.cwd, canonicalSha256([row.agentId, pin.workspaceId, "workspace-read"]), pin.gitCommonDir);
+      if (observed.head !== pin.head || pin.source.gitCommonDir !== pin.gitCommonDir) throw new FormationPlacementError("ROUTE_DRIFT", "target Git HEAD/repository changed", pin.workspaceId);
       await checkConfiguration(pin.source, observed.cwd);
     },
     async create(pin: Pick<FormationTargetPin, "workspaceId">, options: TaskWorkspaceCreateOptions) {

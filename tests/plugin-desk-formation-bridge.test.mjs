@@ -20,7 +20,7 @@ const at = '2026-01-01T00:00:00.000Z';
 const codexProfile = { id: 'slp-lead', provider: 'slp-codex-lead', model: 'gpt-6-luna', modeId: 'full-access', thinkingOptionId: 'high', featureValues: { fast_mode: true } };
 
 function managedBridge(t, options = {}) {
-  const { afterCreate, profile = codexProfile, reportedModeId, omitCurrentModeId, providerEntries, registration = 'ready' } = options;
+  const { afterCreate, profile = codexProfile, reportedModeId, omitCurrentModeId, providerEntries, registration = 'ready', registerIn = 'child' } = options;
   const providerModes = Object.hasOwn(options, 'providerModes') ? options.providerModes : [{ id: 'full-access' }];
   const includeProviderModes = options.includeProviderModes !== false;
   const dir = mkdtempSync(join(tmpdir(), 'slp-managed-formation-'));
@@ -71,6 +71,7 @@ function managedBridge(t, options = {}) {
   const effects = { creates: [], sends: [] };
   let childSnapshot = null;
   const workspaceSnapshots = new Map([['workspace',{id:'workspace',workspaceDirectory:repo.dir,status:'done',archivingAt:null}]]);
+  const repos = new Map([[repo.dir, repo]]);
   const childHandle = id => ({
     id,
     refresh: async () => ({ agent: id === 'child' ? childSnapshot : null, project: null }),
@@ -96,13 +97,15 @@ function managedBridge(t, options = {}) {
       features: Object.entries(options.config.featureValues ?? {}).map(([id, value]) => ({ id, value })),
     };
     if (registration !== 'missing') {
-      const store=createDeskStore({stableRoot}),repoValue=repoOf(repo),read=store.read(repoKeyFor(repoValue));
-      assert.equal(read.state,'ok');
+      // A seat registers in the desk of the Git repository that holds its cwd.
+      const owner=registerIn==='caller'?repo:repos.get(childSnapshot.cwd)??repo;
+      const store=createDeskStore({stableRoot}),repoValue=repoOf(owner),read=store.read(repoKeyFor(repoValue));
+      assert.ok(read.state==='ok'||owner!==repo&&read.state==='absent',read.state);
       const child=memberRow('registered-child',{provider:childSnapshot.provider,at},{agentId:'child',
         role:childSnapshot.provider.endsWith('-peer')?'peer':'lead',createCwd:childSnapshot.cwd,workspaceId,
         ...(registration==='revoked'?{state:'revoked',revokedAt:at,revokeReason:'registration-mismatch'}:{}),
         ...(registration==='wrong-role'?{role:'supervisor'}:{})});
-      await seedMemberships(store,repoValue,[...read.ledger.memberships,child]);
+      await seedMemberships(store,repoValue,[...(read.ledger?.memberships??[]),child]);
     }
     afterCreate?.(() => { currentBinding = bindingFor(candidates[1]); });
     return childHandle('child');
@@ -144,7 +147,7 @@ function managedBridge(t, options = {}) {
     home, stableRoot, candidates, bindingFor, profile, setBinding: candidate => { currentBinding = bindingFor(candidate); },
     verifiedLaunchSets, bridge, paseoRef, effects,
     ready: bridge.whenReady(),
-    repo, workspaceSnapshots,
+    repo, repos, workspaceSnapshots,
   };
 }
 
@@ -154,7 +157,7 @@ async function boundFormationSeat(t, options) {
   t.after(() => f.bridge.stop());
   const handle = `formation-${randomUUID()}`;
   const row = memberRow(handle, { provider: f.profile.provider, at }, {
-    role: 'lead', agentId: 'parent', createCwd: f.repo.dir, workspaceId: 'workspace',
+    role: options?.callerRole ?? 'lead', agentId: 'parent', createCwd: f.repo.dir, workspaceId: 'workspace',
   });
   await seedMemberships(createDeskStore({ stableRoot: f.stableRoot }), repoOf(f.repo), [row]);
   const { conn, reader, ack } = await handshake(f.bridge.socketPath(), hello(bridgeSha256, handle));
@@ -389,4 +392,40 @@ for(const registration of ['missing','revoked','wrong-role'])test('wire '+regist
  assert.equal(Object.hasOwn(out.result,'delivery'),false);assert.equal(f.effects.sends.length,0);
  const replay=await callTool(f,402,'slp_seat_create',input);assert.equal(replay.receiptSha256,out.receiptSha256);
  assert.equal(f.effects.creates.length,1);assert.equal(f.effects.sends.length,0);
+});
+
+const commitFixture=dir=>execFileSync('git',['-C',dir,'-c','user.name=Fixture','-c','user.email=fixture@example.invalid','commit','--allow-empty','-qm','fixture base']);
+for(const registerIn of ['child','caller'])test('wire Supervisor Lead in another repository waits on the target desk ('+registerIn+' registration)',async t=>{
+ const f=await boundFormationSeat(t,{callerRole:'supervisor',registerIn});commitFixture(f.repo.dir);
+ const other=gitRepo(t,'slp-managed-formation-other-');commitFixture(other.dir);f.repos.set(other.dir,other);
+ f.workspaceSnapshots.set('other',{id:'other',workspaceDirectory:other.dir,status:'done',archivingAt:null});
+ const input={...seatCreate('cross-repo-'+registerIn),placement:{kind:'existing',workspaceId:'other',cwd:other.dir,reason:'other repository'}};
+ const out=await callTool(f,501,'slp_seat_create',input);
+ const store=createDeskStore({stableRoot:f.stableRoot});
+ const caller=store.read(repoKeyFor(repoOf(f.repo))),target=store.read(repoKeyFor(repoOf(other)));
+ if(registerIn==='child'){
+  assert.equal(out.result.state,'awaiting-caller-delivery',JSON.stringify(out.result));
+  assert.equal(out.result.workspaceId,'other');assert.equal(out.result.parent,'parent');
+  assert.equal(target.ledger.memberships.filter(m=>m.agentId==='child').length,1);
+  assert.equal(caller.ledger.memberships.some(m=>m.agentId==='child'),false);
+  assert.ok(out.result.delivery.prompt.includes('Routing/protocol repository: '+other.dir));
+ }else{
+  // The caller desk alone never proves the target repository's registration.
+  assert.equal(out.result.state,'seat-pending',JSON.stringify(out.result));assert.equal(target.state,'absent');
+ }
+ const observed=out.phases.find(p=>p.name==='target-observed').value;
+ assert.equal(observed.gitCommonDir,other.gitCommonDir);assert.equal(observed.source.repository,other.dir);
+ assert.equal(f.effects.creates.length,1);assert.equal(f.effects.creates[0].workspaceId,'other');assert.equal(f.effects.sends.length,0);
+ // The receipt stays on the caller's desk.
+ const receipt=await callTool(f,502,'slp_operation_get',{kind:'seat-create',requestId:input.requestId});
+ assert.equal(receipt.receiptSha256,out.receiptSha256);
+});
+for(const role of ['lead','peer'])test('wire Lead caller forming a '+role+' in another repository stays rejected',async t=>{
+ const f=await boundFormationSeat(t,{providerEntries:role==='peer'?peerEntries:undefined});commitFixture(f.repo.dir);if(role==='peer')peerPool(f,1);
+ const other=gitRepo(t,'slp-managed-formation-other-');commitFixture(other.dir);
+ f.workspaceSnapshots.set('other',{id:'other',workspaceDirectory:other.dir,status:'done',archivingAt:null});
+ const out=await callTool(f,601,'slp_seat_create',{...seatCreate('cross-'+role),role,placement:{kind:'existing',workspaceId:'other',cwd:other.dir,reason:'other repository'}});
+ const result=out.result??out;
+ assert.equal(result.code,'CAPABILITY_GAP',JSON.stringify(out));assert.match(result.message,/different Git repository/);
+ assert.equal(f.effects.creates.length,0);
 });

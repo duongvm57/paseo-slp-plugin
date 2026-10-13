@@ -43,12 +43,12 @@ confirms/detects drift, never forces models; Human constraints belong in assignm
 Jev's brief, not grantRef. Full-pin compatibility validates complete pool/Jev pins;
 no settings overrides.
 Placement defaults to caller; existing worktrees need declared paths/reason.
-It qualifies same-Git workspace/cwd and pins routing/protocol separately.
+Qualifies same-Git workspace/cwd and pins routing/protocol separately; Supervisor→Lead: separate-repo.
 Placement/automatic runtime/selection waits briefly for exact registration;
 legacy omitted full-pin Peer/Lead keeps its delivery path. Pending directs
 slp_operation_get with the same requestId: immutable evidence, no resume/recreate.
 SDK open may revive archived workspaces; prefer active IDs. Source configuration
-drift blocks delivery; same-Git identity alone grants no authority.
+drift blocks delivery; same-Git identity grants no authority.
 Lead uses Paseo create_workspace, owns its host setup within
 the grant, then calls slp_seat_create with placement existing and that workspace
 ID. Do not return to create_agent. V1 kind=worktree reports a gap before effects.

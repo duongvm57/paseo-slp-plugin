@@ -269,7 +269,8 @@ export async function runSeatCreate(row: MembershipValue, input: DeskSeatCreateI
   selectPeer?: (row: MembershipValue, input: DeskSeatCreateInputValue, phase: PhaseWriter, guard: () => Promise<DeskRejectionValue | null>, context?: SelectionContext) => Promise<SelectedPeer>;
   placementCapability?: () => Promise<void>;
   placement?: ReturnType<typeof createFormationPlacement>;
-  readMemberships?: () => readonly MembershipValue[] | null;
+  /** Reads the desk of the Git repository that will register the child. */
+  readMemberships?: (gitCommonDir: string | null) => readonly MembershipValue[] | null;
   membershipWaitMs?: number;
   guard: () => Promise<DeskRejectionValue | null>;
 }) {
@@ -427,7 +428,7 @@ export async function runSeatCreate(row: MembershipValue, input: DeskSeatCreateI
       const memberPin = { agentId, provider: create.provider.slice(0, split), createCwd: target?.cwd ?? row.createCwd,
         workspaceId: create.workspaceId, role: input.role };
       const readMember = () => {
-        try { return registeredMembership(deps.readMemberships?.() ?? [], memberPin); }
+        try { return registeredMembership(deps.readMemberships?.(target?.gitCommonDir ?? null) ?? [], memberPin); }
         catch { return null; } // Missing/unreadable registration never establishes readiness.
       };
       const waitMs = deps.membershipWaitMs ?? 1500;
