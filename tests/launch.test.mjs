@@ -117,7 +117,7 @@ test('spawnKit carries role-scoped approximate MCP tool signatures', t => {
     const plan = launchPlan(installed, { ...request, repository: dir, role, binding: piBinding });
     assert.match(plan.spawnKit.note, /approximate; consult the specific live schema for unfamiliar parameters or a mismatch/);
     assert.match(plan.spawnKit.note, /ordinary Peer: start slp_seat_create with runtime\/selection omitted/);
-    assert.match(plan.spawnKit.note, /returned choices use selection.optionId; full runtime is compatibility with complete receipts/);
+    assert.match(plan.spawnKit.note, /returned choices use selection.optionId, plus selection.thinkingOptionId when that option has multiple eligible pairs \(null for runtime default\); full runtime is compatibility with complete receipts/);
     assert.deepEqual(plan.spawnKit.tools.map(tool => tool.split('(')[0]), orchestrating);
     assert.match(plan.spawnKit.tools[5], /labels\?: object/);
     for (const tool of plan.spawnKit.tools) assert.match(tool, /^[a-z_]+\([^)]*\)$/);

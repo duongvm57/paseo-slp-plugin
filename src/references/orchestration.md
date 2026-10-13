@@ -6,10 +6,12 @@ thresholds/methods; the assignment controls scope and authority.
 
 ## Frame and maintain state
 
-Read relevant repository evidence before delegation. Establish outcome, acceptance,
-constraints, assumptions/unknowns, ownership/exclusions, dependencies and proof.
-Keep moving writer ownership separate from module/state ownership. Expose missing
-framing before representation changes; file/API plans stay provisional.
+For an open anchoring/premise/challenge question in a brief, follow-up or
+correction, read references/peer-tactics.md. Read relevant repository evidence
+before delegation. Establish outcome, acceptance, constraints, assumptions/unknowns,
+ownership/exclusions, dependencies and proof. Keep moving writer ownership separate
+from module/state ownership. Expose missing framing before representation changes;
+file/API plans stay provisional.
 
 Bounded means finishable within one Peer's context. Estimate update rounds/comments,
 flows/screens, touched files and the provider's context window against required
@@ -19,13 +21,11 @@ not just coding, and label unmeasured context estimates. If it will not fit, spl
 dependency-ordered slices with
 one Peer and explicit scope each; do not size by issue count alone.
 
-A bounded task may use an inline brief. For desk work, read slp_workflow_get;
+For desk work, read slp_workflow_get;
 amend brief/decisions through its tools instead of copying a second owner/revision
 ledger into notes. Resolve omissions/stale pins before decisions. Keep constraints
 and provisional choices; notify affected owners of steering/material judgments.
-Without desk, use the authorized timeline/checkpoint. Give Peers relevant context;
-Lead retains integration context. Messages are claims, not acceptance; policy
-recovery restores no task state.
+Without desk, use the authorized timeline/checkpoint. Messages are claims, not acceptance.
 
 ## Select topology
 
@@ -39,7 +39,7 @@ Start with the smallest topology that supplies the required judgment:
 | Plausible alternative foundations or costly lock-in | Independent design lenses or sealed council. |
 | Large disruptive dependency | Bounded Peer/lane or dependency Lead, with separate contract, proof and handback. |
 
-Dispositions share the Peer role. Assign self-contained questions and the
+Assign self-contained questions and the
 Peer policy's outputs; read-only reports stay in-session unless artifact
 writes are granted. Review selection follows review-gates.md, including an
 explicit not-required decision or authorized waiver; a topology label
@@ -52,8 +52,6 @@ new assignment by default, even inside the same project. Reuse reliable
 context only for that assignment's continuation, authorized phases,
 correction or re-review. A new review candidate alone is not a new assignment;
 added scope/grants alone do not make a different outcome continuation.
-Explicit Human-directed formation exceptions and authorized handoffs still
-stand.
 
 Desk task IDs and host dispatch.reuse capability do not decide a Peer session's
 outcome boundary or grant a reuse exception. Classify from brief/outcome and
@@ -112,7 +110,9 @@ Freeze read-only review candidates with writer acknowledgment/pause; idle
 alone is insufficient. A receiving owner inspects candidate/dependencies before
 transfer. One writer owns integration; Lead retains its decision. Freeze and
 review the integrated result, since lane reviews do not prove integration.
-Merge/cherry-pick, commit and push need their applicable grants.
+Merge/cherry-pick, commit and push need their applicable grants. After an
+owner/Lead exception write changes a file another owner will return to, send
+that owner one line disclosing it with the current candidate.
 
 ## Resolve failed premises and dependencies
 
@@ -136,9 +136,9 @@ Inspect exact artifacts/diff, relevant pre-existing/untracked work and actual
 proof. Use a complete current desk capture or installed snapshot/full clean
 commit; ignored/external/process evidence needs its own observation.
 report-records.md owns submission/CLI validation. Record consistency proves
-no execution. Inspect measured server check/recipe results with their class,
-output and candidate; independently verify shell-reported checks. Repeat
-valid measured execution only for drift or an unresolved outcome question.
+no execution. Inspect measured check/recipe results (class, output, candidate);
+independently verify shell-reported checks; repeat valid measured execution only
+for drift or an unresolved outcome question.
 The desk does not pause writers or prove semantic correctness: keep writers
 paused and the current candidate identical to the reviewed one.
 

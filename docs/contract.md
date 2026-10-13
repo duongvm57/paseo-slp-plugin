@@ -58,6 +58,7 @@ and dependency locks are supporting artifacts, not additional runtime owners.
 | src/references/monitoring.md | Supervisor/Lead event observation, heartbeat ownership and bounded-task resource settlement. |
 | src/references/report-records.md | Handback submission versus offline schema/evidence validation, claim/observation limits and settlement mirror/export/sink operation. |
 | src/references/governance.md | Supervisor scope, causal notebook, evidence-led failure investigation, authorized recovery, cross-project relay and policy evolution. |
+| src/references/peer-tactics.md | Conditional toolbox of fifteen optional tactics for briefs, follow-ups and corrections with an open anchoring/premise/challenge question; read only on need. A tactic grants no scope, write authority, seat or acceptance obligation, and REOPEN_REQUEST/DEPENDENCY_REQUEST/BLOCKED stay existing invariants. |
 | src/references/anti-patterns.md | Conditional twenty-pattern judgment catalogue with specific Inspect evidence, questions and bounded responses; governance owns causal records and authority. Hypotheses, not runtime detectors or a mandatory full audit. |
 | src/references/provider-routing.md | Supervisor/Lead profile selection, Peer pool selection, validation and handoff; conditional pointer to Jev routing procedure. |
 | src/references/jev-routing.md | Conditional Jev routing procedure: load only for `shadow`, `armed` or `error`; `error` blocks the dependent branch. |

@@ -45,7 +45,7 @@ type PhaseWriter = (name: string, value: unknown) => void;
 const formationEvidenceTooLarge = (value: unknown) =>
   Buffer.byteLength(JSON.stringify(value)) * 3 > WIRE_LIMITS.deskBridgeRequestBytes - 32768;
 function selectionFailure(error: unknown): DeskRejectionValue {
-  const e = error as { name?: unknown; code?: unknown; reason?: unknown } | null;
+  const e = error as { name?: unknown; code?: unknown; reason?: unknown; eligibleEfforts?: unknown } | null;
   if (e?.name === "SeatSelectionError" && ["INVALID_RECORD", "ROUTE_DRIFT", "REQUEST_TOO_LARGE"].includes(e.code as string)) {
     if (e.code === "INVALID_RECORD" && e.reason === "declined") {
       return reject("INVALID_RECORD", "Jev declined Peer routing; no suitable option was selected",
@@ -54,6 +54,23 @@ function selectionFailure(error: unknown): DeskRejectionValue {
     if (e.code === "ROUTE_DRIFT" && e.reason === "selection-mismatch") {
       return reject("ROUTE_DRIFT", "independent selection differs from the armed Jev decision",
         `Inspect the retained decision and resolve the choice with the owning Lead/Human. Do not silently discard an assigned selection. ${DESK_OPERATION_RETRY_RECOVERY}`);
+    }
+    if (e.code === "INVALID_RECORD" && e.reason === "effort-required") {
+      const efforts = e.eligibleEfforts;
+      if (!Array.isArray(efforts) || efforts.length === 0 || efforts.length > 64
+        || efforts.some(value => value !== null && (typeof value !== "string" || value.length === 0))
+        || Buffer.byteLength(JSON.stringify(efforts)) > 384) {
+        return reject("REQUEST_TOO_LARGE", "eligible effort values cannot be safely reported within the diagnostic limit",
+          `Ask the Human to narrow the pool's allowed efforts before selecting. ${DESK_OPERATION_RETRY_RECOVERY}`);
+      }
+      return reject("INVALID_RECORD", "Peer option matches multiple eligible preset + effort pairs; choose selection.thinkingOptionId",
+        `Choose selection.thinkingOptionId from these eligible values for the selected option: ${JSON.stringify(efforts)}. This bounded list may omit further values; null means runtime default. An unadmitted rejection can keep its requestId. ${DESK_OPERATION_RETRY_RECOVERY}`);
+    }
+    if (e.code === "INVALID_RECORD" && (e.reason === "pair-ineligible" || e.reason === "no-eligible-pairs")) {
+      return reject("INVALID_RECORD", e.reason === "no-eligible-pairs"
+        ? "No eligible preset + effort pair is available for the selected option or pool"
+        : "Peer selection does not match an eligible preset + effort pair",
+        `Inspect pool eligibility and model/effort capabilities; ask the Human to correct the pool or capabilities if no pair is eligible. An unadmitted rejection can keep its requestId. ${DESK_OPERATION_RETRY_RECOVERY}`);
     }
     if (e.code === "INVALID_RECORD" && e.reason === "selection-required") {
       return reject("INVALID_RECORD", "Peer formation requires an independent selection.optionId",

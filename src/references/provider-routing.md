@@ -47,9 +47,9 @@ Catalog hash, eligibility and Jev receipts must also be fresh.
 
 V2: follow returned pool policy/selectionGuidance and every preset's
 description/hints. Choose smallest sufficient capability and effort; record
-the concrete uncertainty or verification difficulty justifying stronger choices.
+uncertainty or verification difficulty justifying stronger choices.
 Task labels, brief length, names/order/origin/disposition imply no tier.
-Choose selection.optionId + selection.thinkingOptionId (null for runtime default).
+Choose selection.optionId; ambiguous options need selection.thinkingOptionId (null for default).
 For cross-provider name routingRequirements.referenceAgentId; add crossProvider:true
 for an assignment-wide requirement. Runtime families differ (Devin to Codex);
 missing reference is a gap. Preserve rules/effort limits and compatibility

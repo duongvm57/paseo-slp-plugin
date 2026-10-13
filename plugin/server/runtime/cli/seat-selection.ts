@@ -26,9 +26,10 @@ export type SelectedPeer = {
 };
 export class SeatSelectionError extends Error {
   readonly code: "INVALID_RECORD" | "ROUTE_DRIFT" | "REQUEST_TOO_LARGE";
-  readonly reason?: "declined" | "selection-mismatch" | "selection-required";
-  constructor(code: SeatSelectionError["code"], message: string, reason?: SeatSelectionError["reason"]) {
-    super(message); this.name = "SeatSelectionError"; this.code = code; this.reason = reason;
+  readonly reason?: "declined" | "selection-mismatch" | "selection-required" | "effort-required" | "pair-ineligible" | "no-eligible-pairs";
+  readonly eligibleEfforts?: (string | null)[];
+  constructor(code: SeatSelectionError["code"], message: string, reason?: SeatSelectionError["reason"], eligibleEfforts?: (string | null)[]) {
+    super(message); this.name = "SeatSelectionError"; this.code = code; this.reason = reason; this.eligibleEfforts = eligibleEfforts;
   }
 }
 const MAX_SELECTION_BYTES = 32 * 1024;
@@ -42,9 +43,12 @@ function readInputs(request: PeerSelectionRequest) {
   const catalog = readCatalog(request.repository, request.paseoHome);
   if (catalog.version === 1 && (Object.keys(request.routingContext ?? {}).length || request.selection && Object.hasOwn(request.selection, "thinkingOptionId"))) throw new SeatSelectionError("INVALID_RECORD", "v1 pools keep fixed settings; explicitly convert to v2 before using effort selection or reference constraints");
   const usable = eligibleOptions(catalog, "peer").filter(option => catalog.version === 2 || !seatTokenConflict(option));
-  if (usable.length === 0) throw new SeatSelectionError("INVALID_RECORD", "no eligible Peer option");
+  if (usable.length === 0) throw new SeatSelectionError("INVALID_RECORD", "no eligible Peer option",
+    catalog.version === 2 ? "no-eligible-pairs" : undefined);
   if (request.selection && !usable.some(option => option.id === request.selection!.optionId)) {
-    throw new SeatSelectionError("INVALID_RECORD", "selection is not an eligible Peer option");
+    throw new SeatSelectionError("INVALID_RECORD", "selection is not an eligible Peer option", catalog.version === 2
+      ? catalog.options.some(option => option.id === request.selection!.optionId) ? "no-eligible-pairs" : "pair-ineligible"
+      : undefined);
   }
   return { catalog, usable, mode, modeSha256: hash(canonicalJson(config)),
     source: { repository: request.repository, catalogFile: catalog.path, scope: catalog.scope } };
@@ -152,13 +156,26 @@ export async function selectPeerSeat(request: PeerSelectionRequest, deps: {
 }
 
 function presetSet(request: PeerSelectionRequest, providers: Provider[] | undefined) {
-  return boundedPresetChoices(presetChoiceSet(readCatalog(request.repository, request.paseoHome), 'peer', providers, request.routingContext));
+  const set = presetChoiceSet(readCatalog(request.repository, request.paseoHome), 'peer', providers, request.routingContext);
+  // Formation diagnostics only: CLI discovery/binding retains its original errors.
+  if (set.choices.length === 0) throw new SeatSelectionError('INVALID_RECORD', 'No eligible preset + effort pair for the selected option or pool', 'no-eligible-pairs');
+  return boundedPresetChoices(set);
 }
 function independentPresetPair(request: PeerSelectionRequest, choices: ReturnType<typeof presetSet>['choices']) {
   if (!request.selection) return undefined;
   const matches = choices.filter(c => c.optionId === request.selection!.optionId
     && (!Object.hasOwn(request.selection!, 'thinkingOptionId') || c.thinkingOptionId === request.selection!.thinkingOptionId));
-  if (matches.length !== 1) throw new SeatSelectionError('INVALID_RECORD', 'Select one eligible preset + effort pair, including thinkingOptionId', 'selection-required');
+  if (matches.length > 1) {
+    // Only already-public effort IDs for this option; never labels, notes or other options.
+    const efforts: (string | null)[] = [];
+    for (const match of matches) {
+      if (Buffer.byteLength(JSON.stringify([...efforts, match.thinkingOptionId])) > 384) break;
+      efforts.push(match.thinkingOptionId);
+    }
+    throw new SeatSelectionError('INVALID_RECORD', 'Select one eligible preset + effort pair, including thinkingOptionId', 'effort-required', efforts);
+  }
+  if (!choices.some(c => c.optionId === request.selection!.optionId)) throw new SeatSelectionError('INVALID_RECORD', 'No eligible preset + effort pair for the selected option', 'no-eligible-pairs');
+  if (matches.length === 0) throw new SeatSelectionError('INVALID_RECORD', 'Selection is not an eligible preset + effort pair', 'pair-ineligible');
   return matches[0];
 }
 function preflightPresetChoice(request: PeerSelectionRequest, providers: Provider[] | undefined) {

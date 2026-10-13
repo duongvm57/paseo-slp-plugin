@@ -83,7 +83,7 @@ test('concurrent epochs share one admission; a losing epoch cannot execute while
 test('foreign native caller cannot retrieve another actor receipt; a distinct native request remains independent',async t=>{
  const f=fixture(t); const original=await f.ops.run(f.identity,f.input,async()=>({state:'recorded'}));
  const foreign=f.ops.get({...f.identity,agentId:'foreign'});
- assert.equal(foreign.code,'EVIDENCE_INCOMPLETE');assert.match(foreign.recovery,/native caller.*Ask that Lead/);
+ assert.equal(foreign.code,'EVIDENCE_INCOMPLETE');assert.match(foreign.recovery,/native caller.*ask that Lead/);
  assert.match(foreign.message,/this caller/);
  assert.match(foreign.recovery,/does not prove/);
  assert.equal(Object.hasOwn(foreign,'identity'),false,'foreign callers receive no owner receipt');
@@ -97,7 +97,10 @@ test('choice preflight publishes no intent and recorded operations bypass it', a
  const choice={ok:true,state:'selection-required',operationAdmitted:false,choices:['a','b']};
  const reply=await f.ops.run(f.identity,f.input,async()=>assert.fail('unselected effect'),async()=>{calls++;return choice;});
  assert.deepEqual(reply,choice);assert.equal(calls,1);
- assert.equal(f.ops.get(f.identity).code,'EVIDENCE_INCOMPLETE');
+ const missing=f.ops.get(f.identity);assert.equal(missing.code,'EVIDENCE_INCOMPLETE');
+ assert.match(missing.recovery,/unadmitted preflight rejection may leave this caller with no intent or receipt/);
+ assert.match(missing.recovery,/foreign-caller lookup does not prove/);
+ assert.match(missing.recovery,/Do not resubmit issued or uncertain effects/);
  const recorded=await f.ops.run(f.identity,{work:'chosen'},async()=>({done:true}),async()=>null);
  const replay=await f.ops.run(f.identity,{work:'chosen'},async()=>assert.fail('replay effect'),async()=>assert.fail('replay preflight'));
  assert.equal(replay.receiptSha256,recorded.receiptSha256);

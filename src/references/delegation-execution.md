@@ -4,7 +4,7 @@ For desk-managed task dispatch, use task-execution.md without duplicating its bo
 
 ## Classify and brief
 
-Classify from the actual assignment, not available sessions:
+Classify from assignment, not available sessions:
 
 | Assignment | Action |
 |---|---|
@@ -36,10 +36,12 @@ pool/Jev choice (provider-routing.md). Unique requestId/task:
 {"requestId":"peer-implementation-1","role":"peer","taskLabel":"bounded implementation","assignment":"Implement the assigned slice and return candidate-bound proof.","grantRef":"current Human assignment"}
 ```
 
-selection-required with operationAdmitted=false returns choices: choose
-independently and add selection.optionId before admission. Shadow needs that
-choice; armed obtains its decision server-side. Full-pin compatibility validates
-complete pool/Jev pins; no settings overrides.
+selection-required with operationAdmitted=false returns choices: add
+selection.optionId before admission; ambiguous V2 options need selection.thinkingOptionId
+(null for runtime default). Shadow needs an independent pair. Armed selection
+confirms/detects drift, never forces models; Human constraints belong in assignment,
+Jev's brief, not grantRef. Full-pin compatibility validates complete pool/Jev pins;
+no settings overrides.
 Placement defaults to caller; existing worktrees need declared paths/reason.
 It qualifies same-Git workspace/cwd and pins routing/protocol separately.
 Placement/automatic runtime/selection waits briefly for exact registration;
@@ -81,13 +83,13 @@ Default placement is the parent workspace, including read-only review;
 a different checkout/lane needs declared paths/reason. Existing worktrees use slp_seat_create.
 Never install dependencies or materialize to hide a gap; Lead owns the setup
 triggered by its authorized Paseo workspace creation.
-Retrieve the actual report through the callback before a verdict.
+Retrieve callback report before verdict.
 
-Verify the returned ID against actual host parent/workspace/cwd and bundle.
-Confirm the brief's report route when its first report arrives. Titles,
-labels supplied by callers and sent prompts prove no relation. Record
+Verify returned ID against actual host parent/workspace/cwd and bundle.
+Confirm brief's report route on first report. Titles,
+caller labels and prompts prove no relation. Record
 unexposed metadata as gaps; take mismatches to the owning parent/Human.
-An uncertain create reserves its scope: reconcile the original request with
+An uncertain create reserves scope: reconcile original request with
 host evidence before replacement. Empty inventory alone proves no absence.
 A replacement needs proof the original cannot still create and any old owner
 is settled; unresolved effects BLOCK this branch. Preserve original sessions.
@@ -95,7 +97,7 @@ is settled; unresolved effects BLOCK this branch. Preserve original sessions.
 ## Retrieve
 
 Use monitoring.md's event waits and bounded fallback wakes. On finish,
-retrieve the actual report/artifact through status/activity/timeline access;
+retrieve report/artifact through status/activity/timeline access;
 curated tails may omit it. Missing report access blocks acceptance; idle is
 no verdict. Same-assignment follow-ups preserve the verified child with
 background/notifyOnFinish. A Human-authorized stock Codex/Pi
