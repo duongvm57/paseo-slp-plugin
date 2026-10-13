@@ -17,7 +17,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { tmpdir } from 'node:os';
@@ -52,6 +52,30 @@ test('paseo-plugin.json parses through the host readPluginManifest', async t => 
     requirements: { paseo: '>=0.11.0' },
     build: [['npm', 'install', '--omit=dev', '--no-audit', '--no-fund']],
   });
+});
+
+test('manifest listing assets exist inside plugin/ and are PNG files', () => {
+  // Host-independent: reads the raw manifest, so it runs even when no host validator is available.
+  const manifest = JSON.parse(readFileSync(join(PLUGIN_DIR, 'paseo-plugin.json'), 'utf8'));
+  const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  const entries = [
+    ['icon', manifest.icon],
+    ...(manifest.media ?? []).map((entry, index) => [`media[${index}]`, entry]),
+  ].filter(([, value]) => !(typeof value === 'string' && value.startsWith('https://')));
+  assert.ok(entries.some(([label]) => label === 'icon'), 'manifest declares an icon');
+  for (const [label, value] of entries) {
+    assert.equal(typeof value, 'string', `${label} is a string`);
+    assert.ok(!value.startsWith('/') && !value.includes('\\') && !/^[A-Za-z]:/.test(value), `${label} is a relative path with "/" separators`);
+    assert.ok(!value.split('/').includes('..'), `${label} does not contain ".."`);
+    const file = join(PLUGIN_DIR, value);
+    assert.ok(existsSync(file), `${label} exists in plugin/: ${value}`);
+    const bytes = readFileSync(file);
+    assert.ok(bytes.subarray(0, 8).equals(PNG_SIGNATURE), `${label} starts with the PNG signature`);
+    if (label === 'icon') {
+      // IHDR width/height are big-endian uint32 at byte offsets 16 and 20.
+      assert.equal(bytes.readUInt32BE(16), bytes.readUInt32BE(20), 'icon is square');
+    }
+  }
 });
 
 test('host manifest rejects invalid fields and never preserves unknown top-level keys', async t => {
