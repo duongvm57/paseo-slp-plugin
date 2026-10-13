@@ -38,7 +38,7 @@ export type FormationTargetPin = {
 };
 type Phase = (name: string, value: unknown) => void;
 type Guard = () => Promise<DeskRejectionValue | null>;
-type Git = Pick<TaskGitIo, "commonDir" | "top" | "revParse">;
+type Git = Pick<TaskGitIo, "commonDir" | "top" | "revParse" | "worktreeList">;
 
 export class FormationPlacementError extends Error {
   readonly code: DeskRejectionValue["code"];
@@ -186,21 +186,36 @@ export function createFormationPlacement(deps: {
     }
   };
   const overlaps = (a: string, b: string) => a === b || a.startsWith(`${b}/`) || b.startsWith(`${a}/`);
+  // Every registered checkout (main, bare or linked) of the repository at cwd.
+  const checkouts = async (cwd: string) => {
+    try {
+      const raw = await git.worktreeList(cwd);
+      if (Buffer.byteLength(raw) > 1024 * 1024) throw new Error("registration cap");
+      const paths = raw.split("\0").filter(field => field.startsWith("worktree ")).map(field => field.slice("worktree ".length));
+      if (paths.length === 0 || paths.some(path => !isAbsolute(path))) throw new Error("no registration");
+      return paths.map(path => { try { return realpathSync(path); } catch { return path; } });
+    } catch {
+      throw new FormationPlacementError("CAPABILITY_GAP", "placement worktree registrations cannot be observed; cross-repository Lead placement fails closed");
+    }
+  };
   // Supervisor + Lead + existing placement is the only combination that may
-  // leave the caller's repository. Every other request keeps the caller's repo
-  // and therefore its historical rejection. A nested repository shares paths
-  // with the caller's checkout, so it never qualifies as another desk.
+  // leave the caller's repository. Every other request, and any failed
+  // classification read, keeps the caller's repo and its historical path. Two
+  // repositories are separate desks only when no checkout of either contains,
+  // or is contained by, a checkout of the other.
   const placementRepository = async (row: MembershipValue, input: DeskSeatCreateInputValue, key: string) => {
     const placement = input.placement;
     if (placement?.kind !== "existing" || row.role !== "supervisor" || input.role !== "lead") return null;
-    const start = placement.cwd !== undefined ? directory(placement.cwd)
-      : await liveDirectory(placement.workspaceId!, null, key, null);
-    const repo = await observeCommon(start);
+    let start: string, repo: string;
+    try {
+      start = placement.cwd !== undefined ? directory(placement.cwd)
+        : await liveDirectory(placement.workspaceId!, null, key, null);
+      repo = await observeCommon(start);
+    } catch { return null; }
     if (repo === deps.repo.gitCommonDir) return null;
-    const targetTop = directory(await git.top(start));
-    const callerTops = [directory(await git.top(directory(row.createCwd))), dirname(deps.repo.gitCommonDir)];
-    if (callerTops.some(top => overlaps(top, targetTop) || overlaps(top, dirname(repo)))) {
-      throw new FormationPlacementError("CAPABILITY_GAP", "placement repository is nested with the caller's checkout; a cross-repository Lead requires a separate checkout", placement.workspaceId);
+    const caller = await checkouts(directory(row.createCwd)), target = await checkouts(start);
+    if (caller.some(a => target.some(b => overlaps(a, b)))) {
+      throw new FormationPlacementError("CAPABILITY_GAP", "placement repository is nested with the caller's repository; a cross-repository Lead requires checkouts that neither contain nor are contained by the caller's", placement.workspaceId);
     }
     return { repo, start };
   };

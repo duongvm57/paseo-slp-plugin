@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, realpathSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createFormationPlanner, runSeatCreate } from '../../plugin/server/desk-formation.ts';
 import { createFormationPlacement } from '../../plugin/server/desk-placement.ts';
@@ -14,7 +14,8 @@ export function committedRepository(cwd) {
  fixtureGit(cwd,'-c','user.name=Fixture','-c','user.email=fixture@example.invalid','commit','--allow-empty','-qm','fixture base');
  return realpathSync(join(cwd,'.git'));
 }
-export function placementFixture(t,{mode='off',count=1,registration='ready',budgets,role='peer',callerRole='lead'}={}) {
+const gitCommonDirOf=cwd=>realpathSync(resolve(cwd,fixtureGit(cwd,'rev-parse','--git-common-dir')));
+export function placementFixture(t,{mode='off',count=1,registration='ready',budgets,role='peer',callerRole='lead',git}={}) {
  const f=selectionFixture(t,{mode,count});
  const commonDir=committedRepository(f.repository),target=join(f.dir,'target');
  // Fixture prerequisite only; the product never calls Git worktree add or host setup.
@@ -41,7 +42,7 @@ export function placementFixture(t,{mode='off',count=1,registration='ready',budg
    labels:{...options.labels,'paseo.parent-agent-id':options.parent},currentModeId:options.config.modeId,
    thinkingOptionId:options.config.thinkingOptionId,features:Object.entries(options.config.featureValues??{}).map(([id,value])=>({id,value}))};
   snapshots.set(childId,snapshot);
-  const ledger=snapshot.cwd===foreign||snapshot.cwd.startsWith(foreign+'/')?foreignMembers:members;
+  const ledger=gitCommonDirOf(snapshot.cwd)===foreignCommonDir?foreignMembers:members;
   if(registrationState!=='missing')ledger.push(memberRow(childId,{provider,at},{agentId:childId,role:currentRole,
    createCwd:snapshot.cwd,workspaceId:id,...(registrationState==='unregistered'?{registeredAt:null}:{}),
    ...(registrationState==='revoked'?{revokedAt:at,revokeReason:'fixture'}:{})}));
@@ -60,7 +61,7 @@ export function placementFixture(t,{mode='off',count=1,registration='ready',budg
  const planner=createFormationPlanner({runtimePath:candidate,daemonHome:f.home,host:()=>host,
   importModule:async spec=>{const launch=await import(spec);return {...launch,
    selectPeerSeat:(request,deps)=>launch.selectPeerSeat(request,{...deps,decide:f.decide})};}});
- const placement=createFormationPlacement({repo:{gitCommonDir:commonDir},host:()=>workspaceApi,budgets});
+ const placement=createFormationPlacement({repo:{gitCommonDir:commonDir},host:()=>workspaceApi,budgets,...(git?{git}:{})});
  const deps={stableRoot:join(f.home,'slp-runtime'),repoKey:'repo',host:()=>host,plan:planner,
   placement,placementCapability:planner.placementCapability,preflightPeer:planner.preflightPeer,selectPeer:planner.selectPeer,
   readMemberships:gitCommonDir=>gitCommonDir===foreignCommonDir?foreignMembers:members,membershipWaitMs:30,guard:async()=>null};

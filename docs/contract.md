@@ -695,11 +695,14 @@ supplied they must agree. The SDK descriptor, not the requested ID alone, pins
 workspace/canonical cwd. Git-common-dir equality rejects foreign and nested Git
 repositories before child creation; a same-Git linked worktree qualifies. One
 desk serves one repository. The only exception is a Supervisor caller forming a
-Lead with existing placement in a separate (non-nested) repository: that
-repository's main/linked checkout becomes source and target, the Lead registers
-in its desk, the membership wait reads that ledger, and the receipt stays on the
-Supervisor's desk. Lead callers, Peer children, caller/omitted placement, nested
-repositories and task access stay rejected. New explicit placement pins
+Lead with existing placement in a separate repository, where no registered
+checkout (main, bare or linked, from `git worktree list`) of either repository
+contains or is contained by a checkout of the other; unobservable registrations
+fail closed. That repository's main/linked checkout becomes source and target,
+the Lead registers in its desk, the membership wait reads that ledger, and the
+receipt stays on the Supervisor's desk. A failed classification read keeps the
+caller-repository path and its phases. Lead callers, Peer children,
+caller/omitted placement, nested repositories and task access stay rejected. New explicit placement pins
 source top/configuration/HEAD and target workspace/cwd/HEAD; pool/protocol use
 source, provider snapshots and execution prompt use target. Source/target drift
 blocks dependent effects; CLI JSON cannot supply the internal launch context or

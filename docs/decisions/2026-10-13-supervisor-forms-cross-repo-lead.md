@@ -14,8 +14,9 @@ so a Supervisor could not natively form a Lead for a second project.
 ## Decision
 
 Keep one desk per repository. A Supervisor may form a Lead with existing
-placement in a separate, non-nested repository; that repository supplies source
-and target pins, its desk registers the Lead and is read by the membership wait,
+placement in a separate repository, where no checkout of either repository
+contains or is contained by a checkout of the other; that repository supplies
+source and target pins, its desk registers the Lead and is read by the membership wait,
 and the receipt stays on the Supervisor's desk. Lead callers, Peer children,
 caller/omitted placement, nested repositories and task access stay
 same-repository. Rejected: (a1) only clarify the rejection, leaving Supervisors on
