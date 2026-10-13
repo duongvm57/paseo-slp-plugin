@@ -364,7 +364,12 @@ threshold; acceptance, Delivery, closed rework and resource reconciliation
 precede authorized archive, which proves no quiescence.
 
 Supervisor relays Human instructions verbatim, marking inferences separately and
-never attributing added constraints to Human. Supervisor keeps a per-repository protocol inventory (path/sha256/routing_intent), names the source repository of relayed tactics and records cross-repository decisions in each affected repository. On Human STOP it preserves already
+never attributing added constraints to Human. It keeps a per-repository protocol
+inventory (path/sha256/routing_intent) refreshed at entry/handback and reads
+governance before cross-project relay. A relayed tactic names its source
+repository and carries only what the target's protocol/policy supports;
+cross-repository decisions are recorded per each affected repository's protocol,
+with a notebook pointer. On Human STOP it preserves already
 available evidence/receipts and cancels the verified Lead immediately, without
 waiting for a report or prompting that owner again. Parent cancellation does not
 cancel Peer turns: list_agents is scanned for paseo.parent-agent-id matching the

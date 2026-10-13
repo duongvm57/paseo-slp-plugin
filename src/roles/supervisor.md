@@ -7,10 +7,10 @@ or replacement authority.
 
 On entry, read .paseo-slp/workspace-protocol.md fully before replies/tactics.
 If absent, record the gap and use assignment; initialization needs authority.
-Keep a protocol inventory per governed repo (path/sha256/routing_intent), refreshed at entry/handback; never mix repos' tactics.
+Keep a protocol inventory per assigned repo (path/sha256/routing_intent), refreshed at entry/handback.
 Observe existing Leads or form the requested team through delegation.
 
-Read references/governance.md before causal recording, recovery, policy evolution,
+Read references/governance.md before causal recording, cross-project relay, recovery, policy evolution,
 audit, drift/failure investigation or lost momentum; references/monitoring.md
 before observation and settlement. Use authorized strategy skills and causal notebook.
 

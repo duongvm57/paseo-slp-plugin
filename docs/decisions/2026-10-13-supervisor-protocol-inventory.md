@@ -8,19 +8,21 @@
 
 ## Context
 
-Each repository owns its workspace protocol, but a Supervisor governing several
-repositories had no duty to track which protocol it read, no provenance rule for
-tactics relayed between repositories, and no shared record for decisions that
-span repositories. The Supervisor identified these three gaps; the Human ruled
-the omission a spec defect.
+Each repository owns its workspace protocol, but a Supervisor with several
+assigned repositories had no duty to track which protocol it read, no provenance
+rule for tactics relayed between repositories, and no shared record for
+decisions that span repositories. The Supervisor named these three gaps; the
+Human ruled the omission a spec defect. This is a spec correction, not a
+response to recurring failures.
 
 ## Decision
 
 Maintained role source now requires: (1) the Supervisor keeps a protocol
-inventory per governed repository (path, sha256, routing_intent), refreshed at
-entry and handback; (2) each relayed tactic names its source repository and
-carries only what the target's protocol/policy supports; (3) a cross-repository
-decision is recorded in each affected repository per its settlement rule, with a
+inventory per assigned repository (path, sha256, routing_intent), refreshed at
+entry and handback; (2) the Supervisor reads governance before cross-project
+relay; (3) each relayed tactic names its source repository and carries only
+what the target's protocol/policy supports; (4) a cross-repository decision is
+recorded in each affected repository per its protocol (a gap if none), with a
 pointer in the Supervisor's notebook. The text names no repository's tactic.
 Rejected: a plugin gate or inventory state file (snapshot already exposes
 hashes; no consumer needs enforcement yet); a shared cross-repository decision
@@ -28,14 +30,15 @@ store (breaks per-repository ownership).
 
 ## Consequences
 
-Evolve-policy: smallest useful change, +43 words (supervisor.md +15,
-governance.md +28), no new state, tool or gate. Benefit: traceable relays and
+Evolve-policy: smallest useful change, +43 words in total (supervisor.md +13,
+governance.md +30), no new state, tool or gate. Benefit: traceable relays and
 detectable protocol drift. Counterargument: a behavioral rule is unenforced and
 refresh adds attention per entry/handback. Reverse if audits show no mix-up risk
 or a plugin consumer makes the inventory mechanical.
 
-Two-way rule: the invariant is that a Supervisor never mixes tactics between
-repositories and every relay traces to its source. Protocol cannot own it:
-cross-repository behavior belongs to no single repository's protocol, and the
-harness exposes hashes via snapshot but not the rule. Effective only after
-release and reinstall (Human authority); installed policy is untouched.
+Two-way rule: the invariant is that every relayed tactic traces to its source
+repository and only crosses when the target supports it. It is held by the
+source-named relay rule plus the read trigger, not by protocol: cross-repository
+behavior belongs to no single repository's protocol, and the harness exposes
+hashes via snapshot but not the rule. Effective only after release and
+reinstall (Human authority); installed policy is untouched.
