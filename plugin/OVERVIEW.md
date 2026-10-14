@@ -1,32 +1,53 @@
-Paseo SLP adds a Supervisor, Lead and Peer team of coding agents to Paseo. You give a Lead a bounded objective, or work through an optional Supervisor. The Lead frames the work, coordinates independent Peers, integrates their results and returns a project verdict. You keep control of intent, important trade-offs and final acceptance.
+Paseo SLP helps you delegate complex coding work to a coordinated team of agents without having to manage every agent yourself. A Lead owns coordination and integration; Peers take bounded implementation, design or review assignments; an optional Supervisor observes the workflow and relays your decisions. You keep control of goals, important trade-offs and final acceptance.
 
-## What it adds
+The plugin loads each agent's role instructions and keeps shared work records in Paseo, so you can inspect who owns the work, what decisions were made and what evidence supports the result.
 
-- Up to 15 providers named `slp-<family>-<role>`, and two profiles: **SLP Supervisor** and **SLP Lead**. Seats can run on Codex, Pi, Devin, Claude Code or OpenCode, and can be mixed in one team.
-- Role instructions that are loaded when a seat starts, separate from your task prompt.
-- A Peer pool: the set of runtime options the Lead picks from for each Peer.
-- A repository desk with durable assignments, briefs, decisions, declared scopes, selected review, and candidate and check evidence.
-- A native task queue for large objectives, and planned handoff of an assignment to another Lead.
-- A sidebar manager, and a read-only **SLP work** panel opened with **Read SLP work** from the command palette.
-- Optional features, all off by default: a shared communication language, Peer quota fallback, Jev-assisted routing, and communication supervision.
+## When to use it
 
-## How it works
+- Work has strong dependencies between steps, and implementation may expose a faulty assumption.
+- Architecture, lifecycle or ownership needs clarification as work proceeds.
+- Multiple modules, projects, workspaces or owners need to coordinate across integration boundaries.
+- Long or complex work needs decisions and responsibility to survive interruptions or handoffs.
 
-Each seat is an ordinary Paseo agent. Paseo stays the only control plane, and the plugin does not run its own scheduler or agent database. Each moving scope has one writer, and Peers do not spawn other agents. The desk keeps handback claims separate from measured candidate and check evidence. It does not infer acceptance from a handback, an agent status or a passing check. Acceptance stays with you.
+For small tasks with clear contracts and few dependencies, such as simple CRUD or extensions following an existing pattern, one agent is often enough. Use SLP when coordination provides more value than its overhead.
+
+## How work is organized
+
+Give an **SLP Lead** a bounded objective, or work through an **SLP Supervisor**. The Lead chooses and creates the Peers needed for the task. Peers form independent judgments: they can challenge an assumption, request a missing dependency or report that work is blocked. Each moving scope has one writer.
+
+Set up `.paseo-slp/workspace-protocol.md` for minimum sufficient coordination. A clear, bounded task can start with one Peer Engineer; the Lead adds an Architect or Reviewer when needed. The Supervisor is optional.
+
+The repository desk preserves assignments, current briefs, decisions, dependencies, review and evidence. Its task queue supports Lead-invoked dispatch and integration, and planned handoff keeps an assignment's history. Open **Read SLP work** to inspect these records in the workspace. The desk distinguishes reported results from measured evidence; final acceptance stays with you.
+
+Each team member is an ordinary Paseo agent you can open and chat with. Agents can use Codex, Pi, Devin, Claude Code or OpenCode, with different providers and models in the same team.
+
+## What this changes in practice
+
+| Coordination problem | SLP practice |
+| --- | --- |
+| Workers inherit a pre-solved answer | The Lead delegates outcomes; Peers can challenge the premise. |
+| Parallel agents overwrite each other's work | One writer per moving scope, with declared ownership and repository isolation tactics. |
+| Review approves an author's framing or an outdated change | Independent judgment on a stable candidate, with review revisited when the brief, scope or candidate changes. |
+| An idle agent or passing tests are treated as completion | The Lead assesses the integrated candidate and its evidence; you retain final acceptance. |
 
 ## Setup
 
 1. Enable the provider families you use in Paseo's agent settings, then open **SLP** in the sidebar and run **Inspect**.
-2. Choose **Activate SLP runtime**. Keep other writers of Paseo's `config.json` out while it runs.
-3. In **SLP > Profiles**, choose a provider and an explicit model for the Supervisor and the Lead, then save.
+2. Open **Maintenance > Runtime setup** and choose **Activate SLP runtime**. Keep other writers of Paseo's `config.json` out while it runs.
+3. In **SLP > Profiles**, choose a provider and an explicit model for the Supervisor and the Lead, then choose **Save profiles**. A successful save applies the choices to future launches.
 4. For each repository, onboard it with the `paseo-slp-onboarding` skill. It proposes `.paseo-slp/workspace-protocol.md` and the Peer pool, and shows the diff before writing.
 5. Make sure the Peer pool has at least one enabled option, then start a task by creating an agent with the SLP Supervisor or SLP Lead profile.
 
+For example: `Fix the checkout total rounding bug. Report back with the candidate and the checks you ran.`
+
 Installing the plugin, or activating it, does not create any agent.
+
+See the [README](https://github.com/duongvm57/paseo-slp-plugin#readme) for the full setup and operating guide.
 
 ## Settings and limits
 
-- Role choices, the Peer pool, and the optional features are configured in the SLP manager. Optional features are off until you turn them on.
+- The SLP manager configures Supervisor/Lead models and the Peer pool of allowed runtimes. Engineer, Architect and Reviewer assignments come from the Lead's task brief, independently of the runtime choice.
+- Optional features are off by default: a shared communication language, one designated Peer quota fallback, Jev-assisted runtime routing, and communication supervision that assesses captured Peer handbacks and Lead handling and can alert a Supervisor.
 - A repository can pin its own Peer pool in `.paseo-slp/slp-routing.json`. A pinned pool takes precedence over the shared pool.
 - Role changes affect future launches, not sessions that are already running.
 - The plugin refuses to overwrite a provider or profile it does not own, and it stops with `RECOVERY_REQUIRED` when the configuration changed outside its journal.
