@@ -23,6 +23,29 @@ Mở **Read SLP work** để xem công việc đã đăng ký mà không phải 
 
 https://github.com/user-attachments/assets/110692f7-88de-4bad-be16-626ff180d97b
 
+## Khi nào nên dùng SLP
+
+**Nên dùng SLP khi:**
+
+- Dependency dọc mạnh; implementation có thể làm lộ premise sai.
+- Architecture/lifecycle/ownership chưa rõ từ đầu.
+- Nhiều module/project/workspace, owner và integration boundary phải phối hợp.
+- Project dài/phức tạp, Human không muốn micromanage từng agent.
+- Giá trị coordination lớn hơn overhead.
+
+**Không cần full SLP khi:**
+
+- Task nhỏ, bounded; CRUD hoặc horizontal extension đơn giản.
+- Contract rõ, ít dependency.
+- Một agent có thể làm end-to-end dễ dàng.
+- Overhead coordination lớn hơn giá trị tạo ra.
+
+**Ở giữa:**
+
+- Setup `.paseo-slp/workspace-protocol.md` theo nguyên tắc phối hợp tối thiểu.
+- Lead đi DIRECT → một Peer Engineer; chỉ thêm Architect/Reviewer khi thật sự cần.
+- Human chọn làm việc trực tiếp với Lead hoặc qua Supervisor tùy nhu cầu.
+
 ## Công việc diễn ra thế nào
 
 1. **Đặt mục tiêu.** Tạo **SLP Lead**, hoặc **SLP Supervisor** để quan sát hay tạo Lead. Ví dụ:
@@ -99,7 +122,7 @@ writer, proof của candidate và review độc lập khi bắt buộc vẫn áp
 
 Bạn cần:
 
-- Paseo `>=0.10.3`, với `pluginsEnabled: true` và `mcp.enabled` hiệu lực là `true`
+- Paseo daemon **và app** `>=0.11.0` cho screen/sidebar UI native, với `pluginsEnabled: true` và `mcp.enabled` hiệu lực là `true`
 - Máy chạy daemon dùng POSIX (Linux/macOS), với Node.js 22.x từ 22.18, hoặc Node.js 23.6+
   (native TypeScript stripping)
 - CLI của từng provider family bạn dùng (Codex, Pi, Devin, Claude, OpenCode), đã đăng nhập trên máy daemon;
@@ -118,13 +141,14 @@ khi bạn kích hoạt.
 
 ## Lần chạy đầu
 
-1. **Kích hoạt.** Mở **SLP** ở thanh bên của Paseo (hoặc *Open SLP manager* trong command palette),
-   chọn **Inspect**, xác nhận **Daemon home confirmed** và **Exclusive configuration window**,
-   rồi chọn **Activate**. Trong lúc thao tác chạy, giữ các bên khác không sửa cấu hình daemon.
-2. **Chọn model cho role.** Trong **SLP → Role profiles**, chọn provider và model cụ thể cho
-   **Supervisor** và **Lead**, cùng mode, thinking, feature nếu provider hỗ trợ. Chọn **Save**,
-   rồi chạy lại thao tác kích hoạt (**Re-verify binding** hoặc **Rebind**) để áp dụng lựa chọn.
-   Chỉ Save chưa áp dụng thay đổi. Phải đặt model trước khi delegation; Devin dùng model `swe-2`.
+1. **Kích hoạt.** Mở **SLP** ở thanh bên của Paseo (hoặc *Open SLP Overview* trong command palette),
+   chọn **Inspect**, rồi mở **Maintenance → Runtime setup**, xác nhận **Daemon home confirmed**
+   và **Exclusive configuration window**, rồi chọn **Activate SLP runtime**.
+   Trong lúc thao tác chạy, giữ các bên khác không sửa cấu hình daemon.
+2. **Chọn model cho role.** Trong **SLP → Profiles**, chọn provider và model cụ thể cho
+   **Supervisor** và **Lead**, cùng mode, thinking, feature nếu provider hỗ trợ. Chọn **Save profiles**,
+   xác nhận cửa sổ cấu hình độc quyền và daemon home khi được yêu cầu. Lưu thành công tự áp dụng
+   lựa chọn; không cần nút binding riêng. Phải đặt model trước khi delegation; Devin dùng model `swe-2`.
    Thay đổi áp dụng cho lần khởi chạy sau, không đổi session đang chạy.
 3. **Onboard một repository.** Cài skill onboarding, rồi nhờ agent bất kỳ trong repo đó
    *onboard / set up SLP*. Skill sẽ đề xuất `.paseo-slp/workspace-protocol.md` và Peer pool, và cho
@@ -139,8 +163,9 @@ khi bạn kích hoạt.
    Nếu onboarding ghim `.paseo-slp/slp-routing.json`, cấu hình option của file đó trong lúc
    onboarding. Manager sửa pool chung; file ghim của repo được ưu tiên, và file rỗng hoặc
    không hợp lệ không chuyển sang dùng pool chung.
-5. **Giao task.** Chọn **New agent** trong workspace của repo, chọn profile **SLP Supervisor**, đặt
-   tiêu đề `Supervisor — <task>` và ghi mục tiêu. Sau đó cứ tiếp tục chat ở đó.
+5. **Giao task.** Chọn **New agent** trong workspace của repo, chọn profile **SLP Lead**, đặt
+   tiêu đề `Lead — <task>` và ghi mục tiêu có giới hạn. Nếu muốn làm việc qua Supervisor,
+   chọn **SLP Supervisor** và đặt tiêu đề `Supervisor — <task>`. Sau đó cứ tiếp tục chat ở đó.
 
 Vài dòng tùy chọn giúp mục tiêu chắc chắn hơn:
 
@@ -162,7 +187,7 @@ dependency đã khai báo, nhận xét review, cùng bằng chứng candidate/ch
 đọc trạng thái mới; dữ liệu thiếu hoặc cũ được hiển thị rõ. Panel không suy ra công việc từ chat
 hay nghiệm thu task thay bạn.
 
-Với mục tiêu lớn, tab **Tasks** hiển thị queue native, lý do readiness, attempt, phán xét
+Với mục tiêu lớn, phần **Tasks** hiển thị queue native, lý do readiness, attempt, phán xét
 result hiện hành và nghĩa vụ delivery/resource chưa giải quyết. Lead gọi dispatch rõ ràng:
 reserve trước, tạo worker chưa có work prompt, bind scope với membership đã đăng ký, rồi
 gửi việc. Dependency cần phán xét output còn hợp lệ và bằng chứng output có tại đích.
@@ -214,7 +239,7 @@ paseo plugin update paseo-slp --ref <tag>   # bản đã ghim: chọn ref mới 
 paseo plugin reload paseo-slp               # cài từ thư mục: sau khi checkout thay đổi
 ```
 
-Sau khi update hoặc reload, mở SLP manager và chạy **Rebind** khi nó hiển thị runtime mới.
+Sau khi update hoặc reload, mở SLP manager và chạy **Update SLP runtime** khi nó hiển thị runtime mới.
 Session đang chạy giữ nguyên tiến trình và hướng dẫn role; lần khởi chạy mới dùng binding mới.
 Việc mở managed session vẫn cần plugin đang chạy.
 
@@ -225,7 +250,7 @@ runtime cho các session còn đang chạy. Sau đó chạy `paseo plugin remove
 ### Migrate từ 0.6.0 trở xuống
 
 Khi không có agent đang chạy, dùng lệnh update/reload ở trên, rồi mở **SLP → Inspect**
-và chạy **Rebind**. Lựa chọn role đã lưu và Peer pool dùng chung được giữ lại.
+và chạy **Update SLP runtime**. Lựa chọn role đã lưu và Peer pool dùng chung được giữ lại.
 Thông thường không cần cài lại hay migrate state bằng tay.
 
 Chỉ xử lý các mục sau nếu bản cài của bạn có liên quan:

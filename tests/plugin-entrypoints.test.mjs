@@ -48,16 +48,23 @@ test('paseo-plugin.json parses through the host readPluginManifest', async t => 
     name: 'Paseo SLP',
     description: 'Supervisor, Lead and Peer coding-agent teams for Paseo, with a repository desk for assignments, review and evidence.',
     icon: 'assets/icon.png',
-    media: ['assets/screenshot-overview.png', 'assets/screenshot-peer-pool.png'],
+    media: [
+      'assets/intro-cross-workspace.jpg',
+      'assets/intro-peer-dispositions.jpg',
+      'assets/intro-challenge-evidence.jpg',
+      'assets/screenshot-overview.png',
+      'assets/screenshot-peer-pool.png',
+    ],
     requirements: { paseo: '>=0.11.0' },
     build: [['npm', 'install', '--omit=dev', '--no-audit', '--no-fund']],
   });
 });
 
-test('manifest listing assets exist inside plugin/ and are PNG files', () => {
+test('manifest listing assets exist inside plugin/ and are PNG or JPEG files', () => {
   // Host-independent: reads the raw manifest, so it runs even when no host validator is available.
   const manifest = JSON.parse(readFileSync(join(PLUGIN_DIR, 'paseo-plugin.json'), 'utf8'));
   const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  const JPEG_SIGNATURE = Buffer.from([0xff, 0xd8, 0xff]);
   const entries = [
     ['icon', manifest.icon],
     ...(manifest.media ?? []).map((entry, index) => [`media[${index}]`, entry]),
@@ -70,7 +77,8 @@ test('manifest listing assets exist inside plugin/ and are PNG files', () => {
     const file = join(PLUGIN_DIR, value);
     assert.ok(existsSync(file), `${label} exists in plugin/: ${value}`);
     const bytes = readFileSync(file);
-    assert.ok(bytes.subarray(0, 8).equals(PNG_SIGNATURE), `${label} starts with the PNG signature`);
+    const signature = /\.jpe?g$/i.test(value) ? JPEG_SIGNATURE : PNG_SIGNATURE;
+    assert.ok(bytes.subarray(0, signature.length).equals(signature), `${label} starts with the signature for its image format`);
     if (label === 'icon') {
       // IHDR width/height are big-endian uint32 at byte offsets 16 and 20.
       assert.equal(bytes.readUInt32BE(16), bytes.readUInt32BE(20), 'icon is square');

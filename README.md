@@ -23,6 +23,29 @@ Open **Read SLP work** to inspect registered work without reconstructing it from
 
 https://github.com/user-attachments/assets/a98dc2bf-dfaa-4608-985c-9aa21832a246
 
+## When to use SLP
+
+**Use SLP when:**
+
+- Strong vertical dependencies mean implementation can expose a faulty premise.
+- Architecture, lifecycle or ownership is unclear at the start.
+- Multiple modules, projects, workspaces, owners and integration boundaries need coordination.
+- The project is long or complex enough that the Human does not want to micromanage each agent.
+- Coordination provides more value than its overhead.
+
+**Full SLP is unnecessary when:**
+
+- The task is small and bounded: simple CRUD or a horizontal extension.
+- Contracts are clear and dependencies are few.
+- One agent can easily handle the work end to end.
+- Coordination overhead exceeds its value.
+
+**In between:**
+
+- Set up `.paseo-slp/workspace-protocol.md` for minimum sufficient coordination.
+- The Lead goes DIRECT → one Peer Engineer; add an Architect or Reviewer only when needed.
+- The Human works directly with the Lead or through an optional Supervisor.
+
 ## How work progresses
 
 1. **Set the objective.** Start an **SLP Lead**, or an **SLP Supervisor** that observes or creates a
@@ -139,8 +162,10 @@ you activate it.
    If onboarding pins `.paseo-slp/slp-routing.json`, configure that file's options during
    onboarding. The Manager edits the shared pool; a repo pin takes precedence, and an empty or
    invalid pin does not fall back to it.
-5. **Hand over a task.** Choose **New agent** in the repo's workspace, then the **SLP Supervisor**
-   profile, and give it the title `Supervisor — <task>` and an objective. Then keep chatting there.
+5. **Hand over a task.** Choose **New agent** in the repo's workspace, then the **SLP Lead**
+   profile, and give it the title `Lead — <task>` and a bounded objective. If you prefer to work
+   through a Supervisor, choose **SLP Supervisor** and the title `Supervisor — <task>` instead.
+   Then keep chatting there.
 
 A few optional lines make an objective more robust:
 
