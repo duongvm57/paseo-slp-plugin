@@ -18,10 +18,12 @@ import type { TrustedLaunchContext } from "./runtime/cli/types.ts";
 import { FormationPlacementError, FormationPlacementUncertain, type FormationTargetPin, type FormationSourcePin, type createFormationPlacement } from "./desk-placement.ts";
 import { registeredMembership } from "./desk-membership.ts";
 import { DESK_FORMATION_REASONS, DESK_OPERATION_RETRY_RECOVERY } from "../shared/runtime/desk-contract.ts";
+import { seatMetadata } from "./runtime/episode.ts";
+import type { EpisodeSelection } from "./desk-episode.ts";
 
 type ModeSupport = { provider: string; modes: string[] };
 type Plan = {
-  create: { provider: string; workspaceId: string; title: string; initialPrompt: string;
+  create: { provider: string; workspaceId: string; title: string; initialPrompt: string; labels?: Record<string, string>;
     settings: { modeId?: string; thinkingOptionId?: string; features: Record<string, unknown> } };
   modeSupport: ModeSupport;
   profileId?: string; routing?: unknown; warnings?: string[];
@@ -42,6 +44,10 @@ type FormationModule = {
 };
 type SelectionContext = { selected?: SelectedPeer; target?: FormationTargetPin; sourceRepository?: string; source?: FormationSourcePin };
 type PhaseWriter = (name: string, value: unknown) => void;
+const formationPin = (plan: Plan) => {
+  const { labels: _metadata, ...create } = plan.create;
+  return canonicalSha256({ create, modeSupport: plan.modeSupport });
+};
 const formationEvidenceTooLarge = (value: unknown) =>
   Buffer.byteLength(JSON.stringify(value)) * 3 > WIRE_LIMITS.deskBridgeRequestBytes - 32768;
 function selectionFailure(error: unknown): DeskRejectionValue {
@@ -272,6 +278,8 @@ export async function runSeatCreate(row: MembershipValue, input: DeskSeatCreateI
   /** Reads the desk of the Git repository that will register the child. */
   readMemberships?: (gitCommonDir: string | null) => readonly MembershipValue[] | null;
   membershipWaitMs?: number;
+  runtimeSha?: string;
+  selectEpisode?: (key: string) => EpisodeSelection;
   guard: () => Promise<DeskRejectionValue | null>;
 }) {
   if (row.agentId === null || !["lead", "supervisor"].includes(row.role)) return reject("AUTHORITY_REQUIRED", "only an orchestrating bound seat can form a child");
@@ -381,18 +389,27 @@ export async function runSeatCreate(row: MembershipValue, input: DeskSeatCreateI
       // full-pin invocations keep their original validation/receipt path.
       return reject("REQUEST_TOO_LARGE", "automatic formation evidence/prompt exceeds the wire allowance");
     }
-    const pin = canonicalSha256({ create, modeSupport: plan.modeSupport });
+    const pin = formationPin(plan);
     const { initialPrompt, ...createMetadata } = create;
     phase("prepared", { pin, create: createMetadata, promptSha256: canonicalSha256(initialPrompt),
       modeSupport: plan.modeSupport,
       ...(source ? { source } : {}), profileId: plan.profileId ?? null, routing: plan.routing ?? null, warnings: plan.warnings ?? [] });
     const guard = await deps.guard(); if (guard !== null) return guard;
     const createPlan = await prepare(); if ("ok" in createPlan) return createPlan;
-    if (canonicalSha256({ create: createPlan.create, modeSupport: createPlan.modeSupport }) !== pin) return reject("ROUTE_DRIFT", "formation bundle or provider mode evidence changed before create");
+    if (formationPin(createPlan) !== pin) return reject("ROUTE_DRIFT", "formation bundle or provider mode evidence changed before create");
     const beforeCreate = await deps.guard(); if (beforeCreate !== null) return beforeCreate;
     const createPlacement = await verifyEffectPlacement(); if (createPlacement !== null) return createPlacement;
     const label = canonicalSha256(identity);
+    const metadata = seatMetadata({ role: input.role,
+      disposition: input.role === "peer" ? input.disposition : undefined,
+      runtimeSha: deps.runtimeSha ?? create.labels?.["slp.runtime-sha"],
+      repository: target?.source.repository ?? source?.repository ?? deps.placement?.protocolRepository ?? row.createCwd });
+    let episode: EpisodeSelection;
+    try { episode = deps.selectEpisode?.(label) ?? { episode: null, labels: {}, basis: "missing-context", warnings: ["episode-context-missing"] }; }
+    catch { episode = { episode: null, labels: {}, basis: "metadata-unavailable", warnings: ["episode-state-unavailable"] }; }
+    const labels = { ...metadata.labels, ...episode.labels, "slp.formation": label };
     phase("create-issued", { label, parent: row.agentId, workspaceId: create.workspaceId, runtimePin: pin,
+      labels, episode: { context: episode.episode, basis: episode.basis }, warnings: [...metadata.warnings, ...episode.warnings],
       ...(target ? { target } : {}) });
     let agentId: string;
     try {
@@ -401,7 +418,7 @@ export async function runSeatCreate(row: MembershipValue, input: DeskSeatCreateI
           ...(create.settings.modeId !== undefined ? { modeId: create.settings.modeId } : {}),
           ...(create.settings.thinkingOptionId !== undefined ? { thinkingOptionId: create.settings.thinkingOptionId } : {}),
           featureValues: create.settings.features },
-        parent: row.agentId!, title: create.title, labels: { "slp.formation": label },
+        parent: row.agentId!, title: create.title, labels,
         idempotencyKey: label, requestId: label,
       };
       agentId = (await deps.placement!.create({ workspaceId: create.workspaceId }, options)).id;
@@ -413,13 +430,13 @@ export async function runSeatCreate(row: MembershipValue, input: DeskSeatCreateI
       cwd: target?.cwd ?? row.createCwd, workspaceId: create.workspaceId, parent: row.agentId,
       modeId: create.settings.modeId, thinkingOptionId: create.settings.thinkingOptionId,
       modeIdUnsupported: plan.modeSupport.modes.length === 0,
-      features: create.settings.features, labels: { "slp.formation": label },
+      features: create.settings.features, labels,
     });
     phase("create-observed", { agentId, verification });
     if (!verification.ok) return { ok: true, state: "identity-uncertain", agentId, sent: false, verification, resourceDisposition: "retained" };
     const beforePlan = await deps.guard(); if (beforePlan !== null) return { ...beforePlan, agentId };
     const sendPlan = await prepare(); if ("ok" in sendPlan) return { ...sendPlan, agentId };
-    if (canonicalSha256({ create: sendPlan.create, modeSupport: sendPlan.modeSupport }) !== pin) return { ...reject("ROUTE_DRIFT", "bundle or provider mode evidence changed before assignment delivery"), agentId };
+    if (formationPin(sendPlan) !== pin) return { ...reject("ROUTE_DRIFT", "bundle or provider mode evidence changed before assignment delivery"), agentId };
     const beforeSend = await deps.guard(); if (beforeSend !== null) return { ...beforeSend, agentId };
     const sendPlacement = await verifyEffectPlacement(agentId); if (sendPlacement !== null) return sendPlacement;
     // Full-runtime/Lead requests without placement preserve historical delivery
@@ -444,7 +461,7 @@ export async function runSeatCreate(row: MembershipValue, input: DeskSeatCreateI
         // A read-only registration wait is not a freshness lease for delivery.
         const refused = await deps.guard(); if (refused !== null) return { ...refused, agentId };
         const current = await prepare(); if ("ok" in current) return { ...current, agentId };
-        if (canonicalSha256({ create: current.create, modeSupport: current.modeSupport }) !== pin) {
+        if (formationPin(current) !== pin) {
           return { ...reject("ROUTE_DRIFT", "formation changed during membership registration wait"), agentId };
         }
         try { if (target) await deps.placement!.verify(row, target); else { await deps.placement!.verifyCaller(row); await verifySource(); } }

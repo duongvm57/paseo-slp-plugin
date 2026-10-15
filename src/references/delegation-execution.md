@@ -4,7 +4,7 @@ For desk-managed task dispatch, use task-execution.md without duplicating its bo
 
 ## Classify and brief
 
-Classify from assignment, not available sessions:
+Classify by assignment:
 
 | Assignment | Action |
 |---|---|
@@ -21,12 +21,13 @@ any Peer outcome boundary.
 Brief outcome/acceptance, constraints/unknowns, owned/excluded scope,
 phase/grants, dependencies/skills, proof/effort bounds and exact report-recipient ID.
 Use review-gates.md's neutral/sealed brief. Record parent, seat,
-workspace/cwd, isolation reason and baseline resources there.
+workspace/cwd, isolation reason and baseline resources.
 For parallel work use orchestration.md's actual paths/shared-resource preflight.
 
 ## Form and deliver
 
 Use bound slp_seat_create by default with requestId, role, taskLabel, assignment and grantRef.
+Unregistered Human root assignment: first create episode:"new"; later inherit.
 grantRef is a declared pointer to the Human grant (e.g. assignment sentence
 and date), a claim, never authenticated; verify authority, one writer and review sufficiency.
 Lead: saved slp-lead. Ordinary Peer: omit runtime/selection for server
@@ -52,7 +53,7 @@ drift blocks delivery; same-Git identity grants no authority.
 Lead uses Paseo create_workspace, owns its host setup within
 the grant, then calls slp_seat_create with placement existing and that workspace
 ID. Never return to create_agent. V1 kind=worktree reports a gap before effects.
-Server creates without work, verifies the tuple and returns awaiting-caller-delivery
+Server creates without work, verifies tuple and returns awaiting-caller-delivery
 with delivery.prompt; send exactly that prompt through send_agent_prompt with
 notifyOnFinish=true. delivery "server" sends without callback; use only when
 none is needed. Assignment names the verified parent ID and requires one native
@@ -79,7 +80,7 @@ changing runtime or moving to CLI is not recovery for an uncertain create.
 For unbound/older hosts or required compatibility, use provider-routing.md,
 prepare --emit create and agent-scoped Paseo create_agent with emitted settings and
 notifyOnFinish=true; preserve taskLabel/disposition and the actual parent.
-Default placement is the parent workspace, including read-only review;
+Default placement: parent workspace, including read-only review;
 a different checkout/lane needs declared paths/reason. Existing worktrees use slp_seat_create.
 Never install dependencies or materialize to hide a gap; Lead owns the setup
 triggered by its authorized Paseo workspace creation.
@@ -97,8 +98,8 @@ is settled; unresolved effects BLOCK this branch. Preserve original sessions.
 ## Retrieve
 
 Use monitoring.md's event waits and bounded fallback wakes. On finish,
-retrieve report/artifact through status/activity/timeline access;
-curated tails may omit it. Missing report access blocks acceptance; idle is
+retrieve report/artifact through status/activity/timeline;
+tails may omit it. Missing report access blocks acceptance; idle is
 no verdict. Same-assignment follow-ups preserve the verified child with
 background/notifyOnFinish. A Human-authorized stock Codex/Pi
 prepare fallback may render role bytes; a legacy provider/title proves no load.

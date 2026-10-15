@@ -514,6 +514,88 @@ described below. CLI prepare stays
 explicit/offline; a bound older candidate lacking selection exports reports a
 capability gap for the new path while explicit full pins remain compatible.
 
+### Retrospective seat metadata
+
+Plugin-controlled creates include `slp.role`, the explicit `slp.disposition`
+when supplied, `slp.runtime-sha` and `slp.protocol-sha`. The runtime hash is the
+installed candidate's `candidateSha256`, not the formation receipt's
+`runtimePin` (which hashes the create plan). The protocol hash is SHA-256 of
+the exact file bytes in the effective protocol source checkout; it is not the
+existing JSON-canonical placement configuration pin. File identity is cached
+and invalidated on edits or replacement, including same-size edits with a
+restored mtime.
+
+Missing version metadata omits the corresponding label and records a bounded
+warning. Labels travel in the existing create call and are covered by native
+seat verification; they add no host call or label update. Metadata does not
+grant authority. Values contain identifiers, hashes or the declared role and
+disposition tokens, never assignment/report text or project names.
+
+`slp.formation` remains the ordinary formation receipt join key. Managed task
+creates retain their assignment/task/attempt/create-action join labels, and
+verification uses their original immutable create labels on subsequent
+phases. Existing receipts retain their original bytes and labels on replay.
+Roots created directly by the Human need no labels.
+
+`slp.episode-id` groups a plugin-created seat with its assignment episode;
+`slp.episode-root` names the original Human-assigned Lead/Supervisor even when
+that root has no labels. `slp_seat_create` defaults to `episode:"inherit"`;
+use `episode:"new"` on the first create for a new Human root assignment when
+there is no desk registration. Labels are immutable observations. A root's
+later episode context comes from the tracker rather than its original labels.
+
+The tracker stores current context and ordinary `episode-opened` events in
+`<stableRoot>/state/episodes/<sha256-of-creator-agent-id>.jsonl`, outside the
+repository and work ledger. Each first/new opening appends one checksum-chained
+JSONL entry and synchronizes file data/length (`fdatasync`); first creation also fsyncs its directory.
+Inheritance reads/reuses context without writing. A torn append or invalid
+chain warns and preserves the file for inspection; it is never auto-truncated.
+A crash during append (including creation of an empty file) can therefore
+disable this creator's episode context until operator maintenance. Seats still
+create normally. Inheriting the older prefix could merge the interrupted new
+assignment into its predecessor, so the tracker reports a gap instead.
+
+Managed registration associates the episode
+and root marker with `assignment-registered`; root registration/close events
+share existing desk transactions. Optional metadata is read before taking the
+ledger writer lock; its resolver uses the verified transaction snapshot without
+IO. A descendant assignment close does not
+close its root episode. Event times mark server observation; a Lean handback
+outside the desk cannot produce a reliable close and stays an analyzer gap.
+
+The persistence invariant belongs to the plugin: it must share one context
+across server-side creates/restarts without agent self-reporting. Repository
+protocol/harness cannot own that invariant without adding ceremony. The
+metadata neither grants authority nor represents task acceptance. It is
+separate from the work ledger so optional metadata failure cannot degrade the
+desk. Native verification reports `metadataMismatches` separately from blocking
+core formation/task label mismatches.
+
+Warnings distinguish missing/ambiguous context, unverified history,
+`episode-state-corrupt`, `episode-state-unsafe`, `episode-state-budget`,
+`episode-lock-retained` and general `episode-state-unavailable`. A record keeps
+at most 2048 openings / 1 MiB; exhaustion preserves history and warns on new
+openings instead of pruning retrospective evidence. An existing valid current
+episode can still be inherited. A second process losing the immediate lock
+records a gap rather than waiting or retrying.
+
+A pointer is anchored to the verified desk head when opened. A later root
+registration by its holder, once closed, invalidates the older pointer. Closing
+an assignment registered before that pointer preserves the newer Lean episode.
+Attachment as another owner's managed seat does not override the holder's own
+Lean pointer. Unverified history omits episode labels even for a labelled
+creator; the native parent link still supports retrospective inference. If
+`episode-history-unavailable` repeats after changing desks or resetting a
+ledger, use `episode:"new"` to reanchor once current history is verified.
+
+There is no automatic repair, age-based lock removal or background work. For
+retained locks or damaged/full metadata, operator maintenance first preserves
+the record and verifies that its writer has stopped before restoring/resetting
+that metadata. Reset history is an explicit analyzer gap; agents continue to
+create seats with warnings while maintenance is pending. Multiple registered
+episodes on one root are ambiguous; sequential Lean context does not prove
+that concurrent Human assignments cannot exist.
+
 ### Caller and existing placement
 
 Both Lead and Peer accept placement. Omitted input retains the old caller

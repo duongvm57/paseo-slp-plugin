@@ -50,11 +50,14 @@ import {
   type HandbackValue,
   type LedgerValue,
   type MembershipValue,
+  verifiedDeskEvents,
 } from "./desk-store.ts";
 import { assignmentRegistrationSha256 } from "./desk-store.ts";
 import { deskWorkflowParticipant } from "./desk-ownership.ts";
 import { isRejection, readLedger, repoEnvelope, type DeskRunnerDeps, type RunnerCtx } from "./desk-runner.ts";
 import { validateReportRecordV1 } from "./desk-records.ts";
+import { readEpisode } from "./runtime/episode.ts";
+import type { EpisodeSelection } from "./desk-episode.ts";
 
 const execFileAsync = promisify(execFile);
 
@@ -200,7 +203,7 @@ function requireLead(actor: MembershipValue): DeskRejectionValue | null {
 // decide — synchronous and pure.
 // ---------------------------------------------------------------------------
 
-export function decideDeskHandback(ledger: Readonly<LedgerValue>, command: Record<string, unknown>): DecideOutcome {
+export function decideDeskHandback(ledger: Readonly<LedgerValue>, command: Record<string, unknown>, episode?: EpisodeSelection | null): DecideOutcome {
   const parsed = DeskHandbackCommand.safeParse(command);
   if (!parsed.success) {
     return reject("INVALID_RECORD", "command does not match any desk-handback command schema", "commands are strict JSON objects with a kind discriminator");
@@ -234,7 +237,10 @@ export function decideDeskHandback(ledger: Readonly<LedgerValue>, command: Recor
       [{ kind: "assignment-registered", payload: {
         assignmentId, ownerAgentId: row.ownerAgentId, authorityRef: row.authorityRef,
         registrationSha256: assignmentRegistrationSha256(row),
-      } }],
+        ...(episode ? { ...episode.episode, episodeRootAssignment: episode.episode?.rootAgentId === row.ownerAgentId,
+          episodeBasis: episode.basis, metadataWarnings: episode.warnings } : {}),
+      } }, ...(episode?.episode && ['creator-unlabelled-unformed', 'new-root-assignment'].includes(episode.basis)
+        ? [{ kind: "episode-opened", payload: { ...episode.episode } }] : [])],
       { assignments: [...ledger.assignments, row] },
     );
   }
@@ -292,7 +298,13 @@ export function decideDeskHandback(ledger: Readonly<LedgerValue>, command: Recor
     const assignments = ledger.assignments.map(a =>
       a.assignmentId === cmd.assignmentId ? { ...a, state: "closed" as const } : a,
     );
-    return ok([{ kind: "assignment-closed", payload: { assignmentId: cmd.assignmentId } }], { assignments });
+    const registration = verifiedDeskEvents(ledger)?.find(event => event.kind === "assignment-registered" && event.payload.assignmentId === cmd.assignmentId);
+    const registeredEpisode = readEpisode(registration?.payload);
+    const alreadyClosed = registeredEpisode && verifiedDeskEvents(ledger)?.some(event => event.kind === "episode-closed"
+      && event.payload.episodeId === registeredEpisode.episodeId);
+    return ok([{ kind: "assignment-closed", payload: { assignmentId: cmd.assignmentId } },
+      ...(registeredEpisode && registration?.payload.episodeRootAssignment === true && !alreadyClosed
+        ? [{ kind: "episode-closed", payload: { ...registeredEpisode, outcome: "unknown" } }] : [])], { assignments });
   }
 
   if (cmd.kind === "handback.submit") {
@@ -638,7 +650,7 @@ export type MutationOutcome = MutationOk | DeskRejectionValue;
 export async function runAssignmentRegister(
   ctx: RunnerCtx,
   input: DeskAssignmentRegisterInputValue,
-  deps: DeskRunnerDeps,
+  deps: DeskRunnerDeps & { episode?: (assignmentId: string) => ((ledger: Readonly<LedgerValue>) => EpisodeSelection) | null },
 ): Promise<MutationOutcome> {
   const ledger = readLedger(deps, ctx.repoKey);
   if (isRejection(ledger)) return ledger;
@@ -649,10 +661,19 @@ export async function runAssignmentRegister(
     authorityRef: input.authorityRef,
     objective: input.objective,
   };
+  // Optional metadata IO is completed before transact takes its writer lock.
+  let resolveEpisode: ((ledger: Readonly<LedgerValue>) => EpisodeSelection) | null = null;
+  try { resolveEpisode = deps.episode?.(deriveId("asg", [ctx.row.agentId!, input.requestId])) ?? null; }
+  catch { resolveEpisode = () => ({ episode: null, labels: {}, basis: "metadata-unavailable", warnings: ["episode-state-unavailable"] }); }
   const settled = await deps.store.transact(
     ctx.repoKey,
     { repo: repoEnvelope(ledger), actorKey: `agent:${ctx.row.agentId}`, assignmentId: "assignment-admin", requestId: input.requestId, command },
-    decideDeskHandback,
+    (current, command) => {
+      let episode: EpisodeSelection | null = null;
+      try { episode = resolveEpisode?.(current) ?? null; }
+      catch { episode = { episode: null, labels: {}, basis: "metadata-unavailable", warnings: ["episode-state-unavailable"] }; }
+      return decideDeskHandback(current, command, episode);
+    },
   );
   if (!settled.ok) return settled;
   const after = readLedger(deps, ctx.repoKey);

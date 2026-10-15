@@ -1,0 +1,6 @@
+interface:
+  display_name: "Repository Cleanup"
+  short_description: "Remove stale repository machinery and history"
+  default_prompt: "Use $docs-cleanup only for the explicitly requested repository-wide audit, cleanup, or verification; consolidate current truth, remove stale docs and proof machinery, and preserve unrelated work."
+policy:
+  allow_implicit_invocation: false

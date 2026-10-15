@@ -149,6 +149,14 @@ create_agent arguments; see the
 Both commands only prepare arguments; Supervisor/Lead use Paseo to actually
 create the agent.
 
+Preparation emits role/version labels in `create.labels`; preserve them when
+calling `create_agent`. Handoff also emits `slp.handoff-from`. Optional
+`handoff.episode: {episodeId, rootAgentId}` carries an already-known predecessor
+episode, preserving the original root ID even when that root has no labels.
+This offline input is a supplied claim, not a host observation. Missing or
+invalid episode context emits `episode-context-missing` and no episode labels;
+preparation makes no additional host lookup to fill it.
+
 An optional `handoff.recapInputs` supplies structured assignment/authority,
 decisions, assumptions, unresolved items, owner/dependency pins, report artifacts
 and resources. The packet retains the required free-text `handoff.state` and

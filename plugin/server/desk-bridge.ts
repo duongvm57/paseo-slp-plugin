@@ -59,6 +59,8 @@ import { classifyLockHolderProcess, parseLockHolder, readProcessIdentity, type L
 import { recoverDeskLockAsync } from "./runtime/desk-recovery.ts";
 import { detectDaemonHome } from "./daemon-home.ts";
 import { sha256Hex } from "./config-view.ts";
+import { readLabels } from "./runtime/episode.ts";
+import { createEpisodeTracker } from "./desk-episode.ts";
 import type { Journal } from "./journal.ts";
 import type { LauncherBuilder } from "../shared/contracts.ts";
 import { MAX_RPC_BYTES } from "../shared/contracts.ts";
@@ -469,6 +471,7 @@ type PaseoLike = {
           provider?: unknown;
           workspaceId?: unknown;
           archivedAt?: unknown;
+          labels?: unknown;
         } | null;
       } | null>;
     };
@@ -652,6 +655,11 @@ export function createDeskBridge(deps: DeskBridgeDeps) {
 
   let state: DeskBridgeState = { kind: "starting" };
   let stableRoot: string | null = null;
+  let episodeTracking: { root: string; tracker: ReturnType<typeof createEpisodeTracker> } | null = null;
+  const episodesFor = (root: string) => {
+    if (episodeTracking?.root !== root) episodeTracking = { root, tracker: createEpisodeTracker(root, { now }) };
+    return episodeTracking.tracker;
+  };
   let paths: ReturnType<typeof deskBridgePaths> | null = null;
   let binding: {
     bindingSha256: string;
@@ -1013,7 +1021,7 @@ export function createDeskBridge(deps: DeskBridgeDeps) {
    *  refresh is the "current identity" oracle only; contract §2 forbids it
    *  for REBIND, which this path never performs — a mismatch here rejects
    *  the call, it does not rebind anything. */
-  async function sdkIdentity(row: SeatRow): Promise<DeskRejectionValue | null> {
+  async function sdkIdentity(row: SeatRow, observeLabels?: (labels: Record<string, string> | null) => void): Promise<DeskRejectionValue | null> {
     const paseo = deps.paseoRef.current;
     if (paseo === null) {
       return rejection(
@@ -1022,7 +1030,7 @@ export function createDeskBridge(deps: DeskBridgeDeps) {
         "identity cannot be verified without a connected paseo context — dispatch stays closed",
       );
     }
-    let result: { agent: { provider?: unknown; workspaceId?: unknown; archivedAt?: unknown } | null } | null;
+    let result: { agent: { provider?: unknown; workspaceId?: unknown; archivedAt?: unknown; labels?: unknown } | null } | null;
     try {
       result = await Promise.race([
         paseo.agents.ref(row.agentId as string).refresh(),
@@ -1062,6 +1070,10 @@ export function createDeskBridge(deps: DeskBridgeDeps) {
         "the bound agent's provider/workspace diverged from the membership record",
         "the recorded binding no longer describes a live seat — rebind the session",
       );
+    }
+    if (observeLabels) {
+      try { observeLabels(readLabels(agent.labels)); }
+      catch { observeLabels(null); }
     }
     return null;
   }
@@ -1134,6 +1146,7 @@ export function createDeskBridge(deps: DeskBridgeDeps) {
     /** The one ledger observation behind this dispatch — the status
      *  runner projects it directly; mutations re-read under the lock. */
     seatRead: DeskStoreRead | null;
+    creatorLabels?: Record<string, string> | null;
   }
 
   interface ToolHandler {
@@ -1313,12 +1326,17 @@ export function createDeskBridge(deps: DeskBridgeDeps) {
         "retain the invocation and start a bridge bound to the current runtime",
       );
       const pinnedBinding = fresh.binding;
+      let creatorLabels = ctx.creatorLabels ?? null;
+      let episodeLedger = ctx.seatRead?.state === "ok" ? ctx.seatRead.ledger : null;
       const host = deps.taskHost ?? (() => null);
       const plan = createFormationPlanner({ runtimePath: pinnedBinding.runtimePath, daemonHome: dirname(pinnedRoot), host });
       const placement = ctx.seatRead?.state === "ok" ? createFormationPlacement({
         repo: ctx.seatRead.ledger.repo, host: deps.formationWorkspace ?? (() => null),
       }) : undefined;
       return runSeatCreate(ctx.row, ctx.input, { stableRoot: pinnedRoot, repoKey: ctx.bound.repoKey, host, plan,
+        runtimeSha: pinnedBinding.candidateSha256,
+        selectEpisode: key => episodesFor(pinnedRoot).forSeat({ agentId: ctx.row.agentId!, labels: creatorLabels,
+          mode: ctx.input.episode, key, ledger: episodeLedger }),
         preflightPeer: plan.preflightPeer, selectPeer: plan.selectPeer,
         placement, placementCapability: plan.placementCapability,
         readMemberships: gitCommonDir => {
@@ -1349,8 +1367,10 @@ export function createDeskBridge(deps: DeskBridgeDeps) {
             return rejection("CANDIDATE_DRIFT", "active runtime changed during formation", "retain the created seat and reconcile binding");
           }
           const fresh = freshRow(ctx.bound); if ("error" in fresh) return fresh.error;
-          const identity = await sdkIdentity(fresh.row); if (identity !== null) return identity;
-          const after = freshRow(ctx.bound); return "error" in after ? after.error : null;
+          const identity = await sdkIdentity(fresh.row, labels => { creatorLabels = labels; }); if (identity !== null) return identity;
+          const after = freshRow(ctx.bound);
+          if (!("error" in after) && after.read.state === "ok") episodeLedger = after.read.ledger;
+          return "error" in after ? after.error : null;
         },
       });
     }),
@@ -1474,11 +1494,13 @@ export function createDeskBridge(deps: DeskBridgeDeps) {
         runnerDeps(),
       );
     }),
-    [ASSIGNMENT_REGISTER_TOOL]: defineTool(DeskAssignmentRegisterInput, async ({ row, bound, input }) => {
+    [ASSIGNMENT_REGISTER_TOOL]: defineTool(DeskAssignmentRegisterInput, async ({ row, bound, input, creatorLabels }) => {
       return runAssignmentRegister(
         { repoKey: bound.repoKey, row },
         input,
-        runnerDeps(),
+        { ...runnerDeps(), episode: assignmentId => stableRoot === null ? null : episodesFor(stableRoot).prepareAssignment({
+          agentId: row.agentId!, labels: creatorLabels ?? null, key: `assignment:${assignmentId}`,
+        }) },
       );
     }),
     [ASSIGNMENT_ATTACH_TOOL]: defineTool(DeskAssignmentAttachInput, async ({ row, bound, input }) => {
@@ -1713,7 +1735,8 @@ export function createDeskBridge(deps: DeskBridgeDeps) {
       row = rowOrError.row;
       seatRead = rowOrError.read;
     }
-    const identityError = await sdkIdentity(row);
+    let creatorLabels: Record<string, string> | null = null;
+    const identityError = await sdkIdentity(row, labels => { creatorLabels = labels; });
     if (identityError !== null) return fail(identityError);
     const capError = capabilityGate();
     if (capError !== null) return fail(capError);
@@ -1748,7 +1771,7 @@ export function createDeskBridge(deps: DeskBridgeDeps) {
             : "degraded";
     }
     try {
-      const result = await prepared.run({ row, bound, availability, seatRead });
+      const result = await prepared.run({ row, bound, availability, seatRead, creatorLabels });
       return { content: [{ type: "text", text: text(result) }] };
     } catch (error) {
       return fail(rejection(

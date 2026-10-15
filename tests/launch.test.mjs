@@ -44,16 +44,16 @@ test('plan surfaces the intended modeId with its provenance and warns when nothi
   const withMode = launchPlan(installed, { ...base, binding: { ...piBinding, modeId: 'bypass' } });
   assert.equal(withMode.modeId, 'bypass');
   assert.equal(withMode.modeIdSource, 'binding');
-  assert.equal(withMode.warnings, undefined);
+  assert.deepEqual(withMode.warnings, ['protocol-sha-unavailable']);
   assert.deepEqual(withMode.create.settings, { modeId: 'bypass', features: {} });
   const noMode = launchPlan(installed, { ...base, binding: piBinding });
   assert.equal(noMode.modeId, null);
   assert.equal(noMode.modeIdSource, 'none');
-  assert.deepEqual(noMode.warnings, [NO_MODE_WARNING]);
+  assert.deepEqual(noMode.warnings, [NO_MODE_WARNING, 'protocol-sha-unavailable']);
   assert.deepEqual(noMode.create.settings, { features: {} });
-  // The create.* argument record is unchanged: only additive top-level fields.
+  // Retrospective labels are additive; runtime settings retain their shape.
   assert.deepEqual(Object.keys(noMode.create).sort(),
-    ['initialPrompt', 'notifyOnFinish', 'provider', 'settings', 'title', 'workspaceId']);
+    ['initialPrompt', 'labels', 'notifyOnFinish', 'provider', 'settings', 'title', 'workspaceId']);
 });
 
 test('agent_mode frontmatter is the declared mode fallback — emitted, sourced and warned', t => {
@@ -536,7 +536,7 @@ test('handoff plans carry modeId, spawnKit and orientation alongside the packet'
   const plan = handoffPlan(installed, { ...request, role: 'lead', binding: piBinding, handoff });
   assert.equal(plan.modeId, null);
   assert.equal(plan.modeIdSource, 'none');
-  assert.deepEqual(plan.warnings, [NO_MODE_WARNING]);
+  assert.deepEqual(plan.warnings, [NO_MODE_WARNING, 'episode-context-missing']);
   assert.equal(plan.spawnKit.tools.length, 17);
   assert.equal(plan.orientation.installedRoot, installed);
   assert.equal(plan.handoff.previousAgentId, 'old-lead');

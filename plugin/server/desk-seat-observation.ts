@@ -1,6 +1,7 @@
 // Native seat observation shared by ordinary formation and managed tasks.
 // This module reads one fresh SDK snapshot; it owns no task state or effects.
 import type { TaskAgentHandle } from "./desk-task-execution-host.ts";
+import { retrospectiveLabel } from "../shared/runtime/episode-labels.ts";
 
 // Both the SDK adapter and snapshot fixtures satisfy this read-only seam.
 // Creating, sending, listing and workspace access are deliberately unnecessary.
@@ -11,6 +12,7 @@ type SeatVerification = {
   mismatches: string[];
   workspaceId?: string | null;
   parent?: string | null;
+  metadataMismatches?: string[];
 };
 
 // The private managed-create carrier must not escape create/refresh diagnostics.
@@ -44,9 +46,12 @@ export async function verifySeat(
     return { ok: false, mismatches: ["refresh returned no agent snapshot"] };
   }
   const mismatches: string[] = [];
+  const metadataMismatches: string[] = [];
   if (pin.labels === null) mismatches.push("label:create-provenance-unavailable");
   else for (const [key, value] of Object.entries(pin.labels ?? {})) {
-    if (agent.labels?.[key] !== value) mismatches.push(`label:${key}:mismatch`);
+    if (agent.labels?.[key] !== value) {
+      (retrospectiveLabel(key) ? metadataMismatches : mismatches).push(`label:${key}:mismatch`);
+    }
   }
   if (agent.id !== agentId) mismatches.push(`agentId:${agent.id ?? "unreported"}`);
   if (agent.provider !== pin.provider) {
@@ -107,5 +112,6 @@ export async function verifySeat(
     ok: mismatches.length === 0,
     mismatches: privateTicket === null ? mismatches : mismatches.map(value => value.replaceAll(privateTicket, "[REDACTED]")),
     workspaceId: agent.workspaceId ?? null, parent: parentLabel,
+    ...(metadataMismatches.length ? { metadataMismatches } : {}),
   };
 }

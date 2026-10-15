@@ -21,6 +21,7 @@ const formation = {
   placement: DeskSeatPlacement.optional(),
   // Absent means "caller": the caller delivers through host send_agent_prompt so the host arms finish notification.
   delivery: z.enum(["caller", "server"]).optional(),
+  episode: z.enum(["inherit", "new"]).optional(),
 };
 /** Placement/parent come from the authenticated seat, never caller labels.
  * Profiles and complete settings are server-resolved, with no overrides. */

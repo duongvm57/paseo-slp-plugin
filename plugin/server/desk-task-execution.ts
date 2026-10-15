@@ -45,6 +45,8 @@ import type { DeskStore, LedgerValue, MembershipValue } from "./desk-store.ts";
 import { DESK_TASK_CREATE_TICKET_KEY } from "./desk-seat.ts";
 import type { MutationOutcome } from "./desk-handback.ts";
 import { canonicalSha256, canonicalJson } from "./config-view.ts";
+import { episodeLabels, readLabels, seatMetadata } from "./runtime/episode.ts";
+import { assignmentEpisode } from "./desk-episode.ts";
 import {
   adapterPaths, applyDeltaToTarget, backupDeltaPaths, computeDelta,
   constrainDelta, expectedStageMap, materializeIsolatedPlacement,
@@ -103,6 +105,7 @@ export type TaskExecutionDeps = {
     repository: string, selection: TaskRuntimeSelection, disposition?: string,
   ): Promise<TaskRuntimeBinding | DeskRejectionValue>;
   now?: () => Date;
+  runtimeSha?: string;
   ioLimits?: Partial<TaskIoLimits>;
 };
 
@@ -377,7 +380,7 @@ async function dispatchBootstrap(
   // 3. Bootstrap create — no work prompt anywhere. Intent → issue →
   //    create → verify → observe. Workspace-bound create is preferred
   //    when the exact workspace descriptor is known.
-  const labels = {
+  const coreLabels = {
     "slp.repo": ctx.repoKey,
     "slp.task": input.taskId,
     "slp.attempt": attemptId,
@@ -403,6 +406,13 @@ async function dispatchBootstrap(
     && row.actorMembershipId === ctx.row.membershipId && row.assignmentId === input.assignmentId && row.attemptId === attemptId
     && row.actionKind === "create");
   if (originalCreate?.kind === "action" && originalCreate.body === null) return rejected("CAPABILITY_GAP", "historical create intent lacks its immutable body", "retain the exact action and reconcile; never retrofit host claim pins");
+  const originalLabels = originalCreate?.kind === "action" ? readLabels(originalCreate.body?.labels) : null;
+  if (originalCreate !== undefined && originalLabels === null) return rejected("CAPABILITY_GAP", "historical create labels are unreadable", "retain the immutable original create; never reconstruct its labels from current inputs");
+  const metadata = originalCreate === undefined ? seatMetadata({ role: "peer", runtimeSha: deps.runtimeSha, repository })
+    : { labels: {}, warnings: [] };
+  const episode = originalCreate === undefined ? assignmentEpisode(createHistory, input.assignmentId) : null;
+  if (originalCreate === undefined && !episode) metadata.warnings.push("episode-context-missing");
+  const labels: Record<string, string> = originalLabels ?? { ...metadata.labels, ...episodeLabels(episode), ...coreLabels };
   // The original intent is immutable. A lost private ticket cannot be
   // reconstructed from its digest or replaced on a historical invocation.
   const createTicket = originalCreate === undefined ? randomBytes(32).toString("hex") : null;
@@ -414,7 +424,7 @@ async function dispatchBootstrap(
       runtime: input.runtime, seat: seatPinOf(resolved, input.runtime),
       placement: { cwd: placementCwd, kind: input.placement.kind },
       sourceBase: { ...pinOf(sourceBaseMeasure), artifactSha256: baseArtifactSha },
-      idempotencyKey, hostRequestId, labels, createTicketSha256: sha256Hex(createTicket!),
+      idempotencyKey, hostRequestId, labels, metadataWarnings: metadata.warnings, createTicketSha256: sha256Hex(createTicket!),
       publicRequestId: input.requestId, publicRequestSha256: canonicalSha256(input),
       parent: ctx.row.agentId, grantRef: input.grantRef,
       resourceIntents: ["agent-archive", "membership", ...(input.placement.kind === "isolated" ? ["worktree-remove"] : [])],
@@ -621,7 +631,8 @@ function managedCreateLabels(
   if (typeof labels !== "object" || labels === null || Array.isArray(labels)
     || Object.entries(expected).some(([key, value]) => key !== "slp.create-action"
       && !Object.entries(labels).some(([storedKey, storedValue]) => storedKey === key && storedValue === value))) return null;
-  return expected;
+  const originalLabels = readLabels(labels);
+  return originalLabels === null ? null : { ...originalLabels, ...expected };
 }
 
 /** Exact registered membership + valid scope under Core's lock — the only

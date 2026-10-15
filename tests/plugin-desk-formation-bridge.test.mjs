@@ -65,8 +65,10 @@ function managedBridge(t, options = {}) {
       };
     },
   };
-  const parent = { id: 'parent', provider: profile.provider, workspaceId: 'workspace', archivedAt: null };
-  const paseoRef = { current: { agents: { ref: id => ({ refresh: async () => ({ agent: id === parent.id ? parent : null, project: null }) }) } } };
+  const parent = { id: 'parent', provider: profile.provider, workspaceId: 'workspace', archivedAt: null,
+    ...(options.creatorLabels !== undefined ? { labels: options.creatorLabels } : {}) };
+  const agentSnapshots = new Map([[parent.id, parent]]);
+  const paseoRef = { current: { agents: { ref: id => ({ refresh: async () => ({ agent: agentSnapshots.get(id) ?? null, project: null }) }) } } };
 
   const effects = { creates: [], sends: [] };
   let childSnapshot = null;
@@ -74,7 +76,7 @@ function managedBridge(t, options = {}) {
   const repos = new Map([[repo.dir, repo]]);
   const childHandle = id => ({
     id,
-    refresh: async () => ({ agent: id === 'child' ? childSnapshot : null, project: null }),
+    refresh: async () => ({ agent: agentSnapshots.get(id) ?? null, project: null }),
     send: async (text, options) => effects.sends.push({ text, options }),
     archive: async () => ({ archivedAt: at }),
     waitForFinish: async () => null,
@@ -85,7 +87,7 @@ function managedBridge(t, options = {}) {
     const combined = options.config.provider;
     const slash = combined.indexOf('/');
     childSnapshot = {
-      id: 'child',
+      id: effects.creates.length === 1 ? 'child' : `child-${effects.creates.length}`,
       provider: combined.slice(0, slash),
       model: combined.slice(slash + 1),
       cwd: workspaceSnapshots.get(workspaceId)?.workspaceDirectory ?? repo.dir,
@@ -96,19 +98,20 @@ function managedBridge(t, options = {}) {
       thinkingOptionId: options.config.thinkingOptionId,
       features: Object.entries(options.config.featureValues ?? {}).map(([id, value]) => ({ id, value })),
     };
+    agentSnapshots.set(childSnapshot.id, childSnapshot);
     if (registration !== 'missing') {
       // A seat registers in the desk of the Git repository that holds its cwd.
       const owner=registerIn==='caller'?repo:repos.get(childSnapshot.cwd)??repo;
       const store=createDeskStore({stableRoot}),repoValue=repoOf(owner),read=store.read(repoKeyFor(repoValue));
       assert.ok(read.state==='ok'||owner!==repo&&read.state==='absent',read.state);
-      const child=memberRow('registered-child',{provider:childSnapshot.provider,at},{agentId:'child',
+      const child=memberRow(`registered-${childSnapshot.id}`,{provider:childSnapshot.provider,at},{agentId:childSnapshot.id,
         role:childSnapshot.provider.endsWith('-peer')?'peer':'lead',createCwd:childSnapshot.cwd,workspaceId,
         ...(registration==='revoked'?{state:'revoked',revokedAt:at,revokeReason:'registration-mismatch'}:{}),
         ...(registration==='wrong-role'?{role:'supervisor'}:{})});
       await seedMemberships(store,repoValue,[...(read.ledger?.memberships??[]),child]);
     }
     afterCreate?.(() => { currentBinding = bindingFor(candidates[1]); });
-    return childHandle('child');
+    return childHandle(childSnapshot.id);
   };
   const taskHost = {
     providers: { snapshot: async () => ({ entries: providerEntries ?? (() => {
@@ -147,7 +150,7 @@ function managedBridge(t, options = {}) {
     home, stableRoot, candidates, bindingFor, profile, setBinding: candidate => { currentBinding = bindingFor(candidate); },
     verifiedLaunchSets, bridge, paseoRef, effects,
     ready: bridge.whenReady(),
-    repo, repos, workspaceSnapshots,
+    repo, repos, workspaceSnapshots, parent, agentSnapshots,
   };
 }
 
@@ -176,6 +179,44 @@ async function callTool(f, id, name, args) {
   assert.ok(reply.result?.content?.[0]?.text, `missing ${name} result: ${JSON.stringify(reply)}`);
   return JSON.parse(reply.result.content[0].text);
 }
+
+test('wire episode inheritance uses existing parent refresh, keeps roots unlabelled and replays without effects', async t => {
+  const f = await boundFormationSeat(t, { creatorLabels: {} });
+  const first = await callTool(f, 'episode-a', 'slp_seat_create', seatCreate('episode-a'));
+  assert.equal(first.result.state, 'awaiting-caller-delivery', JSON.stringify(first));
+  const a = f.effects.creates[0].options.labels;
+  assert.equal(a['slp.episode-root'], 'parent');
+  assert.ok(a['slp.episode-id']);
+  const second = await callTool(f, 'episode-b', 'slp_seat_create', seatCreate('episode-b'));
+  assert.equal(second.result.state, 'awaiting-caller-delivery', JSON.stringify(second));
+  assert.equal(f.effects.creates[1].options.labels['slp.episode-id'], a['slp.episode-id']);
+  const third = await callTool(f, 'episode-c', 'slp_seat_create', { ...seatCreate('episode-c'), episode: 'new' });
+  assert.equal(third.result.state, 'awaiting-caller-delivery', JSON.stringify(third));
+  const c = f.effects.creates[2].options.labels;
+  assert.notEqual(c['slp.episode-id'], a['slp.episode-id']);
+  assert.equal(c['slp.episode-root'], 'parent');
+  assert.deepEqual(f.parent.labels, {});
+  const replay = await callTool(f, 'episode-replay', 'slp_seat_create', { ...seatCreate('episode-c'), episode: 'new' });
+  assert.equal(replay.receiptSha256, third.receiptSha256);
+  assert.equal(f.effects.creates.length, 3);
+});
+
+test('wire missing or throwing creator labels records a gap without an additional host call or failed native create', async t => {
+  for (const labels of [undefined, { 'slp.formation': 'legacy' }, 'throw']) {
+    const f = await boundFormationSeat(t, labels === 'throw' ? {} : { creatorLabels: labels });
+    if (labels === 'throw') Object.defineProperty(f.parent, 'labels', { get() { throw new Error('unreadable'); } });
+    let refreshes = 0;
+    const original = f.paseoRef.current.agents.ref;
+    f.paseoRef.current.agents.ref = id => { const ref = original(id); return { refresh: async () => { refreshes++; return ref.refresh(); } }; };
+    const out = await callTool(f, 'missing', 'slp_seat_create', seatCreate('missing'));
+    assert.equal(out.result.state, 'awaiting-caller-delivery', JSON.stringify(out));
+    assert.equal(f.effects.creates[0].options.labels['slp.episode-id'], undefined);
+    assert.ok(out.phases.find(row => row.name === 'create-issued').value.warnings.includes('episode-context-missing'));
+    // The existing dispatch/formation guards refresh the actor. Episode
+    // classification consumes those snapshots rather than refreshing itself.
+    assert.equal(refreshes, 6);
+  }
+});
 
 test('slp_seat_create adopts a newly verified binding when it changes before invocation and pins the child report route', async t => {
   const f = await boundFormationSeat(t);
