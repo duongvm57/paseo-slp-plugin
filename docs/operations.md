@@ -98,6 +98,25 @@ availability and conflicts before changing anything.
   the journal, the state moves to `RECOVERY_REQUIRED`; run **Reconcile →
   inspect** to re-verify and resolve before retrying.
 
+### Publication and interrupted configuration
+
+The manager writes intent before mutation. Candidate and launch-set publication
+precede the journal's `materialized` result. A content-addressed directory
+published before that result can be verified and reused; its presence is never
+proof of activation. The ACTIVE state requires both persisted and live checks.
+
+A same-boot pending or outcome-unknown patch can still be running and blocks
+reconcile complete/restore-before. A foreign-boot patch is classified against
+observed state; an unresolved outcome remains `RECOVERY_REQUIRED`. The
+foreign-boot exception rests on the host's synchronous config-patch and closed
+worker lifecycle assumptions, originally inspected on 0.8.0. That historical
+inspection is not live qualification of every supported host.
+
+The plugin serializes its own administrator operations, while external writers
+still require the exclusive window. It uses SDK config patches rather than a
+fallback raw-file writer. Semantic restoration cannot recover an earlier baseline
+when adoption occurred without the original receipt.
+
 ## SLP screen and work panel
 
 Overview is the default destination. Profiles, Peer pool, Routing / Jev,
@@ -240,6 +259,25 @@ stored a versioned binary path needs one reactivation to move onto the alias;
 an administrator-supplied direct release path intentionally pins that
 activation. Saved Supervisor/Lead choices and Peer pool model IDs remain
 Human-controlled; discovering a new model does not select it automatically.
+
+### Standalone compatibility and migration
+
+The plugin is the supported installation path. Retained standalone commands
+remain documented in [CLI install/upgrade/uninstall](cli.md#install--upgrade--uninstall--verify).
+They write the same provider/profile IDs outside the plugin journal, so using
+both paths together causes collision or ownership drift.
+
+To migrate, finish sessions that depend on the standalone install, then run its
+`uninstall <installed-root> --apply --reload` through the CLI. Preserve any
+Human-edited entries the command refuses to remove. Install and activate the
+plugin only after the standalone binding has been detached. Repository protocol,
+pinned routing and notebook files remain intact. Never uninstall an old retained
+copy to remove entries already rebound to a newer standalone directory.
+
+`npm run install:slp` previews; `npm run install:slp:apply` and `install.sh`
+apply. These compatibility entry points do not widen platform support or authorize
+host changes. Standalone receipts retain retired profile preferences for review;
+new installation does not populate a repository pool from them.
 
 ## Deactivation and removal
 
@@ -514,6 +552,25 @@ described below. CLI prepare stays
 explicit/offline; a bound older candidate lacking selection exports reports a
 capability gap for the new path while explicit full pins remain compatible.
 
+Fresh native mode evidence comes from the exact selected provider: advertised
+`modes: []` omits mode and requires the child to report none; missing mode
+metadata is a capability gap. A nonempty list requires the saved explicit mode
+in that list. OpenCode aliases missing `extends` need a fresh connected config
+observation around the snapshot; only that provider's stable transport is kept.
+Config never establishes availability, and raw config/credentials never enter
+formation evidence. Missing, changing or native OpenCode transport blocks the
+branch. Non-OpenCode formation adds no config capability requirement.
+
+Operation receipts bind the native caller/repository/kind/request ID outside the
+task ledger. Intent publication admits one executor; phases are digested before
+effects. Exact replay and `slp_operation_get` only read retained evidence, even
+after registration arrives. A new membership epoch may read the same native
+caller's receipt but cannot replay a mutation from the old epoch. Ambiguous or
+corrupt legacy history, more than 4096 entries or 16 MiB of scanned intents blocks
+new admission; stable-key reads need no legacy scan. No cleanup is automatic.
+A foreign caller's `EVIDENCE_INCOMPLETE` establishes no absence in the issuing
+Lead's receipts and never grants resubmission authority.
+
 ### Retrospective seat metadata
 
 Plugin-controlled creates include `slp.role`, the explicit `slp.disposition`
@@ -605,7 +662,14 @@ or give an absolute cwd for an already-existing same-Git checkout and let SDK
 open return its workspace ID. If both are given, exact canonical cwd must match.
 A second workspace on the same checkout does not provide filesystem isolation.
 
-The server checks Git-common-dir equality, rejecting foreign/nested Git repos.
+The server normally checks Git-common-dir equality, rejecting foreign/nested
+Git repositories. A Supervisor may form a Lead with existing placement in a
+separate repository only when no registered checkout of either repository
+contains a checkout of the other. The target repository supplies source/target
+pins and registers the Lead in its own desk; the receipt stays on the
+Supervisor's desk. Missing checkout observations fail closed, and all pinned
+verifications repeat the separation check. Lead callers, Peer children and task
+access keep their same-repository boundary.
 Explicit placement pins source top, config/HEAD and SDK target ID/cwd/HEAD;
 routing/protocol come from source and provider snapshots/execution use target.
 Conflicting target-local catalog/protocol refuses; no local/user-pool switch or
@@ -720,6 +784,12 @@ all refuse rather than guess. A decline emits its receipt and exits nonzero —
 the pool is Human-owned, so escalate rather than retry. Controlled
 degradation: while armed an outage blocks only the dependent delegation; the
 Human disables the capability in the Manager card and Lead judgment resumes.
+
+Keys are stored write-only through the UI and disclosed as `hasKey` in status.
+The 0600 file protects against other users, not same-user processes; daemon-home
+integrity remains the boundary. Typed output guarantees shape, not correctness.
+The Human's pool defines policy; neither Jev confidence nor a model label grants
+permission, supplies calibrated task fitness or replaces required review.
 
 ### Communication supervision (optional)
 

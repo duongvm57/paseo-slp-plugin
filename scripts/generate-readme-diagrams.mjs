@@ -1,5 +1,10 @@
 // Both READMEs use one product overview; regenerate after editing this source.
 // node scripts/generate-readme-diagrams.mjs [--check]
+// Human intent/final acceptance and Paseo lifecycle frame the execution area.
+// Supervisor observation is separate; the desk cards describe records, not phases.
+// Blue: execution; violet: observation/handoff; amber: review; green: proof;
+// teal: durable accounts. Keep light/dark palettes, selectable English labels
+// shared by both READMEs, and accessible title/description in the SVG.
 import { readFileSync, writeFileSync } from 'node:fs';
 
 const stylesheet = `

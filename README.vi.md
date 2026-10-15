@@ -267,7 +267,7 @@ Chỉ xử lý các mục sau nếu bản cài của bạn có liên quan:
 - **Script tự viết:** nếu import module `src/*.mjs` đã bị bỏ, chuyển sang
   [CLI được tài liệu hóa](docs/cli.md). Với standalone install, `npm run install:slp`
   nay chỉ preview; `npm run install:slp:apply` mới apply.
-- **Standalone → plugin:** theo [hướng dẫn migration](docs/reports/legacy-install.md#migrating-to-the-plugin)
+- **Standalone → plugin:** theo [hướng dẫn migration](docs/operations.md#standalone-compatibility-and-migration)
   để gỡ binding standalone cũ trước khi activate; hai cách cài dùng chung ID.
 
 Nếu Inspect báo conflict cấu hình hoặc `RECOVERY_REQUIRED`, dùng
@@ -300,6 +300,7 @@ Tài liệu chi tiết viết bằng tiếng Anh.
 
 | Đọc                                              | Khi bạn muốn                                                                    |
 | ------------------------------------------------ | ------------------------------------------------------------------------------- |
+| [Sơ đồ giải thích](docs/plugin-explained.html) | Sơ đồ song ngữ về lifecycle, công việc và bằng chứng |
 | [docs/architecture.md](docs/architecture.md)     | Mô hình role, những gì plugin thêm vào Paseo, cách nạp role và delegation      |
 | [docs/operations.md](docs/operations.md)         | Kích hoạt, nâng cấp, profile, thiết lập repository, Peer pool, tính năng tùy chọn |
 | [docs/cli.md](docs/cli.md)                       | Các lệnh `slp.mjs` offline: `prepare`, `routes`, `route-decide`, `monitor` và các lệnh khác |

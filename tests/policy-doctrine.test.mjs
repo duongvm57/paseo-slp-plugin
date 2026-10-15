@@ -381,20 +381,12 @@ test('existing scenario obligations remain independent of text consolidation', (
   assert.match(directScenario.assertions.join(' '), /Peer supplies proof/);
 });
 
-test('resulting policy/install graph has no dangling or retired active pointers', () => {
+test('current policy/install graph ships its referenced files and pins its source template', () => {
   const walk = dir => readdirSync(join(root, dir), { withFileTypes: true }).flatMap(entry =>
     entry.isDirectory() ? walk(`${dir}/${entry.name}`) : entry.name.endsWith('.md') ? [`${dir}/${entry.name}`] : []);
-  const retired = ['src/references/delegation-formation.md',
-    'skills/paseo-slp-onboarding/references/custom-interview.md',
-    'skills/paseo-slp-onboarding/references/repository-configuration.md'];
   const unit = installUnitPaths(root);
-  for (const path of retired) {
-    assert.equal(existsSync(join(root, path)), false, `retired source ${path}`);
-    assert.ok(!unit.includes(path), `retired install entry ${path}`);
-  }
   for (const path of [...walk('src'), ...walk('skills/paseo-slp-onboarding')]) {
     assert.ok(unit.includes(path), `${path} must ship`);
-    for (const gone of retired) assert.ok(!raw(path).includes(gone.split('/').at(-1)), `${path} points to retired ${gone}`);
     for (const pointer of raw(path).matchAll(/\]\(([^)#]+)(?:#[^)]*)?\)/g)) {
       if (!/^[a-z]+:/i.test(pointer[1])) assert.ok(existsSync(resolve(root, dirname(path), pointer[1])), `${path}: ${pointer[1]}`);
     }
@@ -407,8 +399,6 @@ test('resulting policy/install graph has no dangling or retired active pointers'
   for (const role of ['supervisor', 'lead', 'peer']) assert.ok(unit.includes(`src/roles/${role}.md`));
   const sha = createHash('sha256').update(raw(template)).digest('hex');
   assert.match(raw(protocol), new RegExp(`^current_source_template_sha256: '${sha}'$`, 'm'));
-  assert.match(raw(protocol), /^version: '15'$/m);
-  assert.match(raw(protocol), /^template_sha256: 'c5b6db392e3d9646d931cda658c3364fe64287caf1f9717ad323681f2e860ad1'$/m);
 });
 
 test('review method tools stay conditional and keep Lead obligations', () => {

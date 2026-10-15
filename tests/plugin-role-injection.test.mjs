@@ -1,5 +1,5 @@
 // tests/plugin-role-injection.test.mjs — Phase 2 hook + gate coverage
-// (settings-driven-providers.md §6): agent.create role resolution across all
+// (settings-driven-providers.md): agent.create role resolution across all
 // twelve owned ids plus the slp_role marker, pass-through for foreign/devin
 // providers, fail-closed binding/candidate behavior, systemPrompt
 // composition, session_open grant emission, the bin/slp-gate.mjs sentinel as

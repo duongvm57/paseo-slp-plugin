@@ -51,8 +51,8 @@ eq(beforeHooks.sort(), ['agent.create', 'agent.create', 'agent.session_open', 'a
 // verified → observer lifecycle hooks land on top of the desk handshake pair.
 eq(onHooks.sort(), [
   'agent.archived', 'agent.archived', 'agent.created', 'agent.created',
-  'agent.turn_ended', 'agent.turn_started',
-], 'observer + desk handshake lifecycle hooks registered');
+  'agent.turn_ended', 'agent.turn_ended', 'agent.turn_started', 'agent.turn_started',
+], 'observer + task/context + desk handshake lifecycle hooks registered');
 if (beforeHooks.length + onHooks.length === 0) fail('no hooks registered');
 ok('hook surface non-empty');
 cleanup();

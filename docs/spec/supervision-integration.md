@@ -1,21 +1,10 @@
-# SLP communication supervision — integration design
+# Communication supervision
 
-Status: shadow and notify implemented (revised 2026-09-26, feature parity
-with `paseo-supervision` commit
-[`1bad19b8`](https://github.com/hoangnb24/paseo-supervision/tree/1bad19b8ee6c58482494f56a3d8c6edb4f969ee1)).
-Local checks cover the behavior below; live end-to-end validation, a
-labelled model evaluation and any activation on a real daemon have **not**
-run. Nothing in this document is enabled by installing or upgrading the
-plugin.
-
-History: first designed 2026-09-23 (shadow-only, presence-checking rubric,
-`notify` inert). Revised 2026-09-25 (axis-scoped local gates). This revision
-restores the upstream task-relative semantic rubric, adds cross-Peer
-disposition, independent findings, daemon defaults for discovered Leads, and
-real `notify` delivery with a header bell. A same-day UX revision (after a
-live test found the card hard to use) replaced typed ids with agent pickers,
-made one switch control supervision, accepted saves the plugin cannot
-refresh as pending verification, and removed the Command Center items.
+This spec owns capture, assessment and notification invariants for the opt-in
+supervision capability. Local checks cover these interfaces; current live E2E
+acceptance and model calibration require separate evidence.
+[Operations](../operations.md#communication-supervision-optional) owns the
+operator procedure. Installing or upgrading never enables transmission.
 
 ## Decision
 
@@ -37,22 +26,6 @@ The output is always a **suspected communication issue for review**. It is
 never artifact acceptance, a Lead verdict, authority, permission to alter an
 assignment, or an automatic Peer follow-up. `notify` only prompts the chosen
 Supervisor, who decides within its own assignment.
-
-## Upstream feature mapping
-
-| Upstream behavior | SLP behavior and reason |
-| --- | --- |
-| Fixed providers `codex-lead`/`codex-peer`/`codex-supervisor` ([`server/config.ts`](https://github.com/hoangnb24/paseo-supervision/blob/1bad19b8ee6c58482494f56a3d8c6edb4f969ee1/server/config.ts)). | Roles derive from [`plugin/shared/runtime/families.ts`](../../plugin/shared/runtime/families.ts) — the twelve exact `slp-<family>-<role>` ids. Providers outside the registry are never auto-classified. |
-| Every discovered Lead routes to one UI-selected Supervisor. | Same outcome, opt-in: **daemon defaults** apply to every discovered SLP Lead without an explicit route; explicit per-Lead routes override (an explicit `off` wins). Defaults are off until the Human selects a mode. Rooms never mix: each case is judged against its own Lead's communication. |
-| Semantic three-question rubric ([`server/jev.ts`](https://github.com/hoangnb24/paseo-supervision/blob/1bad19b8ee6c58482494f56a3d8c6edb4f969ee1/server/jev.ts)). | Restored as rubric 2 with SLP terms, plus `no_action_required` and code-offered link questions (below). |
-| All-axis veto: any unknown axis makes the whole decision unknown. | Not copied. Findings are independent per axis; an unknown axis never erases another axis's supported finding. |
-| `JEV_API_KEY` env, TypeSafe only, 15 s timeout. | Existing SLP Jev config and private key (TypeSafe or OpenRouter, pinned model, response-pin validation), 5 s single-shot timeout, credential guard. No second key path. |
-| Env `PASEO_SUPERVISION_ALERT_CONFIDENCE`, default 0.9. | `confidenceThreshold` in the store (0.5–1, default 0.9), one value for evaluator and Manager. |
-| Invalid env configuration throws in `contribute()`, so the **whole upstream plugin** fails to load. | Only the supervision capability stops: an invalid store is off with a visible Manager error; the rest of SLP keeps working. |
-| Supervisor chosen in host settings; the client persists the setting between an RPC `prepare` and `commit`, and a loaded client must bootstrap the server after restart. | One server-side CAS writer on the private store; every client and the observer read the same file. The server needs no client to start observing after a restart. |
-| Command Center "Set this thread as Supervisor", "Open supervision settings", "Disable Supervisor notifications"; bell in the recipient workspace. | Bell only ([`plugin/client/supervision-controls.ts`](../../plugin/client/supervision-controls.ts)), with "Open supervision settings" and "Turn off alerts" (notify → shadow). The Human rejected Command Center items as too hidden (2026-09-26); the Supervisor is picked by name in the Manager card instead. |
-| Mark-before-send, no retry, refresh-before-send. | Kept, with a persisted attempt store, per-finding dedupe, and deferral while the Supervisor is running. |
-| Open cases, dedupe and alerts in memory; nothing survives restart. | Cases stay process-local (no replay); bounded metadata rings keep the review trail and delivery attempts. |
 
 ## Ownership and data flow
 
@@ -83,19 +56,14 @@ flowchart LR
 No observer code lives in the immutable `bin/`/`src/` runtime payload.
 [`plugin/server/runtime/cli/monitor.ts`](../../plugin/server/runtime/cli/monitor.ts) stays a separate on-demand tool.
 
-### Host capability gaps and host facts
+### Host evidence boundary
 
-| Capability | Evidence | Response |
-| --- | --- | --- |
-| Server-side plugin settings read/watch | Installed `@getpaseo/plugin@0.8.0` `registerSettings()` returns `void`. | Private state file read by the server; no client bootstrap. |
-| Per-item turn id or authenticated sender on timeline messages | Protocol 0.8.0 `AgentTimelineItem`; hook items are bare. | Matched start/end ordering; the finish-envelope fallback is text correlation, not authentication; ambiguity is unknown. |
-| Normalized timeline shapes per family | Observed 2026-09-26 for codex, claude and devin (live smoke; [fixtures README](../../tests/fixtures/supervision/README.md) rows 16–18) and pi (one authorized pi Peer, row 19). | Only fixture-backed shapes are verified (see Provider coverage). |
-| Devin send outcome | The Devin provider's ACP update for MCP tools carries only `status` — no `rawOutput`, no `content` (its own session record, row 18); the host mapper would keep either. | Devin sends are recognized with verified recipients but their outcome is unknown; a Devin Lead's handling is never judged. A host-side send receipt (sender, recipient, callId, success, turn linkage) would be the fix — not implemented. |
-| `assignmentFile` content, Lead read receipts, structured report recipient | Lifecycle events and snapshots carry none. | In pointer mode, a brief line with optional leading spaces/tabs, `Assignment file:`, optional spaces/tabs, and a non-whitespace value makes brief and handback unobservable; the daemon never reads file bytes. In snapshot mode, prepare reads and validates the file and the `Assignment snapshot:` carrier plus inline content are ordinary brief text. `report-route-unverifiable` is disclosed on completed Peer cases only. |
-| Cancelling an issued `send()` | `PaseoAgentHandle.send(text, {messageId})` has no abort. | Revalidate, reserve, bound the wait, report uncertain, never retry. |
-| Non-interrupting delivery to a running agent | `PaseoAgentSendOptions` exposes no `activeTurnBehavior`; host 0.9.1 `session.js` defaults it to `interrupt` (protocol enum `interrupt`/`steer`). The handle forwards options untyped, but relying on an undeclared option is a workaround — not used. | Defer while the refreshed Supervisor is `running`; an idle→running race can still interrupt (disclosed). |
-| Plugin-session refresh of a live SLP agent | Live 2026-09-26 (host 0.9.1, app over relay): saving a route for a live `slp-devin-lead` failed "Agent not found" from `paseo.agents.ref(id).refresh()` in the plugin handler, while the app listed the agent. Host `getAgentPayloadById` returns null only through `isProviderVisibleToClient`; root cause not confirmed ([fixtures README](../../tests/fixtures/supervision/README.md) row 15). | A save no longer requires a snapshot: no snapshot (null or thrown) records the agent **unverified** and the save lands; a returned snapshot is still checked exactly. Routes activate only on host evidence (below). |
-| Host-side dedupe of repeated sends | Host 0.9.1 `message-receipts` persists (agentId, messageId) with a request fingerprint: a completed replay is a no-op, a pending one fails "outcome unknown", a different body fails "key conflict". | Deterministic `messageId` and deterministic alert body as defence in depth; the plugin's own attempt store remains the dedupe (0.8 hosts are not assumed to have receipts). |
+The observed provider envelopes and their provenance live with the
+[supervision fixtures](../../tests/fixtures/supervision/README.md).
+Only observed normalized shapes open a transmission lane; derived examples
+are not positive evidence. Devin send outcomes and OpenCode capture remain
+unknown where no emitted result/verified shape exists. The detector never
+reads assignment pointer files or infers report-recipient authority.
 
 ## Configuration and authority
 
@@ -491,60 +459,10 @@ pass after each drain:
 
 ## Operator surface
 
-The Manager's Supervision card (inside the Jev tab), in plain English (a
-language switch is a later task):
-
-- **One switch.** "Supervision" is the Jev `supervision` capability. It is
-  written immediately from the saved Jev view under its CAS token (other
-  capability keys preserved), and it is disabled with the reason while Jev
-  is not ready. Turning it on first shows the disclosure (what leaves the
-  host, cost, interruption risk, limits) with **Turn on** / **Cancel**. The
-  Jev card only shows a pointer line; its own save keeps the stored
-  supervision value.
-- **Status line** from saved state only: off and why; on and which Leads;
-  record only or who is alerted; how many Leads are waiting or paused.
-- **Which Leads.** *All SLP Leads* (defaults; an unchecked Lead becomes an
-  explicit `off` route) or *Selected Leads* (defaults off; one route per
-  checked Lead). Rows come from the app's own agent list
-  (`paseo.agents.list({ scope: "active" })`): title, project · workspace ·
-  status, and the Lead's gate reason in words. A configured Lead the list
-  does not show appears by short id. Stored routes the two scopes cannot
-  express (another mode, Supervisor or delay) are kept verbatim and marked
-  until the Human changes that row.
-- **When an issue is found.** *Record only* (`shadow`) or *Record and alert a
-  Supervisor* (`notify`) with a single-choice list of active SLP Supervisors.
-- **Advanced** (collapsed): confidence needed and the wait before alerting,
-  in seconds. **What is sent and what it costs** (collapsed): the
-  disclosure.
-- **Save changes / Discard changes.** A failed save keeps the draft and shows
-  the error in words; the raw message goes to the shell's error line. After
-  a save, unverified agents are listed ("watching starts once this Lead's
-  next turn is seen"). A schema-1 file shows "Settings from an earlier
-  version were found for N Leads" with **Restore**, which rebuilds the old
-  choices as an unsaved draft.
-- **Recent findings.** Open issues with Lead → Peer names, the problem in
-  words, alert state, and **Open Lead** / **Open Peer** (client navigation,
-  hidden on hosts without it); counts of checked-with-no-issue and in
-  progress; unchecked cases grouped by reason; a reminder that no findings
-  does not mean healthy. **Technical details** (collapsed) keeps the raw
-  readout: gate codes, diagnostics, per-case states, counts, findings with
-  linked/resolving call ids, delivery state (presentation states
-  `reserved`/`accepted`/`uncertain`/`deferred`/`canceled`/`blocked`; the
-  attempt store persists only `reserved`/`accepted`/`uncertain`),
-  visibility and the last assessment with rubric version.
-
-A bell appears in each notify recipient's workspace with **Open supervision
-settings** and **Turn off alerts**; it is re-derived from the stored config
-on load, after local changes and on a 60 s client-side poll of
-`get-supervision-status` (a cheap file read on the daemon; no daemon-side
-watcher). There are no supervision Command Center items.
-
-Persisted state is metadata only: `state/supervision-cases.json` and
-`state/supervision-deliveries.json`, each ≤200 entries or 30 days. Rows from
-before rubric 2 read as `rubricVersion: legacy-1`; their choices never
-inherit rubric-2 meaning. Cases and the queue are process-local: a restart
-does not replay missed turns. For review, the Human reads the native Paseo
-timeline under existing access controls.
+The [operations guide](../operations.md#communication-supervision-optional)
+owns controls, defaults, external-data disclosure and delivery troubleshooting.
+The card and recipient-workspace bell share one CAS writer. UI state never
+widens the capture or recipient qualification rules above.
 
 ## Verification and remaining acceptance
 
@@ -565,27 +483,14 @@ exists on the test daemon); a pi rejected/failed send observed live (its
 rejected classification rests on the observed envelope and synthetic
 mutations); a host send receipt for devin.
 
-## Open decisions
+## Remaining decisions and acceptance
 
-1. Which Leads and families form the first shadow pilot, and which sample,
-   false-alert classes and cost ceiling the Human needs before enabling
-   `notify` anywhere. Confidence alone cannot answer this.
-2. Whether a structured, authoritative report-recipient signal can exist
-   (writer, binding time, amendments). Without it route compliance stays
-   outside this detector.
-3. Whether the SDK will expose a non-interrupting delivery option; until
-   then deferral-while-running is the mitigation.
-4. Evaluation semantics of non-work turns — addressed by rubric 3 (above).
-   Live r4 showed three acknowledgement/follow-up Peer turns whose
-   `peerHandback` came back `drift` because an ACK was judged as a work
-   handback. Rubric 3 clarifies turn-scoped obligations instead of filtering:
-   every turn is still a case judged by Jev, and no keyword heuristic
-   suppresses or exempts a turn. A bounded synthetic eval (12 en/vi cases, 7
-   negative controls, one live run on typesafe/jev-1.13.0;
-   `.local-checks/supervision-provider-design-20260926/implementation/ack-semantics/`)
-   agreed with every `peerHandback` label and 9/12 `leadBrief` labels, with
-   no false finding at the 0.9 threshold; the three `leadBrief` misses are
-   low-confidence drift on short work briefs, also present under rubric 2.
-   The synthetic set did not reproduce the live r4 drift and says nothing
-   about calibration; a live follow-up on real turns remains the acceptance
-   check.
+- The Human selects the first shadow pilot's Leads/families, sample,
+  false-alert classes and cost ceiling before enabling notify.
+- Structured authoritative report-recipient evidence is unavailable; route
+  compliance stays outside this detector.
+- Delivery defers while the refreshed Supervisor is running. The idle-to-running
+  race can still interrupt; the adapter supplies no non-interrupting send mode.
+- Rubric 3 judges turn-scoped obligations, including acknowledgment-only turns,
+  without keyword filtering. Earlier synthetic evals are diagnostics, not
+  calibration or a substitute for a live follow-up on real turns.

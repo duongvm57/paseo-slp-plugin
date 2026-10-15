@@ -499,21 +499,12 @@ test('set-jev requires the raw-file CAS token and preserves unrelated capability
   );
 });
 
-// ---------------------------------------------------------------------------
-// Fixture sanity — the sanitized family fixtures stay loadable and shaped
-// like the host evidence they were taken from.
-// ---------------------------------------------------------------------------
-
-test('sanitized provider fixtures parse and carry send_agent_prompt evidence', async t => {
+// Distributed evidence must stay sanitized; runtime shape checks replay the
+// same live fixtures in plugin-supervision-capture.test.mjs.
+test('retained supervision evidence contains no credential-shaped strings', () => {
   const dir = new URL('./fixtures/supervision/', import.meta.url).pathname;
-  const families = ['codex', 'devin', 'pi', 'claude'];
-  for (const family of families) {
-    const fixture = JSON.parse(readFileSync(join(dir, `${family}.send-agent-prompt.json`), 'utf8'));
-    assert.equal(typeof fixture, 'object', family);
-    // Every fixture names the tool and shows where the record came from —
-    // no credentials or real agent content may appear (fixtures are
-    // sanitized: synthetic ids only).
-    assert.match(JSON.stringify(fixture), /send_agent_prompt/, family);
-    assert.doesNotMatch(JSON.stringify(fixture), /sk-[a-zA-Z0-9_-]{10}|sk-or-|ya29\.|ghp_/, family);
+  for (const name of readdirSync(dir).filter(name => name.endsWith('.json'))) {
+    const bytes = readFileSync(join(dir, name), 'utf8');
+    assert.doesNotMatch(bytes, /sk-[a-zA-Z0-9_-]{10}|sk-or-|ya29\.|ghp_/, name);
   }
 });

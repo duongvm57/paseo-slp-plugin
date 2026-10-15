@@ -105,7 +105,7 @@ lifecycle rules. Release remains Human authority.
 |---|---|
 | Lead topology | One Lead; split only for authority or capacity under a Human formation mandate |
 | Release | Release actions reserved in AGENTS.md; Human authority |
-| Work state | Lead timeline for judgments; current desk projection for admitted operations when used; durable notes under .local-checks/ |
+| Work state | Lead timeline for judgments; current desk projection for admitted operations when used; check evidence under .local-checks/ (never a competing work ledger) |
 | Delivery/completion | Artifact and evidence for Human acceptance unless the assignment specifies otherwise |
 | Settlement | Decisions made on the Human's behalf and in-task rulings go into the PR description; durable decisions go to `docs/decisions/` within the same candidate. SLP boundary: AGENTS.md §SLP boundary |
 
@@ -121,9 +121,5 @@ lifecycle rules. Release remains Human authority.
 The frontmatter preserves historical rendering package/template identity and
 Human review-selection authority. current_source_template_sha256/date record
 the newly measured source basis, not a rewritten historical provenance.
-Version 13 retires replaced manual ceremony under the Human structural
-refactor grant; guarded desk operations use their current projection.
-Authority, required review, local R1/R2 and ordinary-path proof remain binding.
-Version 14 adds the Settlement row (PR description for in-task rulings,
-`docs/decisions/` for durable ones) and a pointer to the AGENTS.md SLP boundary;
-nothing else changes.
+Guarded desk operations use their current projection. Authority, required
+review, local R1/R2 and ordinary-path proof remain binding.

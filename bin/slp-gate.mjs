@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// SLP managed-entry sentinel gate (settings-driven-providers.md §6 Phase 2).
+// SLP managed-entry sentinel gate (settings-driven-providers.md).
 // Lives inside the immutable candidate payload at bin/slp-gate.mjs and is
 // exec'd by each hook-family slp-* provider's generated gate launcher:
 //

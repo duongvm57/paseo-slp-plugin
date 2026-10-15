@@ -2,7 +2,7 @@
 //
 // A launch set lives at <stable-root>/launchers/<launch-set-sha256>/ and holds
 // launch.json plus executable POSIX launchers — one real argv[0] per provider
-// entry, in two kinds since Phase 2 (settings-driven-providers.md §6):
+// entry, in two kinds since Phase 2 (settings-driven-providers.md):
 // devin keeps the v1 shim+wrapper launcher; hook families (codex/pi/claude)
 // get a trivial gate launcher that exports the frozen SLP_FAMILY_BIN and
 // execs the candidate's bin/slp-gate.mjs. Every argv[0] must answer the
@@ -184,7 +184,7 @@ function launcherScript(
   );
 }
 
-/** Phase-2 gate launcher (settings-driven-providers.md §6): a real argv[0]
+/** Phase-2 gate launcher (settings-driven-providers.md): a real argv[0]
  *  that exports the frozen family binary and execs the candidate's sentinel
  *  gate under the frozen Node — nothing else is baked because the gate's
  *  only jobs are the grant check and the exec-through. `unset NODE_OPTIONS`
