@@ -468,7 +468,7 @@ test('launchCheck names every failing stage and separates profile completeness f
   const noMode = launchCheck(installed, { ...request, repository: dir, role: 'lead',
     profiles: [{ id: 'slp-lead', provider: 'slp-codex-lead', model: 'gpt-5.6-luna' }], providers: goodProviders });
   assert.equal(noMode.ok, true);
-  assert.deepEqual(noMode.warnings, [NO_MODE_WARNING]);
+  assert.deepEqual(noMode.warnings, [NO_MODE_WARNING, 'protocol-sha-unavailable']);
   // Stale catalog hash is reported before create on the Peer path, while the
   // wrapper's live state is still reported separately.
   const peer = launchCheck(installed, { ...request, repository: dir, role: 'peer', providers,

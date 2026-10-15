@@ -392,8 +392,12 @@ export function launchCheck(root: string, request: LaunchRequest, { handoff = fa
   const warnings = [...(bindingWarnings ?? []),
     ...(binding != null ? resolveMode(binding, bindingSource, merged.repository).warnings : [])];
   if (handoff) step('handoff', () => { handoffPacket(request); });
-  step('plan', () => { (handoff ? handoffPlan : launchPlan)(root, request); });
-  return { ok: checks.every(check => check.ok), checks, ...(warnings.length ? { warnings } : {}) };
+  step('plan', () => {
+    const planned = (handoff ? handoffPlan : launchPlan)(root, request);
+    warnings.push(...(planned.warnings ?? []));
+  });
+  const uniqueWarnings = [...new Set(warnings)];
+  return { ok: checks.every(check => check.ok), checks, ...(uniqueWarnings.length ? { warnings: uniqueWarnings } : {}) };
 }
 
 // prepare --schema: the request contract plan() consumes, emitted so Humans
@@ -438,7 +442,7 @@ export function requestSchema(handoff = false) {
       'The planner emits a plan only — it never creates agents or mutates host state.',
       'Provider objects must be verbatim entries from live list_providers (request.providers) — no added, removed or edited fields; a mismatched extends or a configured/static inventory is refused, not adapted.',
       'The plan emits the resolved modeId plus modeIdSource (binding | bundle | agent_mode | none) — a catalog option or saved profile pin reports bundle, an explicit binding reports binding, the .paseo-slp/workspace-protocol.md agent_mode frontmatter is the declared fallback, and none means pin the mode in the Human-owned option/profile or ask the Human (cross-family inheritance fails at the host; a permission mode never expands task authority).',
-      'prepare --check <request.json> reports each stage failure; prepare <request.json> --emit create prints the audit artifact { modeId, modeIdSource, create } — create is the verbatim create_agent argument record.',
+      'prepare --check <request.json> reports each stage failure and advisory warnings; prepare <request.json> --emit create prints the audit artifact { modeId, modeIdSource, warnings?, create } — create is the verbatim create_agent argument record and warnings are retained when present.',
       'Peer launches only through the project pool option: an explicit binding is refused, and profiles may accompany the request for discovery but never select the runtime.',
       'Jev routing mode is per-daemon and evaluated at plan time for both prepare and prepare-handoff (they share the plan builder): a route.decision receipt is always verified, is required whenever jev.capabilities.routing is armed, and only then binds route.optionId to the receipt choice — an enabled-but-unarmed daemon verifies and records both picks (shadow evaluation). prepare never calls the network — receipts are produced only by the explicit route-decide helper command.',
     ],

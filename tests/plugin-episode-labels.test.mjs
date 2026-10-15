@@ -6,9 +6,10 @@ import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { spawnSync } from 'node:child_process';
 import { creatorClass, episodeId, labelledEpisode, protocolSha256, seatMetadata } from '../plugin/server/runtime/episode.ts';
 import { install } from '../plugin/server/runtime/cli/package.ts';
-import { handoffPlan, launchPlan } from '../plugin/server/runtime/cli/launch.ts';
+import { handoffPlan, launchPlan, launchCheck } from '../plugin/server/runtime/cli/launch.ts';
 import { committedRepository, placementFixture } from './helpers/formation-placement-fixture.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
@@ -128,4 +129,32 @@ test('Supervisor cross-repository metadata hashes the target protocol, preservin
   const issued = out.phases.find(row => row.name === 'create-issued').value;
   assert.equal(issued.labels['slp.protocol-sha'], sha(protocol));
   assert.equal(issued.parent, f.row.agentId);
+});
+
+
+for (const context of ['missing', 'invalid', 'valid']) test(`handoff ${context} episode warnings survive check and create export`, t => {
+  const dir = directory(t), installed = join(dir, 'installed');
+  committedRepository(dir);
+  install(root, installed);
+  const handoff = { previousAgentId: 'previous', reason: 'quota', authority: 'Human', state: 'settled',
+    previousOwner: { settled: true, evidence: 'settlement' }, resources: [],
+    ...(context === 'missing' ? {} : { episode: context === 'invalid' ? { episodeId: 'invalid', rootAgentId: 'root' }
+      : { episodeId: episodeId('valid-handoff'), rootAgentId: 'root' } }) };
+  const request = { repository: dir, workspaceId: 'workspace', role: 'lead', assignment: 'bounded',
+    binding: { provider: 'pi', model: 'model', modeId: 'full-access' }, handoff };
+  const planned = handoffPlan(installed, request);
+  const checked = launchCheck(installed, request, { handoff: true });
+  assert.equal(checked.ok, true);
+  assert.deepEqual(checked.warnings, planned.warnings);
+  for (const flags of [['--check'], ['--emit', 'create']]) {
+    const result = spawnSync(process.execPath, [join(installed, 'bin/slp.mjs'), 'prepare-handoff', '-', ...flags], {
+      input: JSON.stringify(request), encoding: 'utf8', timeout: 20000,
+    });
+    assert.equal(result.status, 0, result.stderr);
+    const output = JSON.parse(result.stdout);
+    assert.deepEqual(output.warnings, planned.warnings);
+    assert.equal(output.warnings.includes('episode-context-missing'), context !== 'valid');
+    assert.ok(output.warnings.includes('protocol-sha-unavailable'));
+    if (flags[0] === '--emit') assert.deepEqual(output.create, planned.create);
+  }
 });

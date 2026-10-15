@@ -45,6 +45,9 @@ After measurement, the delegation reference was copy-edited to its original
 production-file differences from the measured fingerprint; server/runtime
 implementation is unchanged. The copy edit was not separately benchmarked.
 The final test receipt pins the candidate including that text correction.
+A subsequent Greptile follow-up corrected the managed-task protocol source and
+preserved CLI warnings in check/export outputs. Those corrections are outside
+the measured ordinary formation path; this benchmark was not rerun for them.
 
 Raw samples, per-file fingerprints, benchmark script and earlier results:
 [/tmp/paseo-slp-episode-bench-to3qribk](/tmp/paseo-slp-episode-bench-to3qribk).

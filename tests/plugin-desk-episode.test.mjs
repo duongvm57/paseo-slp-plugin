@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -10,7 +11,7 @@ import { episodeId, episodeLabels } from '../plugin/server/runtime/episode.ts';
 import { runAssignmentClose, runAssignmentRegister } from '../plugin/server/desk-handback.ts';
 import { gitRepo, memberRow, repoOf, seedMemberships } from './helpers/desk-bridge-fixture.mjs';
 import { placementFixture } from './helpers/formation-placement-fixture.mjs';
-import { realDesk, taskSpec, bootstrapInput } from './helpers/task-execution-fixtures.mjs';
+import { realDesk, taskSpec, bootstrapInput, git } from './helpers/task-execution-fixtures.mjs';
 import { latestTask } from '../plugin/server/desk-task.ts';
 import { runTaskDispatch } from '../plugin/server/desk-task-execution.ts';
 
@@ -288,4 +289,36 @@ test('managed bootstrap pins the registered episode and metadata remains advisor
   const replay = await runTaskDispatch(d.ctx, input, d.deps);
   assert.equal(replay.perform, false);
   assert.equal(d.host.calls.create.length, 1);
+});
+
+
+for (const placement of ['shared-checkout', 'isolated', 'missing-protocol']) test(`managed ${placement} metadata uses the protocol in the execution checkout`, async t => {
+  const d = await realDesk(t), protocolDir = join(d.w.repo, '.paseo-slp');
+  mkdirSync(protocolDir);
+  const protocol = '---\nversion: 1\n---\nProtocol at the selected base.\n';
+  writeFileSync(join(protocolDir, 'workspace-protocol.md'), protocol);
+  git(d.w.repo, ['add', '.paseo-slp/workspace-protocol.md']);
+  git(d.w.repo, ['commit', '-m', 'older protocol']);
+  const older = git(d.w.repo, ['rev-parse', 'HEAD']);
+  writeFileSync(join(protocolDir, 'workspace-protocol.md'), protocol.replace('selected base', 'desk main checkout'));
+  git(d.w.repo, ['commit', '-am', 'current source protocol']);
+  let cwd;
+  if (placement === 'shared-checkout') {
+    cwd = join(d.w.dir, 'other-worktree');
+    git(d.w.repo, ['worktree', 'add', '--detach', cwd, older]);
+  }
+  await d.define();
+  const out = await runTaskDispatch(d.ctx, d.bootInput('task-1', { placement: placement === 'shared-checkout'
+    ? { kind: 'shared-checkout', cwd, baseRef: older }
+    : { kind: 'isolated', baseRef: placement === 'missing-protocol' ? d.w.head : older } }), d.deps);
+  assert.equal(out.state, 'bound', JSON.stringify(out));
+  const labels = d.host.calls.create[0].labels;
+  const intent = d.ledger().taskEntries.find(row => row.kind === 'action' && row.actionKind === 'create');
+  if (placement === 'missing-protocol') {
+    assert.equal(labels['slp.protocol-sha'], undefined);
+    assert.ok(intent.body.metadataWarnings.includes('protocol-sha-unavailable'));
+  } else {
+    assert.equal(labels['slp.protocol-sha'], createHash('sha256').update(protocol).digest('hex'));
+    assert.equal(intent.body.labels['slp.protocol-sha'], labels['slp.protocol-sha']);
+  }
 });

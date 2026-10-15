@@ -408,7 +408,7 @@ async function dispatchBootstrap(
   if (originalCreate?.kind === "action" && originalCreate.body === null) return rejected("CAPABILITY_GAP", "historical create intent lacks its immutable body", "retain the exact action and reconcile; never retrofit host claim pins");
   const originalLabels = originalCreate?.kind === "action" ? readLabels(originalCreate.body?.labels) : null;
   if (originalCreate !== undefined && originalLabels === null) return rejected("CAPABILITY_GAP", "historical create labels are unreadable", "retain the immutable original create; never reconstruct its labels from current inputs");
-  const metadata = originalCreate === undefined ? seatMetadata({ role: "peer", runtimeSha: deps.runtimeSha, repository })
+  const metadata = originalCreate === undefined ? seatMetadata({ role: "peer", runtimeSha: deps.runtimeSha, repository: placementCwd })
     : { labels: {}, warnings: [] };
   const episode = originalCreate === undefined ? assignmentEpisode(createHistory, input.assignmentId) : null;
   if (originalCreate === undefined && !episode) metadata.warnings.push("episode-context-missing");

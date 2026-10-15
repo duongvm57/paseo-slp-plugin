@@ -181,10 +181,12 @@ Three modes support request authoring — all side-effect free:
   profile from a live-verified provider. Exits 1 when any stage fails; nothing
   is created.
 - `prepare <request.json> --emit create` prints an audit artifact:
-  `{ modeId, modeIdSource, create }` — `create` is exactly the `create` member
+  `{ modeId, modeIdSource, warnings?, create }` — `create` is exactly the `create` member
   (the create_agent argument record, untrimmed) for callers that pass it
   through directly, and the mode fields record the resolved mode plus its
-  provenance so a saved emit file is self-describing. Note the host gap:
+  provenance so a saved emit file is self-describing. Both `--check` and
+  `--emit create` retain the plan's advisory warnings, including missing
+  protocol or handoff episode context. Note the host gap:
   Paseo has no plan-file consumer today, so pasting or parsing `create` into
   `create_agent` remains a manual mitigation with a cross-check — it does not
   eliminate the risk of an altered record reaching the host. `--out <path>`
