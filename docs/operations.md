@@ -474,7 +474,7 @@ caller-invoked, delta-only signal scan.
 
 What the shim injects at session entry — and how to verify it reached a
 seat — is documented in
-[Plugin architecture](architecture.md#the-hidden-channel).
+[Plugin architecture](architecture.md#assignment-and-policy-delivery).
 
 ## Peer runtime pool
 

@@ -217,12 +217,9 @@ Six rules fall out of the role model and shape everything below:
 │                                                                  │
 │   config.json                                                    │
 │     agents.providers:                                            │
-│       slp-claude-supervisor  slp-codex-supervisor                │
-│       slp-pi-supervisor      slp-devin-supervisor   ─┐           │
-│       slp-claude-lead        slp-codex-lead          │ up to 12  │
-│       slp-pi-lead            slp-devin-lead          │ entries — │
-│       slp-claude-peer        slp-codex-peer          │ settings- │
-│       slp-pi-peer            slp-devin-peer         ─┘ driven    │
+│       slp-<family>-supervisor                                     │
+│       slp-<family>-lead         settings-driven family selection  │
+│       slp-<family>-peer         from the family registry          │
 │     agentProfiles:                                               │
 │       slp-supervisor → one slp-*-supervisor provider             │
 │       slp-lead       → one slp-*-lead provider                   │
@@ -232,8 +229,8 @@ Six rules fall out of the role model and shape everything below:
 │                        shims, role wrappers, gate, transports,    │
 │                        helpers)                                  │
 │     launchers/<sha>/   per-provider argv0 launchers — gate        │
-│                        launchers for codex/pi/claude, shim        │
-│                        launchers for devin                      │
+│                        launchers for hook transports, shim        │
+│                        launchers for wrapper transports          │
 │     state/receipt.json what the plugin believes it owns           │
 │     state/communication-language                                   │
 │                            optional injected language (toggleable) │
@@ -265,8 +262,9 @@ The plugin is a **manager**, not an agent feature. It exposes a small set
 of administrative operations (`status`, `activate`, `reconcile`,
 `deactivate`, `local-target`, `catalog`) that a human drives from the SLP
 sidebar. Agents never see these. Activation writes the provider entries
-(up to fifteen — all fifteen without routing; the chosen supervisor/lead
-combos plus all five peers when `role-routing.json` is set) and 2 profiles
+(all registered family/role combinations without routing; the chosen
+Supervisor/Lead combinations plus each registered family's Peer entry when
+`role-routing.json` is set) and two profiles
 into `config.json` atomically through `config.patch`,
 materializes the SLP payload into an immutable `slp-runtime/<sha>` tree,
 and records a receipt. Nothing changes on the daemon until a human
@@ -276,7 +274,12 @@ Two saved profiles anchor **SLP Supervisor** and **SLP Lead** runtimes.
 Peers use complete pool bundles, selected server-side or independently by the
 Lead per task from the routing pool: a repository's `.paseo-slp/slp-routing.json`
 when pinned, else the user-scope `state/peer-pool.json` above. Either scope
-is what lets one project mix e.g. a Codex Lead with Devin peers.
+is what lets one project mix a Lead from one family with Peers from another.
+
+The [family registry](../plugin/shared/runtime/families.ts) owns supported
+families, role IDs and transport selection. This architecture describes the
+shared mechanisms; the [provider spec](spec/settings-driven-providers.md)
+owns family-specific mappings, launch requirements and compatibility rules.
 
 ## Two lifecycles
 
@@ -288,7 +291,7 @@ time an agent is created. There are two transports — both
 render the same `roleBundle()` bytes from the same candidate:
 
 ```
-hook families (codex / pi / claude) — thin alias + hooks
+hook transport — thin alias + hooks
 
 human or agent calls create_agent(profile/provider, prompt)
         │
@@ -314,12 +317,12 @@ provider session begins with SLP instructions already in its
 durable context
 
 
-devin / opencode — shim + ACP role wrapper
+wrapper transport — shim + ACP role wrapper
 
 human or agent calls create_agent(profile/provider, prompt)
         │
         ▼
-Paseo resolves the slp-{devin,opencode}-* provider entry
+Paseo resolves the slp-<family>-<role> provider entry
         │
         ▼
 launcher process starts  ── env: SLP_MANAGED_RUNTIME, SLP_NODE_BIN,
@@ -328,7 +331,7 @@ launcher process starts  ── env: SLP_MANAGED_RUNTIME, SLP_NODE_BIN,
 slp-shim verifies the runtime payload (manifest digest + identity)
         │
         ▼
-OpenCode shim requires the live session-open grant before child spawn;
+grant-bearing families require a live session-open grant before child spawn;
 role wrapper starts the real ACP child and prepends role instructions
 to every session/prompt (entry carrier on first/re-armed prompts)
         │
@@ -336,8 +339,8 @@ to every session/prompt (entry carrier on first/re-armed prompts)
 provider receives SLP instructions before the user content on each prompt
 ```
 
-Devin and OpenCode use the wrapper transport because generic ACP drops
-`systemPrompt` — policy must be carried in ACP prompt text. For hook families the plugin is in the loop at session entry
+The wrapper transport carries policy in ACP prompt text because generic ACP
+drops `systemPrompt`. For hook families the plugin is in the loop at session entry
 via the two before-hooks, but never afterwards — no proxy, no monitoring
 daemon, no session interception. The gate is what makes a hook gap (plugin
 disabled or reloading) fail visibly instead of spawning an unroled seat.
@@ -350,23 +353,20 @@ than producing an unroled seat. The `slp-*` providers only appear in the
 config once activation writes them, so in practice this only bites when a
 config outlives its binding (e.g. a restored or hand-edited config).
 
-## The hidden channel
+## Assignment and policy delivery
 
-A seat's context arrives through **two channels**, and only one is visible
-in the UI:
+A seat receives task content and role policy through separate mechanisms:
 
-1. **`initialPrompt` — visible.** Whatever the spawner passes to
+1. **`initialPrompt` — task content.** Whatever the spawner passes to
    `create_agent`: the human's typed text for profile-pick spawns, or the
    planner's assignment block for `prepare`-rendered spawns.
-2. **Session-entry injection — hidden.** Bytes appended to the provider's
-   durable instruction channel while the session is being built — by the
-   `agent.create` hook's `systemPrompt` write for codex/pi/claude, or by
-   the role wrapper's `session/new` rewrite for devin. The seat sees it;
-   the human does not — it never appears in the agent tab, the
-   conversation view, or `initialPrompt`.
+2. **Transport-delivered policy.** The hook writes `config.systemPrompt`,
+   or the ACP wrapper prepends policy to `session/prompt`. Wrapper delivery
+   reasserts core instructions on every prompt and includes entry helpers
+   on first/re-armed prompts.
 
 ```
-what the human sees              what the seat's context contains
+task content                     transport-delivered policy
 ┌─────────────────────┐          ┌──────────────────────────────────┐
 │ initialPrompt:      │          │ SLP role=supervisor              │
 │ "điều tra repo X,   │          │ common policy                    │
@@ -377,31 +377,22 @@ what the human sees              what the seat's context contains
                                  │ spawn kit (MCP signatures)       │
                                  │ policy locators (path + sha256)  │
                                  └──────────────────────────────────┘
-                                    ^ injected at session entry — hook
-                                      systemPrompt or role wrapper —
-                                      invisible in UI
+                                    ^ hook systemPrompt or
+                                      wrapper prompt transformation
 ```
 
-For the Devin (ACP) transport this lands in `appendSystemPrompt`; each
-family has its own durable channel. The daemon's own global
-`daemonAppendSystemPrompt` still applies too — separate owners, both reach
-the session.
+Policy delivery does not depend on the caller copying the role manual into
+the task prompt. Host UI visibility depends on the transport and timeline
+representation; a prompt view alone does not prove the bytes delivered to the
+model. `roleBundle()` renders package bytes offline, while live delivery needs
+the observations described in [development](development.md#testing).
 
-Why this design: the carrier used to live inside `prepare`-emitted
-`initialPrompt`, which meant it was *visible but only existed on the
-prepare path* — a profile-picked spawn silently lost its spawn kit and
-policy locators. Moving the carrier into session entry makes it
-*guaranteed on every `slp-*` launch but invisible*. The trade-off is
-deliberate: correctness over transparency-by-default. Verification paths
-exist — spawn a probe seat and ask it to enumerate its injected sections,
-or render the bundle offline via `roleBundle()`.
-
-What each spawn path puts in the visible prompt:
+What each spawn path supplies:
 
 | Content | `prepare` spawn | Profile-pick spawn |
 |---|---|---|
-| Role instructions | hidden (injected) | hidden (injected) |
-| Spawn kit + policy locators | visible in emitted prompt | hidden (injected) |
+| Role instructions | transport-delivered | transport-delivered |
+| Spawn kit + policy locators | included in emitted prompt and entry carrier | entry carrier |
 | `Launch binding:` record | visible | absent — shim cannot read profile fields |
 | Structured assignment | planner-built | whatever the human types |
 | Title (`Supervisor — <task>`) | planner-built | human-typed |
