@@ -392,7 +392,7 @@ What each spawn path supplies:
 | Content | `prepare` spawn | Profile-pick spawn |
 |---|---|---|
 | Role instructions | transport-delivered | transport-delivered |
-| Spawn kit + policy locators | included in emitted prompt and entry carrier | entry carrier |
+| Spawn kit + policy locators | entry carrier for verified managed targets; emitted prompt fallback otherwise | entry carrier |
 | `Launch binding:` record | visible | absent — shim cannot read profile fields |
 | Structured assignment | planner-built | whatever the human types |
 | Title (`Supervisor — <task>`) | planner-built | human-typed |
