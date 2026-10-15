@@ -18,48 +18,26 @@ a "no plugin change" outcome.
 | `@getpaseo/server` | unpinned host; not changed | 0.11.2 | Partial plugin/config/provider touchpoints, not whole host | 2026-10-11 | Inspection only; no host installation or live compatibility claim |
 | `@getpaseo/cli` | unpinned host; not changed | 0.11.2 | Partial plugin/schedule/command delta, not full CLI | 2026-10-11 | Inspection only; no CLI installation |
 
-`requirements.paseo` in `plugin/paseo-plugin.json`: `>=0.10.3`, unchanged
-by this SDK update. The earlier record of `>=0.8.0` described the September
-assessment, not the current manifest. Field must stay present: an absent
-`requirements.paseo` is treated by the daemon as a pre-0.8 legacy plugin.
-Updating build dependencies does not update historical capability evidence,
-raise the supported host floor or prove runtime compatibility.
+`requirements.paseo` in `plugin/paseo-plugin.json` is `>=0.11.0` for native
+screen/sidebar support on daemon and app. Keep the field present. That current
+API floor does not extend the assessed runtime evidence in the table above.
+Updating SDK dependencies or documentation never proves live compatibility.
 
-## 2026-10-11 bounded SDK update
+## Coverage and unresolved differences
 
-Human requested the latest local SDK while preparing the spawn-guidance fix
-for a PR. All five npm stable tags resolved to 0.11.2; only the three direct
-SDK dependencies and the plugin's protocol dependency were updated. Package
-tarballs, SHA256 pins, changed-file inventories, diffs and the pre-update
-impact report are retained under
-`~/slp-traces/spawn-guidance-fix-20261010/sdk-0.11.2/`.
-Release source: [Paseo v0.11.2 changelog](https://github.com/getpaseo/paseo/blob/v0.11.2/CHANGELOG.md).
+The 2026-10-11 assessment was partial. Generated protocol validators and
+unconsumed host internals remain unassessed; subsequent syncs start at 0.10.0
+for those surfaces. No live 0.11.2 daemon/plugin cutover was performed.
+Supervision fixtures were recorded on host 0.9.1 and have not been re-recorded.
 
-Coverage is deliberately partial: no optional upstream feature was adopted,
-no live daemon/plugin cutover was performed, and generated protocol
-validators plus unconsumed host internals remain unassessed. Subsequent
-syncs must start at 0.10.0 for those unreviewed surfaces. Source checks and
-independent-review outcomes are reported in the PR; this record alone is
-not test or acceptance evidence.
+`plugin/server/config-view.ts` parses config without stripping a UTF-8 BOM,
+which daemon 0.9.2 accepts. Mirroring that behavior remains undecided; a docs
+refresh does not authorize a production parser change.
 
-## Open items from the last assessment
+## Evidence provenance
 
-- `plugin/server/config-view.ts` parses config without stripping a UTF-8 BOM,
-  which daemon ≥0.9.2 accepts: consider mirroring the strip. Still undecided.
-- Docs pinned to 0.8.0 need re-baselining with a bump:
-  `docs/spec/paseo-plugin-implementation.md`,
-  `docs/spec/paseo-plugin-feasibility.md`, `docs/contract.md`.
-- No live daemon exercise on 0.11.2 in this SDK update; `tests/fixtures/supervision/*.json` were
-  recorded on host 0.9.1 and not re-recorded.
-
-## Evidence
-
-2026-09-28 assessment, Devin session 9ab88406b1f14e58948532f68a932d30:
-`.local-checks/skill-upstream-sync/v0.10.0/report.md` with tarball diffs and
-check receipts beside it (`receipts/`). That directory is gitignored and
-exists only on the machine that ran it; the rows above are the tracked
-record. Notable this run: parity tests ran against a real 0.10.0 server
-backend (`PASEO_CLI_MODULES` → extracted tarball + `which`/`semver`
-shims), so manifest validation, `compilePlugin`, `DaemonConfigStore` merge
-and `loadPersistedConfig` schema parity are verified on the target, not
-skipped.
+The 2026-10-11 tarball/diff assessment used the published
+[Paseo v0.11.2 source](https://github.com/getpaseo/paseo/blob/v0.11.2/CHANGELOG.md).
+Its raw artifacts were machine-local; the table records the tracked coverage,
+not a new test receipt. Earlier host-parity checks used the extracted 0.10.0
+server with `PASEO_CLI_MODULES`; their results qualify that earlier target only.

@@ -19,20 +19,21 @@ thật, không đăng ký daemon host, không auth thật.
 
 Làm gì:
 
-1. Build image `paseo-slp-container-harness:node24-paseo0.9.2` từ
+1. Build image `paseo-slp-container-harness:node24-paseo0.11.2` từ
    `node:24-bookworm` pin theo digest
    (`sha256:64af3819f9275802414d7cdc38c27e9d82bd564dec4d4da87d008255d36c63b4`),
-   cài sẵn `@getpaseo/cli@0.9.2` — version nằm trong range
-   `plugin/paseo-plugin.json` (`requirements.paseo: >=0.8.0`).
+   cài sẵn `@getpaseo/cli@0.11.2` — version nằm trong range
+   `plugin/paseo-plugin.json` (`requirements.paseo: >=0.11.0`).
 2. Mount checkout read-only tại `/src`; fake `HOME` + `PASEO_HOME` dưới
    `/acceptance`.
 3. `slp.mjs install --paseo-home --apply` (integrated install thật), `verify`,
    `identity`, `instructions` cho cả 3 role, `uninstall` dry-run.
-4. `lib/checks.mjs` — 68 invariant: 12 provider `slp-*` (transport map
-   codex/pi/`devin→acp`/claude), peer `paseoTools.disabledTools`, 2 saved
+4. `lib/checks.mjs` — các invariant: 15 provider `slp-*` (transport map
+   codex/pi/`devin→acp`/claude/`opencode→acp`), peer `paseoTools.disabledTools`, 2 saved
    profile, mcp flags bật, fixture config/file human-owned giữ nguyên,
    `installed.json` + `paseo-binding.json` receipts đúng.
-5. `lib/plugin-load.mjs` — import `index.server.ts` thật, gọi `contribute()`
+5. `lib/plugin-load.mjs` — kiểm tra adapter bằng server stub (không chứng minh
+   real daemon load): import `index.server.ts` thật, gọi `contribute()`
    với server stub: toàn bộ RPC surface + before/on hooks + cleanup; sau đó
    `materializer` publish embedded payload vào `$PASEO_HOME/slp-runtime/`,
    `verifyPublished`, và chạy CLI `identity`/`instructions` của runtime đã
@@ -92,7 +93,7 @@ tests/container/
   accept.sh             suite acceptance trong container → CONTAINER_ACCEPTANCE_OK
   serve.sh              daemon+web UI disposable trong container → CONTAINER_SERVE_READY
   fixtures/config.json  fake config.json seed (provider legacy + profile + private key)
-  lib/checks.mjs        68 invariant assertions sau integrated install
+  lib/checks.mjs        invariant assertions sau integrated install
   lib/plugin-load.mjs   contribute() surface + materialize/verify/run published runtime
   run                   host: build + run accept (checkout mount ro, --rm)
   serve                 host: build + run serve, publish 127.0.0.1:<port>:6767
@@ -107,6 +108,6 @@ tests/container/
   (`PASEO_RELAY_ENABLED=false`).
 - Bước `npm install` (image build, plugin build, SDK shim) cần mạng; offline
   sẽ fail sớm với lỗi npm.
-- Pin `@getpaseo/cli@0.9.2` thỏa manifest hiện tại; nếu repo nâng
-  `requirements.paseo` sang 0.10.x thì đổi `PASEO_CLI_VERSION` trong Dockerfile
+- Pin `@getpaseo/cli@0.11.2` thỏa manifest hiện tại; nếu repo nâng
+  `requirements.paseo` thì đổi `PASEO_CLI_VERSION` trong Dockerfile
   (giữ cùng range manifest).

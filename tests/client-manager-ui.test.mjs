@@ -66,6 +66,58 @@ test('slim option controls retain selection, touch slop and themed focus without
   assert.deepEqual(selected, ['default', 'default']);
 });
 
+test('model picker preserves selection on disclosure, clears to provider default and accepts a manual ID', async t => {
+  const mod = await loadHooks(t), changes = [];
+  mod.primitiveState.tree = true;
+  let opens = 0;
+  function Picker() {
+    const [value, setValue] = React.useState('saved-model');
+    return React.createElement(mod.OptionPicker, { colors, label: 'Model', value,
+      options: [{ id: 'catalog-model', label: 'Catalog model' }],
+      onOpen: () => { opens++; },
+      onChange: next => { changes.push(next); setValue(next); } });
+  }
+  const renderer = await render(t, Picker, {});
+  const control = (type, label) => renderer.root.find(node => node.type === type
+    && node.props.accessibilityLabel === label);
+  const press = async label => { await act(async () => control('Pressable', label).props.onPress()); };
+  const text = () => JSON.stringify(renderer.toJSON());
+
+  assert.match(text(), /saved-model/);
+  await press('Change model');
+  assert.equal(opens, 1);
+  assert.equal(control('Pressable', 'Close Model').props.accessibilityState.expanded, true);
+  assert.match(text(), /saved-model/);
+  assert.deepEqual(changes, [], 'opening the picker must not replace the saved model');
+  await press('Close Model');
+  await press('Change model');
+  assert.equal(opens, 2);
+  assert.deepEqual(changes, [], 'closing and reopening must not edit the model');
+
+  await press('Select Provider default');
+  assert.deepEqual(changes, ['']);
+  assert.equal(control('Pressable', 'Change model').props.accessibilityState.expanded, false);
+  assert.doesNotMatch(text(), /saved-model/);
+  assert.match(text(), /Provider default/);
+
+  await press('Change model');
+  await press('Select Catalog model catalog-model');
+  assert.deepEqual(changes, ['', 'catalog-model']);
+  assert.match(text(), /Catalog model/);
+  await press('Change model');
+  await press('Enter model ID manually');
+  assert.deepEqual(changes, ['', 'catalog-model'], 'manual disclosure must not edit the model');
+  assert.equal(control('TextInput', 'Model ID').props.value, 'catalog-model');
+  await act(async () => control('TextInput', 'Model ID').props.onChangeText('custom-model'));
+  assert.deepEqual(changes, ['', 'catalog-model', 'custom-model']);
+  assert.equal(control('TextInput', 'Model ID').props.value, 'custom-model');
+  await press('Close Model');
+  assert.match(text(), /custom-model/);
+  await press('Change model');
+  assert.equal(control('TextInput', 'Model ID').props.value, 'custom-model');
+  assert.deepEqual(changes, ['', 'catalog-model', 'custom-model']);
+});
+
 test('binding identity distinguishes mismatch, missing read, unbound and verification without truncating pins', async t => {
   const mod = await loadHooks(t);
   const renderer = await render(t, mod.RuntimeIdentity, { colors, statusView: runtime(), home: '/typed' });
@@ -155,6 +207,54 @@ async function acknowledge(rig) {
     await act(async () => dialog.findAll(node => node.props.title === title && typeof node.props.onToggle === 'function')[0].props.onToggle(true));
   }
 }
+
+test('Profiles family changes clear foreign settings and Save sends only the displayed bundle', async t => {
+  const saves = deferredRpc();
+  const choice = { family: 'codex', model: 'codex-model', modeId: 'full-access',
+    thinkingOptionId: 'high', featureValues: { auto_accept: true } };
+  const rig = await managerRig(t, { params: { section: 'profiles' } }, {
+    'get-role-routing': async () => ({ routing: { schemaVersion: 1, supervisor: choice, lead: choice } }),
+    'set-role-routing': input => saves.rpc(input),
+    catalog: async input => ({ schemaVersion: 1,
+      models: input.family === 'pi'
+        ? [{ id: 'pi-model', label: 'Pi model', thinkingOptions: [] }]
+        : [{ id: 'codex-model', label: 'Codex model', thinkingOptions: [{ id: 'high', label: 'High' }] }],
+      modes: input.family === 'pi' ? [] : [{ id: 'full-access', label: 'Full access' }],
+      features: [], error: null }),
+  }, true);
+  await act(async () => rig.reads.calls[0].resolve(runtime({ embeddedCandidateSha256: A })));
+  assert.equal(control(rig, 'Save profiles').props.disabled, true, 'unchanged saved choices need no write');
+  const card = () => rig.renderer.root.findAll(node => node.type.name === 'RoutingCard')[0];
+  const family = card().findAll(node => node.type.name === 'ChipSelect'
+    && node.props.options.some(option => option.value === 'pi'))[0];
+  await act(async () => family.props.onChange('pi'));
+  assert.deepEqual(rig.routing().form.supervisor, {
+    family: 'pi', model: '', modeId: '', thinkingOptionId: '', features: '', feature: {},
+  });
+  const model = card().findAll(node => node.type.name === 'OptionPicker' && node.props.label === 'Model')[0];
+  await act(async () => model.props.onChange('pi-model'));
+  assert.equal(card().findAll(node => node.type.name === 'ChipSelect'
+    && node.props.options.some(option => option.value === 'high')).length, 1,
+  'only the unchanged Lead retains a thinking picker');
+  assert.equal(control(rig, 'Save profiles').props.disabled, false);
+  await act(async () => control(rig, 'Save profiles').props.onPress());
+  await acknowledge(rig);
+  await act(async () => control(rig, 'Save and apply').props.onPress());
+  assert.equal(saves.calls.length, 1);
+  assert.deepEqual(saves.calls[0].input.routing.supervisor, { family: 'pi', model: 'pi-model' });
+  assert.deepEqual(saves.calls[0].input.routing.lead, choice);
+});
+
+test('unbound Profiles allow drafts but keep Save disabled and disclose activation', async t => {
+  const rig = await managerRig(t, { params: { section: 'profiles' } }, {}, true);
+  await act(async () => rig.reads.calls[0].resolve(runtime({ binding: null })));
+  await act(async () => rig.routing().setField('supervisor', 'model')('draft-model'));
+  assert.equal(rig.routing().form.supervisor.model, 'draft-model');
+  assert.equal(control(rig, 'Save profiles').props.disabled, true);
+  assert.match(JSON.stringify(rig.renderer.toJSON()), /Activate first/);
+  assert.equal(modal(rig), undefined);
+  assert.equal(rig.calls.filter(call => /^(set-|activate)/.test(call.name)).length, 0);
+});
 
 test('Save profiles confirms on demand, saves then applies once with pinned authority and pending protection', async t => {
   const saves = deferredRpc(), starts = deferredRpc();

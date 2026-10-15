@@ -67,6 +67,10 @@ Amendments retain their reason, authority pointer and affected owners. Material
 decisions retain notification and outcome references; recording a notification
 intent is not proof that anyone received it or changed the work.
 
+Every read verifies committed historical events and their row/body digests;
+a cached tip cannot replace full-chain integrity. Retention introduces no
+pruning of referenced evidence or automatic deletion of accepted history.
+
 History is append-only. Exact retries preserve idempotency; changed requests or
 stale revision pins produce conflicts. Legacy assignments remain readable
 without invented context. Reference pointers and declared ownership are claims;
@@ -153,5 +157,5 @@ acknowledgment still need actual evidence. Native ownership acceptance is a
 separate desk operation; host lifecycle operations require their own authority.
 
 These are local storage, preparation and read interfaces. Live delivery and
-agent behavior require separate E2E evidence. The detailed implementation
-obligations are in the [work-coordination spec](spec/work-coordination.md).
+agent behavior require separate E2E evidence. The runtime transaction owns exact owner/revision checks, declared overlap and
+review freshness; policy owns sufficient questions and authority judgment.

@@ -16,8 +16,9 @@ required before delivery. Foreign/nested Git repositories still need a Lead
 bound to that repository, not a path override. New worktree creation remains
 outside seat placement V1: use Paseo create_workspace under its host-setup grant,
 then slp_seat_create placement existing. Existing task dispatch/deliver retain
-their own guarded task placement; this change adds no multi-repo Lead or task
-enrollment. Pending/uncertain seat IDs remain retained, never a recreate signal.
+their own guarded task placement and do not gain cross-repository access.
+The Supervisor-to-Lead exception is described in
+[ordinary placement](operations.md#caller-and-existing-placement). Pending/uncertain seat IDs remain retained, never a recreate signal.
 
 ## Work and evidence
 
@@ -31,6 +32,10 @@ enrollment. Pending/uncertain seat IDs remain retained, never a recreate signal.
 | Hold and control | Open questions, findings and stop requests that prevent dependent execution. |
 | Action | Intent before a host or filesystem effect, then an observation, failure or uncertainty. |
 | Delivery and resource | Responsibility acknowledgments and outstanding lifecycle/cleanup obligations. |
+
+The v9 ledger stores these revisions in a strict append-only `taskEntries`
+stream. Legacy migration adds an empty stream without inventing work or
+receipts. Every read verifies the committed event chain and task history.
 
 These records are immutable revisions in one ledger. Scope still owns moving
 write authority and independent review; task state does not copy the scope or

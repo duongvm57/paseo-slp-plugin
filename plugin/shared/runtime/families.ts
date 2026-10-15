@@ -1,6 +1,6 @@
 // plugin/shared/runtime/families.ts — the provider-family registry: the single source
 // of truth for the slp-<family>-<role> owned id space and the role axis it
-// pairs with (settings-driven-providers.md §5–§6). Shared so server AND client
+// pairs with (settings-driven-providers.md). Shared so server AND client
 // modules import the same derivation — pure data plus derived constants, no
 // imports at all (same host-compiler boundary as contracts.ts: no node
 // builtins, nothing the plugin checkout cannot resolve).
@@ -19,7 +19,7 @@ export interface FamilySpec {
   id: string;
   /** Human display name: status chips, pickers, generated provider labels. */
   label: string;
-  /** How role bytes reach the seat (settings-driven-providers.md §6):
+  /** How role bytes reach the seat (settings-driven-providers.md):
    *  "hook"    — thin alias + sentinel-gate launcher; `agent.create` injects
    *              roleBundle() via config.systemPrompt and `agent.session_open`
    *              overlays the grant (codex/pi/claude).

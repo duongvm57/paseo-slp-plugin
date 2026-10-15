@@ -1,9 +1,7 @@
 import type { PresetFields } from "./runtime/peer-presets.ts";
 import { presetOptionError } from "./runtime/peer-presets.ts";
-// Shared contracts for the paseo-slp manager plugin (Option A v1).
-// Normative sources: docs/spec/paseo-plugin-implementation.md §3 (wire RPCs) and
-// §7 (receipt/operation-intent journal schema). The seam interfaces at the
-// bottom freeze the §12 module boundaries for the implementation lanes.
+// Shared manager RPC and journal schemas. docs/contract.md maps state owners;
+// the seam interfaces below define server/client adapter boundaries.
 //
 // Host-compiler boundary: shared/ modules may import only zod, react-family
 // specifiers and @getpaseo/plugin SDK specifiers — no node builtins, and no
@@ -21,7 +19,7 @@ import { FAMILY_IDS, OWNED_PROVIDER_ID_RE, PROVIDER_EXTENDS_IDS, ROLES, persiste
 export const MAX_RPC_BYTES = 64 * 1024;
 
 // ---------------------------------------------------------------------------
-// §3 wire schemas
+// Public wire schemas
 // ---------------------------------------------------------------------------
 
 export const Sha = z.string().regex(/^[0-9a-f]{64}$/);
@@ -184,7 +182,7 @@ export const SetLanguageOutput = z.object({
   value: z.string().nullable(),
 }).strict();
 /** One role's settings-driven provider choice (settings-driven-providers.md
- *  §5 Phase 1). `family` picks the managed `slp-<family>-<role>` provider the
+ *  provider generation). `family` picks the managed `slp-<family>-<role>` provider the
  *  role's profile binds to; absent optional fields are simply not applied to
  *  the generated profile — the plugin invents no model/mode defaults. */
 export const RoleChoice = z.object({
@@ -518,7 +516,7 @@ export const CatalogOption = z.object({
 /** One selectable option inside a provider feature or model descriptor —
  *  id + display label plus optional description, default marker and
  *  free-form metadata. Shared by CatalogFeature's select options and a
- *  model's thinkingOptions (§9 corrected finding: the host's
+ *  model's thinkingOptions (the host's
  *  AgentModelDefinition exposes them; the plugin interface had
  *  over-narrowed the listing). */
 export const CatalogSelectOption = z.object({
@@ -596,7 +594,7 @@ export const setJevKey = defineRpc({ name: "set-jev-key", input: SetJevKeyInput,
 export const testJev = defineRpc({ name: "test-jev", input: TestJevInput, output: TestJevOutput });
 
 // ---------------------------------------------------------------------------
-// §7 receipt / operation-intent journal schemas (server-internal; the client
+// Receipt / operation-intent journal schemas (server-internal; the client
 // bundle never imports them at runtime beyond shared-module presence).
 // ---------------------------------------------------------------------------
 
@@ -688,7 +686,7 @@ export const Binding = z.object({
   runtimePath: AbsolutePath,
   launchSetSha256: Sha,
   launchManifestSha256: Sha,
-  // Legacy bindings record all twelve shim launchers; Phase 2 bindings
+  // Legacy bindings record all twelve shim launchers; hook-era bindings
   // current bindings record fifteen — twelve gates plus the three
   // devin shim launchers (the transitional devin-only layout also
   // validates). The launch manifest's launcherFamilies/gateFamilies fields
@@ -851,11 +849,11 @@ export type BinaryValue = z.infer<typeof Binary>;
 export type LauncherFileValue = z.infer<typeof LauncherFile>;
 
 // ---------------------------------------------------------------------------
-// §12 frozen module seams (server-internal; type-only below this point).
+// Module seams (server-internal; type-only below this point).
 // Lanes implement against these signatures; Lead owns this file.
 // ---------------------------------------------------------------------------
 
-/** §3 wire bounds applied at construction: a conflict field that exceeds the
+/** Wire bounds applied at construction: a conflict field that exceeds the
  * schema would fail Receipt/RPC validation downstream, so normalize before the
  * value can be persisted or returned. */
 const CONFLICT_MESSAGE_MAX = 2048;
@@ -879,7 +877,7 @@ export function normalizeConflict(conflict: ConflictValue): ConflictValue {
 }
 
 /** Typed conflict vocabulary shared by every lane. Throw this for any failure
- * that maps to a declared §3 conflict code; the manager converts it. */
+ * that maps to a declared conflict code; the manager converts it. */
 export class OperationConflict extends Error {
   readonly code: ConflictCode;
   readonly path: string | null;
@@ -917,7 +915,7 @@ export interface EmbeddedPayload {
   files: { path: string; sha256: string; mode: number; base64: string }[];
 }
 
-/** server/materializer.ts — immutable candidate install-unit publication (§5). */
+/** server/materializer.ts — immutable candidate install-unit publication. */
 export interface MaterializeResult {
   candidateSha256: Sha256;
   payloadSha256: Sha256;
@@ -945,7 +943,7 @@ export interface Materializer {
 }
 export type MaterializerFactory = (payload: EmbeddedPayload) => Materializer;
 
-/** server/executables.ts — Node + family binary resolution and probes (§6). */
+/** server/executables.ts — Node + family binary resolution and probes. */
 export type BinaryResolution = BinaryValue;
 export interface ResolvedNode {
   /** Verified absolute ordinary-Node path; never Electron/plugin/shim paths. */
@@ -981,7 +979,7 @@ export interface ExecutableResolver {
 }
 export type ExecutableResolverFactory = () => ExecutableResolver;
 
-/** server/launchers.ts — immutable launch-set generation/publication (§6). */
+/** server/launchers.ts — immutable launch-set generation/publication. */
 export interface LaunchSetRequest {
   daemonHome: string;
   stableRoot: string;
@@ -996,8 +994,7 @@ export interface LaunchSet {
   launchManifestSha256: Sha256;
   /** <stableRoot>/launchers/<launchSetSha256> */
   directory: string;
-  /** The generated launcher files (Phase 2: the three devin wrapper
-   *  launchers), with recorded sha256/mode. */
+  /** All generated gate and ACP shim files, with recorded sha256/mode. */
   files: LauncherFileValue[];
   /** P2-d — the manifest's desk-bridge pin, when the published manifest
    *  carries it. Absent on pre-P2-d launch sets; the bridge treats absence
@@ -1015,7 +1012,7 @@ export interface LauncherBuilder {
 }
 export type LauncherBuilderFactory = () => LauncherBuilder;
 
-/** Narrowed connected-API surface the manager may use (§2): config get/patch
+/** Narrowed connected-API surface the manager may use: config get/patch
  * only. The SDK PaseoApi is structurally assignable to this. */
 export interface DaemonConfigConnection {
   get(requestId?: string): Promise<{ requestId: string; config: Record<string, unknown> }>;
@@ -1026,7 +1023,7 @@ export interface ConnectedDaemon {
 }
 
 /** server/manager.ts — sole owner of the mutation mutex, state transitions and
- * connected SDK calls (§3, §8–9). index.server.ts wires the real deps; tests
+ * connected SDK calls. index.server.ts wires the real deps; tests
  * may inject honest doubles. */
 export interface ManagerDeps {
   payload: EmbeddedPayload;

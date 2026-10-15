@@ -1,5 +1,5 @@
 // tests/plugin-routing.test.mjs — Phase 1 settings-driven provider
-// generation (docs/spec/settings-driven-providers.md §5): the plugin-owned
+// generation (docs/spec/settings-driven-providers.md): the plugin-owned
 // role-routing file at slp-runtime/state/role-routing.json, the
 // get/set-role-routing RPCs, routing-driven provider/profile generation,
 // rebind removal of non-chosen combos, the dependent-reference guard, and

@@ -1,5 +1,5 @@
 // plugin/server/role-injection.ts — the agent.create / agent.session_open
-// before-hooks (settings-driven-providers.md §6 Phase 2).
+// before-hooks (settings-driven-providers.md).
 //
 // Hook families (codex/pi/claude) reach a managed seat through a sentinel-
 // gated thin alias: the provider entry keeps its slp-* identity and native
