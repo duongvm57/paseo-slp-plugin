@@ -13,6 +13,7 @@ docs/media/paseo-slp-overview/*.wav
 !.agents/skills/
 .agents/skills/*
 !.agents/skills/paseo-slp-upstream-sync/
+!.agents/skills/docs-cleanup/
 .pi/
 skills-lock.json
 

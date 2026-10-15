@@ -140,6 +140,8 @@ export type TrustedLaunchContext = { routingRepository: string; protocolReposito
 
 export interface Handoff extends Record<string, unknown> {
   previousAgentId: string;
+  /** Existing predecessor context; offline preparation makes no host calls. */
+  episode?: { episodeId: string; rootAgentId: string };
   reason: string;
   authority: string;
   state: string;

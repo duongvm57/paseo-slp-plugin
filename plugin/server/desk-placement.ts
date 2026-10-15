@@ -93,6 +93,7 @@ export function createFormationPlacement(deps: {
   const budgets = deps.budgets ?? { readMs: 8000, effectMs: 20000 };
   if (!Object.values(budgets).every(n => Number.isSafeInteger(n) && n > 0)) throw new Error("invalid formation wait budget");
   let handle: FormationWorkspaceHandle | undefined;
+  let observedProtocolRepository: string | undefined;
   const wait = async <T>(effect: boolean, operation: string, fn: () => Promise<T>): Promise<T> => {
     let timer: ReturnType<typeof setTimeout> | undefined;
     try { return await Promise.race([Promise.resolve().then(fn), new Promise<never>((_, reject) => {
@@ -224,8 +225,10 @@ export function createFormationPlacement(deps: {
   };
   return {
     source,
+    get protocolRepository() { return observedProtocolRepository; },
     async inheritedSource(row: MembershipValue): Promise<FormationSourcePin | undefined> {
       const located = await locateSource(row.createCwd);
+      observedProtocolRepository = located.repository;
       return located.inherited ? { repository: located.repository, gitCommonDir: deps.repo.gitCommonDir,
         head: await head(located.repository), configuration: located.configuration } : undefined;
     },

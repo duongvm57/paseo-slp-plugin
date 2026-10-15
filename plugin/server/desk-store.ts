@@ -1331,6 +1331,11 @@ export type DecideOutcome =
     } & Partial<LedgerTables>)
   | DeskRejectionValue;
 export type DecideFunction = (ledger: Readonly<LedgerValue>, command: Record<string, unknown>) => DecideOutcome;
+// Reuse the chain already verified by read, without another ledger/event read
+// or changing the persisted/read-envelope schema. No clone acquires history
+// implicitly; transact explicitly associates its own immutable decide snapshot.
+const verifiedHistory = new WeakMap<Readonly<LedgerValue>, readonly EventValue[]>();
+export const verifiedDeskEvents = (ledger: Readonly<LedgerValue>): readonly EventValue[] | null => verifiedHistory.get(ledger) ?? null;
 
 /** Internal test seam — production never passes `faults`. Each hook runs
  *  synchronously at its commit-protocol point; a hook may throw (maps to
@@ -3367,6 +3372,7 @@ export function createDeskStore(deps: DeskStoreDeps): DeskStore {
       }
       const refinement = checkRefinements(ledger, repoKey, eventHistory);
       if (refinement !== null) return refinement;
+      verifiedHistory.set(ledger, eventHistory);
       return { state: "ok", ledger, persistedSchemaVersion };
     } catch (error) {
       if (error instanceof OperationConflict) throw error;
@@ -3629,7 +3635,9 @@ export function createDeskStore(deps: DeskStoreDeps): DeskStore {
       // error, recorded nowhere.
       let outcome: unknown;
       try {
-        outcome = decide(deepFreeze(structuredClone(ledger)), envelope.command);
+        const snapshot = deepFreeze(structuredClone(ledger));
+        verifiedHistory.set(snapshot, priorEventHistory);
+        outcome = decide(snapshot, envelope.command);
       } catch (error) {
         return invalidRecord(`decide threw: ${summarize(error)}`, "fix the decide function and resubmit");
       }

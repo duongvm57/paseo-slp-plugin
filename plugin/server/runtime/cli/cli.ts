@@ -287,7 +287,8 @@ try {
       // argument record verbatim (initialPrompt, title, settings, workspaceId
       // untrimmed), and modeId/modeIdSource record the resolved mode plus its
       // provenance so a saved emit file is self-describing for audit.
-      result = options['--emit'] ? { modeId: planned.modeId, modeIdSource: planned.modeIdSource, create: planned.create } : planned;
+      result = options['--emit'] ? { modeId: planned.modeId, modeIdSource: planned.modeIdSource,
+        ...(planned.warnings ? { warnings: planned.warnings } : {}), create: planned.create } : planned;
     }
   }
   else if (command === 'route-decide') {

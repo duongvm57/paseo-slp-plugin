@@ -30,6 +30,7 @@ import { spawnKit } from './spawn-kit.ts';
 import { assignmentFileSelection, assignmentCarrier } from './assignment-file.ts';
 import { SLP_ROLE_PREFIX, LAUNCH_BINDING_PREFIX, ASSIGNMENT_HEADER, PLAN_LOCATOR_CAPTION } from '../../../shared/runtime/session-delivery.ts';
 import { buildHandoffRecap } from '../handoff-recap.ts';
+import { episodeLabels, readEpisode, seatMetadata } from '../episode.ts';
 export { preflightPeerChoice, selectPeerSeat, revalidatePeerSelection, peerSelectionNeedsCapabilities } from './seat-selection.ts';
 export const verifyFormationCandidate = (root: string) => verifyInstall(root);
 
@@ -270,7 +271,7 @@ function prepareInputs(request: LaunchRequest, inspect?: (name: string, fn: () =
 // The single owner of the create_agent argument record. Nothing edits it afterwards.
 function plan(root: string, request: LaunchRequest, packet: HandoffPacket | null,
   context?: import('./types.ts').TrustedLaunchContext) {
-  verifyInstall(root);
+  const installed = verifyInstall(root);
   const prepared = prepareInputs(request, undefined, context) as ReturnType<typeof prepareInputs> & ResolvedBinding;
   const { role, disposition, assignmentSelection, binding, routing, bindingSource } = prepared;
   request = prepared.request;
@@ -283,7 +284,11 @@ function plan(root: string, request: LaunchRequest, packet: HandoffPacket | null
   // unresolved mode would silently fall back to the caller's default at
   // create_agent time — and cross-family inheritance fails at the host.
   const { modeId, modeIdSource, warnings: modeWarnings } = resolveMode(binding, bindingSource, context?.protocolRepository ?? request.repository);
-  const warnings = [...(prepared.warnings ?? []), ...modeWarnings];
+  const metadata = seatMetadata({ role, disposition, runtimeSha: installed.candidate.sha256,
+    repository: context?.protocolRepository ?? request.repository });
+  const successorEpisode = packet ? readEpisode(packet.episode) : null;
+  const warnings = [...(prepared.warnings ?? []), ...modeWarnings, ...metadata.warnings,
+    ...(packet && !successorEpisode ? ['episode-context-missing'] : [])];
   const kit = spawnKit(role);
   const manifest = orientation(root, role, routing);
   return {
@@ -295,6 +300,8 @@ function plan(root: string, request: LaunchRequest, packet: HandoffPacket | null
     ...(routing ? { routing } : {}),
     ...(binding?.profileId ? { profileId: binding.profileId } : {}),
     create: {
+      labels: { ...metadata.labels, ...episodeLabels(successorEpisode),
+        ...(packet ? { 'slp.handoff-from': packet.previousAgentId } : {}) },
       title: agentTitle(role, disposition, request, packet),
       notifyOnFinish: true,
       provider: `${binding.provider}/${binding.model}`,
@@ -385,8 +392,12 @@ export function launchCheck(root: string, request: LaunchRequest, { handoff = fa
   const warnings = [...(bindingWarnings ?? []),
     ...(binding != null ? resolveMode(binding, bindingSource, merged.repository).warnings : [])];
   if (handoff) step('handoff', () => { handoffPacket(request); });
-  step('plan', () => { (handoff ? handoffPlan : launchPlan)(root, request); });
-  return { ok: checks.every(check => check.ok), checks, ...(warnings.length ? { warnings } : {}) };
+  step('plan', () => {
+    const planned = (handoff ? handoffPlan : launchPlan)(root, request);
+    warnings.push(...(planned.warnings ?? []));
+  });
+  const uniqueWarnings = [...new Set(warnings)];
+  return { ok: checks.every(check => check.ok), checks, ...(uniqueWarnings.length ? { warnings: uniqueWarnings } : {}) };
 }
 
 // prepare --schema: the request contract plan() consumes, emitted so Humans
@@ -431,7 +442,7 @@ export function requestSchema(handoff = false) {
       'The planner emits a plan only — it never creates agents or mutates host state.',
       'Provider objects must be verbatim entries from live list_providers (request.providers) — no added, removed or edited fields; a mismatched extends or a configured/static inventory is refused, not adapted.',
       'The plan emits the resolved modeId plus modeIdSource (binding | bundle | agent_mode | none) — a catalog option or saved profile pin reports bundle, an explicit binding reports binding, the .paseo-slp/workspace-protocol.md agent_mode frontmatter is the declared fallback, and none means pin the mode in the Human-owned option/profile or ask the Human (cross-family inheritance fails at the host; a permission mode never expands task authority).',
-      'prepare --check <request.json> reports each stage failure; prepare <request.json> --emit create prints the audit artifact { modeId, modeIdSource, create } — create is the verbatim create_agent argument record.',
+      'prepare --check <request.json> reports each stage failure and advisory warnings; prepare <request.json> --emit create prints the audit artifact { modeId, modeIdSource, warnings?, create } — create is the verbatim create_agent argument record and warnings are retained when present.',
       'Peer launches only through the project pool option: an explicit binding is refused, and profiles may accompany the request for discovery but never select the runtime.',
       'Jev routing mode is per-daemon and evaluated at plan time for both prepare and prepare-handoff (they share the plan builder): a route.decision receipt is always verified, is required whenever jev.capabilities.routing is armed, and only then binds route.optionId to the receipt choice — an enabled-but-unarmed daemon verifies and records both picks (shadow evaluation). prepare never calls the network — receipts are produced only by the explicit route-decide helper command.',
     ],
@@ -472,6 +483,7 @@ export function requestSchema(handoff = false) {
     description: 'Request contract for slp.mjs prepare-handoff — the prepare base fields plus old-owner settlement evidence',
     handoff: {
       previousAgentId: 'required — the agent being replaced',
+      episode: 'optional — existing predecessor {episodeId, rootAgentId}; omitted or invalid context emits a warning, never a guessed episode',
       reason: 'required — why the seat changes hands',
       authority: 'required — who authorized the replacement',
       state: 'required — the old seat’s settlement state',

@@ -530,8 +530,8 @@ test('standalone bundles deliver semantic obligations and conditional operation 
   const direct = body('src/references/delegation-execution.md').replace(/\s+/gu, ' ');
   assert.match(direct, /agent-scoped Paseo create_agent/);
   assert.match(direct, /actual host parent\/workspace\/cwd and bundle/);
-  assert.match(direct, /Default placement is the parent workspace, including read-only review/);
-  assert.match(direct, /Record parent, seat, workspace\/cwd, isolation reason and baseline resources there/);
+  assert.match(direct, /Default placement: parent workspace, including read-only review/);
+  assert.match(direct, /Record parent, seat, workspace\/cwd, isolation reason and baseline resources/);
   assert.match(direct, /preserve taskLabel\/disposition and the actual parent/);
   assert.match(direct, /Empty inventory alone proves no absence/);
   const monitoring = body('src/references/monitoring.md').replace(/\s+/gu, ' ');

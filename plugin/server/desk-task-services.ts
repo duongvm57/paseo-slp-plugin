@@ -15,7 +15,7 @@ export async function createTaskServices(input: {
   ctx: RunnerCtx;
   ledger: Readonly<LedgerValue>;
   store: DeskStore;
-  binding: { runtimePath: string; nodePath: string };
+  binding: { runtimePath: string; nodePath: string; candidateSha256?: string };
   stableRoot: string;
   daemonHome: string;
   host: () => (TaskHostApi & TaskRuntimeApi) | null;
@@ -50,6 +50,7 @@ export async function createTaskServices(input: {
     fs: access.fs,
     git: access.git,
     scratch: { stableRoot: input.stableRoot },
+    runtimeSha: input.binding.candidateSha256,
     resolveSeat: createTaskRuntimeResolver({
       runtimePath: input.binding.runtimePath,
       daemonHome: input.daemonHome,
