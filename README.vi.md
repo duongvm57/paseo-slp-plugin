@@ -130,9 +130,19 @@ Bạn cần:
 
 Bật provider family đã cài mà bạn muốn dùng trong phần cấu hình agent của Paseo trước lần kích hoạt đầu.
 
+### Thư viện plugin chính thức của Paseo
+
+[Paseo SLP trong thư viện plugin](https://paseo.sh/plugins/duongvm57/slp)
+
 ```bash
-paseo plugin install duongvm57/paseo-slp-plugin:plugin                # theo nhánh mặc định
-paseo plugin install duongvm57/paseo-slp-plugin:plugin --ref <tag>    # hoặc ghim một release
+paseo plugin install duongvm57/slp
+```
+
+### Cài trực tiếp từ Git
+
+```bash
+paseo plugin install git:duongvm57/paseo-slp-plugin:plugin              # theo nhánh mặc định
+paseo plugin install git:duongvm57/paseo-slp-plugin:plugin --ref <tag>  # hoặc ghim một release
 ```
 
 Danh sách tag xem ở [Releases](https://github.com/duongvm57/paseo-slp-plugin/releases). Kiểm tra bằng
