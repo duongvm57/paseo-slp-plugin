@@ -77,8 +77,9 @@ jq '{modelConstraint, error, models: [.models[] | {id, label, thinkingOptions, d
 ```
 
 This is response-file processing, not a new CLI flag. The
-[catalog contract](contract.md#provider-catalog-discovery) defines the wire
-behavior for both snapshot and legacy hosts.
+[provider spec](spec/settings-driven-providers.md#catalog-and-profile-editor)
+owns snapshot/legacy resolution. Plugin envelopes remain strict while known
+host descriptor fields are checked and future additions are stripped.
 
 ## `prepare` / `prepare-handoff`
 

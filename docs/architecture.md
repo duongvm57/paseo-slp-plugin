@@ -9,8 +9,8 @@ separately from each task prompt and a
 durable repository desk for work, evidence and supervised execution.
 
 This document draws that architecture. For requirements and file-level
-contracts see [contract.md](contract.md); for the implementation spec see
-[spec/paseo-plugin-implementation.md](spec/paseo-plugin-implementation.md).
+contracts see [contract.md](contract.md); for transport and provider contracts see
+[settings-driven providers](spec/settings-driven-providers.md).
 
 ## Why this shape
 
@@ -284,7 +284,7 @@ Everything above is the **control plane**: it runs when a human clicks,
 and it only ever touches `config.json` + `slp-runtime/`.
 
 The **runtime plane** is what those config entries do afterwards, every
-time an agent is created. Since Phase 2 there are two transports — both
+time an agent is created. There are two transports — both
 render the same `roleBundle()` bytes from the same candidate:
 
 ```
@@ -337,8 +337,7 @@ provider receives SLP instructions before the user content on each prompt
 ```
 
 Devin and OpenCode use the wrapper transport because generic ACP drops
-`systemPrompt` outright — the hook path cannot reach it (Phase 0 probe,
-2026-09-19). For hook families the plugin is in the loop at session entry
+`systemPrompt` — policy must be carried in ACP prompt text. For hook families the plugin is in the loop at session entry
 via the two before-hooks, but never afterwards — no proxy, no monitoring
 daemon, no session interception. The gate is what makes a hook gap (plugin
 disabled or reloading) fail visibly instead of spawning an unroled seat.

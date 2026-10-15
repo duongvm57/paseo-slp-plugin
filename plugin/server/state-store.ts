@@ -64,7 +64,7 @@ export function readLanguage(stableRoot: string): string | null {
 // <stableRoot>/state/role-routing.json picks the supervisor/lead provider
 // families (+ optional model/mode/thinking/feature fields) that
 // desiredProviderEntries/desiredProfiles generate from. Backward
-// compatibility decision (settings-driven-providers.md §5 Phase 1): an
+// compatibility decision (settings-driven-providers.md): an
 // absent file, unparseable bytes, or a schema/legacy-version mismatch all
 // mean "no routing" — activation then keeps the v1 all-family provider
 // generation exactly as before. The file is plugin-owned and rewritten

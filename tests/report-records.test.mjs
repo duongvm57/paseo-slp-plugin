@@ -38,7 +38,7 @@ function executionReport(changes = {}) {
     },
     assumptions: [],
     unknowns: [],
-    selfReport: { read: ['docs/spec/work-coordination.md'], ran: ['node --test tests/report-records.test.mjs'] },
+    selfReport: { read: ['docs/work-coordination.md'], ran: ['node --test tests/report-records.test.mjs'] },
     execution: { result: 'Implemented report semantics.', completed: ['report validator'], unfinished: [] },
     review: null,
     adjudication: null,

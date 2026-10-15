@@ -449,7 +449,7 @@ export function assertPersistedCompatible(rawJson: unknown): void {
 // label/profile conventions, duplicated per the no-cross-boundary rule)
 // ---------------------------------------------------------------------------
 
-/** Hook-injected families (settings-driven-providers.md §6 Phase 2): their
+/** Hook-injected families (settings-driven-providers.md): their
  *  provider entries are sentinel-gated thin aliases — `slp-*` identity +
  *  native `extends`, no shim, no wrapper. The alias keeps agent.provider as
  *  `slp-codex-lead` (managed-seat visibility) and its argv[0] is the launch
@@ -492,7 +492,7 @@ function launcherPathFor(launchSet: LaunchSet, providerId: string): string {
 
 /** The generated provider entries for a launch set + resolution.
  *
- *  Settings-driven generation (settings-driven-providers.md §5 Phase 1):
+ *  Settings-driven generation (settings-driven-providers.md):
  *  when `routing` is set, only the chosen supervisor combo, the chosen lead
  *  combo and all four `slp-<family>-peer` entries are emitted — peers stay
  *  pool-driven per Lead delegation, so they are always generated. Ids absent

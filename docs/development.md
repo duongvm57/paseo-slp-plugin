@@ -12,13 +12,14 @@ npm run check
 npm run check:plugin-payload
 ```
 
-This is the order in `.github/workflows/ci.yml`. `npm test` runs
+CI runs test shards and aggregates their receipts before the remaining checks
+in `.github/workflows/ci.yml`. `npm test` runs
 `scripts/test-isolated.mjs`: it creates a temporary `PASEO_HOME`, runs
-`node --test` with a clean environment (only `HOME`, `PATH` and that
-`PASEO_HOME`), forwards the exit code and removes the directory. An inherited
+`node --test` with a clean environment (`HOME`, `PATH`, the temporary
+`PASEO_HOME`, and an explicitly supplied `PASEO_CLI_MODULES` for host parity), forwards the exit code and removes the directory. An inherited
 live `PASEO_HOME`, managed runtime or enabled service therefore cannot reach
-test fixtures, so no manual `env -i`/`mktemp` wrapper is needed. CI still sets
-its own temporary home around `npm test`; that is redundant but harmless. The
+test fixtures, so no manual `env -i`/`mktemp` wrapper is needed. CI also supplies an outer temporary home around its direct wrapper invocation;
+the wrapper still isolates the test child. The
 canonical-fixture check currently requires `tmpdir()` to resolve to `/tmp`;
 local runs here use that default.
 
@@ -130,7 +131,11 @@ the host shell timeout and stops when `receipt.json` exists or the wrapper has
 died:
 
 ```bash
-while pgrep -f -- "--slp-record=$DIR" >/dev/null && [ ! -f "$DIR/receipt.json" ]; do sleep 5; done
+# DIR and TEST_WRAPPER_PID identify the already-owned recorded run.
+wait_until=$((SECONDS + 45))
+while kill -0 "$TEST_WRAPPER_PID" 2>/dev/null && [ ! -f "$DIR/receipt.json" ] && [ "$SECONDS" -lt "$wait_until" ]; do
+  sleep 5
+done
 ```
 
 Which test covers which area, from what each file imports:
@@ -171,21 +176,49 @@ SDK effects remain fixtures; these checks do not prove live delivery, process
 quiescence or role compliance. See [task execution](task-execution.md) for the
 operational limits.
 
-Native task adapters are checked against the published SDK 0.10 contracts;
+Native task adapters compile against the pinned SDK 0.11.2 declarations;
 installation compatibility with an older daemon does not establish its execution
 capabilities. Installed dependency checks and extracted-target typechecks are
 reported separately.
 
-An earlier candidate was additionally verified live on a real Paseo 0.8.0 daemon:
-Git-source install, management surface, activate/deactivate/reconcile RPCs,
-provider/profile patching, collision and drift refusals, and recovery
-classification — see `.local-checks/` for the evidence ledger. Roles are
-behavioral instructions, not a filesystem/MCP sandbox. The transport supports
-Codex, Pi, Devin, Claude and OpenCode; routing, adapter and handoff have local checks.
-Live provider switching, heartbeat, council and the full E2E manifest are
-not yet E2E-accepted. The [candidate contract](contract.md) records capability
-and policy-load ownership; the [E2E review checklist](review-checklist.md)
-defines the evidence required for a live workflow claim.
+Roles are behavioral instructions, not a filesystem/MCP sandbox. Local
+transport checks cover Codex, Pi, Devin, Claude and OpenCode; fixture success
+does not establish live provider switching, heartbeat, council, compaction or
+full-manifest acceptance. Historical smoke evidence remains specific to its
+candidate and host; local `.local-checks/` artifacts are not distributed
+acceptance evidence.
+
+Current live qualification must separately observe:
+
+| Claim | Required observation |
+|---|---|
+| Install and UI compatibility | Real load on the selected daemon/app, served-home identity, native surface and helper accessibility. |
+| Activate/update/deactivate/recovery | Persisted and live config preservation, collision/drift refusals, interrupted operations, old/new session behavior through cutover and retained-runtime access. |
+| Role delivery | Actual installed commands and instruction bytes on each claimed family's start/resume path, including reload/disable gaps. |
+| Workflow acceptance | Frozen host evidence and independent U1–U7 review for the requested [E2E manifest](../e2e/scenarios.mjs), with blocked/unrun branches visible. |
+
+The [candidate contract](contract.md) maps capability and policy-load ownership;
+the [review checklist](review-checklist.md) defines live workflow proof.
+For local synchronization, an aborted create or empty inventory never proves
+absence of a child; cancellation/delayed-publication and unassisted-progress
+claims need a deliberately exercised fault boundary and native timeline.
+
+### Container install/load checks
+
+`./tests/container/run` builds a disposable image pinned to Paseo 0.11.2 and
+exercises installation, retained runtime loading and contributor registration.
+It needs Docker and outbound network. [Container instructions](../tests/container/README.vi.md)
+separate fake-home install/load checks from a real disposable daemon serve.
+The stubbed contribution check is a local adapter check; it cannot prove real
+host loading, UI behavior or agent compliance. The container route supplements
+`npm test` under the [install acceptance decision](decisions/2026-10-01-container-install-acceptance.md).
+
+### README diagrams
+
+Edit `scripts/generate-readme-diagrams.mjs`, run it to regenerate the shared
+`docs/images/slp-overview.svg`, and run it with `--check` for parity. Both
+READMEs use this one asset. The visual explainer is a reading aid linked from
+the README; contracts remain with the owner documents listed there.
 
 ### Independent review probes
 

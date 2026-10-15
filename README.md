@@ -268,7 +268,7 @@ Check these only if they apply to your installation:
 - **Custom scripts:** imports from removed `src/*.mjs` modules need to use the
   [documented CLI](docs/cli.md). For standalone installs, `npm run install:slp` now
   previews; `npm run install:slp:apply` applies.
-- **Standalone → plugin:** follow [the migration guide](docs/reports/legacy-install.md#migrating-to-the-plugin)
+- **Standalone → plugin:** follow [the migration guide](docs/operations.md#standalone-compatibility-and-migration)
   to remove the old standalone binding before activation; both paths own the same IDs.
 
 If Inspect reports a configuration conflict or `RECOVERY_REQUIRED`, use
@@ -299,6 +299,7 @@ After editing it, run `node scripts/generate-readme-diagrams.mjs`; use `--check`
 
 | Read                                             | When you want                                                                   |
 | ------------------------------------------------ | ------------------------------------------------------------------------------- |
+| [Visual explainer](docs/plugin-explained.html) | Bilingual diagrams of plugin lifecycles, work and evidence |
 | [docs/architecture.md](docs/architecture.md)     | The role model, what the plugin adds to Paseo, role delivery and delegation   |
 | [docs/operations.md](docs/operations.md)         | Activation, upgrades, profiles, repository setup, the Peer pool, optional capabilities |
 | [docs/cli.md](docs/cli.md)                       | The offline `slp.mjs` commands: `prepare`, `routes`, `route-decide`, `monitor` and the rest |

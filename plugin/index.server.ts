@@ -108,7 +108,7 @@ export default function contribute(server: Parameters<PluginServerContribution>[
   server.handle(setSupervision, (input, { paseo }) => supervision.setSupervision(input, paseo));
   server.handle(getSupervisionStatus, input => supervision.getStatus(input));
   server.handle(disableSupervisionNotifications, (input, { paseo }) => supervision.disableNotifications(input, paseo));
-  // Phase 2 (settings-driven-providers.md §6): the hook-family thin aliases
+  // Phase 2 (settings-driven-providers.md): the hook-family thin aliases
   // need the two halves the sentinel gate cannot supply — role-bundle
   // injection at agent.create and the session-open grant overlay. Both hooks
   // read the binding lazily per call, so a later activation or rebind is

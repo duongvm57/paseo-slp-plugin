@@ -19,5 +19,5 @@ export { RuntimePopover, SlpSidebarItem } from "../../plugin/client/sidebar.tsx"
 export { contributeSupervisionControls, notifySupervisionChanged } from "../../plugin/client/supervision-controls.ts";
 
 export { OwnerLink } from "../../plugin/client/owner-link.tsx";
-export { ChipSelect, styles as controlStyles } from "../../plugin/client/ui-kit.tsx";
+export { ChipSelect, OptionPicker, styles as controlStyles } from "../../plugin/client/ui-kit.tsx";
 export { PeerPoolCard } from "../../plugin/client/cards/peer-pool.tsx";

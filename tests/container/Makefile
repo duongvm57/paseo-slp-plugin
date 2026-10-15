@@ -1,7 +1,7 @@
 # Container harness for paseo-slp: install acceptance + disposable serve mode.
 # Everything runs inside Docker against a read-only mount of this checkout;
 # no host paseo home, credentials, or daemon state is touched.
-IMAGE := paseo-slp-container-harness:node24-paseo0.9.2
+IMAGE := paseo-slp-container-harness:node24-paseo0.11.2
 
 .PHONY: test-container serve serve-stop serve-logs image clean
 
