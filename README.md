@@ -130,9 +130,19 @@ You need:
 
 Enable the installed family you want to use in Paseo's agent settings before the first activation.
 
+### Official Paseo plugin registry
+
+[Paseo SLP in the plugin directory](https://paseo.sh/plugins/duongvm57/slp)
+
 ```bash
-paseo plugin install duongvm57/paseo-slp-plugin:plugin                # follow the default branch
-paseo plugin install duongvm57/paseo-slp-plugin:plugin --ref <tag>    # or pin a release
+paseo plugin install duongvm57/slp
+```
+
+### Direct Git installation
+
+```bash
+paseo plugin install git:duongvm57/paseo-slp-plugin:plugin              # follow the default branch
+paseo plugin install git:duongvm57/paseo-slp-plugin:plugin --ref <tag>  # or pin a release
 ```
 
 Tags are listed on [Releases](https://github.com/duongvm57/paseo-slp-plugin/releases). Check it with
