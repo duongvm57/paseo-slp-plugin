@@ -9,7 +9,7 @@ import { createDeskOperations, type OperationIdentity } from "./desk-operation.t
 import { verifySeat } from "./desk-seat-observation.ts";
 import { createTaskBoundedHost } from "./desk-task-host.ts";
 import type { TaskHostApi } from "./desk-task-execution-host.ts";
-import { observeTaskProviders, taskProviderInventory, type TaskRuntimeApi } from "./desk-task-runtime.ts";
+import { observeTaskProviders, taskProviderInventory, type ProviderWarmup, type TaskRuntimeApi } from "./desk-task-runtime.ts";
 import { WIRE_LIMITS, type DeskRejectionValue } from "../shared/enforcement.ts";
 import type { DeskSeatCreateInputValue } from "../shared/delegation.ts";
 import type { MembershipValue } from "./desk-store.ts";
@@ -111,6 +111,7 @@ function placementFailure(error: unknown, agentId?: string, target?: FormationTa
 export function createFormationPlanner(deps: {
   runtimePath: string; daemonHome: string; host: () => (TaskHostApi & TaskRuntimeApi) | null;
   importModule?: (specifier: string) => Promise<unknown>;
+  providerWarmup?: ProviderWarmup;
 }) {
   const loadLaunch = async (): Promise<FormationModule> => {
     const load = deps.importModule ?? (specifier => import(specifier));
@@ -126,7 +127,7 @@ export function createFormationPlanner(deps: {
     const host = deps.host();
     if (host === null) throw new FormationPlanningError("CAPABILITY_GAP", "connected host unavailable");
     try {
-      const observed = await observeTaskProviders(createTaskBoundedHost(host), context?.target?.cwd ?? row.createCwd);
+      const observed = await observeTaskProviders(createTaskBoundedHost(host), context?.target?.cwd ?? row.createCwd, deps.providerWarmup);
       if (observed.error) throw new Error("provider snapshot failed");
       return observed;
     } catch { throw new FormationPlanningError("CAPABILITY_GAP", "connected provider snapshot failed"); }

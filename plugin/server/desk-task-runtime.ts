@@ -41,11 +41,29 @@ export type TaskRuntimeApi = ReferenceHost & {
   config?: { get(requestId?: string): Promise<{ config: unknown }> };
 };
 
+export type ProviderWarmup = { budgetMs: number; pollMs: number };
+/** The daemon answers a cwd's first snapshot with enabled providers still
+ * "loading" (no models) and warms them in the background. */
+export const PROVIDER_WARMUP: ProviderWarmup = { budgetMs: 10_000, pollMs: 250 };
+
+/** Re-read while an enabled provider is still warming up, within the budget.
+ * The last read stands: a provider still loading stays unavailable. */
+async function warmedSnapshot(host: TaskRuntimeApi, cwd: string, warmup: ProviderWarmup) {
+  const deadline = Date.now() + warmup.budgetMs;
+  let observed = await host.providers.snapshot({ cwd });
+  while (!observed.error && observed.entries.some(entry => entry.enabled === true && entry.status === "loading")
+    && Date.now() + warmup.pollMs < deadline) {
+    await new Promise(resolve => setTimeout(resolve, warmup.pollMs));
+    observed = await host.providers.snapshot({ cwd });
+  }
+  return observed;
+}
+
 /** Preserve published transport facts. For current snapshots lacking OpenCode
  * transport, read the live daemon config around a fresh snapshot. Never infer
  * ACP from an alias or use config to invent ready/enabled provider evidence. */
-export async function observeTaskProviders(host: TaskRuntimeApi, cwd: string) {
-  let observed = await host.providers.snapshot({ cwd });
+export async function observeTaskProviders(host: TaskRuntimeApi, cwd: string, warmup: ProviderWarmup = PROVIDER_WARMUP) {
+  let observed = await warmedSnapshot(host, cwd, warmup);
   if (observed.error) return observed;
   const missing = new Set(observed.entries.filter(entry => /^slp-opencode-(supervisor|lead|peer)$/.test(entry.provider)
     && entry.enabled === true && entry.status === "ready" && !entry.error && entry.extends === undefined).map(entry => entry.provider));

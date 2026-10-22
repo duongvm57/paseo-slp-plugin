@@ -180,7 +180,7 @@ test('production planner uses fresh saved bundles, ready SDK providers and exact
   const save = value => writeFileSync(join(f.root, 'config.json'), JSON.stringify({ daemon: { agentProfiles: [value] } })); save(profile);
   const calls = [];
   f.host.providers.snapshot = async input => { calls.push(input); return { entries: [{ provider: 'slp-codex-lead', enabled: true, status: 'ready', modes: [{ id: 'full-access' }] }] }; };
-  const planner = createFormationPlanner({ runtimePath, daemonHome: f.root, host: () => f.host });
+  const planner = createFormationPlanner({ runtimePath, daemonHome: f.root, host: () => f.host, providerWarmup: { budgetMs: 30, pollMs: 5 } });
   const plan = await planner(f.row, f.input);
   assert.deepEqual(plan.create.settings, f.plan.create.settings); assert.equal(plan.create.provider, f.plan.create.provider);
   assert.equal(plan.create.workspaceId, 'workspace'); assert.match(plan.create.initialPrompt, /Handback route: the verified parent agent ID is parent\./);
@@ -263,7 +263,7 @@ import { selectionFixture } from './helpers/seat-selection-fixture.mjs';
 import { pathToFileURL } from 'node:url';
 import { routeDecide } from '../plugin/server/runtime/cli/jev-routing.ts';
 
-async function realPeerFixture(t, mode, count = 2, family = 'codex') {
+async function realPeerFixture(t, mode, count = 2, family = 'codex', providerWarmup) {
  const f=selectionFixture(t,{mode,count});
  if(family==='opencode'){
   for(const option of f.options)Object.assign(option,{provider:'opencode',model:'provider/nested/model',modeId:'build'});
@@ -287,7 +287,7 @@ async function realPeerFixture(t, mode, count = 2, family = 'codex') {
    refresh:async()=>({id,workspaceDirectory:f.repository,status:'done',archivingAt:null}),agents:{create}})}};
  if(family==='opencode')host.config={get:async()=>({config:{providers:{'slp-opencode-peer':{extends:'acp'}}}})};
  const loaded=[];
- const planner=createFormationPlanner({runtimePath:candidate,daemonHome:f.home,host:()=>host,
+ const planner=createFormationPlanner({runtimePath:candidate,daemonHome:f.home,host:()=>host,...(providerWarmup?{providerWarmup}:{}),
   importModule:async spec=>{
    loaded.push(spec);assert.equal(spec,pathToFileURL(join(candidate,'plugin/server/runtime/cli/launch.ts')).href);
    const launch=await import(spec);
@@ -722,4 +722,30 @@ test('effort diagnostic bounds and validates its public scalar surface',async t=
   assert.match(out.recovery,/Ask the Human to narrow/);assert.ok(out.recovery.length<=WIRE_LIMITS.rejectionRecovery);
   assert.doesNotMatch(JSON.stringify(out),/PRIVATE_SECRET|x{100}/);assert.deepEqual(f.effects,[]);
  }
+});
+
+for(const shape of ['none','selection'])test('v2 Peer formation waits for a provider snapshot still warming up in a new cwd ('+shape+')',async t=>{
+ // A daemon's first snapshot for a cwd holds enabled providers at "loading" without models while it
+ // warms them in the background; the warmed catalog arrives on a later read of the same cwd.
+ const f=await realPeerFixture(t,'off',1,'codex',{budgetMs:2000,pollMs:5});f.catalog.version=2;
+ for(const option of f.options){Object.assign(option,{displayName:'Fixture',description:'Bounded coding',effortPolicy:{kind:'fixed',thinkingOptionId:'high'},runtimeRule:'none'});delete option.thinkingOptionId;}
+ f.savePool();
+ const ready={provider:'slp-codex-peer',enabled:true,status:'ready',modes:[{id:'full-access'}],models:[{id:'model/variant',thinkingOptions:[{id:'low'},{id:'high'}]}]};
+ const reads=new Map();
+ f.host.providers.snapshot=async input=>{const n=(reads.get(input?.cwd)??0)+1;reads.set(input?.cwd,n);
+  return {entries:[n<3?{provider:'slp-codex-peer',enabled:true,status:'loading'}:ready]};};
+ const out=await f.run({...f.input,...(shape==='selection'?{selection:{optionId:'first',thinkingOptionId:'high'}}:{}),delivery:'server'});
+ assert.equal(out.result?.state,'host-accepted',JSON.stringify(out));
+ assert.deepEqual(f.effects.map(e=>e.kind),['create','send']);
+});
+
+test('v2 Peer formation still refuses a provider that stays loading past the warm-up budget',async t=>{
+ const f=await realPeerFixture(t,'off',1,'codex',{budgetMs:30,pollMs:5});f.catalog.version=2;
+ for(const option of f.options){Object.assign(option,{displayName:'Fixture',description:'Bounded coding',effortPolicy:{kind:'fixed',thinkingOptionId:'high'},runtimeRule:'none'});delete option.thinkingOptionId;}
+ f.savePool();let reads=0;
+ f.host.providers.snapshot=async()=>{reads++;return {entries:[{provider:'slp-codex-peer',enabled:true,status:'loading'}]};};
+ const out=await f.run({...f.input,selection:{optionId:'first',thinkingOptionId:'high'},delivery:'server'});
+ assert.equal(out.code,'INVALID_RECORD',JSON.stringify(out));
+ assert.equal(out.message,'No eligible preset + effort pair is available for the selected option or pool');
+ assert.ok(reads>1,'a loading snapshot is read again before refusing');assert.deepEqual(f.effects,[]);
 });
