@@ -47,14 +47,33 @@ export type ProviderWarmup = { budgetMs: number; pollMs: number };
 export const PROVIDER_WARMUP: ProviderWarmup = { budgetMs: 10_000, pollMs: 250 };
 
 /** Re-read while an enabled provider is still warming up, within the budget.
- * The last read stands: a provider still loading stays unavailable. */
+ * The budget bounds every read, the first included, so slow reads cannot
+ * stretch the wait past it. A read that misses the deadline is ignored and
+ * the last read stands: a provider still loading stays unavailable. Without
+ * any read in time there is no observation. */
 async function warmedSnapshot(host: TaskRuntimeApi, cwd: string, warmup: ProviderWarmup) {
   const deadline = Date.now() + warmup.budgetMs;
-  let observed = await host.providers.snapshot({ cwd });
+  const late = Symbol("late");
+  const read = async () => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([
+        host.providers.snapshot({ cwd }),
+        new Promise<typeof late>(resolve => { timer = setTimeout(resolve, Math.max(0, deadline - Date.now()), late); }),
+      ]);
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+  const first = await read();
+  if (first === late) throw new Error("provider snapshot missed the warm-up deadline");
+  let observed = first;
   while (!observed.error && observed.entries.some(entry => entry.enabled === true && entry.status === "loading")
     && Date.now() + warmup.pollMs < deadline) {
     await new Promise(resolve => setTimeout(resolve, warmup.pollMs));
-    observed = await host.providers.snapshot({ cwd });
+    const next = await read();
+    if (next === late) break;
+    observed = next;
   }
   return observed;
 }

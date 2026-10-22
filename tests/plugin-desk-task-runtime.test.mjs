@@ -4,7 +4,8 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync, symlinkSync } from 'node
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { createTaskRuntimeResolver } from '../plugin/server/desk-task-runtime.ts';
+import { createTaskRuntimeResolver, observeTaskProviders, PROVIDER_WARMUP } from '../plugin/server/desk-task-runtime.ts';
+import { createTaskBoundedHost } from '../plugin/server/desk-task-host.ts';
 import { resolveBinding } from '../plugin/server/runtime/cli/launch.ts';
 import { readCatalog } from '../plugin/server/runtime/cli/routing.ts';
 import { presetChoiceSet } from '../plugin/server/runtime/cli/preset-routing.ts';
@@ -188,4 +189,38 @@ test('missing, ambiguous and symlink candidate modules never select source fallb
   assert.equal(linked.ok, false);
   assert.match(linked.message, /regular file/);
   assert.deepEqual(f.imports, []);
+});
+
+// Each read stays under the host's 8 s read bound, yet two of them exceed the
+// 10 s warm-up budget. Mocked clocks run the default budget without waiting.
+async function observeOnMockedClock(t, host) {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  const start = Date.now();
+  let settled;
+  observeTaskProviders(host, '/repo').then(value => { settled = { value, at: Date.now() - start }; },
+    error => { settled = { error, at: Date.now() - start }; });
+  for (let step = 0; step < 1000 && !settled; step++) {
+    t.mock.timers.tick(50);
+    await new Promise(resolve => setImmediate(resolve));
+  }
+  assert.ok(settled, 'observation settles');
+  return settled;
+}
+
+const slowSnapshot = (ms, status) => new Promise(resolve => setTimeout(resolve, ms, { entries: [{ provider: 'slp-devin-peer', enabled: true, status }] }));
+
+test('provider warm-up keeps its budget when each snapshot read is slow', async t => {
+  let reads = 0;
+  const host = createTaskBoundedHost({ providers: { snapshot: () => slowSnapshot(6000, ++reads === 1 ? 'loading' : 'ready') } });
+  const settled = await observeOnMockedClock(t, host);
+  assert.ok(settled.at <= PROVIDER_WARMUP.budgetMs, `observation took ${settled.at} ms`);
+  assert.equal(reads, 2);
+  // The ready read arrived after the deadline, so the loading read stands.
+  assert.equal(settled.value.entries[0].status, 'loading');
+});
+
+test('provider warm-up refuses a first snapshot read that misses the budget', async t => {
+  const settled = await observeOnMockedClock(t, { providers: { snapshot: () => slowSnapshot(12_000, 'ready') } });
+  assert.ok(settled.at <= PROVIDER_WARMUP.budgetMs, `observation took ${settled.at} ms`);
+  assert.match(settled.error?.message ?? '', /missed the warm-up deadline/);
 });
