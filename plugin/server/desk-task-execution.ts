@@ -6,6 +6,7 @@
 // transition is committed by Core; every external effect is bounded and
 // observed.
 
+import { deliveryMessageIds, matchesDelivery, type DeliveryTimelineItem } from "./delivered-input.ts";
 import { randomBytes } from "node:crypto";
 import type {
   DeskRejectionValue, DeskTaskActionEntryValue,
@@ -875,7 +876,7 @@ async function dispatchSend(
   let accepted = false;
   let sendError: string | null = null;
   try {
-    await host.agents.ref(agentId).send(sentText, { messageId });
+    await host.agents.ref(agentId).send(sentText, { messageId, sourceAgentId: ctx.row.agentId });
     accepted = true;
   } catch (error) {
     sendError = String((error as Error).message ?? error).slice(0, 512);
@@ -2251,7 +2252,7 @@ export function createTaskObserver(ctx: RunnerCtx, deps: TaskExecutionDeps): Tas
         const page = await api.agents.ref(agentId).timeline.refetch({ limit: 50 });
         const items = page.entries ?? [];
         const found = messageId !== null && items.some(e =>
-          e.item?.type === "user_message" && (e.item.messageId === messageId || e.item.clientMessageId === messageId));
+          e.item !== undefined && matchesDelivery(e.item, messageId, action.callerAgentId));
         return { resolved: found, evidence: found ? { kind: "timeline-messageId", messageId } : { kind: "timeline-page", scanned: items.length } };
       }
       if (kind === "archive" && typeof agentId === "string") {
@@ -2272,7 +2273,7 @@ export function createTaskObserver(ctx: RunnerCtx, deps: TaskExecutionDeps): Tas
         }
         const page = typeof agentId === "string"
           ? { entries: [{ agent: (await api.agents.ref(agentId).refresh())?.agent ?? null }], pageInfo: { hasMore: false } }
-          : await api.agents.list({ filter: { labels: { "slp.attempt": request.attemptId } }, page: { limit: 50 } });
+          : await api.agents.list({ filter: { labels: { "slp.attempt": request.attemptId }, includeBackground: true }, page: { limit: 50 } });
         const entries = page.entries;
         const candidate = entries.length === 1 && page.pageInfo?.hasMore === false ? entries[0].agent : null;
         if (candidate === null) return { resolved: false, candidates: entries.length, reason: "create-candidates-incomplete-or-ambiguous" };
@@ -2348,7 +2349,7 @@ const joinAdapterFree = (root: string, rel: string) => `${root.replace(/\/+$/, "
 // ---------------------------------------------------------------------------
 // Host event observer — the bounded, fail-open lifecycle seam wired into
 // at index.server.ts. Positive messageId correlation only; a matching
-// user_message inside turn_ended.timeline binds the turn to the issued
+// delivered input inside turn_ended.timeline binds the turn to the issued
 // send action. Never upgrades on unrelated turn_started/refresh evidence.
 // ---------------------------------------------------------------------------
 
@@ -2356,7 +2357,7 @@ export type TaskTurnEndedEvent = {
   agentId: string;
   turnId?: string;
   outcome?: "completed" | "failed" | "canceled" | string;
-  timeline?: { type: string; messageId?: string; clientMessageId?: string }[];
+  timeline?: DeliveryTimelineItem[];
 };
 
 export function createTaskHostEventObserver(deps: TaskExecutionDeps): {
@@ -2369,14 +2370,15 @@ export function createTaskHostEventObserver(deps: TaskExecutionDeps): {
         if (isRejection(ledger)) return;
         const messageIds = new Set(
           (event.timeline ?? [])
-            .filter(i => i.type === "user_message")
-            .flatMap(i => [i.messageId, i.clientMessageId].filter((v): v is string => typeof v === "string")),
+            .flatMap(deliveryMessageIds),
         );
         if (messageIds.size === 0) return;
         const pending = actionRows(ledger).find(row => {
           const body = row.body;
+          const messageId = body?.messageId;
           const attempt = row.attemptId === null ? null : latestAttempt(ledger, row.attemptId);
-          return typeof body?.messageId === "string" && messageIds.has(body.messageId)
+          return typeof messageId === "string" && messageIds.has(messageId)
+            && event.timeline?.some(item => matchesDelivery(item, messageId, row.callerAgentId))
             && (row.state === "issued" || row.state === "uncertain")
             && row.actionKind === "send" && attempt?.host.agentId === event.agentId;
         });

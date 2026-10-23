@@ -41,6 +41,7 @@ import {
   type RoleRoutingValue,
 } from "../shared/contracts.ts";
 import {
+  familyUsesRegistration,
   FAMILY_BIN_ENV,
   FAMILY_LABEL,
   HOOK_FAMILY_IDS,
@@ -173,7 +174,9 @@ const FeatureVoiceModeSchema = z
       .object({
         provider: SpeechProviderIdSchema.optional(),
         model: z.string().min(1).optional(),
-        voice: z.enum(["alloy", "echo", "fable", "onyx", "nova", "shimmer"]).optional(),
+        // Host 0.12 accepts custom voices from OpenAI-compatible endpoints.
+        // Older hosts still validate their own config.patch before persisting.
+        voice: z.string().trim().min(1).optional(),
         speakerId: z.number().int().optional(),
         speed: z.number().optional(),
       })
@@ -494,7 +497,7 @@ function launcherPathFor(launchSet: LaunchSet, providerId: string): string {
  *
  *  Settings-driven generation (settings-driven-providers.md):
  *  when `routing` is set, only the chosen supervisor combo, the chosen lead
- *  combo and all four `slp-<family>-peer` entries are emitted — peers stay
+ *  combo and every `slp-<family>-peer` entry are emitted — peers stay
  *  pool-driven per Lead delegation, so they are always generated. Ids absent
  *  from the returned map record `present:false` in the plan endpoint, which
  *  the patch turns into a removal on rebind. A null routing keeps the v1
@@ -530,14 +533,14 @@ export function desiredProviderEntries(
       ? { disabledTools: [...PEER_PASEO_TOOLS_POLICY.disabledTools] }
       : undefined;
     if (HOOK_GATE_FAMILIES.has(family)) {
-      // Thin alias: slp-* identity + native extends, argv[0] is the launch
+      // Native role identity (registered or extends alias), argv[0] is the launch
       // set's gate launcher (frozen binary + gate exec, env-free-probe
       // safe). env carries the same managed backstop the wrapper path
       // freezes, plus the empty grant sentinel the session_open hook
       // overlays and SLP_FAMILY_BIN — the launcher's baked export is the
       // probe-time source, the env copy is the spawn-time source.
       entries[id] = {
-        extends: PROVIDER_EXTENDS[family],
+        ...(familyUsesRegistration(family) ? {} : { extends: PROVIDER_EXTENDS[family] }),
         // One label template for every transport (§9): `SLP <Family> <Role>`
         // with FAMILY_LABEL as the single display-name source — the hook
         // branch previously emitted '<family> — <Role> (SLP)' while the
@@ -608,6 +611,7 @@ export function desiredProfiles(
     // (Before this was asymmetric: fresh-path `null` was filtered out, so
     // the routing value silently won where rebind would have deleted.)
     const merged: Record<string, unknown> = { ...routingRest };
+    if (prefs?.[role]?.family === "antigravity" && prefs[role]?.thinkingOptionId === undefined) delete merged.thinkingOptionId;
     for (const [key, value] of Object.entries(prefRest)) {
       if (value === undefined) continue;
       if (value === null) delete merged[key];
@@ -647,6 +651,9 @@ export function applyProfilePrefs(
   const next: Record<string, unknown> = { ...live };
   if (prefs.family !== undefined) {
     next.provider = ownedProviderId(prefs.family, role);
+    // Antigravity encodes effort in its model ID. An omitted preference
+    // must not inherit a different provider's standalone thinking setting.
+    if (prefs.family === "antigravity" && prefs.thinkingOptionId === undefined) delete next.thinkingOptionId;
   }
   for (const key of ["model", "modeId", "thinkingOptionId", "featureValues"] as const) {
     const value = prefs[key];
@@ -668,6 +675,7 @@ function applyRoleRouting(
   role: "supervisor" | "lead",
 ): ProfileValue {
   const next: Record<string, unknown> = { ...live, provider: ownedProviderId(choice.family, role) };
+  if (choice.family === "antigravity" && choice.thinkingOptionId === undefined) delete next.thinkingOptionId;
   for (const key of ["model", "modeId", "thinkingOptionId", "featureValues"] as const) {
     if (choice[key] !== undefined) next[key] = choice[key];
   }

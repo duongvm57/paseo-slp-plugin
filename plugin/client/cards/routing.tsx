@@ -96,19 +96,17 @@ export function useRoutingCard({ target, targetKey, isCurrentKey, statusView, ca
     const prefill = (role: RoutingRole): RoutingRoleForm => {
       const stored = routing?.[role];
       const live = liveOf(role);
+      const family = stored?.family ?? (familyFromProviderId(live?.provider) as FamilyName | null) ?? "codex";
       const featureValues = stored?.featureValues ?? live?.featureValues;
       const feature: Record<string, string> = {};
       for (const [featureId, value] of Object.entries(featureValues ?? {})) {
         feature[featureId] = typeof value === "boolean" ? String(value) : String(value ?? "");
       }
       return {
-        family:
-          stored?.family ??
-          (familyFromProviderId(live?.provider) as FamilyName | null) ??
-          "codex",
+        family,
         model: stored?.model ?? live?.model ?? "",
         modeId: stored?.modeId ?? live?.modeId ?? "",
-        thinkingOptionId: stored?.thinkingOptionId ?? live?.thinkingOptionId ?? "",
+        thinkingOptionId: family === "antigravity" ? "" : stored?.thinkingOptionId ?? live?.thinkingOptionId ?? "",
         features: featureValues ? JSON.stringify(featureValues) : "",
         feature,
       };
@@ -515,7 +513,9 @@ export function RoutingCard({ colors, target, statusView, routing, catalogs, cat
                 ) : null}
               </>
             )}
-            {catalogPending ? <PendingProfileValue colors={colors} label={PROFILE_LOADING_LABELS.thinking} value={routing.ready && !routing.readError ? form.thinkingOptionId : undefined} /> : thinking === null ? (
+            {form.family === "antigravity" ? (
+              <Text style={[styles.legend, { color: colors.foregroundMuted }]}>Thinking effort is selected through the Antigravity model ID.</Text>
+            ) : catalogPending ? <PendingProfileValue colors={colors} label={PROFILE_LOADING_LABELS.thinking} value={routing.ready && !routing.readError ? form.thinkingOptionId : undefined} /> : thinking === null ? (
               // No catalog / no picked model / model not listed — the
               // established free-text degradation path.
               <Field

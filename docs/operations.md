@@ -12,8 +12,10 @@ The [README](../README.md) is the short tour; command details live in
 - A POSIX daemon host (Linux/macOS) with Node 22.x from 22.18, or Node 23.6+
   (the plugin resolves a stable ordinary Node —
   not the Electron binary — at activation).
-- The Codex/Pi/Devin/Claude CLIs matching the provider families you want to
+- The Codex/Pi/Devin/Claude/OpenCode/Antigravity CLIs matching the provider families you want to
   use, plus each family's credentials on the daemon host.
+- Antigravity requires agy 1.4.4 or newer and the manager plugin, uses full access,
+  and selects thinking effort through the model ID; see [Antigravity support](antigravity.md).
 - Pi needs repeatable `--append-system-prompt` support (the tested Pi build
   has it).
 - The daemon's effective `mcp.enabled` must be `true` for activation.
@@ -66,16 +68,16 @@ Activation:
 
 - Materializes the embedded payload to
   `<paseo-home>/slp-runtime/<candidate-sha256>/` — immutable per release.
-- Resolves stable Node plus the five provider-family executables (real
+- Resolves stable Node plus the six provider-family executables (real
   `--version` probes; unresolved families fail closed).
 - Writes launch shims under `slp-runtime/launchers/<launchset-sha256>/` —
   the stable paths the providers reference, so runtime swaps never break
   running sessions.
-- Patches `config.json` with up to fifteen providers
-  `slp-{codex,pi,devin,claude,opencode}-{supervisor,lead,peer}`, the two saved
+- Patches `config.json` with up to eighteen providers
+  `slp-{codex,pi,devin,claude,opencode,antigravity}-{supervisor,lead,peer}`, the two saved
   profiles **SLP Supervisor** and **SLP Lead**, and enables MCP injection.
   Saved role routing generates only the chosen Supervisor/Lead providers
-  and all five Peer providers; absent routing keeps all fifteen.
+  and all six Peer providers; absent routing keeps all eighteen.
 - Records a receipt in `slp-runtime/state/receipt.json` — the journal of
   every operation, used for drift detection and recovery.
 
@@ -252,7 +254,7 @@ stable across candidates. Rebinding is idempotent: a repeat activation is a
 executables (paths, versions and availability) are unchanged.
 
 Family binaries follow verified stable CLI aliases from the daemon's PATH.
-Codex, Pi, Devin, Claude and OpenCode updates behind those aliases reach future managed
+Codex, Pi, Devin, Claude, OpenCode and Antigravity updates behind those aliases reach future managed
 launches without changing SLP's provider entries. The model picker refreshes
 the host's provider catalog when it loads or opens. An older SLP binding that
 stored a versioned binary path needs one reactivation to move onto the alias;

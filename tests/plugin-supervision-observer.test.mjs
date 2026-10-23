@@ -978,6 +978,27 @@ test('observer: a steered finish notification qualifies sends on a pre-handback 
   assert.ok(!rows[0].visibility.includes('lead-start-unmatched'));
 });
 
+test('observer: 0.12 projected finish notification qualifies a steered delivery, excluding older sends', async t => {
+  const { observer, paseo, home } = await baseSetup(t);
+  observer.onStart(leadStart('turn-l1'));
+  observer.onCreated(peerHook(), paseo);
+  observer.onTurn(peerTurn(), paseo);
+  await observer.idle();
+  const text = finishEnvelope(PEER, HANDBACK).slice('<paseo-system>\n'.length, -'\n</paseo-system>'.length);
+  const notification = {
+    type: 'tool_call', name: 'agent_message', callId: 'paseo-agent-message:finish', status: 'completed', error: null,
+    agentMessage: { event: 'finished', sender: { id: PEER }, text },
+    detail: { type: 'plain_text', text },
+  };
+  observer.onTurn(leadEnd([userMsg('older input'), codexSend('before', PEER, 'before handback'),
+    notification, codexSend('after', PEER, 'acknowledged — continue')], { turnId: 'turn-l1' }), paseo);
+  await settle(observer);
+  const rows = ringRows(home);
+  assert.equal(rows[0].counts.roomMessages, 1);
+  assert.ok(rows[0].visibility.includes('lead-start-end-derived'));
+  assert.ok(!rows[0].visibility.includes('lead-start-unmatched'));
+});
+
 test('observer: a bare report-prompt user_message does not anchor — only the envelope proves delivery', async t => {
   const { observer, paseo, home, calls } = await baseSetup(t);
   observer.onCreated(peerHook(), paseo);
@@ -1936,7 +1957,7 @@ test('mixed: claude in both roles — all three axes, the accepted Lead send lin
   const rows = ringRows(home);
   assert.equal(rows[0].state, 'evaluated');
   assert.equal(rows[0].lastAssessment.links.dispositionMessage, 'c1');
-  assert.equal(rows[0].lastAssessment.captureVersion, 'slp-capture-7');
+  assert.equal(rows[0].lastAssessment.captureVersion, 'slp-capture-8');
 });
 
 test('mixed: a related rejected or canceled Lead send keeps handling unknown, offers no candidate and sends no body', async t => {

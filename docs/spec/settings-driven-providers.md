@@ -9,7 +9,8 @@ not current live acceptance; see [development](../development.md).
 ## Family registry
 
 `plugin/shared/runtime/families.ts` owns family IDs, labels, transport,
-`binEnv`, `extends`, optional `sessionGrant` and picker rank. It has no imports
+`binEnv`, executable name, `extends`, optional registration/session-grant flags
+and picker rank. It has no imports
 and ships in the CLI install unit and both host bundles. Derived lists,
 schemas and provider IDs use that registry. Declaration order and picker
 order are separate contracts.
@@ -21,6 +22,13 @@ order are separate contracts.
 | Claude Code | Create hook + sentinel gate | `claude` | Required |
 | Devin | Shim + ACP wrapper | `acp` | Wrapper verification |
 | OpenCode | Shim + ACP wrapper | `acp` | Required before ACP child start |
+| Antigravity | Create hook + sentinel gate | Registered `slp-antigravity-*` | Required |
+
+Antigravity uses registered native providers and `agy` stream-json. Their
+owned configuration omits `extends`; registrations reject their inert default
+command before discovery or connection.
+The adapter is maintained in the plugin, using public SDK interfaces.
+See [Antigravity support](../antigravity.md) for MCP and evidence limits.
 
 OpenCode's native transport is unsupported; version and proof limits belong
 to [OpenCode support](../opencode.md). Adding a family requires a registry
@@ -33,8 +41,8 @@ never authorizes rewriting retained records.
 ## Provider generation
 
 Activation projects saved Supervisor/Lead routing into owned provider entries
-and exactly two saved profiles. It includes all five Peer providers. Without
-saved routing it emits all fifteen family/role entries. Peers use the pool,
+and exactly two saved profiles. It includes each family's Peer provider. Without
+saved routing it emits each family/role combination. Peers use the pool,
 independently of the orchestrator's runtime. Generated labels use
 `SLP <Family> <Role>` from registry labels.
 
@@ -72,7 +80,7 @@ command tail and provider env. `[node, gate]` would probe Node's version;
 an env-dependent launcher would not resolve its binary. Launchers clear
 `NODE_OPTIONS` before Node starts, in addition to child runtime sanitization.
 
-Launch sets publish fifteen files: nine hook gates and six ACP shim
+Launch sets publish eighteen files: twelve hook gates and six ACP shim
 dispatchers. Manifests pin `launcherFamilies` and `gateFamilies` so verification
 reconstructs the correct bytes. Retained manifests without these fields use
 their historical all-shim plan and exact domain.
@@ -116,6 +124,12 @@ the new catalog, clears features and never auto-picks replacements. Re-selecting
 the same family still clears features. An unavailable catalog clears dependent
 choices without delayed prefill. Model/mode changes clear feature values.
 Stored prefill does not trigger these user-edit rules or overwrite dirty drafts.
+Antigravity has no independent thinking option: its model ID selects effort.
+The role form omits that control even without a catalog. Rebinding to this
+family clears an inherited `thinkingOptionId` when routing or an explicit
+family preference does not supply one; other omitted profile fields retain
+their existing preservation semantics. An explicitly supplied unsupported
+thinking option remains an adapter validation error.
 
 ## Unresolved lifecycle questions
 

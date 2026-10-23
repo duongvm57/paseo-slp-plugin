@@ -36,6 +36,8 @@ and dependency locks are supporting artifacts, not additional runtime owners.
 | plugin/server/launchers.ts | Immutable launcher publication and verification, node/family binding, gate-vs-shim manifests and path ancestry. Owns launch-set integrity and collision decisions. |
 | plugin/server/publication-files.ts | Shared asynchronous private-directory, exclusive-write, staging-path and durability mechanics for candidate/launcher publication; domain verification and recovery stay with their callers. |
 | plugin/server/executables.ts | Verified ordinary Node and family executable resolution, daemon PATH aliases and forbidden-prefix/symlink rules. |
+| plugin/server/delivered-input.ts | Pure decoder shared by capture and Desk: semantic agent-message payloads, legacy message IDs and caller-bound send correlation; notification events never confirm sends. Origin does not authenticate Human authority. |
+| plugin/server/antigravity/ | Role-specific native provider registrations and the Apache-2.0 upstream stream-json adapter; configuration selects verified grant launchers; per-open MCP relays supply current stdio/HTTP transport, persistence pins retained relay ABI, and every prompt reasserts role instructions. Isolated probes are not live fleet acceptance. |
 | plugin/server/role-injection.ts | Bind agent.create to the verified installed candidate's role bundle and runtime helpers, applying transport-specific instruction/environment overlays and minting desk membership through its assigned seam. Task-ticket creates require the exact validated claim and strip the carrier before native execution; ordinary hook behavior is preserved. |
 | plugin/server/supervision/state.ts | Served-home supervision file location, schema migration view and the single CAS writer shared by the card and bell. |
 | plugin/server/supervision/capture.ts, plugin/server/supervision/assessment.ts | Fixture-backed per-family brief/handback/send capture, provenance gates, strict Jev rubric/link parsing and independent communication findings. Neither reads an assignment pointer file. |
@@ -190,9 +192,11 @@ semantics rather than original JSON bytes or absent-key shape; it never patches
 once dependent sessions have ended. [Operations](operations.md) owns the full
 activation, reconciliation, removal and migration procedure.
 
-Persisted plugin journals/launch manifests admit the exact legacy4/legacy12
-and current5/current15 domains. Standalone receipts separately retain the exact
-Codex3 + three-profile format. Old fields and digests remain unchanged; missing
+Persisted plugin journals/launch manifests admit exact legacy4/legacy12,
+legacy5/legacy15 and current6/current18 domains. Standalone receipts separately retain the exact
+Codex3 + three-profile format. Antigravity requires manager-owned native
+registrations; standalone generation retains its five independent families.
+Old fields and digests remain unchanged; missing
 historical IDs grant no ownership. Native `extends: opencode` observations may
 remain historical evidence, while newly authored OpenCode bindings require ACP.
 Rebinding checks new-slot collisions and never normalizes old history. See

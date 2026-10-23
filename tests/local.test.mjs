@@ -29,6 +29,7 @@ test('standalone provider plan applies the sorted Paseo tool policy to Peer only
   assert.deepEqual(peerPaseoToolsPolicy.disabledTools, expected);
   assert.deepEqual(peerPaseoToolsPolicy.disabledTools, [...peerPaseoToolsPolicy.disabledTools].sort());
   const plan = configurationPlan('/tmp/slp', { agents: { providers: {}, agentProfiles: [] } });
+  assert.equal(Object.hasOwn(plan.providers, 'slp-antigravity-peer'), false, 'standalone cannot register native providers');
   for (const family of ['codex', 'pi', 'devin', 'claude', 'opencode']) {
     assert.deepEqual(plan.providers[`slp-${family}-peer`].paseoTools, { disabledTools: expected });
     for (const role of ['supervisor', 'lead']) {

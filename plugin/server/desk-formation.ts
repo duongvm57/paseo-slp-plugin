@@ -488,7 +488,7 @@ export async function runSeatCreate(row: MembershipValue, input: DeskSeatCreateI
         notification: "caller must send the exact prompt with send_agent_prompt notifyOnFinish=true; the finish notification is an event, not the report or acceptance" };
     }
     phase("send-issued", { agentId, messageId: label, promptSha256: canonicalSha256(create.initialPrompt) });
-    try { await host.agents.ref(agentId).send(create.initialPrompt, { messageId: label }); }
+    try { await host.agents.ref(agentId).send(create.initialPrompt, { messageId: label, sourceAgentId: row.agentId! }); }
     catch { return { ok: true, state: "send-uncertain", agentId, sent: null, verification, resourceDisposition: "retained" }; }
     return { ok: true, state: "host-accepted", agentId, workspaceId: verification.workspaceId, parent: verification.parent,
       sent: true, verification, runtime: { provider: create.provider, ...create.settings, modeSupport: plan.modeSupport }, resourceDisposition: "retained",

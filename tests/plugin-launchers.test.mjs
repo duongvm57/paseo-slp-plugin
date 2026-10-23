@@ -29,9 +29,10 @@ import { createLauncherBuilder } from '../plugin/server/launchers.ts';
 import { identity, install } from '../plugin/server/runtime/cli/package.ts';
 import { roleInstructions, roleDelivery } from '../plugin/server/runtime/cli/role-bundle.ts';
 import { acpRolePrompt, claudeRolePrompt, injectRole, piRoleArgs } from '../plugin/server/runtime/cli/role-transport.ts';
+import { FAMILY_EXECUTABLE } from '../plugin/shared/runtime/families.ts';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
-const FAMILIES = ['codex', 'pi', 'devin', 'claude', 'opencode'];
+const FAMILIES = ['codex', 'pi', 'devin', 'claude', 'opencode', 'antigravity'];
 const ROLES = ['supervisor', 'lead', 'peer'];
 const sq = value => `'${String(value).replaceAll("'", "'\\''")}'`;
 
@@ -422,7 +423,7 @@ test('resolver: stable PATH aliases follow updates for all five families', async
     mkdirSync(join(dir, family, 'v2'), { recursive: true });
     mkExe(oldPath);
     mkExe(newPath);
-    const alias = join(bin, family);
+    const alias = join(bin, FAMILY_EXECUTABLE[family]);
     symlinkSync(oldPath, alias);
     handlers[alias] = () => versionOut(`${family} ${realpathSync(alias) === oldPath ? '2.0.24' : '2.0.25'}`);
   }
@@ -430,15 +431,15 @@ test('resolver: stable PATH aliases follow updates for all five families', async
   const before = await resolver.resolve({ ...request, nodePath: node });
   for (const family of FAMILIES) {
     assert.deepEqual(before.binaries[family], {
-      available: true, path: join(bin, family), version: `${family} 2.0.24`,
+      available: true, path: join(bin, FAMILY_EXECUTABLE[family]), version: `${family} 2.0.24`,
     });
-    rmSync(join(bin, family));
-    symlinkSync(join(dir, family, 'v2', family), join(bin, family));
+    rmSync(join(bin, FAMILY_EXECUTABLE[family]));
+    symlinkSync(join(dir, family, 'v2', family), join(bin, FAMILY_EXECUTABLE[family]));
   }
   const after = await resolver.resolve({ ...request, nodePath: node, prior: before });
   for (const family of FAMILIES) {
     assert.deepEqual(after.binaries[family], {
-      available: true, path: join(bin, family), version: `${family} 2.0.25`,
+      available: true, path: join(bin, FAMILY_EXECUTABLE[family]), version: `${family} 2.0.25`,
     });
   }
 });
@@ -458,6 +459,7 @@ test('resolver: explicit invalid family binary is a conflict, not silent unavail
     },
   );
 });
+
 
 test('resolver: win32 is fail-closed UNSUPPORTED_PLATFORM', async t => {
   const { request } = resolveDeps(t);
@@ -597,7 +599,7 @@ test('launchers: legacy4 manifest bytes verify unchanged; mixed, partial and unk
   manifest.families = ['codex', 'pi', 'devin', 'claude'];
   manifest.launcherFamilies = [...manifest.families];
   manifest.gateFamilies = ['codex', 'pi', 'claude'];
-  delete manifest.binaries.opencode;
+  delete manifest.binaries.opencode; delete manifest.binaries.antigravity;
   const bytes = JSON.stringify(manifest, null, 2) + '\n';
   const digest = createHash('sha256').update(bytes).digest('hex');
   const directory = join(f.stableRoot, 'launchers', digest); mkdirSync(directory);
@@ -641,9 +643,9 @@ test('launchers: publish writes manifest + 15 quoted launchers (12 gate + 3 shim
   // gate execs vs shim launchers.
   assert.deepEqual(manifest.families.sort(), [...FAMILIES].sort());
   assert.deepEqual(manifest.launcherFamilies.sort(), [...FAMILIES].sort());
-  assert.deepEqual(manifest.gateFamilies.sort(), ['claude', 'codex', 'pi']);
+  assert.deepEqual(manifest.gateFamilies.sort(), ['antigravity', 'claude', 'codex', 'pi']);
   const names = readdirSync(f.set.directory).sort();
-  assert.equal(names.length, 16);
+  assert.equal(names.length, 19);
   assert.deepEqual(
     f.set.files.map(file => basename(file.path)).sort(),
     FAMILIES.flatMap(family => ROLES.map(role => `slp-${family}-${role}`)).sort(),
@@ -673,7 +675,7 @@ test('launchers: publish writes manifest + 15 quoted launchers (12 gate + 3 shim
   // Exact gate launcher bytes (hook families): the frozen SLP_FAMILY_BIN is
   // exported so the env-free argv0 --version probe still reaches the real
   // binary, then the candidate's gate runs under the frozen Node.
-  for (const family of ['codex', 'pi', 'claude']) {
+  for (const family of ['codex', 'pi', 'claude', 'antigravity']) {
     const gate = readFileSync(join(f.set.directory, `slp-${family}-lead`), 'utf8');
     const gateExpected =
       '#!/bin/sh\n' +
@@ -966,7 +968,7 @@ test('gate launcher: env-free argv0 --version reaches the real family binary; gr
   // and passes through; only a daemon-stamped session spawn requires the
   // grant.
   const f = await fixtureRuntime(t);
-  for (const family of ['codex', 'pi', 'claude']) {
+  for (const family of ['codex', 'pi', 'claude', 'antigravity']) {
     const probe = spawnSync(join(f.set.directory, `slp-${family}-peer`), ['--version'], {
       encoding: 'utf8',
       env: { PATH: '/usr/bin:/bin' }, // no provider env at all

@@ -26,7 +26,7 @@ import { homedir } from 'node:os';
 import { isDeepStrictEqual } from 'node:util';
 import { json, readJson, hash, identity, install, verifyInstall, files, stageInstall, swapIn, verifyReplaceable } from './package.ts';
 import { roles, profileRoles, families, profileId, providerId, peerPaseoToolsPolicy } from './profiles.ts';
-import { STANDALONE_PROVIDER_EXTENDS, persistedProviderIds, familyFromProviderId, type FamilyId } from '../../../shared/runtime/families.ts';
+import { familyUsesRegistration, STANDALONE_PROVIDER_EXTENDS, persistedProviderIds, familyFromProviderId, type FamilyId } from '../../../shared/runtime/families.ts';
 import { validateCatalog, routingPath, probeUserPool, catalogPoolDrift } from './routing.ts';
 import { configFile, writeConfig, mcpFlags, requireMcp, verifyOwnedProviders, verifyOwnedProfiles,
   providers as hostProviders, agentProfiles as hostAgentProfiles } from './host-config.ts';
@@ -50,7 +50,7 @@ function readPaseoBinding(destination: string): PaseoBinding {
   const historicalProfiles = value.profiles;
   const codexIds = roles.map(role => providerId(role, 'codex'));
   const codex3 = providerKeys.length === 3 && codexIds.every(id => Object.hasOwn(value.providers as object, id));
-  if (persistedProviderIds(providerKeys) === null && !codex3) throw new Error('Invalid standalone binding: exact Codex3, legacy12 or current15 provider domain required; preserve installation');
+  if (persistedProviderIds(providerKeys) === null && !codex3) throw new Error('Invalid standalone binding: exact Codex3, legacy12, legacy15 or current18 provider domain required; preserve installation');
   if (codex3 && (historicalProfiles.length !== 3 || new Set(historicalProfiles.map(p => record(p) ? p.id : null)).size !== 3
     || !roles.every(role => historicalProfiles.some(p => record(p) && p.id === profileId(role) && p.provider === providerId(role, 'codex'))))) {
     throw new Error('Invalid standalone Codex3 profiles: exact historical supervisor/lead/peer rows required; preserve installation');
@@ -89,7 +89,7 @@ export function installHome(platform = process.platform, env = process.env, home
 // role family is still installed, so this only picks the starting default.
 function defaultFamily(config: HostConfig) {
   const provs = hostProviders(config);
-  return families.find(family => (provs[family] as { enabled?: unknown } | null)?.enabled === true) ?? 'codex';
+  return families.find(family => !familyUsesRegistration(family as FamilyId) && (provs[family] as { enabled?: unknown } | null)?.enabled === true) ?? 'codex';
 }
 
 export function configurationPlan(destination: string, config: HostConfig) {
@@ -97,6 +97,9 @@ export function configurationPlan(destination: string, config: HostConfig) {
   const existing = hostAgentProfiles(config);
   const family = defaultFamily(config);
   for (const role of roles) for (const family of families) {
+    // Registered native providers require the manager plugin. Standalone
+    // installation publishes only families it can launch independently.
+    if (familyUsesRegistration(family as FamilyId)) continue;
     const id = providerId(role, family);
     if (Object.hasOwn(hostProviders(config), id) || (profileRoles.includes(role) && existing.some(p => (p as { id?: unknown }).id === profileId(role)))) {
       throw new Error(`SLP entry already exists: ${role}; uninstall its owning installation first`);

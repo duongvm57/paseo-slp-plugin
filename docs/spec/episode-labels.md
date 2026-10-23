@@ -255,12 +255,20 @@ round trips, background work or agent tokens.
 
 ## Out of scope for the plugin
 
-- **Distinguishing Human messages from agent messages.** The analyzer infers
-  this by elimination today: a message that matches no agent send and is not a
-  system or schedule prompt counts as Human. Paseo knows for certain whether a
-  prompt came from the UI, from a given agent or from a schedule, so recording
-  the sender is a Paseo change. Asking agents to prefix their messages costs
-  tokens and is unreliable.
+- **Distinguishing Human messages from agent messages.** Use valid host
+  provenance first: Paseo 0.12 projects agent deliveries as `tool_call`
+  `agent_message` items with semantic `agentMessage.event`, `sender.id` and
+  `text`; notifications have their own events. This identifies delivery source,
+  not Human authority or a new assignment/turn. A plain `user_message` is
+  **unknown origin** unless independent evidence establishes its source;
+  older SDKs, plugin sends, and imported history may use that shape too.
+  Correlate recorded Desk deliveries with their message IDs and persisted
+  caller; do not classify unmatched inputs as Human by elimination. Never
+  use display text, model-written prefixes or a legacy envelope as authenticated
+  sender evidence. Episode, role, disposition and policy labels remain needed:
+  one sender may participate in several episodes. The analyzer implementation
+  is outside this repository; this is its input contract, not an implemented
+  analyzer migration.
 - **Finish notifications truncated by Paseo, stale session-usage index:**
   Paseo or provider side.
 - **Review-round anchors on the Lean path:** no extra tool call is needed.

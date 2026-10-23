@@ -50,7 +50,7 @@ const getRouting = (store, home) =>
 // The six generated ids under a routing: chosen supervisor + chosen lead
 // combos plus all four pool-driven peers — nothing else.
 const generatedIds = (supFamily, leadFamily) =>
-  [`slp-${supFamily}-supervisor`, `slp-${leadFamily}-lead`, 'slp-codex-peer', 'slp-pi-peer', 'slp-devin-peer', 'slp-claude-peer', 'slp-opencode-peer'].sort();
+  [`slp-${supFamily}-supervisor`, `slp-${leadFamily}-lead`, 'slp-codex-peer', 'slp-pi-peer', 'slp-devin-peer', 'slp-claude-peer', 'slp-opencode-peer', 'slp-antigravity-peer'].sort();
 const absentIds = (supFamily, leadFamily) =>
   OWNED_IDS.filter(id => !generatedIds(supFamily, leadFamily).includes(id));
 
@@ -140,12 +140,62 @@ test('malformed or legacy-version routing file degrades to all-fifteen generatio
   const act = await manager.activate(activateInput(home, deps.payload, randomUUID()), daemon);
   const done = await waitTerminal(manager, home, act.operation.operationId, daemon);
   assert.equal(done.state, 'ACTIVE');
-  assert.equal(Object.keys(slpProvidersOf(readConfigJson(home))).length, 15, 'legacy routing keeps v1 generation');
+  assert.equal(Object.keys(slpProvidersOf(readConfigJson(home))).length, 18, 'legacy routing keeps v1 generation');
 });
 
 // ---------------------------------------------------------------------------
 // Settings-driven generation
 // ---------------------------------------------------------------------------
+
+test('Antigravity rebind clears inherited thinking without changing selected models', async t => {
+  const home = makeHome(t);
+  const binaries = makeBinaries(t);
+  const daemon = await makeDaemon(t, home);
+  const deps = makeDeps({ execOpts: { binaries } });
+  const manager = createManager(deps);
+  const store = createStateStore();
+  await setRouting(store, home,
+    { family: 'codex', model: 'old-supervisor', thinkingOptionId: 'high' },
+    { family: 'claude', model: 'old-lead', thinkingOptionId: 'medium' });
+  const first = await manager.activate(activateInput(home, deps.payload, randomUUID()), daemon);
+  assert.equal((await waitTerminal(manager, home, first.operation.operationId, daemon)).state, 'ACTIVE');
+
+  await setRouting(store, home,
+    { family: 'antigravity', model: 'gemini-3.8-flash-low', modeId: 'full-access' },
+    { family: 'antigravity', model: 'gemini-3.8-flash-medium', modeId: 'full-access' });
+  const second = await manager.activate(activateInput(home, deps.payload, randomUUID()), daemon);
+  const done = await waitTerminal(manager, home, second.operation.operationId, daemon);
+  assert.equal(done.state, 'ACTIVE', JSON.stringify(done.conflicts));
+  for (const role of ['supervisor', 'lead']) {
+    const profile = readConfigJson(home).daemon.agentProfiles.find(p => p.id === `slp-${role}`);
+    assert.equal(profile.provider, `slp-antigravity-${role}`);
+    assert.equal(profile.model, role === 'supervisor' ? 'gemini-3.8-flash-low' : 'gemini-3.8-flash-medium');
+    assert.equal(Object.hasOwn(profile, 'thinkingOptionId'), false, `${role}: inherited thinking must clear`);
+  }
+});
+
+test('fresh activation with an explicit Antigravity family override clears routing effort', async t => {
+  const home = makeHome(t);
+  const binaries = makeBinaries(t);
+  const daemon = await makeDaemon(t, home);
+  const deps = makeDeps({ execOpts: { binaries } });
+  const manager = createManager(deps);
+  const store = createStateStore();
+  await setRouting(store, home,
+    { family: 'codex', model: 'gpt-model', thinkingOptionId: 'high' },
+    { family: 'claude', model: 'gemini-3.8-flash-medium', modeId: 'full-access', thinkingOptionId: 'medium' });
+  const act = await manager.activate({ ...activateInput(home, deps.payload, randomUUID()),
+    profiles: { lead: { family: 'antigravity' } } }, daemon);
+  const done = await waitTerminal(manager, home, act.operation.operationId, daemon);
+  assert.equal(done.state, 'ACTIVE', JSON.stringify(done.conflicts));
+  const profiles = readConfigJson(home).daemon.agentProfiles;
+  const lead = profiles.find(p => p.id === 'slp-lead');
+  assert.equal(lead.provider, 'slp-antigravity-lead');
+  assert.equal(lead.model, 'gemini-3.8-flash-medium');
+  assert.equal(lead.modeId, 'full-access');
+  assert.equal(Object.hasOwn(lead, 'thinkingOptionId'), false);
+  assert.equal(profiles.find(p => p.id === 'slp-supervisor').thinkingOptionId, 'high');
+});
 
 test('routing generates the two chosen combos plus all four peers', async t => {
   const home = makeHome(t);
@@ -299,7 +349,7 @@ test('routing change on an existing binding removes non-chosen providers and rep
   // Legacy all-fifteen binding first.
   const first = await manager.activate(activateInput(home, deps.payload, randomUUID()), daemon);
   await waitTerminal(manager, home, first.operation.operationId, daemon);
-  assert.equal(Object.keys(slpProvidersOf(readConfigJson(home))).length, 15);
+  assert.equal(Object.keys(slpProvidersOf(readConfigJson(home))).length, 18);
 
   // Route supervisor → devin, lead → pi; re-activate the same candidate.
   await setRouting(store, home, { family: 'devin', model: 'swe-2-high' }, { family: 'pi' });
@@ -383,7 +433,7 @@ test('deactivation under a settings-driven binding still removes every owned id'
   await setRouting(store, home, { family: 'pi' }, { family: 'devin' });
   const act = await manager.activate(activateInput(home, deps.payload, randomUUID()), daemon);
   const doneAct = await waitTerminal(manager, home, act.operation.operationId, daemon);
-  assert.equal(Object.keys(slpProvidersOf(readConfigJson(home))).length, 7);
+  assert.equal(Object.keys(slpProvidersOf(readConfigJson(home))).length, 8);
 
   const deact = await manager.deactivate(
     deactivateInput(home, randomUUID(), doneAct.binding.bindingSha256),

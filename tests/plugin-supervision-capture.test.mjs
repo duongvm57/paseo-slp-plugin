@@ -57,6 +57,48 @@ const user = (text, messageId = 'm-user') => ({ type: 'user_message', text, mess
 const asst = (text, messageId = 'm-asst') => ({ type: 'assistant_message', text, messageId });
 const clone = value => structuredClone(value);
 
+// Source-derived normalized host 0.12.0 projection, not a live provider fixture.
+const agentMessage = (text, sender = LEAD, event = 'message') => ({
+  type: 'tool_call', callId: 'paseo-agent-message:delivery-1', name: 'agent_message',
+  status: 'completed', error: null,
+  agentMessage: { event, sender: { id: sender }, text },
+  detail: { type: 'plain_text', text, icon: 'bot' },
+});
+
+test('0.12 projected input replaces a stale human boundary and preserves the existing family mapping', () => {
+  const got = capture(peerEvent('codex', [user('old brief'), asst('old result'),
+    agentMessage('current brief <xml> & unicode'), asst('current result')]), ROUTED);
+  assert.equal(got.brief.state, 'verified');
+  assert.equal(got.brief.value.text, 'current brief <xml> & unicode');
+  assert.equal(got.brief.value.messageId, 'delivery-1');
+  assert.equal(got.handback.value.text, 'current result');
+});
+
+test('malformed projected inputs fence off older brief and handback evidence', () => {
+  const bad = agentMessage('new input');
+  bad.agentMessage.sender.id = '';
+  const got = capture(peerEvent('codex', [user('stale brief'), asst('stale result'), bad, asst('new result')]), ROUTED);
+  assert.equal(got.brief.state, 'unverified');
+  assert.equal(got.handback.state, 'unverified');
+});
+
+test('0.12 finished notifications anchor only their sender and exact handback body', () => {
+  const body = `Agent ${PEER} (peer) finished.\n\n<agent-response>\nresult <xml> & unicode\n</agent-response>`;
+  const send = sendItems(firstTurn(LIVE.codex.items))[0];
+  const got = capture(leadEvent('codex', [user('old input'), send,
+    agentMessage(body, PEER, 'finished'), { ...clone(send), callId: 'after-delivery' }]), ROUTED);
+  assert.deepEqual(got.sends.map(s => s.callId), ['after-delivery']);
+  assert.equal(handbackAnchorIndex(got.anchors, PEER, 'result <xml> & unicode'), 0);
+  assert.equal(handbackAnchorIndex(got.anchors, OTHER, 'result <xml> & unicode'), -1);
+  assert.equal(handbackAnchorIndex(got.anchors, PEER, 'different'), -1);
+  for (const event of ['message', 'errored', 'permission-required', 'closed']) {
+    const other = capture(leadEvent('codex', [agentMessage(body, PEER, event), send]), ROUTED);
+    assert.equal(handbackAnchorIndex(other.anchors, PEER, 'result <xml> & unicode'), -1, event);
+  }
+  const scrubbed = clone(got.anchors); scrubbed[0].text = '';
+  assert.equal(handbackAnchorIndex(scrubbed, PEER, 'result <xml> & unicode'), -1);
+});
+
 test('legacy tracker carrier fragments stay unverified while complete wrappers remain readable', () => {
   // Retained runtimes can still carry this literal; current renderers omit it.
   const legacy = 'Work tracker: beads (enabled in SLP settings)';

@@ -19,7 +19,7 @@ Set up `.paseo-slp/workspace-protocol.md` for minimum sufficient coordination. A
 
 The repository desk preserves assignments, current briefs, decisions, dependencies, review and evidence. Its task queue supports Lead-invoked dispatch and integration, and planned handoff keeps an assignment's history. Open **Read SLP work** to inspect these records in the workspace. The desk distinguishes reported results from measured evidence; final acceptance stays with you.
 
-Each team member is an ordinary Paseo agent you can open and chat with. Agents can use Codex, Pi, Devin, Claude Code or OpenCode, with different providers and models in the same team.
+Each team member is an ordinary Paseo agent you can open and chat with. Agents can use Codex, Pi, Devin, Claude Code, OpenCode or Antigravity, with different providers and models in the same team.
 
 ## What this changes in practice
 
@@ -52,14 +52,16 @@ See the [README](https://github.com/duongvm57/paseo-slp-plugin#readme) for the f
 - Role changes affect future launches, not sessions that are already running.
 - The plugin refuses to overwrite a provider or profile it does not own, and it stops with `RECOVERY_REQUIRED` when the configuration changed outside its journal.
 - Role rules guide agents. Repository and shell permissions still come from Paseo and the provider.
+- Antigravity supports full access only: its CLI automatically approves tools, subject to native policy denial. Thinking effort is part of the model ID. Its MCP integration supports stdio and Streamable HTTP; legacy SSE and explicit tool-policy preapproval are unsupported. Inherited native MCP services remain available; session routing does not sandbox tools. See [Antigravity support](https://github.com/duongvm57/paseo-slp-plugin/blob/main/docs/antigravity.md) for resume restrictions and evidence limits.
 
 ## Data, filesystem, subprocess and network access
 
 - **Paseo configuration:** activation patches Paseo's `config.json` to add the providers and profiles and to enable MCP injection. Deactivating removes them.
 - **Plugin state:** the plugin keeps its runtime files, journal and settings under `<daemonHome>/slp-runtime/`, including the shared Peer pool. Jev keys are stored there in files with 0600 permissions.
+- **Temporary files:** Antigravity sessions use private directories under the host's temporary directory for MCP customization and attached images, removed when the session closes, including failed opens. MCP endpoints and credentials travel in the current process environment rather than those customization files. The adapter does not edit shared Antigravity configuration or workspace customization files.
 - **Repository files:** the plugin reads `.paseo-slp/` files in repositories you onboard. It does not write your repository's routing catalog. Desk records are not stored in your repository. They live in a folder per repository inside the plugin's runtime state directory. Task integration applies a bounded change to a target repository only when the Lead invokes it, and uses Git worktrees for isolated placement.
-- **Subprocesses:** the plugin finds Node and the provider CLIs on the daemon's `PATH` and runs short version probes against them. It runs Git when a Lead dispatches or integrates a task. A desk check can run only one of three fixed classes: a ledger integrity check, the repository's generated-payload check, or `git rev-parse HEAD`, run in the candidate's checkout. It also runs the bundled offline `slp.mjs` helper for launch validation. Seats themselves are launched through Paseo.
-- **Network:** none by default. If you enable Jev-assisted routing or communication supervision, the configured inputs or captured communications are sent to the Jev service you choose, either OpenRouter or the TypeSafe System One API. Review that service and its costs before enabling it.
+- **Subprocesses:** the plugin finds Node and the provider CLIs on the daemon's `PATH` and runs short version probes against them. It runs Git when a Lead dispatches or integrates a task. A desk check can run only one of three fixed classes: a ledger integrity check, the repository's generated-payload check, or `git rev-parse HEAD`, run in the candidate's checkout. It also runs the bundled offline `slp.mjs` helper for launch validation. Paseo requests each seat; for Antigravity, this plugin's provider runs `agy` for version/model discovery and sessions, plus Node relays and the session's configured stdio MCP commands.
+- **Network and credentials:** agent CLIs send prompts, code/context and tool results to the model services configured for your account. Antigravity's Streamable HTTP MCP relays send requests and configured authentication headers to the session's MCP endpoints; stdio MCP commands can use their own network connections. If you enable Jev-assisted routing or communication supervision, the configured inputs or captured communications are also sent to the Jev service you choose, either OpenRouter or the TypeSafe System One API. Review those services, permissions and costs before using them.
 - **Tracking:** the plugin does not call external trackers or connectors.
 
 ## Requirements
@@ -68,3 +70,4 @@ See the [README](https://github.com/duongvm57/paseo-slp-plugin#readme) for the f
 - A Linux or macOS daemon host. Windows is not supported.
 - Node.js 22.18 or later in the 22 line, or Node.js 23.6 or later, for native TypeScript.
 - The CLI of each provider family you use, signed in on the daemon host.
+- Antigravity requires agy 1.4.4 or newer and this manager plugin; the standalone installer does not register its providers.

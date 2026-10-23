@@ -376,6 +376,9 @@ export interface FamilyFacts {
   resumeRef?: string;
   /** Registry contract flag for exact MCP preapproval (provider-registry.ts). */
   exactPreapproval: boolean;
+  preapprovalEvidence?: string;
+  /** false when the provider does not consume config.mcpServers. */
+  mcpStdio?: boolean;
   /** Source ref backing this family's stdio MCP launch path. */
   mcpLaunchRef: string;
   mcpLaunchEvidence: string;
@@ -389,6 +392,17 @@ export interface FamilyFacts {
 // a registry family landing ahead of its curation must not crash the audit —
 // auditCapabilities fails closed with a typed gap per fact-dependent row.
 const FAMILY_FACTS: Partial<Record<FamilyId, FamilyFacts>> = {
+  antigravity: {
+    exactPreapproval: false,
+    mcpStdio: true,
+    contractRef: "@getpaseo/server@0.12.0:dist/server/builtin-plugins/antigravity-provider/server/provider.ts",
+    preapprovalEvidence: "SLP Antigravity does not negotiate explicit toolPolicy; full-access mode auto-approves tools",
+    mcpLaunchRef: "paseo-slp:plugin/server/antigravity/internal/mcp.ts + mcp-child.ts",
+    mcpLaunchEvidence: "MCP relays read the current session environment; stdio/Streamable HTTP; no shared config edits",
+    resumeRef: "paseo-slp:plugin/server/antigravity/internal/session.ts",
+    resumeEvidence: "v3 pins MCP namespace/names/relay ABI; endpoints and credentials use the current session environment",
+    resumeLimitation: "isolated CLI probes use fake services; no live Paseo desk/host acceptance claim",
+  },
   opencode: {
     exactPreapproval: false,
     contractRef: "@getpaseo/server@0.10.3:dist/server/server/agent/provider-registry.js#PROVIDER_CONTRACTS.acp",
@@ -529,16 +543,16 @@ function familyRecords(
       source: "paseo-src",
       sourceRef: facts.contractRef ?? REGISTRY_SRC,
       evidenceKind: STATIC,
-      evidenceRef: facts.exactPreapproval
+      evidenceRef: facts.preapprovalEvidence ?? (facts.exactPreapproval
         ? `PROVIDER_CONTRACTS.${family}.supportsExactMcpPreapproval === true`
-        : `${family} → UNSUPPORTED_PROVIDER_CONTRACT.supportsExactMcpPreapproval === false — daemon rejects toolPolicy`,
+        : `${family} → UNSUPPORTED_PROVIDER_CONTRACT.supportsExactMcpPreapproval === false — daemon rejects toolPolicy`),
       observedAt: null,
       limitations: [
         "preapproval suppresses permission prompts only — it is not a deny list and grants no authority",
         "the daemon requires every preapproved server to exist in the same request's mcpServers (validateToolPolicyServers)",
         ...(facts.exactPreapproval
           ? []
-          : ["a desk MCP tool on this family can never be preapproved — every call may prompt the seat"]),
+          : ["explicit desk MCP preapproval is unavailable; tool permissions follow the provider mode"]),
       ],
     }),
     record({
@@ -546,15 +560,17 @@ function familyRecords(
       capabilityId: CAPABILITY_IDS.mcpStdioLaunch,
       family,
       probeId: null,
-      status: "supported",
+      status: facts.mcpStdio === false ? "unsupported" : "supported",
       source: "paseo-src",
       sourceRef: facts.mcpLaunchRef,
       evidenceKind: STATIC,
       evidenceRef: facts.mcpLaunchEvidence,
       observedAt: null,
       limitations: [
-        "static config plumbing is proven; whether the spawned MCP child actually receives env is probe (b) — unproven",
-        "providers may merge/filter server env before spawn; config presence is not delivery",
+        ...(facts.mcpStdio === false
+          ? ["host provider does not configure MCP servers; native desk tools are unavailable"]
+          : ["static config plumbing is proven; whether the spawned MCP child actually receives env is probe (b) — unproven",
+            "providers may merge/filter server env before spawn; config presence is not delivery"]),
       ],
     }),
     probeSessionOpenEnvRecord(family),
@@ -567,10 +583,10 @@ function familyRecords(
       source: "paseo-src",
       sourceRef: facts.mcpLaunchRef,
       evidenceKind: STATIC,
-      evidenceRef: "mcpServers[x].env is carried into the provider's MCP config at create",
+      evidenceRef: facts.mcpStdio === false ? facts.mcpLaunchEvidence : "mcpServers[x].env is carried into the provider's MCP config at create",
       observedAt: null,
       limitations: [
-        "plumbing proven, delivery unproven — needs the same probe seat",
+        facts.mcpStdio === false ? "MCP plumbing missing in host provider; a live probe cannot establish absent plumbing" : "plumbing proven, delivery unproven — needs the same probe seat",
       ],
     }),
     probeCreateEnvEchoRecord(family),

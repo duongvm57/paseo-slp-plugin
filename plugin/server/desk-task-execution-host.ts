@@ -4,6 +4,7 @@
 // no Core imports. The desk-task-execution orchestrator composes these.
 
 import { createHash } from "node:crypto";
+import type { DeliveryTimelineItem } from "./delivered-input.ts";
 import { execFile as execFileCb } from "node:child_process";
 import {
   chmodSync, closeSync, constants, copyFileSync, existsSync, fchmodSync,
@@ -24,7 +25,8 @@ export const sha256Hex = (bytes: string | NodeJS.ArrayBufferView) =>
 // TaskHostApi — structural narrowing of the connected host client surface
 // the adapter may touch. Workspace-handle create forwards cwd+workspaceId,
 // parent→callerAgentId, idempotencyKey/mode/thinking; send forwards
-// messageId; errors propagate once; no cancel method exists.
+// messageId and optional sourceAgentId; SDK capability failures propagate once.
+// No cancel method or send fallback exists.
 // ---------------------------------------------------------------------------
 
 export type TaskAgentSnapshot = {
@@ -53,13 +55,9 @@ export type TaskAgentFeature =
 /** Host refetch returns { agent, project }. */
 export type TaskRefetchResult = { agent: TaskAgentSnapshot | null; project: unknown };
 
-/** user_message timeline items carry messageId/clientMessageId; entries
- *  beyond the correlation fields are ignored. */
-export type TaskTimelineItem = {
-  type: string;
-  messageId?: string;
-  clientMessageId?: string;
-};
+/** Both legacy messages and host-projected agent inputs can carry delivery IDs. */
+export type TaskTimelineItem = DeliveryTimelineItem;
+export type TaskSendOptions = { messageId?: string; sourceAgentId?: string };
 
 /** FetchAgentTimelinePayload.entries — each entry wraps the item. */
 export type TaskTimelinePage = {
@@ -69,7 +67,7 @@ export type TaskTimelinePage = {
 export type TaskAgentHandle = {
   readonly id: string;
   refresh(requestId?: string): Promise<TaskRefetchResult | null>;
-  send(text: string, options?: { messageId?: string }): Promise<void>;
+  send(text: string, options?: TaskSendOptions): Promise<void>;
   archive(): Promise<{ archivedAt: string }>;
   waitForFinish(timeoutMs?: number): Promise<unknown>;
   timeline: {
@@ -116,7 +114,7 @@ export type TaskHostApi = {
     ref(id: string): TaskAgentHandle;
     create(options: TaskCreateOptions): Promise<TaskAgentHandle>;
     list(options?: {
-      filter?: { labels?: Record<string, string> };
+      filter?: { labels?: Record<string, string>; includeBackground?: boolean };
       page?: { limit: number; cursor?: string };
     }): Promise<TaskAgentListPage>;
   };

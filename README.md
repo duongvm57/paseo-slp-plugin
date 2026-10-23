@@ -96,7 +96,7 @@ The design rationale is in [docs/architecture.md](docs/architecture.md).
 | Supports planned owner handoff and a read-only workspace work panel                         | An acknowledgment that does not match a usable offer and current revision pins  | Transfers authority through a chat message or a resource account  |
 | Offers opt-in Jev routing and communication supervision                                    | A Jev routing receipt that fails offline verification (hash, model, catalog)     | Enables external services without your configuration              |
 
-Saved role choices narrow the Supervisor/Lead providers; all five Peer providers remain
+Saved role choices narrow the Supervisor/Lead providers; all six Peer providers remain
 pool-driven. Provider entries for unavailable CLIs are disabled. Pool checks apply to
 `prepare` and native task dispatch. Role rules guide agents, while managed launch and desk checks cover their own
 interfaces; repository and shell permissions still come from Paseo and the provider.
@@ -110,9 +110,11 @@ interfaces; repository and shell permissions still come from Paseo and the provi
 | **Lead**       | Framing, routing, dependencies, integration, the project verdict                       | Pre-solves hard work and hands Peers a typing job        | The **SLP Lead** profile                |
 | **Peer**       | One bounded outcome, as an Engineer, Architect, Reviewer or Scout                      | Spawns other agents                                     | An option in the Peer pool, per task    |
 
-Seats run on **Codex, Pi, Devin, Claude Code or OpenCode**, mixed freely: two Peers in the same team can use
+Seats run on **Codex, Pi, Devin, Claude Code, OpenCode or Antigravity**, mixed freely: two Peers in the same team can use
 different providers, models and effort levels. [OpenCode](docs/opencode.md) uses ACP stdio for
 managed and standalone seats; native OpenCode and V1 are unsupported.
+[Antigravity](docs/antigravity.md) requires agy 1.4.4 or newer and the manager
+plugin; it supports full access, with thinking effort selected through the model ID.
 
 Peer Engineer is the default implementation writer. An explicit Human assignment or effective
 workspace protocol can grant a bounded Lead write for clear, reversible work. One writer,
@@ -125,8 +127,9 @@ You need:
 - Paseo daemon **and app** `>=0.11.0` for native screen/sidebar UI, with `pluginsEnabled: true` and an effective `mcp.enabled: true`
 - a POSIX daemon host (Linux/macOS), with Node.js 22.x from 22.18, or Node.js 23.6+
   (native TypeScript stripping)
-- the CLI of each provider family you use (Codex, Pi, Devin, Claude, OpenCode), signed in on the daemon host;
+- the CLI of each provider family you use (Codex, Pi, Devin, Claude, OpenCode, Antigravity), signed in on the daemon host;
   Pi needs repeatable `--append-system-prompt` support
+- Antigravity needs agy 1.4.4 or newer; standalone CLI installation retains the other five families
 
 Enable the installed family you want to use in Paseo's agent settings before the first activation.
 

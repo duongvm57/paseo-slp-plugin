@@ -420,7 +420,9 @@ export function buildRoleChoice(
   const choice: Record<string, unknown> = { ...(stored ?? {}), family: form.family };
   const model = form.model.trim();
   const modeId = form.modeId.trim();
-  const thinkingOptionId = form.thinkingOptionId.trim();
+  // This family has no separate effort control, including while its
+  // catalog is unavailable. Never save an inherited free-text value.
+  const thinkingOptionId = form.family === "antigravity" ? "" : form.thinkingOptionId.trim();
   if (model) choice.model = model;
   else delete choice.model;
   if (modeId) choice.modeId = modeId;

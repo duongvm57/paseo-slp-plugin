@@ -30,6 +30,7 @@ import {
   PROVIDER_EXTENDS,
   ROLES,
   persistedProviderIds,
+  familyUsesRegistration,
   type FamilyId,
   type RoleName,
 } from "../shared/runtime/families.ts";
@@ -38,7 +39,7 @@ export const FAMILIES = FAMILY_IDS;
 /** Historical keys are an ownership boundary, not implicit false slots. */
 export function projectionProviderIds(projection: ProjectionValue): readonly string[] {
   const ids = persistedProviderIds(Object.keys(projection.providers));
-  if (ids === null) throw new Error("projection requires exact legacy12 or current15 provider keys");
+  if (ids === null) throw new Error("projection requires exact legacy12, legacy15 or current18 provider keys");
   return ids;
 }
 export type FamilyName = FamilyId;
@@ -51,9 +52,11 @@ export const ROLE_DISPLAY: Record<RoleName, string> = {
   peer: "Peer",
 };
 
-export function providerExtendsForId(id: string): string | null {
+export function providerExtendsForId(id: string): string | null | undefined {
   const match = OWNED_PROVIDER_ID_RE.exec(id);
-  return match ? PROVIDER_EXTENDS[match[1] as FamilyName] : null;
+  if (!match) return null;
+  const family = match[1] as FamilyName;
+  return familyUsesRegistration(family) ? undefined : PROVIDER_EXTENDS[family];
 }
 
 // ---------------------------------------------------------------------------

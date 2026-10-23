@@ -317,8 +317,14 @@ test('native turn evidence observes only the positively correlated bound worker 
   await f.bridge.taskTurnEnded({ agentId: 'task-reader', turnId: 'wrong-actor', outcome: 'completed',
     timeline: [{ type: 'user_message', messageId: action().body.messageId }] });
   assert.equal(f.ledger().revision, before);
+  const incoming = (sender, event = 'message') => ({ type: 'tool_call', name: 'agent_message', status: 'completed', error: null,
+    callId: 'paseo-agent-message:' + action().body.messageId, agentMessage: { event, sender: { id: sender }, text: 'delivered work' } });
+  for (const item of [incoming('foreign'), incoming(action().callerAgentId, 'finished'), incoming(action().callerAgentId, 'errored')]) {
+    await f.bridge.taskTurnEnded({ agentId: 'task-worker', turnId: 'not-delivery', outcome: 'completed', timeline: [item] });
+    assert.equal(f.ledger().revision, before);
+  }
   await f.bridge.taskTurnEnded({ agentId: 'task-worker', turnId: 'observed-turn', outcome: 'completed',
-    timeline: [{ type: 'user_message', messageId: action().body.messageId }] });
+    timeline: [incoming(action().callerAgentId)] });
   assert.equal(action().state, 'observed');
   assert.equal(action().actorAgentId, 'task-worker', 'the native receipt uses the worker, never a fabricated owner');
   assert.equal(f.ledger().taskEntries.filter(row => row.kind === 'adjudication').length, 0);

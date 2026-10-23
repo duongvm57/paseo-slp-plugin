@@ -229,10 +229,12 @@ test('contribute() registers the RPCs plus the two before-hooks, cleanup unregis
   });
 
   const registrations = [];
+  const providerRegistrations = [];
   const beforeHooks = [];
   const onHooks = [];
   const unregistered = [];
   const server = {
+    registerProvider(provider) { providerRegistrations.push(provider); },
     handle(contract, handler) {
       registrations.push({ name: contract.name, handler });
     },
@@ -246,6 +248,8 @@ test('contribute() registers the RPCs plus the two before-hooks, cleanup unregis
     },
   };
   const cleanup = contribute(server);
+  assert.deepEqual(providerRegistrations.map(p => p.id).sort(), ['slp-antigravity-lead', 'slp-antigravity-peer', 'slp-antigravity-supervisor']);
+  assert.ok(providerRegistrations.every(p => p.command[0] === process.execPath && p.command[1] === '--eval' && p.requiresConfiguration === true));
   assert.deepEqual(
     registrations.map(r => r.name).sort(),
     [
@@ -366,6 +370,7 @@ test('turn_started stashes the SDK for Desk without the optional observer and cl
   const registrations = [];
   const unregistered = [];
   const server = {
+    registerProvider() {},
     handle() {},
     before() { return () => {}; },
     on(name, handler) { registrations.push({ name, handler }); return () => unregistered.push(name); },
@@ -442,6 +447,7 @@ test('the catalog RPC passes per-model thinking options through to CatalogOutput
   const contribute = await importContribute(t);
   const registrations = [];
   const cleanup = contribute({
+    registerProvider: () => {},
     handle: (contract, handler) => registrations.push({ name: contract.name, handler }),
     before: () => () => {},
     on: () => () => {},

@@ -559,6 +559,7 @@ test('send gates on registered membership then correlates messageId', async t =>
     'Assignment id: "asg-1"\nTask id: "task-1"\nAttempt id: "att-1"\n' +
     'Handback route: the verified parent agent ID is "agent-owner".\n');
   assert.equal(opts.messageId, send2.messageId);
+  assert.equal(opts.sourceAgentId, fixtureCtx().row.agentId);
   assert.equal(opts.messageId, effectIdentity('send', 'req-s2'));
 
   // (c) The attempt row is bound/running after the sequence.
@@ -833,7 +834,7 @@ test('production observer answers placement/resource observations bounded', asyn
 });
 
 
-test('host event observer correlates turn_ended timeline messageIds', async t => {
+for (const projected of [false, true]) test(`host event observer correlates ${projected ? 'projected agent' : 'legacy'} delivery IDs`, async t => {
   const w = world(t);
   const ledger = fixtureLedger(w);
   const core = coreDouble(ledger);
@@ -844,12 +845,18 @@ test('host event observer correlates turn_ended timeline messageIds', async t =>
   ledger.taskEntries.push({
     kind: 'action', entityId: 'act-send-1', revision: 1, assignmentId: 'asg-1',
     actionId: 'act-send-1', actionKind: 'send', state: 'issued',
-    taskId: 'task-1', attemptId: 'att-1', resultId: null, body: { messageId }, receipt: null,
+    taskId: 'task-1', attemptId: 'att-1', resultId: null, callerAgentId: 'agent-owner', body: { messageId }, receipt: null,
   });
   const observer = createTaskHostEventObserver(deps);
+  if (projected) for (const [sender, event] of [['foreign', 'message'], ['agent-owner', 'finished'], ['agent-owner', 'errored']]) {
+    await observer.onTurnEnded(fixtureCtx(), { agentId: 'agent-new', timeline: [{ type: 'tool_call', name: 'agent_message', status: 'completed', error: null,
+      callId: 'paseo-agent-message:' + messageId, agentMessage: { event, sender: { id: sender }, text: 'not a delivery' } }] });
+    assert.equal(ledger.taskEntries.find(r => r.actionId === 'act-send-1').state, 'issued');
+  }
   await observer.onTurnEnded(fixtureCtx(), {
     agentId:'agent-new',turnId: 'turn-1', outcome: 'completed',
-    timeline: [{ type: 'user_message', messageId }],
+    timeline: [projected ? { type: 'tool_call', name: 'agent_message', status: 'completed', error: null,
+      callId: 'paseo-agent-message:' + messageId, agentMessage: { event: 'message', sender: { id: 'agent-owner' }, text: 'work' } } : { type: 'user_message', messageId }],
   });
   const row = ledger.taskEntries.find(r => r.actionId === 'act-send-1');
   assert.equal(row.state, 'observed');
