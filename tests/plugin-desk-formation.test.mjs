@@ -54,6 +54,7 @@ test('delivery server: ordinary formation derives native parent/placement, obser
   assert.equal(out.state, 'recorded', JSON.stringify(out));
   assert.equal(out.result.state, 'host-accepted', JSON.stringify(out));
   assert.deepEqual(f.effects.map(row => row.kind), ['create', 'send']);
+  assert.equal(f.effects[1].options.sourceAgentId, 'parent');
   const create = f.effects[0].options;
   assert.equal(create.parent, 'parent'); assert.equal('prompt' in create, false); assert.equal('cwd' in create, false);
   assert.deepEqual(create.config, { provider: 'slp-codex-lead/model/variant', modeId: 'full-access', thinkingOptionId: 'high', featureValues: { fast_mode: true } });

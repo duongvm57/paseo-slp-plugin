@@ -294,7 +294,7 @@ function assertHistoricalWrite(previous: ReceiptValue | null, next: ReceiptValue
   });
   visit(next, (kind, value, projection) => {
     if (projectionProviderIds(projection).length === OWNED_PROVIDER_IDS.length) return;
-    if (!known.get(kind)?.has(JSON.stringify(value))) throw new Error(`new or modified historical ${kind} refused; current writes require current15, historical evidence remains verbatim`);
+    if (!known.get(kind)?.has(JSON.stringify(value))) throw new Error(`new or modified historical ${kind} refused; current writes require current18, historical evidence remains verbatim`);
   });
 }
 

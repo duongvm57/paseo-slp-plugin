@@ -153,7 +153,7 @@ test('managed OpenCode ACP shim refuses missing grants before child spawn; live 
   writeBinary('opencode v2.0.24');
   const home = join(f.dir, 'home'); const stableRoot = join(home, 'slp-runtime');
   const installed = join(stableRoot, f.sha); install(root, installed);
-  const binaries = Object.fromEntries(['codex','pi','devin','claude','opencode'].map(id => [id, id === 'opencode' ? { available: true, path: fake, version: 'opencode v2.0.24' } : { available: false, path: null, version: null }]));
+  const binaries = Object.fromEntries(['codex','pi','devin','claude','opencode','antigravity'].map(id => [id, id === 'opencode' ? { available: true, path: fake, version: 'opencode v2.0.24' } : { available: false, path: null, version: null }]));
   const set = await createLauncherBuilder().publish({ daemonHome: home, stableRoot, operationId: 'grant-proof', candidate: { sha256: f.sha, runtimePath: installed }, node: { path: process.execPath, version: process.versions.node, execPath: process.execPath }, binaries });
   const launcher = join(set.directory, 'slp-opencode-peer');
   const message = { jsonrpc: '2.0', id: 1, method: 'session/prompt', params: { sessionId: 's', prompt: [{ type: 'text', text: 'local echo fixture' }] } };

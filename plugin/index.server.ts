@@ -2,6 +2,7 @@
 // Synchronous contribution returning cleanup; the connected API arrives in
 // handlers. Lead wires the lane modules here; manager alone owns the mutation
 // mutex, state transitions and connected SDK calls.
+import { deliveryTimelineItem } from "./server/delivered-input.ts";
 import type { PluginServerContribution } from "@getpaseo/plugin/server";
 import { realpathSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -33,10 +34,16 @@ import { readWorkspaceWorkflow } from "./server/workflow-view.ts";
 import type { TaskHostApi } from "./server/desk-task-execution-host.ts";
 import type { TaskRuntimeApi } from "./server/desk-task-runtime.ts";
 import type { FormationWorkspaceApi } from "./server/desk-placement.ts";
+import { ROLES } from "./shared/runtime/families.ts";
+import { createAntigravityProvider } from "./server/antigravity/provider.ts";
 // Host note: this must stay a hoisted function declaration, not a const —
 // the daemon compiler's Hermes interop eagerly copies export values before
 // module bodies run, so `export default const` evaluates to undefined.
 export default function contribute(server: Parameters<PluginServerContribution>[0]): ReturnType<PluginServerContribution> {
+  // Registration publishes definitions only; probes/processes start on demand.
+  // Host config cannot extend another plugin's provider, so each role owns a
+  // registered native definition whose configured command is the sentinel gate.
+  for (const role of ROLES) server.registerProvider(createAntigravityProvider(`slp-antigravity-${role}`, `SLP Antigravity ${role}`));
   let taskApi: (TaskHostApi & TaskRuntimeApi & FormationWorkspaceApi) | null = null;
   const noteTaskApi = (paseo: (TaskHostApi & TaskRuntimeApi & FormationWorkspaceApi) | undefined) => { if (paseo !== undefined) taskApi = paseo; };
   const materializer = createMaterializer(embeddedPayload);
@@ -205,9 +212,7 @@ export default function contribute(server: Parameters<PluginServerContribution>[
     deskBridge.notePaseo(paseo);
     return deskBridge.taskTurnEnded({
       agentId: event.agent.id, ...(event.turnId === null ? {} : { turnId: event.turnId }), outcome: event.outcome.kind,
-      timeline: event.timeline.map(item => item.type === "user_message"
-        ? { type: item.type, messageId: item.messageId, clientMessageId: item.clientMessageId }
-        : { type: item.type }),
+      timeline: event.timeline.map(deliveryTimelineItem),
     });
   });
   // A resumed ACP turn can dispatch Desk tools before an RPC, create hook,

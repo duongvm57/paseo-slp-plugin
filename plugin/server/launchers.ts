@@ -133,7 +133,7 @@ function buildManifest(request: LaunchSetRequest): LaunchManifest {
       : { available: false, path: null, version: null };
   }
   if (persistedFamilyIds(Object.keys(request.binaries)) !== FAMILY_IDS) {
-    throw new OperationConflict("INVALID_REQUEST", "new launch sets require the exact current5 binary domain");
+    throw new OperationConflict("INVALID_REQUEST", "new launch sets require the exact current6 binary domain");
   }
   const manifest: LaunchManifest = {
     schemaVersion: 1,
@@ -283,7 +283,7 @@ function parseManifest(bytes: Buffer): LaunchManifest {
   const historicalFamilies = Array.isArray(m.families) ? persistedFamilyIds(m.families) : null;
   const binaryFamilies = persistedFamilyIds(Object.keys(binaries));
   if (historicalFamilies === null || binaryFamilies === null || historicalFamilies.length !== binaryFamilies.length) {
-    fail("families/binaries must share exact legacy4 or current5 domain");
+    fail("families/binaries must share exact legacy4, legacy5 or current6 domain");
   }
   for (const family of historicalFamilies) {
     const b = (binaries as Record<string, unknown>)[family] as BinaryResolution | undefined;

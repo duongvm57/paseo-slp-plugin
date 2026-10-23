@@ -22,6 +22,7 @@
 // local reason. Unverified evidence never carries a body out of this module,
 // and neither does a send whose outcome is not accepted.
 import { createHash } from "node:crypto";
+import { agentMessageOf } from "../delivered-input.ts";
 import type { AgentTimelineItem } from "@getpaseo/protocol/agent-types";
 import type { PluginHookAgent, PluginLifecycleEvents } from "@getpaseo/plugin/server";
 import { z } from "zod";
@@ -37,7 +38,7 @@ export type TurnEnded = PluginLifecycleEvents["agent.turn_ended"];
 export type TurnStarted = PluginLifecycleEvents["agent.turn_started"];
 
 /** Parser generation recorded with every assessment (ring metadata). */
-export const CAPTURE_VERSION = "slp-capture-7";
+export const CAPTURE_VERSION = "slp-capture-8";
 
 // Bounded reason vocabulary (wire-visible in the observations list — reason
 // codes only, never message text). Codes no longer produced stay listed so
@@ -152,28 +153,50 @@ export type Capture =
       sends: Send[];
       sendCoverage: Coverage;
       issues: string[];
-      /** user_message positions inside the CURRENT turn slice — the same
-       *  slice send extraction used, so at most the turn-opening message
-       *  (latestTurn starts at the last user_message; nothing older can
+      /** Delivered input positions inside the CURRENT communication slice — the same
+       *  slice send extraction used, so at most the slice-opening message
+       *  (latestTurn starts at the last delivered input; nothing older can
        *  anchor this turn's handling). The raw material for the end-only
        *  chronology fallback (see handbackAnchorIndex). Text is the
        *  family-verified message body (a role prefix removed); an
        *  unverified mapping leaves the raw text, which can never match an
        *  envelope. Bodies live in-process only; the gate-down scrub empties
        *  them like every other captured body. */
-      anchors: { index: number; text: string }[];
+      anchors: MessageAnchor[];
     };
 
 export const fingerprint = (value: unknown): string =>
   createHash("sha256").update(JSON.stringify(value)).digest("hex");
 
-// The latest user_message is a CANDIDATE boundary — v0.8 timeline items carry
-// no per-item turn id, so a handback can only be read as "last assistant
-// message of the latest turn slice" (spec point 3). Never scan older turns.
+interface MessageAnchor {
+  index: number;
+  text: string;
+  notification?: { senderId: string; event: string };
+}
+
+// Host 0.12 projects delivered prompts into this existing tool_call variant.
+// Decode only the semantic payload; detail.text is presentation, never fallback
+// provenance. This does not authenticate a sender supplied by a WS client.
+const projectedInput = (item: AgentTimelineItem): boolean =>
+  item?.type === "tool_call" && item.name === "agent_message";
+function inputMessage(item: AgentTimelineItem): { text: string; messageId: string | null; notification?: MessageAnchor["notification"] } | null {
+  if (item.type === "user_message") return { text: item.text, messageId: item.messageId ?? item.clientMessageId ?? null };
+  const message = agentMessageOf(item);
+  if (message === null) return null;
+  return {
+    text: message.text, messageId: message.messageId,
+    notification: { senderId: message.sender.id, event: message.event },
+  };
+}
+
+// The latest delivered input is a CANDIDATE communication boundary. Host
+// timelines have no per-item turn id; 0.12 agent inputs project to tool_call
+// and may steer a running turn. Never infer a new lifecycle turn from one.
+// Older sends are conservatively excluded instead of attributed past an input.
 export function latestTurn(timeline: readonly AgentTimelineItem[]): readonly AgentTimelineItem[] {
-  // ES2022 lib — no findLastIndex; the slice starts at the last user_message.
+  // ES2022 lib — no findLastIndex; the slice starts at the last delivered input.
   const start = turnStart(timeline);
-  // No user_message at all: the event items are this turn's own records (a
+  // No delivered input at all: retain the existing unknown-boundary path (a
   // Lead turn that consists of a single send_agent_prompt has no fresh user
   // input). Dropping them would lose a delivered send entirely — fall back
   // to the whole item list; chronology gating still applies downstream.
@@ -181,7 +204,7 @@ export function latestTurn(timeline: readonly AgentTimelineItem[]): readonly Age
 }
 const turnStart = (timeline: readonly AgentTimelineItem[]): number => {
   for (let i = timeline.length - 1; i >= 0; i -= 1) {
-    if (timeline[i]?.type === "user_message") return i;
+    if (timeline[i]?.type === "user_message" || projectedInput(timeline[i])) return i;
   }
   return -1;
 };
@@ -297,7 +320,7 @@ type MessageAdapter = {
   userMessage(text: string, role: "lead" | "peer"): { text: string; shapeId: string } | null;
 };
 
-// Fixture-backed message mappings: first user_message of the turn slice is
+// Fixture-backed message mappings: opening delivered input of the communication slice is
 // the brief, the last assistant_message is the handback.
 //   codex  — live-codex-peer.timeline.json (+ upstream corpus)
 //   claude — live-claude-peer.timeline.json
@@ -366,6 +389,7 @@ const MESSAGE_ADAPTERS: Partial<Record<FamilyId, MessageAdapter>> = {
 const HANDBACK_SHAPES: Record<FamilyId, string> = {
   codex: "codex-message-v1", claude: "claude-message-v1", devin: "devin-acp-message-v1", pi: "pi-message-v1",
   opencode: "opencode-unverified",
+  antigravity: "antigravity-unverified",
 };
 
 const unverifiedMessage = (reason: string): Evidence<CapturedMessage> => ({ state: "unverified", reason });
@@ -386,7 +410,11 @@ function peerMessages(family: FamilyId | null, timeline: readonly AgentTimelineI
       handback: unverifiedMessage(VISIBILITY.turnBoundaryUnverified),
     };
   }
-  const opening = timeline[start] as Extract<AgentTimelineItem, { type: "user_message" }>;
+  const opening = inputMessage(timeline[start]);
+  if (opening === null) return {
+    brief: unverifiedMessage(VISIBILITY.turnBoundaryUnverified),
+    handback: unverifiedMessage(VISIBILITY.turnBoundaryUnverified),
+  };
   const body = adapter.userMessage(opening.text, "peer");
   const brief: Evidence<CapturedMessage> = body === null
     ? unverifiedMessage(VISIBILITY.rolePrefixUnrecognized)
@@ -577,6 +605,7 @@ const SEND_ADAPTERS: Record<FamilyId, SendAdapter> = {
   pi: piSends,
   // Registry membership/role delivery does not verify timeline shapes.
   opencode: { coverage: { state: "unverified", reason: VISIBILITY.sendCoverageUnverified }, parse: () => null },
+  antigravity: { coverage: { state: "unverified", reason: VISIBILITY.sendCoverageUnverified }, parse: () => null },
 };
 
 /** Send coverage for a provider named by a verified host record; null or a
@@ -730,8 +759,11 @@ export function capture(event: TurnEnded, activeLeads: { has(id: string): boolea
     sends: extraction.sends,
     sendCoverage: extraction.coverage,
     issues: [...issues],
-    anchors: turn.flatMap((item, index) =>
-      item.type === "user_message" ? [{ index, text: adapter?.userMessage(item.text, "lead")?.text ?? item.text }] : []),
+    anchors: turn.flatMap((item, index) => {
+      const input = inputMessage(item);
+      return input === null ? [] : [{ index, text: adapter?.userMessage(input.text, "lead")?.text ?? input.text,
+        ...(input.notification ? { notification: input.notification } : {}) }];
+    }),
   };
 }
 
@@ -746,7 +778,7 @@ export function capture(event: TurnEnded, activeLeads: { has(id: string): boolea
 // Plugin RPC timed out"), and gate-pause windows drop starts at the hook.
 // When no usable start is on record, the only honest fallback is ordering the
 // turn_ended event proves INSIDE the same slice the sends were extracted
-// from: the turn-opening user_message is this case's handback delivery — the
+// from: the slice-opening delivered input is this case's handback delivery — the
 // host's <paseo-system> finish notification embedding the handback body
 // (agent-prompt.js formatFinishNotificationBody; the peer's identity must
 // hold at the status-line position, not anywhere in the body). A bare
@@ -758,13 +790,19 @@ export function capture(event: TurnEnded, activeLeads: { has(id: string): boolea
 // nothing either — the fallback never invents evidence and never fabricates
 // a start timestamp.
 export function handbackAnchorIndex(
-  anchors: readonly { index: number; text: string }[],
+  anchors: readonly MessageAnchor[],
   peerId: string,
   handbackText: string | null,
 ): number {
   let first = -1;
   for (const anchor of anchors) {
-    const matched = handbackText !== null && isFinishAnchor(anchor.text, peerId, handbackText);
+    // New host payloads already contain decoded body text. Keep the legacy
+    // status-line/body correlation as well as the structured finished event;
+    // neither a bare message nor cancellation is a finish anchor.
+    const matched = handbackText !== null && (anchor.notification
+      ? anchor.notification.event === "finished" && anchor.notification.senderId === peerId &&
+        isFinishAnchor(`${SYSTEM_PREFIX}${anchor.text}${SYSTEM_SUFFIX}`, peerId, handbackText)
+      : isFinishAnchor(anchor.text, peerId, handbackText));
     if (matched && (first < 0 || anchor.index < first)) first = anchor.index;
   }
   return first;

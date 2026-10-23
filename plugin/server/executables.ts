@@ -27,7 +27,7 @@ import type {
   ResolvedNode,
 } from "../shared/contracts.ts";
 
-import { FAMILY_IDS } from "../shared/runtime/families.ts";
+import { FAMILY_IDS, FAMILY_EXECUTABLE } from "../shared/runtime/families.ts";
 import { supportsOpenCodeVersion, OPENCODE_VERSION_REQUIREMENT } from "../shared/runtime/opencode-version.mjs";
 
 // The family set derives from the shared registry (families.ts) — the export
@@ -372,7 +372,7 @@ async function resolveBinary(
   // pinned a versioned realpath. Once recorded, the alias follows future
   // vendor updates without another SLP activation.
   for (const dir of pathDirs(ctx.env)) {
-    const candidate = join(dir, family);
+    const candidate = join(dir, FAMILY_EXECUTABLE[family]);
     const real = await executableRealpath(candidate);
     if (real === null || rejectBinary(real, node, ctx)) continue;
     try {

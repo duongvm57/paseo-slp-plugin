@@ -8,7 +8,7 @@ import { createManager } from '../plugin/server/manager.ts';
 import { canonicalSha256, effectiveView, extractProjection, unrelatedPersistedView } from '../plugin/server/config-view.ts';
 import { classifyState, patchForDirection } from '../plugin/server/config-transaction.ts';
 import { Receipt, OwnedProvider, PersistedProvider, Projection } from '../plugin/shared/contracts.ts';
-import { LEGACY_OWNED_PROVIDER_IDS, OWNED_PROVIDER_IDS } from '../plugin/shared/runtime/families.ts';
+import { LEGACY_FAMILY_IDS, PRE_ANTIGRAVITY_FAMILY_IDS, FAMILY_IDS, ROLES, LEGACY_OWNED_PROVIDER_IDS, OWNED_PROVIDER_IDS } from '../plugin/shared/runtime/families.ts';
 import { activateInput, deactivateInput, reconcileInput, makePluginFixture, makeDeps, makeDaemon, receiptPath, readReceipt, readConfigJson, sha256, waitTerminal, waitRecovery, dirBlocker, armRecoveryFault } from './helpers/plugin-doubles.mjs';
 
 const addedIds = ['slp-opencode-supervisor', 'slp-opencode-lead', 'slp-opencode-peer'];
@@ -16,7 +16,9 @@ const encoded = value => JSON.stringify(value, null, 2) + '\n';
 
 // Author a synthetic legacy corpus. These conversions belong only to fixture
 // construction: production must never perform them on persisted history.
-async function legacyFixture(t, { inactive = false, pending = false } = {}) {
+async function legacyFixture(t, { inactive = false, pending = false, families = LEGACY_FAMILY_IDS } = {}) {
+  const removedFamilies = FAMILY_IDS.filter(family => !families.includes(family));
+  const addedIds = removedFamilies.flatMap(family => ROLES.map(role => `slp-${family}-${role}`));
   const f = await makePluginFixture(t);
   const manager = createManager(f.deps);
   if (pending) { dirBlocker(f.home); armRecoveryFault(f.deps, 'activate', 'patch-dispatched'); }
@@ -33,7 +35,7 @@ async function legacyFixture(t, { inactive = false, pending = false } = {}) {
     if (!binding || sets.has(binding.launchSetSha256)) return;
     const oldDir = dirname(binding.launcherFiles[0].path);
     const manifest = JSON.parse(readFileSync(join(oldDir, 'launch.json'), 'utf8'));
-    delete manifest.binaries.opencode;
+    for (const family of removedFamilies) delete manifest.binaries[family];
     manifest.launchers = manifest.launchers.filter(file => !addedIds.includes(file.id));
     const bytes = encoded(manifest); const manifestSha = sha256(bytes);
     const setSha = sha256(manifestSha + manifest.launchers.map(file => file.sha256).join(''));
@@ -51,7 +53,8 @@ async function legacyFixture(t, { inactive = false, pending = false } = {}) {
     const set = sets.get(value.launchSetSha256);
     value.launchSetSha256 = set.setSha; value.launchManifestSha256 = set.manifestSha;
     value.launcherFiles = value.launcherFiles.filter(file => !addedIds.includes(basename(file.path))).map(file => ({ ...file, path: join(set.directory, basename(file.path)) }));
-    delete value.binaries.opencode; projection(value.owned); snapshot(value.beforeActivation);
+    for (const family of removedFamilies) delete value.binaries[family];
+    projection(value.owned); snapshot(value.beforeActivation);
     value.postPatchPersistedShapeSha256 = canonicalSha256(value.owned);
     value.bindingSha256 = canonicalSha256({ candidateSha256: value.candidateSha256, payloadSha256: value.payloadSha256, launchSetSha256: value.launchSetSha256, owned: value.owned });
   };
@@ -73,6 +76,25 @@ async function legacyFixture(t, { inactive = false, pending = false } = {}) {
   assert.deepEqual(journal.read(join(f.home, 'slp-runtime')), receipt, 'fixture is an admitted legacy record before scenarios');
   return { ...f, receipt, bytes, journal, stableRoot: join(f.home, 'slp-runtime'), rootOperationId: start.operation.operationId, manager: createManager(makeDeps({ payload: f.deps.payload, execOpts: { binaries: f.binaries } })) };
 }
+
+test('pre-Antigravity five-family histories preserve bytes across read/CAS and rebind to six families', async t => {
+  const f = await legacyFixture(t, { families: PRE_ANTIGRAVITY_FAMILY_IDS });
+  assert.equal(Object.keys(f.receipt.binding.binaries).length, 5);
+  assert.equal(Object.keys(f.receipt.binding.owned.providers).length, 15);
+  assert.equal(Object.hasOwn(f.receipt.binding.binaries, 'antigravity'), false);
+  assert.equal(readFileSync(receiptPath(f.home), 'utf8'), f.bytes);
+  const unchanged = structuredClone(f.receipt); unchanged.revision++;
+  f.journal.write(f.stableRoot, unchanged);
+  assert.deepEqual(readReceipt(f.home).binding, f.receipt.binding);
+  const edited = structuredClone(unchanged); edited.revision++;
+  edited.binding.verifiedAt = '2026-10-22T00:00:00.000Z';
+  assert.throws(() => f.journal.write(f.stableRoot, edited), /historical/);
+  const start = await f.manager.activate(activateInput(f.home, f.deps.payload, randomUUID()), f.daemon);
+  const done = await waitTerminal(f.manager, f.home, start.operation.operationId, f.daemon);
+  assert.equal(done.operation.outcome, 'succeeded', JSON.stringify(done.conflicts));
+  assert.equal(Object.keys(readReceipt(f.home).binding.binaries).length, 6);
+  assert.deepEqual(readReceipt(f.home).operations[0], f.receipt.operations[0]);
+});
 
 test('legacy active and inactive histories read verbatim, preserve every digest and do not gain absent OpenCode slots', async t => {
   for (const inactive of [false, true]) {
@@ -147,13 +169,13 @@ test('authorized rebind emits current15/current5 while preserving the exact lega
   const done = await waitTerminal(f.manager, f.home, start.operation.operationId, f.daemon);
   assert.equal(done.operation.outcome, 'succeeded', JSON.stringify(done.conflicts));
   const read = readReceipt(f.home);
-  assert.equal(Object.keys(read.binding.binaries).length, 5); assert.equal(Object.keys(read.binding.owned.providers).length, 15);
+  assert.equal(Object.keys(read.binding.binaries).length, 6); assert.equal(Object.keys(read.binding.owned.providers).length, 18);
   assert.deepEqual(read.operations[0], f.receipt.operations[0]); assert.deepEqual(read.binding.beforeActivation, f.receipt.binding.beforeActivation);
   assert.deepEqual(readConfigJson(f.home).agents.providers.personal, config.agents.providers.personal);
   const result = readConfigJson(f.home).daemon.agentProfiles.find(p => p.id === 'slp-lead');
   for (const key of ['model', 'modeId', 'thinkingOptionId', 'featureValues']) assert.deepEqual(result[key], profile[key]);
   const plan = read.operations.at(-1).plan;
-  assert.equal(Object.keys(plan.before.owned.providers).length, 15); assert.equal(Object.keys(plan.afterOwned.providers).length, 15);
+  assert.equal(Object.keys(plan.before.owned.providers).length, 18); assert.equal(Object.keys(plan.afterOwned.providers).length, 18);
   assert.deepEqual(plan.previousBinding, f.receipt.binding);
 });
 
@@ -178,6 +200,29 @@ test('a provider absent from the legacy vocabulary is never silently claimed or 
   assert.ok(!f.daemon.patchCalls.at(-1).removeProviders.includes('slp-opencode-peer'));
 });
 
+test('five-family history cannot acquire a foreign Antigravity slot and deactivation preserves it', async t => {
+  const f = await legacyFixture(t, { families: PRE_ANTIGRAVITY_FAMILY_IDS });
+  const config = readConfigJson(f.home);
+  const foreign = { label: 'Human Antigravity', command: ['/bin/true'], enabled: true, env: {} };
+  config.agents.providers['slp-antigravity-peer'] = foreign;
+  writeFileSync(join(f.home, 'config.json'), encoded(config));
+  f.daemon = await makeDaemon(t, f.home);
+  const before = readFileSync(join(f.home, 'config.json'), 'utf8');
+  const patchesBefore = f.daemon.patchCalls.length;
+  const start = await f.manager.activate(activateInput(f.home, f.deps.payload, randomUUID()), f.daemon);
+  const failed = await waitTerminal(f.manager, f.home, start.operation.operationId, f.daemon);
+  assert.equal(failed.operation.outcome, 'failed');
+  assert.ok(readReceipt(f.home).operations.at(-1).conflicts.some(c => c.code === 'COLLISION'));
+  assert.equal(f.daemon.patchCalls.length, patchesBefore);
+  assert.equal(readFileSync(join(f.home, 'config.json'), 'utf8'), before);
+  assert.deepEqual(readReceipt(f.home).binding, f.receipt.binding);
+  const deactivate = await f.manager.deactivate(deactivateInput(f.home, randomUUID(), f.receipt.binding.bindingSha256), f.daemon);
+  const done = await waitTerminal(f.manager, f.home, deactivate.operation.operationId, f.daemon);
+  assert.equal(done.operation.outcome, 'succeeded', JSON.stringify(done.conflicts));
+  assert.deepEqual(readConfigJson(f.home).agents.providers['slp-antigravity-peer'], foreign);
+  assert.ok(!f.daemon.patchCalls.at(-1).removeProviders.includes('slp-antigravity-peer'));
+});
+
 test('pending legacy recovery completes or restores its original pinned plan without adding OpenCode ownership', async t => {
   for (const action of ['complete', 'restore-before']) {
     const f = await legacyFixture(t, { pending: true });
@@ -198,13 +243,13 @@ test('legacy endpoint comparison hashes its own unrelated domain; inverse recove
   const f = await legacyFixture(t, { pending: true }); const plan = f.receipt.operations[0].plan;
   const config = readConfigJson(f.home); const effective = effectiveView((await f.daemon.config.get()).config);
   assert.equal(classifyState(config, (await f.daemon.config.get()).config, plan).class, 'before');
-  const current = extractProjection(config, 'COLLISION'); assert.equal(Object.keys(current.providers).length, 15);
+  const current = extractProjection(config, 'COLLISION'); assert.equal(Object.keys(current.providers).length, 18);
   const historical = extractProjection(config, 'COLLISION', LEGACY_OWNED_PROVIDER_IDS); assert.equal(Object.keys(historical.providers).length, 12);
   const changed = structuredClone(config); changed.agents ??= {}; changed.agents.providers ??= {}; changed.agents.providers['slp-opencode-peer'] = { extends: 'opencode', label: 'External', command: ['/bin/true'], enabled: true, env: {} };
   assert.notEqual(canonicalSha256(unrelatedPersistedView(changed, LEGACY_OWNED_PROVIDER_IDS)), canonicalSha256(unrelatedPersistedView(config, LEGACY_OWNED_PROVIDER_IDS)));
   const inverse = patchForDirection(plan, 'activate', 'inverse', changed);
   assert.deepEqual(inverse.removeProviders.sort(), [...LEGACY_OWNED_PROVIDER_IDS].sort());
-  assert.equal(OWNED_PROVIDER_IDS.length, 15); assert.equal(effective.enabled, true);
+  assert.equal(OWNED_PROVIDER_IDS.length, 18); assert.equal(effective.enabled, true);
 });
 
 

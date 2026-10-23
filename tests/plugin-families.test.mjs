@@ -34,9 +34,9 @@ import { FAMILIES as VIEW_FAMILIES, OWNED_PROVIDER_IDS as VIEW_OWNED, PROVIDER_E
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 
-test('the registry declares the five current families on two transports', () => {
-  assert.deepEqual(FAMILY_IDS, ['codex', 'pi', 'devin', 'claude', 'opencode']);
-  assert.deepEqual(HOOK_FAMILY_IDS, ['codex', 'pi', 'claude']);
+test('the registry declares the six current families on two transports', () => {
+  assert.deepEqual(FAMILY_IDS, ['codex', 'pi', 'devin', 'claude', 'opencode', 'antigravity']);
+  assert.deepEqual(HOOK_FAMILY_IDS, ['codex', 'pi', 'claude', 'antigravity']);
   assert.deepEqual(WRAPPER_FAMILY_IDS, ['devin', 'opencode']);
   // The registry is pure — no imports at all, so the client bundle can
   // never pull a server-only or node module through it.
@@ -60,9 +60,9 @@ test('every slp-<family>-<role> id classifies correctly by transport', () => {
 });
 
 test('OWNED_PROVIDER_IDS is exactly the family × role cartesian product', () => {
-  assert.equal(OWNED_PROVIDER_IDS.length, 15);
+  assert.equal(OWNED_PROVIDER_IDS.length, 18);
   assert.equal(OWNED_PROVIDER_IDS.length, FAMILY_IDS.length * ROLES.length);
-  assert.equal(new Set(OWNED_PROVIDER_IDS).size, 15);
+  assert.equal(new Set(OWNED_PROVIDER_IDS).size, 18);
   assert.deepEqual(
     [...OWNED_PROVIDER_IDS].sort(),
     FAMILY_IDS.flatMap(family => ROLES.map(role => `slp-${family}-${role}`)).sort(),

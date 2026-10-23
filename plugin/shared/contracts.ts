@@ -11,7 +11,7 @@ import { z } from "zod";
 import { defineRpc } from "@getpaseo/plugin";
 import { JEV_TRANSPORTS } from "./runtime/jev-transport.ts";
 import { swe2ModelPattern } from "./runtime/model-constraints.ts";
-import { FAMILY_IDS, OWNED_PROVIDER_ID_RE, PROVIDER_EXTENDS_IDS, ROLES, persistedProviderIds, persistedFamilyIds } from "./runtime/families.ts";
+import { FAMILY_IDS, OWNED_PROVIDER_ID_RE, PROVIDER_EXTENDS_IDS, ROLES, persistedProviderIds, persistedFamilyIds, familyFromProviderId, familyUsesRegistration } from "./runtime/families.ts";
 
 /** The serialized-RPC byte contract: every request and response envelope
  *  stays inside this many UTF-8 bytes. Defined once here — producers bound
@@ -630,7 +630,7 @@ export const PEER_PASEO_TOOLS_POLICY = {
 } as const;
 
 export const OwnedProvider = z.object({
-  extends: z.enum(PROVIDER_EXTENDS_IDS),
+  extends: z.enum(PROVIDER_EXTENDS_IDS).optional(),
   label: z.string(),
   // argv of one or two absolute elements. Every generated entry is
   // single-element — the launch-set launcher argv[0] (the host's argv0
@@ -648,7 +648,7 @@ export const OwnedProvider = z.object({
 // Current authored providers still use OwnedProvider/current emission values;
 // this decoder does not normalize native records into ACP or widen ID domains.
 export const PersistedProvider = OwnedProvider.extend({
-  extends: z.enum([...PROVIDER_EXTENDS_IDS, "opencode"]),
+  extends: z.enum([...PROVIDER_EXTENDS_IDS, "opencode"]).optional(),
 });
 export const OwnedProfileSlot = z.object({
   index: z.number().int().nonnegative(), value: Profile,
@@ -660,7 +660,14 @@ export const Projection = z.object({
   injectIntoAgents: Presence(z.boolean()),
 }).strict().superRefine((projection, ctx) => {
   if (persistedProviderIds(Object.keys(projection.providers)) === null) {
-    ctx.addIssue({ code: "custom", path: ["providers"], message: "projection requires exact legacy12 or current15 provider keys" });
+    ctx.addIssue({ code: "custom", path: ["providers"], message: "projection requires exact legacy12, legacy15 or current18 provider keys" });
+  }
+  for (const [id, presence] of Object.entries(projection.providers)) {
+    if (!presence.present) continue;
+    const family = familyFromProviderId(id);
+    if (family !== null && (presence.value.extends === undefined) !== familyUsesRegistration(family)) {
+      ctx.addIssue({ code: "custom", path: ["providers", id], message: "only registered native providers omit extends" });
+    }
   }
 });
 export const Snapshot = z.object({
@@ -686,16 +693,15 @@ export const Binding = z.object({
   runtimePath: AbsolutePath,
   launchSetSha256: Sha,
   launchManifestSha256: Sha,
-  // Legacy bindings record all twelve shim launchers; hook-era bindings
-  // current bindings record fifteen — twelve gates plus the three
-  // devin shim launchers (the transitional devin-only layout also
-  // validates). The launch manifest's launcherFamilies/gateFamilies fields
+  // Legacy bindings retain their exact launcher sets; current bindings
+  // record eighteen launchers: twelve gates and six ACP shims.
+  // The launch manifest's launcherFamilies/gateFamilies fields
   // carry the per-file kind.
   launcherFiles: z.array(LauncherFile).min(1),
   node: z.object({ path: AbsolutePath, version: z.string().min(1) }).strict(),
   // No defaults: absence belongs to the historical domain and must stay
   // absent when old fields and their digests are verified.
-  binaries: z.object({ ...familyKeyed(Binary), opencode: Binary.optional() }).strict(),
+  binaries: z.object({ ...familyKeyed(Binary), opencode: Binary.optional(), antigravity: Binary.optional() }).strict(),
   baseline: z.enum(["fresh", "adopted-observed"]),
   beforeActivation: Snapshot,
   mcpBefore: z.object({ enabled: FlagBefore, injectIntoAgents: FlagBefore }).strict(),
@@ -707,7 +713,7 @@ export const Binding = z.object({
   const families = persistedFamilyIds(Object.keys(binding.binaries));
   const ids = persistedProviderIds(Object.keys(binding.owned.providers));
   if (families === null || ids === null || ids.length !== families.length * ROLES.length) {
-    ctx.addIssue({ code: "custom", path: ["binaries"], message: "binding binary/owned domains must both be exact legacy4/12 or current5/15" });
+    ctx.addIssue({ code: "custom", path: ["binaries"], message: "binding binary/owned domains must both be exact legacy4/12, legacy5/15 or current6/18" });
   }
   if (ids !== null && Object.keys(binding.beforeActivation.owned.providers).length > ids.length) {
     ctx.addIssue({ code: "custom", path: ["beforeActivation"], message: "a historical binding cannot have a newer baseline vocabulary" });
@@ -730,7 +736,7 @@ export const Plan = z.object({
   restoreInjectionTo: z.boolean().nullable(),
 }).strict().superRefine((plan, ctx) => {
   if (Object.keys(plan.before.owned.providers).length !== Object.keys(plan.afterOwned.providers).length) {
-    ctx.addIssue({ code: "custom", path: ["afterOwned"], message: "plan endpoints require one exact legacy12 or current15 domain" });
+    ctx.addIssue({ code: "custom", path: ["afterOwned"], message: "plan endpoints require one exact legacy12, legacy15 or current18 domain" });
   }
   const size = Object.keys(plan.afterOwned.providers).length;
   if ((plan.nextBinding !== null && Object.keys(plan.nextBinding.owned.providers).length !== size)

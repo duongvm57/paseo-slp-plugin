@@ -31,7 +31,7 @@ const RUNTIME_CONTROL_ENV_KEYS = [
 // NODE_OPTIONS is cleared as well: it would inject flags into the frozen
 // helper Node commands rendered through SLP_NODE_BIN.
 const STRIPPED_ENV_KEYS = [...RUNTIME_CONTROL_ENV_KEYS, 'NODE_OPTIONS'];
-const FAMILIES = ['codex', 'pi', 'devin', 'claude', 'opencode'];
+const FAMILIES = ['codex', 'pi', 'devin', 'claude', 'opencode', 'antigravity'];
 const ROLES = ['supervisor', 'lead', 'peer'];
 
 

@@ -1,0 +1,13 @@
+Antigravity native provider adapted from getpaseo/paseo v0.12.0:
+plugins/antigravity-provider/server/
+https://github.com/getpaseo/paseo/tree/v0.12.0/plugins/antigravity-provider/server
+Copyright (c) 2025-present Mohamed Boudra
+Licensed under Apache-2.0; see LICENSE.
+
+SLP modifications: configurable role-specific registration IDs and labels,
+requiresConfiguration with an inert default command rejected before discovery/connect, omitted icon, repository-relative TypeScript imports, and erasable
+constructor fields for the repository's native TypeScript runtime.
+
+Additional SLP implementation: private native MCP customization carriers,
+per-open stdio/Streamable HTTP relays, v3 namespaced MCP binding checks, per-prompt role
+reassertion and CLI 1.4.4 admission. These are local additions to upstream.

@@ -61,7 +61,7 @@ No observer code lives in the immutable `bin/`/`src/` runtime payload.
 The observed provider envelopes and their provenance live with the
 [supervision fixtures](../../tests/fixtures/supervision/README.md).
 Only observed normalized shapes open a transmission lane; derived examples
-are not positive evidence. Devin send outcomes and OpenCode capture remain
+are not positive evidence. Devin send outcomes and OpenCode/Antigravity capture remain
 unknown where no emitted result/verified shape exists. The detector never
 reads assignment pointer files or infers report-recipient authority.
 
@@ -156,8 +156,12 @@ The store is `<daemonHome>/slp-runtime/state/supervision.json`, schema 3:
      real normalized fixture and the item matches it), `missing` (the turn
      region is known and the message is not there), or `unverified` with a
      cause (`unsupported-family` for a non-registry provider, `turn-boundary-unverified` when no
-     `user_message` opens the slice, `role-prefix-unrecognized`). The latest
-     `user_message` of a completed Peer turn is the brief and the last
+     delivered input opens the slice, `role-prefix-unrecognized`). Host 0.12
+     projects agent-originated inputs into completed `tool_call` rows named
+     `agent_message`. Capture validates their semantic `agentMessage` payload
+     and passes its decoded text through the existing family message adapter;
+     presentation text is never a fallback. A malformed projected input fences
+     off older evidence. The latest delivered input is the brief and the last
      `assistant_message` the handback. When that message starts with the
      compact SLP launch envelope (`SLP role`, `Launch binding`, `Assignment`),
      capture validates the role against the actor and the bound provider
@@ -181,6 +185,13 @@ The store is `<daemonHome>/slp-runtime/state/supervision.json`, schema 3:
      non-whitespace value is a content fact (`brief-references-assignment-file`)
      in pointer mode; the renderer's suffix is not required and the daemon never
      reads the path. `Assignment snapshot:` does not match that pointer syntax.
+
+     This is a communication slice, not proof of a lifecycle turn boundary:
+     agent messages can steer an active turn. Sends before its latest input
+     are conservatively excluded. Structured `finished` notifications qualify
+     end-only chronology only with the expected sender ID and exact legacy
+     status-line/handback-body correlation. Other events and bare reports do
+     not anchor. Metadata does not authenticate a client-supplied sender ID.
    - **each send** — input (`verified` recipient + prompt, or unverified with
      a reason) and outcome: `accepted` needs the semantic success of exactly
      that call in a verified shape; `rejected` needs an explicit failure

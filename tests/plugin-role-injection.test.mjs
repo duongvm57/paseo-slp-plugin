@@ -23,7 +23,7 @@ import { roleBundle } from '../plugin/server/runtime/cli/role-bundle.ts';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const GATE = join(root, 'bin', 'slp-gate.mjs');
-const HOOK_FAMILIES = ['codex', 'pi', 'claude'];
+const HOOK_FAMILIES = ['codex', 'pi', 'claude', 'antigravity'];
 const ALL_FAMILIES = [...HOOK_FAMILIES, 'devin', 'opencode'];
 const ROLES = ['supervisor', 'lead', 'peer'];
 const HOOK_IDS = HOOK_FAMILIES.flatMap(f => ROLES.map(r => `slp-${f}-${r}`));
@@ -537,7 +537,7 @@ test('session_open: every hook id gets a fresh non-empty grant; others pass thro
       assert.equal(out.agentId, 'agent-1');
     }
   }
-  assert.equal(seen.size, 48, 'every open gets a distinct grant token');
+  assert.equal(seen.size, (OWNED_IDS.length - DEVIN_IDS.length) * 4, 'every open gets a distinct grant token');
   for (const provider of ['codex', 'custom-tool', 'slp-devin-peer']) {
     assert.equal(injection.sessionOpen(openReq(provider)), undefined);
   }
@@ -711,7 +711,7 @@ test('thin aliases: every entry gets a single-element launcher argv0; hook env a
   );
   const resolution = { node: { path: '/opt/node/bin/node', version: '24.0.0' }, binaries };
   const entries = desiredProviderEntries(launchSet, resolution, f.candidate, f.home, null);
-  assert.equal(Object.keys(entries).length, 15);
+  assert.equal(Object.keys(entries).length, 18);
   for (const id of OWNED_IDS) {
     const family = id.split('-')[1];
     const entry = entries[id];
@@ -735,7 +735,7 @@ test('thin aliases: every entry gets a single-element launcher argv0; hook env a
       assert.equal(entry.env.SLP_FAMILY_BIN, undefined);
       continue;
     }
-    assert.equal(entry.extends, family);
+    assert.equal(entry.extends, family === 'antigravity' ? undefined : family);
     assert.equal(entry.env.SLP_FAMILY_BIN, `/opt/bin/${family}`);
   }
   // An unavailable hook-family binary disables the alias; the gate env keeps

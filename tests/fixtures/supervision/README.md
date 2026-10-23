@@ -34,7 +34,10 @@ controls mutate the observed envelopes in `plugin-supervision-capture.test.mjs`.
 Pi's compact launch wrapper has a real-builder synthetic test, not live evidence.
 Devin plain follow-ups were observed only as metadata in a later run; synthetic
 tests pin the strict transport-trace distinction without claiming a live fixture.
-OpenCode timeline/send shapes remain unverified.
+OpenCode and Antigravity timeline/send shapes remain unverified.
+The Paseo 0.12 `agent_message` tests are source-derived host projection
+controls, including mid-turn steering and malformed metadata. They preserve
+existing family verification and do not qualify a new live provider lane.
 
 ## Host capability limits
 

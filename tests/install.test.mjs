@@ -331,7 +331,7 @@ test('standalone binding rejects partial/unknown domains before upgrade and pres
   for (const mutate of [r => delete r.providers['slp-pi-peer'], r => { r.providers['slp-future-peer'] = r.providers['slp-pi-peer']; }]) {
     const bad = structuredClone(original); mutate(bad); const bytes = json(bad); writeFileSync(receiptFile, bytes);
     const manifest = readJson(manifestFile); manifest.paseoBindingSha256 = hash(bytes); writeFileSync(manifestFile, json(manifest));
-    assert.throws(() => upgradePaseo(fakeSource(dir, `new-${Object.keys(bad.providers).length}`), join(dir, `invalid-${Object.keys(bad.providers).length}`), destination, true), /exact Codex3, legacy12 or current15/);
+    assert.throws(() => upgradePaseo(fakeSource(dir, `new-${Object.keys(bad.providers).length}`), join(dir, `invalid-${Object.keys(bad.providers).length}`), destination, true), /exact Codex3, legacy12, legacy15 or current18/);
     assert.deepEqual(readFileSync(join(home, 'config.json')), rawBefore); assert.equal(readFileSync(receiptFile, 'utf8'), bytes);
   }
 });

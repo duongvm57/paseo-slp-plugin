@@ -101,7 +101,7 @@ const statusView = (over = {}) => ({
     nodePath: '/usr/bin/node',
     baseline: 'fresh',
   },
-  families: ['codex', 'pi', 'devin', 'claude', 'opencode'].map(name => family(name)),
+  families: ['codex', 'pi', 'devin', 'claude', 'opencode', 'antigravity'].map(name => family(name)),
   operation: null,
   conflicts: [],
   verifiedAt: '2026-09-18T00:00:10Z',
@@ -463,6 +463,13 @@ test('the Save diff-gate enables only when the form-built choice differs from st
     toggleDefs,
   );
   assert.deepEqual(merged.choice.featureValues, { auto_accept: false, x: 1 });
+});
+
+test('Antigravity role form never saves a separate thinking option while catalog is unavailable', () => {
+  const form = { family: 'antigravity', model: 'gemini-3.8-flash-low', modeId: 'full-access', thinkingOptionId: 'high', features: '', feature: {} };
+  const built = buildRoleChoice('supervisor', form, { family: 'antigravity', thinkingOptionId: 'high' }, []);
+  assert.ok('choice' in built);
+  assert.equal(Object.hasOwn(built.choice, 'thinkingOptionId'), false);
 });
 
 test('thinkingOptionsFor resolves the picked model or falls back to free text', () => {

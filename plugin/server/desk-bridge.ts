@@ -23,6 +23,7 @@
 // stop() closes connections, closes the server,
 // unlinks the socket and releases the lock — in that order.
 
+import { deliveryMessageIds, matchesDelivery } from "./delivered-input.ts";
 import { z } from "zod";
 import { createServer, type Server, type Socket } from "node:net";
 import {
@@ -1250,9 +1251,8 @@ export function createDeskBridge(deps: DeskBridgeDeps) {
   async function taskTurnEnded(event: TaskTurnEndedEvent): Promise<void> {
     try {
       if (stopped || state.kind !== "listening" || store === null || stableRoot === null || capabilityGate() !== null) return;
-      if (!event.timeline?.some(item => item.type === "user_message" && (item.messageId || item.clientMessageId))) return;
-      const messageIds = new Set(event.timeline.filter(item => item.type === "user_message")
-        .flatMap(item => [item.messageId, item.clientMessageId].filter((id): id is string => typeof id === "string")));
+      const messageIds = new Set((event.timeline ?? []).flatMap(deliveryMessageIds));
+      if (messageIds.size === 0) return;
       const repos = readdirSync(deskReposDir(stableRoot)).filter(name => REPO_KEY_PATTERN.test(name));
       if (repos.length > REPO_SCAN_LIMIT) return;
       const matches: { repoKey: string; row: SeatRow; read: Extract<DeskStoreRead, { state: "ok" }>; attemptId: string; assignmentId: string }[] = [];
@@ -1276,9 +1276,13 @@ export function createDeskBridge(deps: DeskBridgeDeps) {
         for (const attempt of attempts.values()) {
           if (attempt.kind !== "attempt" || attempt.host.agentId !== event.agentId ||
               attempt.member?.agentId !== row.agentId || attempt.member.membershipId !== row.membershipId) continue;
-          if (![...actions.values()].some(action => action.kind === "action" && action.actionKind === "send" &&
-              action.attemptId === attempt.attemptId && (action.state === "issued" || action.state === "uncertain") &&
-              typeof action.body?.messageId === "string" && messageIds.has(action.body.messageId))) continue;
+          if (![...actions.values()].some(action => {
+            if (action.kind !== "action" || action.actionKind !== "send" || action.attemptId !== attempt.attemptId
+              || (action.state !== "issued" && action.state !== "uncertain")) return false;
+            const messageId = action.body?.messageId;
+            return typeof messageId === "string" && messageIds.has(messageId)
+              && event.timeline?.some(item => matchesDelivery(item, messageId, action.callerAgentId));
+          })) continue;
           matches.push({ repoKey, row, read, attemptId: attempt.attemptId, assignmentId: attempt.assignmentId });
         }
       }

@@ -1274,11 +1274,11 @@ export function createSupervisionObserver(deps: ObserverDeps) {
       // turn-start is on record — reload erased the start maps, the hook
       // RPC timed out, or a gate pause dropped it — the ended turn's own
       // ordering can still prove chronology, but only inside the turn
-      // slice extraction used: the turn-opening user_message IS this
+      // slice extraction used: the slice-opening delivered input IS this
       // case's handback delivery — the finish-notification envelope with
       // the peer's id at the status-line position and the handback in the
       // agent-response section. The envelope is correlation evidence from
-      // text, not an authenticated sender; a bare prompt body is not
+      // text plus host metadata on 0.12, not an authenticated sender; a bare prompt body is not
       // accepted, and an anchor in an older turn or a scrubbed body never
       // qualifies — the fallback invents nothing and fabricates no start.
       const endDerived = handbackAnchorIndex(

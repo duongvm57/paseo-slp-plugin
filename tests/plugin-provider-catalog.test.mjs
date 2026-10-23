@@ -151,7 +151,7 @@ test('snapshot path: managed-id entry wins, resolvedProvider recorded, models fi
 });
 
 test('picker catalog refreshes each managed provider before reading models after a CLI update', async () => {
-  for (const family of ['codex', 'pi', 'devin', 'claude', 'opencode']) {
+  for (const family of ['codex', 'pi', 'devin', 'claude', 'opencode', 'antigravity']) {
     const loadCatalog = await freshCatalog();
     let model = 'old-model';
     const calls = [];

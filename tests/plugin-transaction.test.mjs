@@ -26,6 +26,7 @@ import { createManager } from '../plugin/server/manager.ts';
 import { createStateStore } from '../plugin/server/state-store.ts';
 import {
   assertPersistedCompatible,
+  applyProfilePrefs,
   desiredProviderEntries,
   patchForDirection,
 } from '../plugin/server/config-transaction.ts';
@@ -65,6 +66,40 @@ import {
 // Tests
 // ---------------------------------------------------------------------------
 
+test('explicit Antigravity family preference clears inherited effort but preserves other profile fields', () => {
+  const live = { id: 'slp-supervisor', name: 'SLP Supervisor', provider: 'slp-codex-supervisor', model: 'chosen', thinkingOptionId: 'high' };
+  const changed = applyProfilePrefs(live, { family: 'antigravity' }, 'supervisor');
+  assert.equal(Object.hasOwn(changed, 'thinkingOptionId'), false);
+  assert.equal(changed.model, 'chosen');
+  assert.equal(live.thinkingOptionId, 'high', 'planning must not mutate the observed profile');
+  assert.equal(applyProfilePrefs(live, { family: 'codex' }, 'supervisor').thinkingOptionId, 'high');
+  assert.equal(applyProfilePrefs(live, { family: 'antigravity', thinkingOptionId: 'explicit-unsupported' }, 'supervisor').thinkingOptionId,
+    'explicit-unsupported', 'explicit settings remain subject to adapter validation');
+});
+
+test('0.12 custom TTS voices survive unrelated config planning; empty voices still reject', () => {
+  for (const voice of ['alloy', 'custom-voice', 'vi-VN-speaker']) {
+    assert.doesNotThrow(() => assertPersistedCompatible({ version: 1, features: { voiceMode: { tts: { voice } } } }));
+  }
+  for (const voice of ['', '   ', 1]) {
+    assert.throws(() => assertPersistedCompatible({ version: 1, features: { voiceMode: { tts: { voice } } } }),
+      error => error.code === 'SCHEMA_LOSS');
+  }
+});
+
+test('activation registers owned Antigravity overrides without changing the native base', async t => {
+  const { home, daemon, deps } = await makePluginFixture(t, { version: 1, daemon: { mcp: { enabled: true } } });
+  const manager = createManager(deps); const id = randomUUID();
+  await manager.activate(activateInput(home, deps.payload, id), daemon);
+  const done = await waitTerminal(manager, home, id, daemon);
+  assert.equal(done.operation.outcome, 'succeeded', JSON.stringify(done.conflicts));
+  const config = readConfigJson(home);
+  assert.equal(Object.hasOwn(config.agents.providers, 'antigravity'), false);
+  assert.equal(Object.hasOwn(config.agents.providers, 'slp-antigravity-peer'), true);
+  assert.equal(Object.hasOwn(config.agents.providers['slp-antigravity-peer'], 'extends'), false);
+  assert.equal(readReceipt(home).binding.owned.providers['slp-antigravity-peer'].present, true);
+});
+
 test('plugin provider generation and receipt schemas carry the Peer Paseo tool policy only', () => {
   assert.deepEqual(PEER_PASEO_TOOLS_POLICY.disabledTools, peerPaseoToolsPolicy.disabledTools);
   assert.deepEqual(PEER_PASEO_TOOLS_POLICY.disabledTools, [...PEER_PASEO_TOOLS_POLICY.disabledTools].sort());
@@ -77,7 +112,7 @@ test('plugin provider generation and receipt schemas carry the Peer Paseo tool p
     node: { path: '/usr/bin/node' },
     binaries: Object.fromEntries(FAMILIES.map(family => [family, { available: true, path: `/usr/bin/${family}` }])),
   };
-  const entries = desiredProviderEntries(launchSet, resolution, '/slp/runtime', '/paseo');
+  const entries = desiredProviderEntries(launchSet, resolution, '/slp/runtime', '/paseo', null);
   for (const family of FAMILIES) {
     assert.deepEqual(entries[`slp-${family}-peer`].paseoTools, {
       disabledTools: PEER_PASEO_TOOLS_POLICY.disabledTools,
@@ -112,7 +147,7 @@ test('happy activate: INACTIVE → ACTIVE, providers/profiles/injection written,
   assert.equal(start.pollAfterMs, 1000);
 
   const done = await waitTerminal(manager, home, opId, daemon);
-  assert.equal(done.operation.outcome, 'succeeded');
+  assert.equal(done.operation.outcome, 'succeeded', JSON.stringify(done));
   assert.equal(done.state, 'ACTIVE');
   assert.equal(done.binding?.candidateSha256, deps.payload.candidate.sha256);
   assert.equal(done.retainedRuntimeCount, 1);
@@ -122,7 +157,7 @@ test('happy activate: INACTIVE → ACTIVE, providers/profiles/injection written,
   assert.equal(config.daemon.mcp.enabled, true);
   assert.equal(config.daemon.mcp.injectIntoAgents, true);
   const providers = slpProvidersOf(config);
-  assert.equal(Object.keys(providers).length, 15);
+  assert.equal(Object.keys(providers).length, 18);
   for (const id of OWNED_IDS) {
     const family = id.split('-')[1];
     const role = id.split('-')[2];
@@ -526,7 +561,7 @@ test('deactivate blocked by DEPENDENT_REFERENCE from an unrelated profile', asyn
   const done = await waitTerminal(manager, home, deact.operation.operationId, daemon2);
   assert.equal(done.operation.outcome, 'failed');
   assert.ok(opConflicts(home, opId).includes('DEPENDENT_REFERENCE'));
-  assert.equal(Object.keys(slpProvidersOf(readConfigJson(home))).length, 15);
+  assert.equal(Object.keys(slpProvidersOf(readConfigJson(home))).length, 18);
 });
 
 test('deactivate blocked by DEPENDENT_REFERENCE from metadataGeneration.providers', async t => {
@@ -546,7 +581,7 @@ test('deactivate blocked by DEPENDENT_REFERENCE from metadataGeneration.provider
   assert.equal(done.operation.outcome, 'failed');
   assert.ok(opConflicts(home, opId).includes('DEPENDENT_REFERENCE'));
   assert.equal(daemon2.patchCalls.length, 0);
-  assert.equal(Object.keys(slpProvidersOf(readConfigJson(home))).length, 15);
+  assert.equal(Object.keys(slpProvidersOf(readConfigJson(home))).length, 18);
 });
 
 test('deactivate with a modified owned profile → OWNERSHIP_DRIFT, no patch', async t => {
@@ -789,7 +824,7 @@ test('status reports state and never mutates; unknown operationId → NOT_FOUND'
   const s0 = await manager.status(statusInput(home), daemon);
   assert.equal(s0.state, 'INACTIVE');
   assert.equal(s0.binding, null);
-  assert.equal(s0.families.length, 5);
+  assert.equal(s0.families.length, 6);
   assert.equal(s0.liveAcceptance, 'not-established-by-this-rpc');
   const unknown = await manager.status(statusInput(home, randomUUID()), daemon);
   assert.equal(unknown.operation, null);
@@ -1027,7 +1062,7 @@ test('pure planner: patchForDirection rebuilds forward and inverse patches', asy
   const beforeConfig = { version: 1, daemon: { mcp: { enabled: true } } };
   const forward = patchForDirection(plan, 'activate', 'forward', beforeConfig);
   assert.equal(forward.mcp.injectIntoAgents, true);
-  assert.equal(Object.keys(forward.providers).length, 15);
+  assert.equal(Object.keys(forward.providers).length, 18);
   assert.equal(forward.removeProviders, undefined);
   assert.equal(forward.agentProfiles.length, 2);
   const inverse = patchForDirection(plan, 'activate', 'inverse', readConfigJson(home));
