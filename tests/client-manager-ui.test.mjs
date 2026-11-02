@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import React from 'react';
 import TestRenderer from 'react-test-renderer';
+import { FAMILY_IDS } from '../plugin/shared/runtime/families.ts';
 import { act, deferredRpc, loadHooks } from './helpers/client-hooks-harness.mjs';
 
 const A = 'a'.repeat(64), B = 'b'.repeat(64);
@@ -206,6 +207,27 @@ async function acknowledge(rig) {
   for (const title of ['Exclusive configuration window', 'Daemon home confirmed']) {
     await act(async () => dialog.findAll(node => node.props.title === title && typeof node.props.onToggle === 'function')[0].props.onToggle(true));
   }
+}
+
+for (const family of FAMILY_IDS) {
+  test(`fresh install prefills sole available ${family} profiles and catalogs without activation`, async t => {
+    const rig = await managerRig(t);
+    await act(async () => rig.reads.calls[0].resolve(runtime({
+      state: 'INACTIVE', binding: null,
+      families: FAMILY_IDS.map(id => ({
+        family: id, availability: id === family ? 'available' : 'unavailable',
+        binaryPath: id === family ? `/bin/${id}` : null,
+        observedVersion: id === family ? '1.0' : null,
+      })),
+    })));
+    assert.equal(rig.routing().form.supervisor.family, family);
+    assert.equal(rig.routing().form.lead.family, family);
+    for (const role of ['supervisor', 'lead']) {
+      assert.ok(rig.calls.some(call => call.name === 'catalog' && call.input.family === family && call.input.role === role));
+    }
+    assert.ok(!rig.calls.some(call => ['activate', 'set-role-routing'].includes(call.name)));
+    assert.match(JSON.stringify(rig.renderer.toJSON()), /no Maintenance step is needed/);
+  });
 }
 
 test('Profiles family changes clear foreign settings and Save sends only the displayed bundle', async t => {

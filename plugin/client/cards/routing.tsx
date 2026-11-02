@@ -96,7 +96,9 @@ export function useRoutingCard({ target, targetKey, isCurrentKey, statusView, ca
     const prefill = (role: RoutingRole): RoutingRoleForm => {
       const stored = routing?.[role];
       const live = liveOf(role);
-      const family = stored?.family ?? (familyFromProviderId(live?.provider) as FamilyName | null) ?? "codex";
+      const family = stored?.family ?? (familyFromProviderId(live?.provider) as FamilyName | null) ?? (statusView?.families.find(entry => entry.family === "codex" && entry.availability === "available")?.family
+          ?? statusView?.families.find(entry => entry.availability === "available")?.family
+          ?? "codex");
       const featureValues = stored?.featureValues ?? live?.featureValues;
       const feature: Record<string, string> = {};
       for (const [featureId, value] of Object.entries(featureValues ?? {})) {

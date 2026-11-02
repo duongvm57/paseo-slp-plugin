@@ -131,7 +131,7 @@ You need:
   Pi needs repeatable `--append-system-prompt` support
 - Antigravity needs agy 1.4.4 or newer; standalone CLI installation retains the other five families
 
-Enable the installed family you want to use in Paseo's agent settings before the first activation.
+Any one supported provider CLI is sufficient; Codex is optional. SLP discovers available CLIs before activation.
 
 ### Official Paseo plugin registry
 
@@ -154,14 +154,15 @@ you activate it.
 
 ## First run
 
-1. **Activate.** Open **SLP** in Paseo's sidebar (or *Open SLP Overview* from the command palette),
-   choose **Inspect**, then open **Maintenance → Runtime setup** and confirm **Daemon home confirmed** and **Exclusive configuration window**,
-   then choose **Activate SLP runtime**. Keep other configuration writers out while it runs.
-2. **Pick role models.** In **SLP → Profiles**, choose a provider and an explicit model for
+1. **Open SLP.** Open **SLP** in Paseo's sidebar (or *Open SLP Overview* from the command palette).
+   SLP automatically discovers available provider CLIs; any one supported family is sufficient.
+   You can configure profiles before activation, without opening Maintenance.
+2. **Choose profiles and activate.** In **SLP → Profiles**, choose a provider and an explicit model for
    **Supervisor** and **Lead**, plus mode, thinking and features where offered. Choose **Save profiles**,
-   confirm the configuration window and daemon home when prompted. A successful save
-   applies the choices automatically; no separate binding button is needed. Models must be set before delegation; Devin uses `swe-2`
-   models. Changes affect future launches, not sessions already running.
+   then confirm the daemon home and exclusive configuration window when prompted. Saving applies
+   the choices and activates SLP. Keep other configuration writers out while it runs.
+   Models must be set before delegation; Devin uses `swe-2` models. Changes affect future launches,
+   not sessions already running. Maintenance remains available for updates, recovery and executable overrides.
 3. **Onboard a repository.** Install the onboarding skill, then ask any agent in that repo to
    *onboard / set up SLP*. It proposes `.paseo-slp/workspace-protocol.md` and the Peer pool, and
    shows the full diff before writing.

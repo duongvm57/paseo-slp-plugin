@@ -32,9 +32,9 @@ Each team member is an ordinary Paseo agent you can open and chat with. Agents c
 
 ## Setup
 
-1. Enable the provider families you use in Paseo's agent settings, then open **SLP** in the sidebar and run **Inspect**.
-2. Open **Maintenance > Runtime setup** and choose **Activate SLP runtime**. Keep other writers of Paseo's `config.json` out while it runs.
-3. In **SLP > Profiles**, choose a provider and an explicit model for the Supervisor and the Lead, then choose **Save profiles**. A successful save applies the choices to future launches.
+1. Install and sign in to at least one supported provider CLI on the daemon host, then open **SLP** in the sidebar. Available provider CLIs are discovered automatically, before activation; Codex is optional.
+2. Open **SLP > Profiles**, choose a provider and an explicit model for the Supervisor and the Lead, then choose **Save profiles**. Confirm the daemon home and exclusive configuration window when prompted. Saving applies the choices and activates SLP for future launches.
+3. **Maintenance > Runtime setup** remains available for runtime updates, executable overrides and recovery.
 4. For each repository, onboard it with the `paseo-slp-onboarding` skill. It proposes `.paseo-slp/workspace-protocol.md` and the Peer pool, and shows the diff before writing.
 5. Make sure the Peer pool has at least one enabled option, then start a task by creating an agent with the SLP Supervisor or SLP Lead profile.
 

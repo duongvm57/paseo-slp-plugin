@@ -151,15 +151,15 @@ khi bạn kích hoạt.
 
 ## Lần chạy đầu
 
-1. **Kích hoạt.** Mở **SLP** ở thanh bên của Paseo (hoặc *Open SLP Overview* trong command palette),
-   chọn **Inspect**, rồi mở **Maintenance → Runtime setup**, xác nhận **Daemon home confirmed**
-   và **Exclusive configuration window**, rồi chọn **Activate SLP runtime**.
-   Trong lúc thao tác chạy, giữ các bên khác không sửa cấu hình daemon.
-2. **Chọn model cho role.** Trong **SLP → Profiles**, chọn provider và model cụ thể cho
+1. **Mở SLP.** Mở **SLP** ở thanh bên của Paseo (hoặc *Open SLP Overview* trong command palette).
+   SLP tự dò các CLI provider khả dụng; chỉ cần một provider được hỗ trợ, không bắt buộc có Codex.
+   Bạn có thể cấu hình profile trước khi kích hoạt, không cần vào Maintenance.
+2. **Chọn profile và kích hoạt.** Trong **SLP → Profiles**, chọn provider và model cụ thể cho
    **Supervisor** và **Lead**, cùng mode, thinking, feature nếu provider hỗ trợ. Chọn **Save profiles**,
-   xác nhận cửa sổ cấu hình độc quyền và daemon home khi được yêu cầu. Lưu thành công tự áp dụng
-   lựa chọn; không cần nút binding riêng. Phải đặt model trước khi delegation; Devin dùng model `swe-2`.
-   Thay đổi áp dụng cho lần khởi chạy sau, không đổi session đang chạy.
+   rồi xác nhận daemon home và cửa sổ cấu hình độc quyền khi được yêu cầu. Lưu sẽ áp dụng lựa chọn
+   và kích hoạt SLP. Trong lúc thao tác chạy, giữ các bên khác không sửa cấu hình daemon.
+   Phải đặt model trước khi delegation; Devin dùng model `swe-2`. Thay đổi áp dụng cho lần khởi chạy sau,
+   không đổi session đang chạy. Maintenance vẫn dùng cho cập nhật, khôi phục và đường dẫn executable.
 3. **Onboard một repository.** Cài skill onboarding, rồi nhờ agent bất kỳ trong repo đó
    *onboard / set up SLP*. Skill sẽ đề xuất `.paseo-slp/workspace-protocol.md` và Peer pool, và cho
    xem toàn bộ diff trước khi ghi.

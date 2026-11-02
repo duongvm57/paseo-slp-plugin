@@ -2,6 +2,7 @@
 // Synchronous contribution returning cleanup; the connected API arrives in
 // handlers. Lead wires the lane modules here; manager alone owns the mutation
 // mutex, state transitions and connected SDK calls.
+import { readTurnHistory } from "./server/turn-history.ts";
 import { deliveryTimelineItem } from "./server/delivered-input.ts";
 import type { PluginServerContribution } from "@getpaseo/plugin/server";
 import { realpathSync } from "node:fs";
@@ -34,7 +35,7 @@ import { readWorkspaceWorkflow } from "./server/workflow-view.ts";
 import type { TaskHostApi } from "./server/desk-task-execution-host.ts";
 import type { TaskRuntimeApi } from "./server/desk-task-runtime.ts";
 import type { FormationWorkspaceApi } from "./server/desk-placement.ts";
-import { ROLES } from "./shared/runtime/families.ts";
+import { ROLES, OWNED_PROVIDER_ID_RE } from "./shared/runtime/families.ts";
 import { createAntigravityProvider } from "./server/antigravity/provider.ts";
 // Host note: this must stay a hoisted function declaration, not a const —
 // the daemon compiler's Hermes interop eagerly copies export values before
@@ -207,12 +208,15 @@ export default function contribute(server: Parameters<PluginServerContribution>[
     noteTaskApi(ctx.paseo);
     return deskBridge.sessionOpenStash(input, ctx);
   });
-  const offTaskEnded = server.on("agent.turn_ended", (event, { paseo }) => {
+  const offTaskEnded = server.on("agent.turn_ended", async (event, { paseo, signal }) => {
     noteTaskApi(paseo);
     deskBridge.notePaseo(paseo);
+    if (!OWNED_PROVIDER_ID_RE.test(event.agent.provider)) return;
+    const observed = await readTurnHistory(event, paseo, signal);
+    if (observed === null) return;
     return deskBridge.taskTurnEnded({
       agentId: event.agent.id, ...(event.turnId === null ? {} : { turnId: event.turnId }), outcome: event.outcome.kind,
-      timeline: event.timeline.map(deliveryTimelineItem),
+      timeline: observed.timeline.map(deliveryTimelineItem),
     });
   });
   // A resumed ACP turn can dispatch Desk tools before an RPC, create hook,

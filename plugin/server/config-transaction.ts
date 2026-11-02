@@ -22,6 +22,7 @@ import {
   ProviderOverridesSchema,
   ProviderRuntimeSettingsSchema,
 } from "@getpaseo/protocol/provider-config";
+import { PluginRegistriesSchema } from "@getpaseo/protocol/plugin-registry";
 import { PaseoServicePortAllocationSchema } from "@getpaseo/protocol/paseo-config-schema";
 import {
   OperationConflict,
@@ -140,6 +141,20 @@ const SpeechProviderIdSchema = z
   .trim()
   .toLowerCase()
   .pipe(z.enum(["openai", "local"]));
+// Read both legacy and 0.14 speech shapes; never migrate credentials here.
+// The connected host still validates its own config.patch.
+const SpeechConnectionFields = {
+  apiKey: z.string().trim().min(1).optional(),
+  baseUrl: z.string().trim().min(1).optional(),
+};
+const CurrentSpeechSttSchema = z.discriminatedUnion("provider", [
+  z.object({ provider: z.literal("local"), model: z.string().min(1).optional(), language: z.string().trim().min(1).optional() }).strict(),
+  z.object({ provider: z.literal("openai"), ...SpeechConnectionFields, model: z.string().min(1).optional(), language: z.string().trim().min(1).optional(), confidenceThreshold: z.number().optional() }).strict(),
+]);
+const CurrentSpeechTtsSchema = z.discriminatedUnion("provider", [
+  z.object({ provider: z.literal("local"), model: z.string().min(1).optional(), speakerId: z.number().int().optional(), speed: z.number().optional() }).strict(),
+  z.object({ provider: z.literal("openai"), ...SpeechConnectionFields, model: z.string().min(1).optional(), voice: z.string().trim().min(1).optional() }).strict(),
+]);
 const FeatureDictationSchema = z
   .object({
     enabled: z.boolean().optional(),
@@ -151,6 +166,7 @@ const FeatureDictationSchema = z
         confidenceThreshold: z.number().optional(),
       })
       .strict()
+      .or(CurrentSpeechSttSchema)
       .optional(),
   })
   .strict();
@@ -168,8 +184,9 @@ const FeatureVoiceModeSchema = z
         language: z.string().trim().min(1).optional(),
       })
       .strict()
+      .or(CurrentSpeechSttSchema)
       .optional(),
-    turnDetection: z.object({ provider: SpeechProviderIdSchema.optional() }).strict().optional(),
+    turnDetection: z.object({ provider: SpeechProviderIdSchema.optional(), stt: CurrentSpeechSttSchema.optional() }).strict().optional(),
     tts: z
       .object({
         provider: SpeechProviderIdSchema.optional(),
@@ -181,6 +198,7 @@ const FeatureVoiceModeSchema = z
         speed: z.number().optional(),
       })
       .strict()
+      .or(CurrentSpeechTtsSchema)
       .optional(),
   })
   .strict();
@@ -345,12 +363,14 @@ export const PinnedPersistedConfigSchema = z
       .optional(),
     app: z.object({ baseUrl: z.string().optional() }).strict().optional(),
     providers: ProvidersSchema.optional(),
+    pluginRegistries: PluginRegistriesSchema.optional(),
     pluginsEnabled: z.boolean().optional(),
     plugins: z.record(PluginIdSchema, PluginSourceSchema).optional(),
     worktrees: WorktreesConfigSchema.optional(),
     agents: z
       .object({
         providers: z.preprocess(normalizeAgentProviders, ProviderOverridesSchema).optional(),
+        idleRuntimeCleanup: z.boolean().optional(),
         catalogRefreshTimeoutMs: z.number().int().positive().max(2147483647).optional(),
         metadataGeneration: AgentMetadataGenerationSchema.optional(),
         skills: z.object({ selection: AgentSkillSelectionSchema.optional() }).strict().optional(),
@@ -1060,9 +1080,11 @@ function selectProfileFamily(
   );
   if (enabledBase) return enabledBase;
   if (available.includes("codex")) return "codex";
+  // A fresh host may have any supported CLI, without an explicit base override.
+  if (available.length > 0) return available[0];
   throw new OperationConflict(
     "EXECUTABLE_UNAVAILABLE",
-    "no explicitly enabled base family is available and codex is unavailable; activation fails rather than picking an arbitrary family",
+    "No supported provider CLI is available; install and sign in to a supported provider on the daemon host",
   );
 }
 

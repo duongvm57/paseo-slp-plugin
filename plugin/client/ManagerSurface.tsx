@@ -708,6 +708,11 @@ function ManagerSession({ host, layout, theme, navigation, params = {}, onSectio
           title="Runtime status"
           subtitle={stateHint(statusView.state) || undefined}
         >
+          {statusView.state === "INACTIVE" && !statusView.binding ? (
+            <Text style={[styles.muted, { color: colors.foreground }]}>
+              Get started: open Profiles, choose a provider and model for each role, then Save profiles to activate SLP. Provider discovery runs automatically; no Maintenance step is needed.
+            </Text>
+          ) : null}
           {statusRows(statusView, { full: true })
             .filter(row => !STATUS_DETAIL_LABELS.has(row.label) && !["Embedded candidate", "Active candidate", "Daemon home (canonical)"].includes(row.label))
             .map(row => (

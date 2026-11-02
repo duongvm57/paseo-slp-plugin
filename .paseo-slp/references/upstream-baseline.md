@@ -12,11 +12,11 @@ a "no plugin change" outcome.
 
 | Package | Pinned | Assessed | Coverage | Date | Outcome |
 |---|---|---|---|---|---|
-| `@getpaseo/plugin` | 0.11.2 | 0.12.0 | Public declarations/export map, native-provider registration and consumed hooks; no live probe | 2026-10-22 | Optional APIs additive; Antigravity registration adopts requiresConfiguration with a fail-closed default for older hosts; pins retained |
-| `@getpaseo/client` | 0.11.2 | 0.12.0 | Public declarations and changed methods; plugin uses structural PaseoLike | 2026-10-22 | Optional additions; no client migration needed |
-| `@getpaseo/protocol` | 0.11.2 | 0.12.0 | Consumed schemas/types and messages; generated validators not exhaustive | 2026-10-22 | Agent-message metadata handled by capture; custom TTS voice accepted; runtime dependency retained |
-| `@getpaseo/server` | unpinned host; not changed | 0.12.0 | Partial agent-message ingestion/source paths, lifecycle, config and Antigravity adapter | 2026-10-22 | Capture and Desk adapt projected inputs; Desk sends source IDs and scans background attempts; no live acceptance |
-| `@getpaseo/cli` | unpinned host; not changed | 0.12.0 | Release notes and relied-on CLI paths; not full CLI | 2026-10-22 | No CLI command adaptation needed; no installation |
+| `@getpaseo/plugin` | 0.14.0 | 0.14.0 | Changed public declarations/export maps, consumed lifecycle/provider/client APIs; no live probe | 2026-11-02 | SDK updated; empty turn-ended history adapted; new session-open fields explicitly classified outside seat identity |
+| `@getpaseo/client` | 0.14.0 | 0.14.0 | Public declarations, relied-on timeline API and changed host methods | 2026-11-02 | SDK updated; optional host routing/reload APIs not adopted |
+| `@getpaseo/protocol` | 0.14.0 | 0.14.0 | Consumed config/message schemas; generated outbound validators not exhaustive | 2026-11-02 | Root and plugin runtime pins aligned; new speech/idle-cleanup/registry config preserved |
+| `@getpaseo/server` | unpinned host; not changed | 0.14.0 | Partial lifecycle, persisted config, provider registry/runtime and ACP runtime paths | 2026-11-02 | Empty timeline hook adaptation; no host installation or live acceptance |
+| `@getpaseo/cli` | unpinned host; not changed | 0.14.0 | Release notes and relied-on agent send/archive paths; not full CLI | 2026-11-02 | Queued-delivery receipt and archive pagination are host-side fixes; no CLI adaptation or installation |
 
 `requirements.paseo` in `plugin/paseo-plugin.json` is `>=0.11.0` for native
 screen/sidebar support on daemon and app. Keep the field present. That current
@@ -25,10 +25,10 @@ Updating SDK dependencies or documentation never proves live compatibility.
 
 ## Coverage and unresolved differences
 
-The assessments remain partial. The 2026-10-22 sync covered 0.11.3, 0.11.4,
+The assessments remain partial. The 2026-11-02 sync covers changed consumed surfaces through stable 0.14.0; historical unreviewed internals and generated validators remain open. The 2026-10-22 sync covered 0.11.3, 0.11.4,
 0.12.0-beta.1 through beta.3 and stable, including stable tarball rechecks. Generated protocol validators and
 unconsumed host internals remain unassessed; subsequent syncs start at 0.10.0
-for those surfaces. No live 0.11.2 or 0.12.0 daemon/plugin cutover was performed.
+for those surfaces. No live 0.11.2, 0.12.0 or 0.14.0 daemon/plugin cutover was performed.
 Supervision fixtures were recorded on host 0.9.1 and have not been re-recorded.
 
 `plugin/server/config-view.ts` parses config without stripping a UTF-8 BOM,
@@ -36,6 +36,17 @@ which daemon 0.9.2 accepts. Mirroring that behavior remains undecided; a docs
 refresh does not authorize a production parser change.
 
 ## Evidence provenance
+
+The 2026-11-02 stable 0.14.0 sync report and package diffs are machine-local at
+`.local-checks/skill-upstream-sync/0.14.0/impact.md`. Human approved SDK pins,
+empty-hook history adaptation and config compatibility while retaining the
+manifest floor. The report records exact candidate/check/review evidence and
+remaining limits; these table rows record source/package assessment, not live
+qualification. Published dates, intermediate 0.13/0.14 release notes and all
+five package tarballs were inspected. Optional tools/MCP/translation/host APIs
+were not adopted. Empty hooks use one bounded 500-entry history read; missing
+turn IDs, incomplete boundaries or failed reads remain unverified.
+
 
 The 2026-10-22 impact report is console-only in the Human conversation; no
 scratch report was granted. Sources: [stable release](https://github.com/getpaseo/paseo/releases/tag/v0.12.0),

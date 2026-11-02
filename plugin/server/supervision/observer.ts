@@ -1,3 +1,4 @@
+import { readTurnHistory, type TurnHistoryApi } from "../turn-history.ts";
 // plugin/server/supervision/observer.ts — communication supervision observer.
 // Spec: docs/spec/supervision-integration.md §Observation, §Jev assessment,
 // §Notification delivery, §Failure and privacy boundaries.
@@ -169,7 +170,7 @@ type Job =
   // it) but bumps the monotonic generation, so the compare at apply is
   // ABA-safe. peerGen is undefined for lead events (they fan out to every
   // open case — each case's peer is checked per-case instead).
-  | { t: "turn-end"; order: number; leadId: string; leadGen: number | undefined; peerGen: number | undefined; capture: Capture; startSeq: number | null; overlap: boolean }
+  | { t: "turn-end"; order: number; leadId: string; leadGen: number | undefined; peerGen: number | undefined; capture: Capture; historyEvent?: TurnEnded; historyPurge?: number; startSeq: number | null; overlap: boolean }
   // gens = archive generations AT ENQUEUE — a queued verification answers
   // a question asked at hook time; an archive landing before the job
   // executes already changed the generation, so the job must discard
@@ -287,6 +288,7 @@ type PaseoAgentSnapshot = {
 type PaseoLike = {
   agents: {
     ref(id: string): {
+      timeline?: ReturnType<TurnHistoryApi["agents"]["ref"]>["timeline"];
       refresh(): Promise<{ agent: PaseoAgentSnapshot | null | undefined } | null>;
       send(text: string, options?: { messageId?: string }): Promise<void>;
     };
@@ -889,7 +891,15 @@ export function createSupervisionObserver(deps: ObserverDeps) {
     } else if (routeFor(leadId) === null) {
       return;
     }
-    const captured = capture(event, { has: candidateLead });
+    const needsHistory = event.timeline.length === 0;
+    // Reserve chronology and archive generations synchronously, before I/O.
+    // The placeholder carries no bodies and is never assessed as evidence.
+    const captured: Capture | null = capture(event, { has: candidateLead }) ?? (needsHistory
+      ? isLead ? {
+        kind: "lead", id: createHash("sha256").update(JSON.stringify(["history", leadId, event.turnId])).digest("hex"),
+        leadId, turnId: event.turnId, sends: [], anchors: [], issues: [],
+        sendCoverage: { state: "unverified", reason: VISIBILITY.sendCoverageUnverified },
+      } : capture({ ...event, outcome: { kind: "completed" } }, { has: candidateLead }) : null);
     if (captured === null || seen.has(captured.id)) return;
     seen.set(captured.id, now());
     const seq = ++order;
@@ -902,6 +912,7 @@ export function createSupervisionObserver(deps: ObserverDeps) {
     }
     enqueue({
       t: "turn-end", order: seq, leadId: captured.leadId, capture: captured,
+      ...(needsHistory ? { historyEvent: { ...event, agent: { ...event.agent }, timeline: [] }, historyPurge: purgeCount } : {}),
       leadGen: archiveGen.get(captured.leadId),
       peerGen: captured.kind === "peer" ? archiveGen.get(captured.peerId) : undefined,
       startSeq: captured.kind === "lead" ? meta?.seq ?? null : null,
@@ -1054,7 +1065,29 @@ export function createSupervisionObserver(deps: ObserverDeps) {
       return;
     }
     // turn-end
-    const event = job.capture;
+    let event = job.capture;
+    if (job.historyEvent) {
+      const stale = () => signal.aborted || job.historyPurge !== purgeCount || tombstoned(job.leadId)
+        || archiveGen.get(job.leadId) !== job.leadGen
+        || (event.kind === "peer" && (tombstoned(event.peerId) || archiveGen.get(event.peerId) !== job.peerGen));
+      if (stale() || !observeGate().ok) return;
+      const observed = paseo ? await readTurnHistory(job.historyEvent, paseo, signal) : null;
+      if (stale() || !observeGate().ok) return;
+      if (observed === null) {
+        diag("turn-history-unavailable");
+        if (event.kind === "peer") recordDropped(event, VISIBILITY.sendShapeUnverified);
+        else for (const item of cases.values()) {
+          if (item.leadId !== job.leadId) continue;
+          if (!item.evidence.laneFlags.includes(VISIBILITY.sendShapeUnverified)) item.evidence.laneFlags.push(VISIBILITY.sendShapeUnverified);
+          item.evidenceVersion++;
+          item.dirty = true;
+        }
+        return;
+      }
+      const hydrated = capture(observed, { has: candidateLead });
+      if (hydrated === null) return;
+      event = hydrated;
+    }
     // Job-top fail-closed: a gate-down edge observed here already ran the
     // global purge — and this job's queued capture was body-scrubbed by it.
     // The event contributes no evidence, same drop semantics as the hook.

@@ -658,6 +658,106 @@ test('jev askJevDecision: a network throw is single-shot — no automatic retry'
 const ROUTE_FLAG = 'report-route-unverifiable';
 const until = async cond => { while (!cond()) await sleep(2); };
 
+test('0.14 empty hook hydrates the exact turn on the observer queue', async t => {
+  const { observer, paseo, calls } = await baseSetup(t);
+  observer.onCreated(peerHook(), paseo);
+  const full = peerTurn();
+  const ref = paseo.agents.ref.bind(paseo.agents);
+  let historyReads = 0;
+  paseo.agents.ref = id => ({ ...ref(id), timeline: { refetch: async () => {
+    historyReads++;
+    return { agentId: id, entries: full.timeline.map(item => ({ turnId: full.turnId, item })),
+      hasOlder: false, hasNewer: false, error: null, reset: false, staleCursor: false, gap: false };
+  } } });
+  observer.onTurn({ ...full, timeline: [] }, paseo);
+  await observer.idle();
+  assert.equal(historyReads, 1);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].state.brief.text, full.timeline[0].text);
+  assert.equal(calls[0].state.handback.text, full.timeline[1].text);
+});
+
+for (const outcome of [{ kind: 'completed' }, { kind: 'failed', error: { message: 'fixture' } }, { kind: 'canceled', reason: 'fixture' }]) {
+ test(`0.14 empty Lead hook retrieves sends and preserves handling evidence: ${outcome.kind}`, async t => {
+  const { observer, paseo, calls } = await baseSetup(t);
+  observer.onCreated(peerHook(), paseo);
+  observer.onTurn(peerTurn(), paseo);
+  await observer.idle();
+  const full = leadEnd([userMsg('Handle the peer handback'), codexSend('history-send', PEER, 'accepted — scope settled')], { outcome });
+  const ref = paseo.agents.ref.bind(paseo.agents);
+  let historyReads = 0;
+  paseo.agents.ref = id => ({ ...ref(id), timeline: { refetch: async () => {
+    historyReads++;
+    return { agentId: id, entries: full.timeline.map(item => ({ turnId: full.turnId, item })),
+      hasOlder: false, hasNewer: false, error: null, reset: false, staleCursor: false, gap: false };
+  } } });
+  observer.onStart(leadStart(full.turnId));
+  observer.onTurn({ ...full, timeline: [] }, paseo);
+  await observer.idle();
+  assert.equal(historyReads, 1);
+  assert.equal(calls.length, 2);
+  assert.equal(calls[1].state.messages[0].prompt, 'accepted — scope settled');
+});
+
+}
+
+for (const queued of [false, true]) {
+  test(`0.14 history purge invalidates in-flight and queued jobs: queued=${queued}`, async t => {
+    let currentGate = GATE_OK;
+    const { observer, paseo, calls, stableRoot } = await baseSetup(t, { gate: () => currentGate });
+    observer.onCreated(peerHook(), paseo);
+    await observer.idle();
+    const full = peerTurn();
+    const ref = paseo.agents.ref.bind(paseo.agents);
+    let release, started, historyReads = 0;
+    const reading = new Promise(resolve => { started = resolve; });
+    paseo.agents.ref = id => ({ ...ref(id), timeline: { refetch: () => {
+      historyReads++;
+      started();
+      return new Promise(resolve => { release = () => resolve({ agentId: id,
+        entries: full.timeline.map(item => ({ turnId: full.turnId, item })),
+        hasOlder: false, hasNewer: false, error: null, reset: false, staleCursor: false, gap: false }); });
+    } } });
+    observer.onTurn({ ...full, timeline: [] }, paseo);
+    await reading;
+    if (queued) observer.onTurn({ ...full, turnId: 'queued-peer-turn', timeline: [] }, paseo);
+    currentGate = { ok: false, reason: 'jev-key-missing' };
+    writeFileSync(join(stableRoot, 'state', 'jev.json'), '{}');
+    observer.shadow(stableRoot);
+    currentGate = GATE_OK;
+    writeFileSync(join(stableRoot, 'state', 'jev.json'), '{} ');
+    observer.shadow(stableRoot);
+    release();
+    await observer.idle();
+    assert.equal(calls.length, 0, 'no pre-purge bodies reach assessment after recovery');
+    assert.equal(historyReads, 1, 'queued history invalidated by purge must not be fetched');
+    for (const row of observer.shadow(stableRoot).observations) {
+      assert.ok((observer.retainedBodies(row.fingerprint) ?? 0) === 0);
+    }
+  });
+}
+
+test('0.14 history arriving after archive cannot revive supervision evidence', async t => {
+  const { observer, paseo, calls } = await baseSetup(t);
+  observer.onCreated(peerHook(), paseo);
+  const full = peerTurn();
+  const ref = paseo.agents.ref.bind(paseo.agents);
+  let release, started;
+  const reading = new Promise(resolve => { started = resolve; });
+  paseo.agents.ref = id => ({ ...ref(id), timeline: { refetch: () => {
+    started();
+    return new Promise(resolve => { release = () => resolve({ agentId: id,
+      entries: full.timeline.map(item => ({ turnId: full.turnId, item })),
+      hasOlder: false, hasNewer: false, error: null, reset: false, staleCursor: false, gap: false }); });
+  } } });
+  observer.onTurn({ ...full, timeline: [] }, paseo);
+  await reading;
+  observer.onArchived(peerHook(), paseo);
+  release();
+  await observer.idle();
+  assert.equal(calls.length, 0);
+});
+
 test('observer: assess at handback, re-assess on a new message, close evaluated on a linked disposition', async t => {
   const { observer, paseo, home, calls } = await baseSetup(t);
   observer.onCreated(peerHook(), paseo);

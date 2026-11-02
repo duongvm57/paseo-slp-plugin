@@ -31,7 +31,7 @@ import {
   patchForDirection,
 } from '../plugin/server/config-transaction.ts';
 import { OperationConflict, OwnedProvider, PEER_PASEO_TOOLS_POLICY } from '../plugin/shared/contracts.ts';
-import { FAMILY_LABEL } from '../plugin/shared/runtime/families.ts';
+import { FAMILY_IDS, FAMILY_LABEL } from '../plugin/shared/runtime/families.ts';
 import { providerWrittenFieldsEqual } from '../plugin/server/config-view.ts';
 import { peerPaseoToolsPolicy } from '../plugin/server/runtime/cli/profiles.ts';
 import {
@@ -75,6 +75,40 @@ test('explicit Antigravity family preference clears inherited effort but preserv
   assert.equal(applyProfilePrefs(live, { family: 'codex' }, 'supervisor').thinkingOptionId, 'high');
   assert.equal(applyProfilePrefs(live, { family: 'antigravity', thinkingOptionId: 'explicit-unsupported' }, 'supervisor').thinkingOptionId,
     'explicit-unsupported', 'explicit settings remain subject to adapter validation');
+});
+
+test('0.14 host config keeps speech credentials, registries and idle cleanup through activation', async t => {
+  const config = {
+    version: 1,
+    daemon: { mcp: { enabled: true } },
+    agents: { idleRuntimeCleanup: true },
+    pluginRegistries: { 'https://registry.example.test': { authorization: 'fixture-registry-token' } },
+    features: {
+      dictation: { stt: { provider: 'openai', apiKey: 'fixture-stt', baseUrl: 'https://speech.example.test', language: 'vi' } },
+      voiceMode: {
+        stt: { provider: 'local', model: 'whisper' },
+        turnDetection: { provider: 'local', stt: { provider: 'openai', apiKey: 'fixture-turn' } },
+        tts: { provider: 'openai', apiKey: 'fixture-tts', baseUrl: 'https://voice.example.test', voice: 'custom-voice' },
+      },
+    },
+  };
+  assert.doesNotThrow(() => assertPersistedCompatible(config));
+  const home = makeHome(t, config);
+  const daemon = await makeDaemon(t, home, { forceMini: true });
+  const deps = makeDeps({ execOpts: { binaries: makeBinaries(t) } });
+  const manager = createManager(deps);
+  const start = await manager.activate(activateInput(home, deps.payload, randomUUID()), daemon);
+  const done = await waitTerminal(manager, home, start.operation.operationId, daemon);
+  assert.equal(done.state, 'ACTIVE');
+  const after = readConfigJson(home);
+  assert.deepEqual(after.features, config.features);
+  assert.deepEqual(after.pluginRegistries, config.pluginRegistries);
+  assert.equal(after.agents.idleRuntimeCleanup, true);
+  for (const bad of [
+    { version: 1, agents: { idleRuntimeCleanup: 'yes' } },
+    { version: 1, features: { dictation: { stt: { provider: 'openai', apiKey: '' } } } },
+    { version: 1, features: { voiceMode: { tts: { provider: 'local', apiKey: 'invalid-for-local' } } } },
+  ]) assert.throws(() => assertPersistedCompatible(bad));
 });
 
 test('0.12 custom TTS voices survive unrelated config planning; empty voices still reject', () => {
@@ -997,22 +1031,52 @@ test('close() stops accepting work', async t => {
   assert.equal(out.conflicts[0].code, 'INVALID_REQUEST');
 });
 
+// Derive the matrix from the registry so every supported family must work
+// as the sole installed CLI, including future registry additions.
+for (const family of FAMILY_IDS) {
+  test(`fresh install discovers ${family} alone without activation or config writes`, async t => {
+    const home = makeHome(t);
+    const binaries = makeBinaries(t, [family]);
+    const daemon = await makeDaemon(t, home);
+    const manager = createManager(makeDeps({ execOpts: { binaries } }));
+    const before = readFileSync(join(home, 'config.json'));
+    const view = await manager.status(statusInput(home), daemon);
+    assert.equal(view.state, 'INACTIVE');
+    assert.equal(view.binding, null);
+    for (const entry of view.families) {
+      assert.equal(entry.availability, entry.family === family ? 'available' : 'unavailable');
+    }
+    assert.deepEqual(readFileSync(join(home, 'config.json')), before);
+    assert.equal(existsSync(receiptPath(home)), false);
+    assert.equal(daemon.patchCalls.length, 0);
+  });
+
+  test(`fresh install activates with ${family} alone and no explicit profile family`, async t => {
+    const home = makeHome(t);
+    const binaries = makeBinaries(t, [family]);
+    const daemon = await makeDaemon(t, home);
+    const deps = makeDeps({ execOpts: { binaries } });
+    const manager = createManager(deps);
+    const start = await manager.activate(activateInput(home, deps.payload, randomUUID()), daemon);
+    const done = await waitTerminal(manager, home, start.operation.operationId, daemon);
+    assert.equal(done.state, 'ACTIVE');
+    assert.equal(done.operation.outcome, 'succeeded');
+    const config = readConfigJson(home);
+    for (const role of ['supervisor', 'lead']) {
+      assert.equal(config.daemon.agentProfiles.find(p => p.id === `slp-${role}`).provider, `slp-${family}-${role}`);
+    }
+    for (const other of FAMILY_IDS) {
+      assert.equal(config.agents.providers[`slp-${other}-peer`].enabled, other === family);
+    }
+  });
+}
+
 test('explicit binaries override resolution and land in provider env', async t => {
   const home = makeHome(t);
   const binaries = makeBinaries(t);
   const daemon = await makeDaemon(t, home);
   const deps = makeDeps({ execOpts: { binaries: {} } });
   const manager = createManager(deps);
-
-  // §6 ordering: no explicitly enabled base family and codex unavailable →
-  // activation fails rather than picking an arbitrary family.
-  const refused = await manager.activate(
-    activateInput(home, deps.payload, randomUUID(), { binaries: { claude: binaries.claude } }),
-    daemon,
-  );
-  const refusedDone = await waitTerminal(manager, home, refused.operation.operationId, daemon);
-  assert.equal(refusedDone.operation.outcome, 'failed');
-  assert.ok(opConflicts(home, refused.operation.operationId).includes('EXECUTABLE_UNAVAILABLE'));
 
   // An explicit initialProfileFamily qualifies the override.
   const act = await manager.activate(
@@ -1228,7 +1292,7 @@ test('installed-impl parity: MiniStore and DaemonConfigStore merge the same patc
     autoArchiveAfterMerge: true,
   };
   mini.patch(patch1);
-  real.patch(patch1);
+  await real.patch(patch1);
   assert.deepEqual(readConfigJson(homeMini), readConfigJson(homeReal), 'patch1 persisted divergence');
   assert.deepEqual(mini.get(), real.get(), 'patch1 effective divergence');
 
@@ -1240,7 +1304,7 @@ test('installed-impl parity: MiniStore and DaemonConfigStore merge the same patc
     metadataGeneration: { providers: [{ provider: 'unrelated', model: 'm3' }] },
   };
   mini.patch(patch2);
-  real.patch(patch2);
+  await real.patch(patch2);
   assert.deepEqual(readConfigJson(homeMini), readConfigJson(homeReal), 'patch2 persisted divergence');
   assert.deepEqual(mini.get(), real.get(), 'patch2 effective divergence');
 });
