@@ -411,9 +411,9 @@ export function createExecutableResolver(deps: ExecutableResolverDeps = {}): Exe
       };
       const node = await resolveNode(request, ctx);
       const binaries = {} as Record<FamilyName, BinaryResolution>;
-      for (const family of FAMILIES) {
+      await Promise.all(FAMILIES.map(async family => {
         binaries[family] = await resolveBinary(family, request, node, ctx);
-      }
+      }));
       return { node, binaries };
     },
   };

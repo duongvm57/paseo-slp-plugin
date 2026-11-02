@@ -26,6 +26,7 @@ import {
   type ConflictValue,
   type ConnectedDaemon,
   type DeactivateRequest,
+  type ExecutableResolution,
   type IntentValue,
   type Manager,
   type ManagerDeps,
@@ -2351,6 +2352,7 @@ export function createManager(deps: ManagerDeps): Manager {
   /** Status vocabulary and binding projection; callers supply only observed values. */
   function statusReply(observed: Pick<StatusResult, "target" | "state" | "conflicts"> & {
     binding?: BindingValue | null;
+    discoveredBinaries?: ExecutableResolution["binaries"];
     managedProfiles?: StatusResult["managedProfiles"];
     operation?: OperationViewValue | null;
     retainedRuntimeCount?: number;
@@ -2375,7 +2377,7 @@ export function createManager(deps: ManagerDeps): Manager {
           }
         : null,
       families: FAMILIES.map(family => {
-        const binary = binding?.binaries[family];
+        const binary = binding?.binaries[family] ?? observed.discoveredBinaries?.[family];
         return {
           family,
           availability: binary
@@ -2435,13 +2437,27 @@ export function createManager(deps: ManagerDeps): Manager {
         communicationLanguage: language,
       });
     }
+    // Discovery is advisory and read-only: never materialize launchers, patch
+    // config or create a receipt just to populate first-install pickers.
+    let discoveredBinaries: ExecutableResolution["binaries"] | undefined;
+    const discoveryConflicts: ConflictValue[] = [];
+    if (!receipt?.binding) {
+      try {
+        discoveredBinaries = (await deps.executables.resolve({
+          daemonHome: ctx.canonicalHome,
+          stableRoot: ctx.stableRoot,
+        })).binaries;
+      } catch (error) {
+        discoveryConflicts.push(toConflict(error));
+      }
+    }
     if (!receipt) {
       // No receipt: a bounded local read decides INACTIVE vs RECOVERY_REQUIRED
       // — orphaned slp-* entries in raw config are evidence of an interrupted
       // activation whose journal vanished, not a clean home. This stays within
       // §3's read-only contract: it is a local file read, never a blocking
       // daemon/remote call, and status still performs no mutation.
-      const conflicts: ConflictValue[] = [];
+      const conflicts: ConflictValue[] = [...discoveryConflicts];
       let ownedPresent = false;
       try {
         const raw = readRawConfig(ctx.configPath);
@@ -2458,12 +2474,13 @@ export function createManager(deps: ManagerDeps): Manager {
       return statusReply({
         target: { hostId: request.target.hostId, daemonHome: ctx.canonicalHome },
         state: ownedPresent ? "RECOVERY_REQUIRED" : "INACTIVE",
+        discoveredBinaries,
         conflicts,
         communicationLanguage: language,
       });
     }
 
-    const conflicts: ConflictValue[] = [];
+    const conflicts: ConflictValue[] = [...discoveryConflicts];
     if (
       receipt.target.hostId !== request.target.hostId ||
       receipt.target.daemonHome !== ctx.canonicalHome
@@ -2545,6 +2562,7 @@ export function createManager(deps: ManagerDeps): Manager {
       state,
       managedProfiles,
       binding,
+      discoveredBinaries,
       operation,
       conflicts,
       retainedRuntimeCount: receipt.retained.length,

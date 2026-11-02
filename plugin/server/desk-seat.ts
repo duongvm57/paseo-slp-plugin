@@ -125,6 +125,10 @@ export const DESK_FIELD_POLICY = {
     env: { cell: "JOIN", note: "only the SLP_DESK_HANDLE key: already present → env-collision, no mint; every other key IGNORED (not the desk's)" },
   },
   bind: {
+    title: { cell: "IGNORED", note: "0.14 display metadata; no seat identity or authority" },
+    labels: { cell: "IGNORED", note: "0.14 mutable metadata; membership uses the minted handle" },
+    tools: { cell: "IGNORED", note: "0.14 per-session tools; not seat identity" },
+    mcpServers: { cell: "IGNORED", note: "0.14 session configuration; bridge graft remains P2-d" },
     agentId: { cell: "RECORD", note: "→ row.agentId; at most one live row per agentId (§3)" },
     workspaceId: { cell: "RECORD", note: "→ row.workspaceId (string or null). Not comparable: the create request carries only {config, env} (agent-manager.js:684-686), no workspace" },
     provider: { cell: "COMPARE_EXACT", note: "against row.provider" },

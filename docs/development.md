@@ -178,7 +178,13 @@ SDK effects remain fixtures; these checks do not prove live delivery, process
 quiescence or role compliance. See [task execution](task-execution.md) for the
 operational limits.
 
-Native task adapters compile against the pinned SDK 0.11.2 declarations;
+On Paseo 0.13 and later, turn-ended hooks carry no timeline. SLP reads a
+bounded tail (at most 500 entries) and uses only the exact ended turn when
+both boundaries are visible. Missing turn IDs, truncated history, timeout or
+archive during the read leave the observation unverified. This adapter does
+not establish live supervision or Desk delivery acceptance.
+
+Native task adapters compile against the pinned SDK 0.14.0 declarations;
 installation compatibility with an older daemon does not establish its execution
 capabilities. Installed dependency checks and extracted-target typechecks are
 reported separately.

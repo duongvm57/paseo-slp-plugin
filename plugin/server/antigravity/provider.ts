@@ -34,7 +34,7 @@ export function createAntigravityProvider(id = "antigravity", label = "Antigravi
     id,
     label,
     // Optional on host 0.12; spread keeps this additive field compatible
-    // with the pinned 0.11.2 SDK type. Older hosts use the inert guard below.
+    // with older SDK shapes. Older hosts use the inert guard below.
     ...{ requiresConfiguration: true },
     command: [process.execPath, "--eval", unconfiguredScript],
     // Activation supplies the verified gate as an override. A default launch

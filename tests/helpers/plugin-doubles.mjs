@@ -562,7 +562,7 @@ export async function makeDaemon(t, home, opts = {}) {
         return (async () => {
           if (script === 'reject') throw new Error('injected patch rejection');
           if (script === 'hang') return new Promise(() => {});
-          store.patch(patch);
+          await store.patch(patch);
           if (script === 'apply-then-reject') throw new Error('injected lost response');
           return { requestId: requestId ?? randomUUID(), config: store.get() };
         })();
