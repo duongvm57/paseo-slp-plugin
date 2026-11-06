@@ -122,7 +122,7 @@ writer, proof của candidate và review độc lập khi bắt buộc vẫn áp
 
 Bạn cần:
 
-- Paseo daemon **và app** `>=0.11.0` cho screen/sidebar UI native, với `pluginsEnabled: true` và `mcp.enabled` hiệu lực là `true`
+- Paseo daemon **và app** `>=0.11.0` (host tối thiểu được hỗ trợ; bản SDK mà checkout build theo được pin trong `package.json`) cho screen/sidebar UI native, với `pluginsEnabled: true` và `mcp.enabled` hiệu lực là `true`
 - Máy chạy daemon dùng POSIX (Linux/macOS), với Node.js 22.x từ 22.18, hoặc Node.js 23.6+
   (native TypeScript stripping)
 - CLI của từng provider family bạn dùng (Codex, Pi, Devin, Claude, OpenCode), đã đăng nhập trên máy daemon;

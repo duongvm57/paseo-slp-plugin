@@ -12,11 +12,11 @@ a "no plugin change" outcome.
 
 | Package | Pinned | Assessed | Coverage | Date | Outcome |
 |---|---|---|---|---|---|
-| `@getpaseo/plugin` | 0.14.0 | 0.14.0 | Changed public declarations/export maps, consumed lifecycle/provider/client APIs; no live probe | 2026-11-02 | SDK updated; empty turn-ended history adapted; new session-open fields explicitly classified outside seat identity |
-| `@getpaseo/client` | 0.14.0 | 0.14.0 | Public declarations, relied-on timeline API and changed host methods | 2026-11-02 | SDK updated; optional host routing/reload APIs not adopted |
-| `@getpaseo/protocol` | 0.14.0 | 0.14.0 | Consumed config/message schemas; generated outbound validators not exhaustive | 2026-11-02 | Root and plugin runtime pins aligned; new speech/idle-cleanup/registry config preserved |
-| `@getpaseo/server` | unpinned host; not changed | 0.14.0 | Partial lifecycle, persisted config, provider registry/runtime and ACP runtime paths | 2026-11-02 | Empty timeline hook adaptation; no host installation or live acceptance |
-| `@getpaseo/cli` | unpinned host; not changed | 0.14.0 | Release notes and relied-on agent send/archive paths; not full CLI | 2026-11-02 | Queued-delivery receipt and archive pagination are host-side fixes; no CLI adaptation or installation |
+| `@getpaseo/plugin` | 0.15.2 | 0.15.2 | Full public diff: lifecycle hook rename/addHook, worktree hooks, internal/lifecycle export; no live probe | 2026-11-06 | SDK updated; legacy `on`/`before` kept (host 0.15 maps them; `addHook` absent on 0.11–0.14); migrate before the 2027-04-30 removal |
+| `@getpaseo/client` | 0.15.2 | 0.15.2 | Public declarations; SLP has no direct client import | 2026-11-06 | SDK updated; bundle cache and keep-terminals APIs not adopted |
+| `@getpaseo/protocol` | 0.15.2 | 0.15.2 | Consumed agent-types/messages/config modules; generated outbound validators not exhaustive | 2026-11-06 | Root and plugin runtime pins aligned; `sub_agent.log` now optional (SLP only produces it) |
+| `@getpaseo/server` | unpinned host; CI/container parity 0.15.2 | 0.15.2 | persisted-config, plugin lifecycle/process protocol, plugin-provider; not full host | 2026-11-06 | Config mirror accepts `daemon.usage`, `agents.resumeOnStartup`/`resumePrompt`; opt-in agent resume vs seat role/Desk correlation unverified |
+| `@getpaseo/cli` | unpinned host; CI/container 0.15.2 | 0.15.2 | Release notes and changed daemon stop/restart/status commands | 2026-11-06 | `--keep-terminals` additive; no CLI adaptation; CI parity host raised from 0.11.2 |
 
 `requirements.paseo` in `plugin/paseo-plugin.json` is `>=0.11.0` for native
 screen/sidebar support on daemon and app. Keep the field present. That current
@@ -25,7 +25,7 @@ Updating SDK dependencies or documentation never proves live compatibility.
 
 ## Coverage and unresolved differences
 
-The assessments remain partial. The 2026-11-02 sync covers changed consumed surfaces through stable 0.14.0; historical unreviewed internals and generated validators remain open. The 2026-10-22 sync covered 0.11.3, 0.11.4,
+The assessments remain partial. The 2026-11-06 follow-up covers 0.15.1 (Windows terminal-worker startup fix) and 0.15.2 (project-suggestions RPC, first-run setup UI); both are additive with no consumed-surface change. The 2026-11-04 sync covers 0.15.0-beta.1 and stable 0.15.0 deltas from 0.14.0; CI and container host parity now run against 0.15.2 instead of the 0.11.2 floor, so the floor itself is no longer exercised by CI. The 2026-11-02 sync covers changed consumed surfaces through stable 0.14.0; historical unreviewed internals and generated validators remain open. The 2026-10-22 sync covered 0.11.3, 0.11.4,
 0.12.0-beta.1 through beta.3 and stable, including stable tarball rechecks. Generated protocol validators and
 unconsumed host internals remain unassessed; subsequent syncs start at 0.10.0
 for those surfaces. No live 0.11.2, 0.12.0 or 0.14.0 daemon/plugin cutover was performed.
@@ -36,6 +36,8 @@ which daemon 0.9.2 accepts. Mirroring that behavior remains undecided; a docs
 refresh does not authorize a production parser change.
 
 ## Evidence provenance
+
+The 2026-11-04 stable 0.15.0 report, tarballs, diffs and check receipts are machine-local at `.local-checks/skill-upstream-sync/0.15.0/` (`impact.md`, `receipts/`); the 0.15.2 delta and receipts are under `.local-checks/skill-upstream-sync/0.15.2/`. Human approved the SDK bump, config compatibility and raising CI/container host parity to the latest assessed host (0.15.2) while retaining `>=0.11.0`. No independent review, live install/reload or container run was performed.
 
 The 2026-11-02 stable 0.14.0 sync report and package diffs are machine-local at
 `.local-checks/skill-upstream-sync/0.14.0/impact.md`. Human approved SDK pins,

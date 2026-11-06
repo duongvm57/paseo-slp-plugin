@@ -124,7 +124,7 @@ candidate proof and required independent review still apply; a tiny task grants 
 
 You need:
 
-- Paseo daemon **and app** `>=0.11.0` for native screen/sidebar UI, with `pluginsEnabled: true` and an effective `mcp.enabled: true`
+- Paseo daemon **and app** `>=0.11.0` (minimum supported host; the SDK version this checkout builds against is pinned in `package.json`) for native screen/sidebar UI, with `pluginsEnabled: true` and an effective `mcp.enabled: true`
 - a POSIX daemon host (Linux/macOS), with Node.js 22.x from 22.18, or Node.js 23.6+
   (native TypeScript stripping)
 - the CLI of each provider family you use (Codex, Pi, Devin, Claude, OpenCode, Antigravity), signed in on the daemon host;

@@ -318,6 +318,7 @@ export const PinnedPersistedConfigSchema = z
           })
           .passthrough()
           .optional(),
+        usage: z.object({ enabled: z.boolean().optional() }).strict().optional(),
         browserTools: z.object({ enabled: z.boolean().optional() }).passthrough().optional(),
         git: z
           .object({
@@ -371,6 +372,8 @@ export const PinnedPersistedConfigSchema = z
       .object({
         providers: z.preprocess(normalizeAgentProviders, ProviderOverridesSchema).optional(),
         idleRuntimeCleanup: z.boolean().optional(),
+        resumeOnStartup: z.boolean().optional(),
+        resumePrompt: z.string().optional(),
         catalogRefreshTimeoutMs: z.number().int().positive().max(2147483647).optional(),
         metadataGeneration: AgentMetadataGenerationSchema.optional(),
         skills: z.object({ selection: AgentSkillSelectionSchema.optional() }).strict().optional(),

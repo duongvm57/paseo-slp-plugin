@@ -19,10 +19,10 @@ thật, không đăng ký daemon host, không auth thật.
 
 Làm gì:
 
-1. Build image `paseo-slp-container-harness:node24-paseo0.11.2` từ
+1. Build image `paseo-slp-container-harness:node24-paseo0.15.2` từ
    `node:24-bookworm` pin theo digest
    (`sha256:64af3819f9275802414d7cdc38c27e9d82bd564dec4d4da87d008255d36c63b4`),
-   cài sẵn `@getpaseo/cli@0.11.2` — version nằm trong range
+   cài sẵn `@getpaseo/cli@0.15.2` — version nằm trong range
    `plugin/paseo-plugin.json` (`requirements.paseo: >=0.11.0`).
 2. Mount checkout read-only tại `/src`; fake `HOME` + `PASEO_HOME` dưới
    `/acceptance`.
@@ -108,6 +108,6 @@ tests/container/
   (`PASEO_RELAY_ENABLED=false`).
 - Bước `npm install` (image build, plugin build, SDK shim) cần mạng; offline
   sẽ fail sớm với lỗi npm.
-- Pin `@getpaseo/cli@0.11.2` thỏa manifest hiện tại; nếu repo nâng
+- Pin `@getpaseo/cli@0.15.2` (host mới nhất đã đánh giá) thỏa manifest; nếu repo nâng
   `requirements.paseo` thì đổi `PASEO_CLI_VERSION` trong Dockerfile
   (giữ cùng range manifest).
