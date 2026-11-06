@@ -111,6 +111,32 @@ test('0.14 host config keeps speech credentials, registries and idle cleanup thr
   ]) assert.throws(() => assertPersistedCompatible(bad));
 });
 
+test('0.15 host usage and agent-resume settings survive activation; malformed values reject', async t => {
+  const config = {
+    version: 1,
+    daemon: { mcp: { enabled: true }, usage: { enabled: false } },
+    agents: { resumeOnStartup: true, resumePrompt: 'Continue the assigned task.' },
+  };
+  assert.doesNotThrow(() => assertPersistedCompatible(config));
+  const home = makeHome(t, config);
+  const daemon = await makeDaemon(t, home, { forceMini: true });
+  const deps = makeDeps({ execOpts: { binaries: makeBinaries(t) } });
+  const manager = createManager(deps);
+  const start = await manager.activate(activateInput(home, deps.payload, randomUUID()), daemon);
+  const done = await waitTerminal(manager, home, start.operation.operationId, daemon);
+  assert.equal(done.state, 'ACTIVE');
+  const after = readConfigJson(home);
+  assert.deepEqual(after.daemon.usage, { enabled: false });
+  assert.equal(after.agents.resumeOnStartup, true);
+  assert.equal(after.agents.resumePrompt, 'Continue the assigned task.');
+  for (const bad of [
+    { version: 1, daemon: { usage: { enabled: 'no' } } },
+    { version: 1, daemon: { usage: { enabled: true, future: 1 } } },
+    { version: 1, agents: { resumeOnStartup: 'yes' } },
+    { version: 1, agents: { resumePrompt: 1 } },
+  ]) assert.throws(() => assertPersistedCompatible(bad), error => error.code === 'SCHEMA_LOSS');
+});
+
 test('0.12 custom TTS voices survive unrelated config planning; empty voices still reject', () => {
   for (const voice of ['alloy', 'custom-voice', 'vi-VN-speaker']) {
     assert.doesNotThrow(() => assertPersistedCompatible({ version: 1, features: { voiceMode: { tts: { voice } } } }));
@@ -1183,6 +1209,10 @@ test('installed-impl parity: replica schema vs real loadPersistedConfig', async 
     { version: 1, features: { webUi: { enabled: true, distDir: '' } } },
     // Host strips providers.openai.voice then parses — a data drop.
     { version: 1, providers: { openai: { apiKey: 'k', voice: { model: 'x' } } } },
+    // 0.15 host settings: usage checks and agent resume after restart.
+    { version: 1, daemon: { usage: { enabled: false } } },
+    { version: 1, daemon: { usage: { enabled: true, future: 1 } } },
+    { version: 1, agents: { resumeOnStartup: true, resumePrompt: 'Resume working.' } },
   ];
   const collectDropped = (raw, parsed, path, out) => {
     if (!isRecord(raw)) return;

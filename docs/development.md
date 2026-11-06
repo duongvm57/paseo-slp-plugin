@@ -213,7 +213,7 @@ claims need a deliberately exercised fault boundary and native timeline.
 
 ### Container install/load checks
 
-`./tests/container/run` builds a disposable image pinned to Paseo 0.11.2 and
+`./tests/container/run` builds a disposable image pinned to Paseo 0.15.2 and
 exercises installation, retained runtime loading and contributor registration.
 It needs Docker and outbound network. [Container instructions](../tests/container/README.vi.md)
 separate fake-home install/load checks from a real disposable daemon serve.

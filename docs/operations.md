@@ -7,7 +7,7 @@ The [README](../README.md) is the short tour; command details live in
 
 ## Requirements
 
-- Paseo daemon and app `>=0.11.0` for native screen/sidebar UI, with `pluginsEnabled: true` in the daemon's
+- Paseo daemon and app `>=0.11.0` (minimum supported host, not the pinned SDK version in `package.json`) for native screen/sidebar UI, with `pluginsEnabled: true` in the daemon's
   `config.json`.
 - A POSIX daemon host (Linux/macOS) with Node 22.x from 22.18, or Node 23.6+
   (the plugin resolves a stable ordinary Node —
